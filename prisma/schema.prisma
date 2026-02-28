@@ -1,0 +1,53 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+    provider = "prisma-client"
+    output   = "../src/generated/prisma"
+}
+
+datasource db {
+    provider = "postgresql"
+}
+
+model KnowledgeEntry {
+    id           Int       @id @default(autoincrement())
+    entityType   String
+    entityId     String
+    key          String
+    valueRaw     Json
+    valueSummary String
+    confidence   Int       @default(50)
+    source       String
+    validUntil   DateTime?
+    createdBy    String
+    createdAt    DateTime  @default(now())
+    updatedAt    DateTime  @updatedAt
+    conflictLog  Json      @default("[]")
+    isProtected  Boolean   @default(false)
+
+    @@unique([entityType, entityId, key])
+    @@index([entityType, entityId, key])
+    @@map("knowledge_base")
+}
+
+model Archive {
+    id             Int       @id @default(autoincrement())
+    entityType     String
+    entityId       String
+    key            String
+    valueRaw       Json
+    valueSummary   String
+    confidence     Int
+    source         String
+    validUntil     DateTime?
+    createdBy      String
+    createdAt      DateTime
+    conflictLog    Json      @default("[]")
+    archivedAt     DateTime  @default(now())
+    archivedReason String
+    supersededBy   Int?
+
+    @@index([entityType, entityId, key])
+    @@map("archive")
+}

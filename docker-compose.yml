@@ -1,0 +1,16 @@
+services:
+    postgres:
+        image: postgres:16
+        container_name: iranti_db
+        restart: unless-stopped
+        environment:
+            POSTGRES_USER: postgres
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+            POSTGRES_DB: iranti
+        ports:
+            - "5432:5432"
+        volumes:
+            - iranti_postgres_data:/var/lib/postgresql/data
+
+volumes:
+    iranti_postgres_data:

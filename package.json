@@ -1,0 +1,31 @@
+{
+  "name": "iranti",
+  "version": "0.1.0",
+  "description": "Memory infrastructure for multi-agent AI systems",
+  "main": "dist/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/index.ts",
+    "test": "jest",
+    "seed": "ts-node scripts/seed.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nfemmanuel/iranti.git"
+  },
+  "author": "NF",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/pg": "^8.16.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.4.2",
+    "@prisma/client": "^7.4.2",
+    "dotenv": "^17.3.1",
+    "pg": "^8.19.0",
+    "prisma": "^7.4.2"
+  }
+}
