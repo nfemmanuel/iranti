@@ -3,6 +3,7 @@ import { findEntry, createEntry, updateEntry, archiveEntry, isProtectedEntry } f
 import { EntryInput, EntryQuery, ConflictLogEntry } from '../types';
 import { KnowledgeEntry } from '../generated/prisma/client';
 import { ChunkInput } from './chunker';
+import { getReliabilityScores, weightedConfidence, recordResolution } from './source-reliability';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -41,9 +42,14 @@ export async function librarianWrite(input: EntryInput): Promise<{
         return { action: 'created', entry, reason: 'No existing entry found. Created.' };
     }
 
-    // Exact duplicate — keep higher confidence
+    // Load source reliability scores
+    const reliabilityScores = await getReliabilityScores();
+    const existingWeighted = weightedConfidence(existing.confidence, existing.source, reliabilityScores);
+    const incomingWeighted = weightedConfidence(input.confidence, input.source, reliabilityScores);
+
+    // Exact duplicate — keep higher weighted confidence
     if (JSON.stringify(existing.valueRaw) === JSON.stringify(input.valueRaw)) {
-        if (input.confidence > existing.confidence) {
+        if (incomingWeighted > existingWeighted) {
             const entry = await updateEntry(
                 { entityType: input.entityType, entityId: input.entityId, key: input.key },
                 { confidence: input.confidence, source: input.source }
@@ -54,10 +60,10 @@ export async function librarianWrite(input: EntryInput): Promise<{
     }
 
     // Conflict detected — check confidence gap
-    const gap = Math.abs(existing.confidence - input.confidence);
+    const gap = Math.abs(incomingWeighted - existingWeighted);
 
     if (gap >= CONFLICT_THRESHOLD) {
-        return await resolveByConfidence(existing, input);
+        return await resolveByConfidence(existing, input, incomingWeighted, existingWeighted, reliabilityScores);
     }
 
     // Gap too small — use LLM reasoning before escalating
@@ -141,19 +147,23 @@ ESCALATE: <reason>`,
 
 async function resolveByConfidence(
     existing: KnowledgeEntry,
-    incoming: EntryInput
+    incoming: EntryInput,
+    incomingWeighted: number,
+    existingWeighted: number,
+    reliabilityScores: Record<string, number>
 ): Promise<{ action: 'created' | 'updated' | 'escalated' | 'rejected'; entry?: KnowledgeEntry; reason: string }> {
     const conflictEntry: ConflictLogEntry = {
         detectedAt: new Date().toISOString(),
         incomingSource: incoming.source,
         incomingConfidence: incoming.confidence,
         existingConfidence: existing.confidence,
-        resolution: incoming.confidence > existing.confidence ? 'overwritten' : 'kept',
+        resolution: incomingWeighted > existingWeighted ? 'overwritten' : 'kept',
         resolvedBy: 'librarian',
-        notes: `Confidence gap: ${Math.abs(existing.confidence - incoming.confidence)}`,
+        notes: `Weighted scores — incoming: ${incomingWeighted}, existing: ${existingWeighted}`,
     };
 
-    if (incoming.confidence > existing.confidence) {
+    if (incomingWeighted > existingWeighted) {
+        await recordResolution(incoming.source, existing.source);
         await archiveEntry(existing, 'superseded');
         const entry = await createEntry({
             ...incoming,
@@ -162,13 +172,14 @@ async function resolveByConfidence(
         return {
             action: 'updated',
             entry,
-            reason: `Incoming confidence (${incoming.confidence}) higher than existing (${existing.confidence}). Existing archived.`,
+            reason: `Incoming weighted confidence (${incomingWeighted}) higher than existing (${existingWeighted}). Existing archived.`,
         };
     }
 
+    await recordResolution(existing.source, incoming.source);
     return {
         action: 'rejected',
-        reason: `Existing confidence (${existing.confidence}) higher than incoming (${incoming.confidence}). No change.`,
+        reason: `Existing weighted confidence (${existingWeighted}) higher than incoming (${incomingWeighted}). No change.`,
     };
 }
 
