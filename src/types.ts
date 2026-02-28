@@ -21,6 +21,7 @@ export interface EntryInput {
     validUntil?: Date;
     createdBy: string;
     isProtected?: boolean;
+    conflictLog?: ConflictLogEntry[];
 }
 
 export interface ConflictLogEntry {

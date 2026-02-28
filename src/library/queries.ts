@@ -68,7 +68,7 @@ export async function updateEntry(
     query: EntryQuery,
     updates: Partial<EntryInput>
 ): Promise<KnowledgeEntry> {
-    const { valueRaw, ...rest } = updates;
+    const { valueRaw, conflictLog, ...rest } = updates;
 
     return prisma.knowledgeEntry.update({
         where: {
@@ -82,6 +82,9 @@ export async function updateEntry(
             ...rest,
             ...(valueRaw !== undefined && {
                 valueRaw: valueRaw as Prisma.InputJsonValue,
+            }),
+            ...(conflictLog !== undefined && {
+                conflictLog: conflictLog as unknown as Prisma.InputJsonValue,
             }),
             updatedAt: new Date(),
         },
