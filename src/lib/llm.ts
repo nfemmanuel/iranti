@@ -21,6 +21,10 @@ const providers: Record<string, () => Promise<LLMProvider>> = {
     mock: () => import('./providers/mock').then((m) => m.default),
     gemini: () => import('./providers/gemini').then((m) => m.default),
     claude: () => import('./providers/claude').then((m) => m.default),
+    openai: () => import('./providers/openai').then((m) => m.default),
+    groq: () => import('./providers/groq').then((m) => m.default),
+    mistral: () => import('./providers/mistral').then((m) => m.default),
+    ollama: () => import('./providers/ollama').then((m) => m.default),
 };
 
 // ─── Active Provider ─────────────────────────────────────────────────────────
