@@ -3,6 +3,7 @@ import { librarianWrite, librarianIngest } from '../librarian';
 import { handshake, reconvene, AgentContext, WorkingMemoryBrief } from '../attendant';
 import { runArchivist } from '../archivist';
 import { queryEntry, findEntriesByEntity } from '../library/queries';
+import { createRelationship, getRelated, getRelatedDeep, RelatedEntity } from '../library/relationships';
 import { EntityType } from '../types';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -219,6 +220,38 @@ export class Iranti {
         errors: string[];
     }> {
         return runArchivist();
+    }
+
+    // ── Relationships ───────────────────────────────────────────────────────
+
+    async relate(
+        fromEntity: string,
+        relationshipType: string,
+        toEntity: string,
+        options: { createdBy: string; properties?: Record<string, unknown> } = { createdBy: 'sdk' }
+    ): Promise<void> {
+        const from = parseEntity(fromEntity);
+        const to = parseEntity(toEntity);
+
+        await createRelationship({
+            fromType: from.entityType,
+            fromId: from.entityId,
+            relationshipType,
+            toType: to.entityType,
+            toId: to.entityId,
+            createdBy: options.createdBy,
+            properties: options.properties,
+        });
+    }
+
+    async getRelated(entity: string): Promise<RelatedEntity[]> {
+        const { entityType, entityId } = parseEntity(entity);
+        return getRelated(entityType, entityId);
+    }
+
+    async getRelatedDeep(entity: string, depth: number = 2): Promise<RelatedEntity[]> {
+        const { entityType, entityId } = parseEntity(entity);
+        return getRelatedDeep(entityType, entityId, depth);
     }
 }
 

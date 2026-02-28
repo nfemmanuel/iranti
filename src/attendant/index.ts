@@ -1,5 +1,6 @@
 import { route } from '../lib/router';
 import { queryEntry, findEntriesByEntity } from '../library/queries';
+import { getRelatedDeep } from '../library/relationships';
 import { EntryQuery, QueryResult } from '../types';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -105,13 +106,24 @@ export async function handshake(context: AgentContext): Promise<WorkingMemoryBri
 
     // 3. Fetch all knowledge entries for this agent
     const agentEntries = await findEntriesByEntity('agent', context.agentId);
-    const entryInputs = agentEntries.map((e) => ({
-        key: e.key,
+
+    // 4. Fetch related entities and their knowledge (depth 2)
+    const relatedEntities = await getRelatedDeep('agent', context.agentId, 2);
+    const relatedEntries = await Promise.all(
+        relatedEntities.map((r) => findEntriesByEntity(r.entityType, r.entityId))
+    );
+    const allEntries = [
+        ...agentEntries,
+        ...relatedEntries.flat(),
+    ];
+
+    const entryInputs = allEntries.map((e) => ({
+        key: `${e.entityType}/${e.entityId}/${e.key}`,
         valueSummary: e.valueSummary,
         confidence: e.confidence,
     }));
 
-    // 4. Filter to only what's relevant for the current task
+    // 5. Filter to only what's relevant for the current task
     const relevantKnowledge = await filterRelevantKnowledge(
         context.agentId,
         inferredTaskType,

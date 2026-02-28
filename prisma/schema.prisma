@@ -25,6 +25,7 @@ model KnowledgeEntry {
     updatedAt    DateTime  @updatedAt
     conflictLog  Json      @default("[]")
     isProtected  Boolean   @default(false)
+    properties   Json      @default("{}")
 
     @@unique([entityType, entityId, key])
     @@index([entityType, entityId, key])
@@ -44,10 +45,27 @@ model Archive {
     createdBy      String
     createdAt      DateTime
     conflictLog    Json      @default("[]")
+    properties     Json      @default("{}")
     archivedAt     DateTime  @default(now())
     archivedReason String
     supersededBy   Int?
 
     @@index([entityType, entityId, key])
     @@map("archive")
+}
+
+model EntityRelationship {
+    id               Int      @id @default(autoincrement())
+    fromType         String
+    fromId           String
+    relationshipType String
+    toType           String
+    toId             String
+    properties       Json     @default("{}")
+    createdBy        String
+    createdAt        DateTime @default(now())
+
+    @@unique([fromType, fromId, relationshipType, toType, toId])
+    @@index([fromType, fromId])
+    @@index([toType, toId])
 }
