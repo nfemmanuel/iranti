@@ -173,12 +173,16 @@ iranti/
 │   ├── archivist/
 │   │   └── index.ts            — runArchivist(), escalation processing
 │   ├── lib/
-│   │   ├── llm.ts              — LLMProvider interface, getLLM(), complete()
+│   │   ├── llm.ts              — LLMProvider interface, completeWithFallback(), fallback chain
 │   │   ├── router.ts           — route() by TaskType, model profiles
 │   │   └── providers/
 │   │       ├── mock.ts         — Local dev provider
 │   │       ├── gemini.ts       — Google Gemini provider
-│   │       └── claude.ts       — Anthropic Claude provider (stub)
+│   │       ├── claude.ts       — Anthropic Claude provider (stub)
+│   │       ├── openai.ts       — OpenAI provider
+│   │       ├── groq.ts         — Groq provider
+│   │       ├── mistral.ts      — Mistral AI provider
+│   │       └── ollama.ts       — Ollama local provider
 │   ├── sdk/
 │   │   └── index.ts            — Iranti class, public API
 │   └── types.ts                — Shared TypeScript types
@@ -195,7 +199,8 @@ iranti/
 │   ├── test-relationships.ts   — Knowledge graph tests
 │   ├── test-registry.ts        — Agent registry tests
 │   ├── test-sdk.ts             — Full SDK smoke tests
-│   └── test-integration.ts     — End-to-end integration test
+│   ├── test-integration.ts     — End-to-end integration test
+│   └── test-fallback.ts        — LLM provider fallback chain test
 ├── escalation/
 │   ├── active/                 — Unresolved conflicts (PENDING)
 │   ├── resolved/               — Processed by Archivist
@@ -319,6 +324,8 @@ Entity format: `"entityType/entityId"` e.g. `"researcher/jane_smith"`
 - Never delete from the Archive table
 - Never call provider SDKs directly — use `route()` or `complete()` from
   `src/lib/router.ts` and `src/lib/llm.ts`
+- LLM provider fallback is automatic — configure via `LLM_PROVIDER_FALLBACK` env var,
+  mock is always used as final safety net
 - Follow CODE_STANDARDS.md in docs/engineering/
 - When adding a new component or method, update this file
 

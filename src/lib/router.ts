@@ -1,4 +1,4 @@
-import { complete, getLLM, LLMMessage, LLMResponse } from './llm';
+import { LLMMessage, LLMResponse, completeWithFallback } from './llm';
 
 // ─── Task Types ──────────────────────────────────────────────────────────────
 
@@ -59,17 +59,15 @@ export async function route(
     taskType: TaskType,
     messages: LLMMessage[],
     maxTokens?: number
-): Promise<LLMResponse & { taskType: TaskType; modelProfile: ModelProfile }> {
+): Promise<LLMResponse & { taskType: TaskType; modelProfile: ModelProfile; providerUsed: string }> {
     const profile = MODEL_PROFILES[taskType];
-
-    // For now, all providers use the same LLM instance.
-    // When multi-provider support is needed, instantiate per profile.provider here.
-    const response = await complete(messages, maxTokens);
+    const response = await completeWithFallback(messages, maxTokens);
 
     return {
         ...response,
         taskType,
         modelProfile: profile,
+        providerUsed: response.providerUsed,
     };
 }
 
