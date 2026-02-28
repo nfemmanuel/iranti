@@ -3,9 +3,6 @@
 export type EntityType =
     | 'system'
     | 'agent'
-    | 'researcher'
-    | 'market'
-    | 'technology'
     | string;
 
 // ─── Knowledge Entry ─────────────────────────────────────────────────────────

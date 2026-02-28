@@ -10,6 +10,15 @@ import { updateStats } from '../library/agent-registry';
 
 const CONFLICT_THRESHOLD = 10;
 
+// ─── Input Validation ────────────────────────────────────────────────────────
+
+function clampConfidence(input: EntryInput): EntryInput {
+    return {
+        ...input,
+        confidence: Math.min(100, Math.max(0, Math.round(input.confidence))),
+    };
+}
+
 // ─── Core Write Logic ────────────────────────────────────────────────────────
 
 export async function librarianWrite(input: EntryInput): Promise<{
@@ -17,6 +26,7 @@ export async function librarianWrite(input: EntryInput): Promise<{
     entry?: KnowledgeEntry;
     reason: string;
 }> {
+    input = clampConfidence(input);
     // Guard: never write to protected entries
     const protected_ = await isProtectedEntry({
         entityType: input.entityType,

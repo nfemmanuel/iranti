@@ -7,8 +7,19 @@
   "scripts": {
     "build": "tsc",
     "dev": "ts-node src/index.ts",
-    "test": "jest",
-    "seed": "ts-node scripts/seed.ts"
+    "setup": "ts-node scripts/setup.ts",
+    "seed": "ts-node scripts/seed.ts",
+    "seed:codebase": "ts-node scripts/seed-codebase.ts",
+    "extract:session": "ts-node scripts/extract-session.ts",
+    "test:librarian": "ts-node scripts/test-librarian.ts",
+    "test:attendant": "ts-node scripts/test-attendant.ts",
+    "test:archivist": "ts-node scripts/test-archivist.ts",
+    "test:chunker": "ts-node scripts/test-chunker.ts",
+    "test:reliability": "ts-node scripts/test-reliability.ts",
+    "test:relationships": "ts-node scripts/test-relationships.ts",
+    "test:registry": "ts-node scripts/test-registry.ts",
+    "test:sdk": "ts-node scripts/test-sdk.ts",
+    "test:integration": "ts-node scripts/test-integration.ts"
   },
   "repository": {
     "type": "git",

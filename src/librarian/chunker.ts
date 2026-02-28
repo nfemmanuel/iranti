@@ -21,7 +21,7 @@ export interface ChunkResult {
 // ─── Chunker ─────────────────────────────────────────────────────────────────
 
 export async function chunkContent(input: ChunkInput): Promise<ChunkResult> {
-    const response = await route('classification', [
+    const response = await route('extraction', [
         {
             role: 'user',
             content: `You are extracting atomic facts from a text blob about an entity.

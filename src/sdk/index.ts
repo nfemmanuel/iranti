@@ -65,10 +65,13 @@ export interface IngestResult {
 // ─── Entity Parsing ──────────────────────────────────────────────────────────
 
 function parseEntity(entity: string): { entityType: EntityType; entityId: string } {
+    if (!entity || typeof entity !== 'string') {
+        throw new Error('Entity must be a non-empty string.');
+    }
     const parts = entity.split('/');
-    if (parts.length < 2) {
+    if (parts.length < 2 || !parts[0] || !parts[1]) {
         throw new Error(
-            `Invalid entity format: "${entity}". Expected "entityType/entityId" e.g. "researcher/jane_smith"`
+            `Invalid entity format: "${entity}". Expected "entityType/entityId" e.g. "researcher/jane_smith". Neither part can be empty.`
         );
     }
     const entityType = parts[0] as EntityType;
@@ -96,6 +99,9 @@ export class Iranti {
     // ── Write ───────────────────────────────────────────────────────────────
 
     async write(input: WriteInput): Promise<WriteResult> {
+        if (input.confidence < 0 || input.confidence > 100) {
+            throw new Error(`Confidence must be between 0 and 100. Got: ${input.confidence}`);
+        }
         const { entityType, entityId } = parseEntity(input.entity);
 
         const result = await librarianWrite({

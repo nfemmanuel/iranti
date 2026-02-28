@@ -7,7 +7,8 @@ export type TaskType =
     | 'relevance_filtering' // Deciding what knowledge is relevant
     | 'conflict_resolution' // Reasoning about contradicting facts
     | 'summarization'       // Compressing knowledge for working memory
-    | 'task_inference';     // Inferring what an agent is doing
+    | 'task_inference'      // Inferring what an agent is doing
+    | 'extraction';         // Extracting structured facts from text
 
 // ─── Model Profiles ──────────────────────────────────────────────────────────
 
@@ -44,6 +45,11 @@ const MODEL_PROFILES: Record<TaskType, ModelProfile> = {
         provider: process.env.LLM_PROVIDER ?? 'mock',
         model: process.env.TASK_INFERENCE_MODEL ?? 'gemini-2.0-flash-001',
         reason: 'Task inference is a lightweight classification task',
+    },
+    extraction: {
+        provider: process.env.LLM_PROVIDER ?? 'mock',
+        model: process.env.EXTRACTION_MODEL ?? 'gemini-2.0-flash-001',
+        reason: 'Extraction needs structured output capability, flash is sufficient',
     },
 };
 
