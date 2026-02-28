@@ -1,0 +1,227 @@
+import 'dotenv/config';
+import { librarianWrite, librarianIngest } from '../librarian';
+import { handshake, reconvene, AgentContext, WorkingMemoryBrief } from '../attendant';
+import { runArchivist } from '../archivist';
+import { queryEntry, findEntriesByEntity } from '../library/queries';
+import { EntityType } from '../types';
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+export interface IrantiConfig {
+    connectionString?: string;
+    llmProvider?: string;
+}
+
+export interface WriteInput {
+    entity: string;           // Format: "entityType/entityId" e.g. "researcher/jane_smith"
+    key: string;
+    value: unknown;
+    summary: string;
+    confidence: number;
+    source: string;
+    agent: string;
+    validUntil?: Date;
+}
+
+export interface IngestInput {
+    entity: string;
+    content: string;
+    source: string;
+    confidence: number;
+    agent: string;
+}
+
+export interface HandshakeInput {
+    agent: string;
+    task: string;
+    recentMessages: string[];
+}
+
+export interface QueryResult {
+    found: boolean;
+    value?: unknown;
+    summary?: string;
+    confidence?: number;
+    source?: string;
+    validUntil?: Date | null;
+}
+
+export interface WriteResult {
+    action: 'created' | 'updated' | 'escalated' | 'rejected';
+    key: string;
+    reason: string;
+}
+
+export interface IngestResult {
+    written: number;
+    rejected: number;
+    escalated: number;
+    facts: WriteResult[];
+}
+
+// ─── Entity Parsing ──────────────────────────────────────────────────────────
+
+function parseEntity(entity: string): { entityType: EntityType; entityId: string } {
+    const parts = entity.split('/');
+    if (parts.length < 2) {
+        throw new Error(
+            `Invalid entity format: "${entity}". Expected "entityType/entityId" e.g. "researcher/jane_smith"`
+        );
+    }
+    const entityType = parts[0] as EntityType;
+    const entityId = parts.slice(1).join('/');
+    return { entityType, entityId };
+}
+
+// ─── Iranti Class ────────────────────────────────────────────────────────────
+
+export class Iranti {
+    private config: IrantiConfig;
+
+    constructor(config: IrantiConfig = {}) {
+        this.config = config;
+
+        if (config.connectionString) {
+            process.env.DATABASE_URL = config.connectionString;
+        }
+
+        if (config.llmProvider) {
+            process.env.LLM_PROVIDER = config.llmProvider;
+        }
+    }
+
+    // ── Write ───────────────────────────────────────────────────────────────
+
+    async write(input: WriteInput): Promise<WriteResult> {
+        const { entityType, entityId } = parseEntity(input.entity);
+
+        const result = await librarianWrite({
+            entityType,
+            entityId,
+            key: input.key,
+            valueRaw: input.value,
+            valueSummary: input.summary,
+            confidence: input.confidence,
+            source: input.source,
+            createdBy: input.agent,
+            validUntil: input.validUntil,
+        });
+
+        return {
+            action: result.action,
+            key: input.key,
+            reason: result.reason,
+        };
+    }
+
+    // ── Ingest ──────────────────────────────────────────────────────────────
+
+    async ingest(input: IngestInput): Promise<IngestResult> {
+        const { entityType, entityId } = parseEntity(input.entity);
+
+        const result = await librarianIngest({
+            entityType,
+            entityId,
+            rawContent: input.content,
+            source: input.source,
+            confidence: input.confidence,
+            createdBy: input.agent,
+        });
+
+        return {
+            written: result.written,
+            rejected: result.rejected,
+            escalated: result.escalated,
+            facts: result.results.map((r) => ({
+                action: r.action as WriteResult['action'],
+                key: r.key,
+                reason: r.reason,
+            })),
+        };
+    }
+
+    // ── Handshake ───────────────────────────────────────────────────────────
+
+    async handshake(input: HandshakeInput): Promise<WorkingMemoryBrief> {
+        const context: AgentContext = {
+            agentId: input.agent,
+            taskDescription: input.task,
+            recentMessages: input.recentMessages,
+        };
+
+        return handshake(context);
+    }
+
+    // ── Reconvene ───────────────────────────────────────────────────────────
+
+    async reconvene(
+        previousBrief: WorkingMemoryBrief,
+        input: HandshakeInput
+    ): Promise<WorkingMemoryBrief> {
+        const context: AgentContext = {
+            agentId: input.agent,
+            taskDescription: input.task,
+            recentMessages: input.recentMessages,
+        };
+
+        return reconvene(previousBrief, context);
+    }
+
+    // ── Query ───────────────────────────────────────────────────────────────
+
+    async query(entity: string, key: string): Promise<QueryResult> {
+        const { entityType, entityId } = parseEntity(entity);
+
+        const result = await queryEntry({ entityType, entityId, key });
+
+        if (!result.found || !result.entry) {
+            return { found: false };
+        }
+
+        return {
+            found: true,
+            value: result.entry.valueRaw,
+            summary: result.entry.valueSummary,
+            confidence: result.entry.confidence,
+            source: result.entry.source,
+            validUntil: result.entry.validUntil,
+        };
+    }
+
+    // ── Query All ───────────────────────────────────────────────────────────
+
+    async queryAll(entity: string): Promise<Array<{
+        key: string;
+        value: unknown;
+        summary: string;
+        confidence: number;
+        source: string;
+    }>> {
+        const { entityType, entityId } = parseEntity(entity);
+
+        const entries = await findEntriesByEntity(entityType, entityId);
+
+        return entries.map((e) => ({
+            key: e.key,
+            value: e.valueRaw,
+            summary: e.valueSummary,
+            confidence: e.confidence,
+            source: e.source,
+        }));
+    }
+
+    // ── Maintenance ─────────────────────────────────────────────────────────
+
+    async runMaintenance(): Promise<{
+        expiredArchived: number;
+        lowConfidenceArchived: number;
+        escalationsProcessed: number;
+        errors: string[];
+    }> {
+        return runArchivist();
+    }
+}
+
+// ─── Default Export ──────────────────────────────────────────────────────────
+
+export default Iranti;
