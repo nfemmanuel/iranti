@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { librarianWrite, librarianIngest } from '../librarian';
-import { handshake, reconvene, AgentContext, WorkingMemoryBrief } from '../attendant';
+import { WorkingMemoryBrief } from '../attendant';
+import { getAttendant, AttendantInstance } from '../attendant/registry';
 import { runArchivist } from '../archivist';
 import { queryEntry, findEntriesByEntity } from '../library/queries';
 import { createRelationship, getRelated, getRelatedDeep, RelatedEntity } from '../library/relationships';
@@ -144,28 +145,28 @@ export class Iranti {
     // ── Handshake ───────────────────────────────────────────────────────────
 
     async handshake(input: HandshakeInput): Promise<WorkingMemoryBrief> {
-        const context: AgentContext = {
-            agentId: input.agent,
-            taskDescription: input.task,
+        const attendant = getAttendant(input.agent);
+        return attendant.handshake({
+            task: input.task,
             recentMessages: input.recentMessages,
-        };
-
-        return handshake(context);
+        });
     }
 
     // ── Reconvene ───────────────────────────────────────────────────────────
 
     async reconvene(
-        previousBrief: WorkingMemoryBrief,
-        input: HandshakeInput
+        agentId: string,
+        input: Omit<HandshakeInput, 'agent'>
     ): Promise<WorkingMemoryBrief> {
-        const context: AgentContext = {
-            agentId: input.agent,
-            taskDescription: input.task,
+        const attendant = getAttendant(agentId);
+        return attendant.reconvene({
+            task: input.task,
             recentMessages: input.recentMessages,
-        };
+        });
+    }
 
-        return reconvene(previousBrief, context);
+    getAttendant(agentId: string): AttendantInstance {
+        return getAttendant(agentId);
     }
 
     // ── Query ───────────────────────────────────────────────────────────────

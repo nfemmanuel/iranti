@@ -19,7 +19,7 @@ async function test() {
     const brief = await handshake(context);
     console.log('  Agent ID:', brief.agentId);
     console.log('  Inferred task:', brief.inferredTaskType);
-    console.log('  Relevant knowledge entries:', brief.relevantKnowledge.length);
+    console.log('  Relevant knowledge entries:', brief.workingMemory.length);
     console.log('  Operating rules loaded:', brief.operatingRules.length > 0);
     console.log('  Generated at:', brief.briefGeneratedAt);
 

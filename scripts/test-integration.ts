@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { librarianWrite } from '../src/librarian';
-import { handshake, reconvene, AgentContext } from '../src/attendant';
+import { handshake, reconvene } from '../src/attendant';
 import { runArchivist } from '../src/archivist';
 import { queryEntry } from '../src/library/queries';
 
@@ -11,7 +11,7 @@ async function mockAgent(agentId: string) {
     console.log(`\n── Agent ${agentId} starting ──`);
 
     // 1. Handshake with Attendant
-    const context: AgentContext = {
+    const context = {
         agentId,
         taskDescription: 'Research academic background of Dr. Jane Smith',
         recentMessages: [
@@ -53,7 +53,7 @@ async function mockAgent(agentId: string) {
     console.log('  Write 2 (publications):', write2.action, '|', write2.reason);
 
     // 3. Agent reconvenes mid-task
-    const updatedContext: AgentContext = {
+    const updatedContext = {
         agentId,
         taskDescription: 'Verifying affiliation from secondary source',
         recentMessages: [

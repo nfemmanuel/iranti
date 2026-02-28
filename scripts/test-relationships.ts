@@ -73,7 +73,7 @@ async function test() {
         recentMessages: ['Looking up researcher profile'],
     });
     console.log('  Inferred task:', brief.inferredTaskType);
-    console.log('  Relevant knowledge entries:', brief.relevantKnowledge.length);
+    console.log('  Relevant knowledge entries:', brief.workingMemory.length);
 
     // Test inbound relationships
     console.log('\nTest 4 — getRelated from university (inbound):');
