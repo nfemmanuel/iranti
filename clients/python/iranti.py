@@ -439,6 +439,35 @@ class IrantiClient:
             errors=data['errors'],
         )
 
+    def observe(
+        self,
+        agent_id: str,
+        current_context: str,
+        max_facts: int = 5,
+    ) -> dict:
+        """
+        Observe an agent's context window and return facts to inject.
+        Call this before each agent LLM call to ensure relevant knowledge
+        is present in context.
+
+        Args:
+            agent_id:        Agent whose knowledge base to search
+            current_context: The agent's current prompt or context string
+            max_facts:       Maximum facts to inject (default 5)
+
+        Returns:
+            dict with keys:
+              facts           — list of facts to inject
+              entitiesDetected — entities found in context
+              alreadyPresent  — facts skipped (already in context)
+              totalFound      — total facts found before filtering
+        """
+        return self._post('/observe', {
+            'agentId': agent_id,
+            'currentContext': current_context,
+            'maxFacts': max_facts,
+        })
+
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _parse_brief(self, data: dict) -> WorkingMemoryBrief:

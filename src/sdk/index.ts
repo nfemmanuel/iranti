@@ -63,6 +63,12 @@ export interface IngestResult {
     facts: WriteResult[];
 }
 
+export interface ObserveInput {
+    agent: string;
+    currentContext: string;
+    maxFacts?: number;
+}
+
 // ─── Entity Parsing ──────────────────────────────────────────────────────────
 
 function parseEntity(entity: string): { entityType: EntityType; entityId: string } {
@@ -288,6 +294,16 @@ export class Iranti {
 
     async assignToTeam(agentId: string, teamId: string): Promise<void> {
         return assignToTeam(agentId, teamId, 'sdk');
+    }
+
+    // ── Context Window Observation ────────────────────────────────────────────
+
+    async observe(input: ObserveInput): Promise<import('../attendant/AttendantInstance').ObserveResult> {
+        const attendant = getAttendant(input.agent);
+        return attendant.observe({
+            currentContext: input.currentContext,
+            maxFacts: input.maxFacts,
+        });
     }
 
     // ── Mock Configuration (dev/test only) ──────────────────────────────────

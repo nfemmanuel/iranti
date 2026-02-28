@@ -39,6 +39,28 @@ export interface WorkingMemoryBrief {
     contextCallCount: number;
 }
 
+// ─── Observe Types ────────────────────────────────────────────────────────────
+
+export interface ObserveInput {
+    currentContext: string;
+    maxFacts?: number;          // default 5 — don't overwhelm context
+}
+
+export interface FactInjection {
+    entityKey: string;          // entityType/entityId/key
+    summary: string;
+    value: unknown;
+    confidence: number;
+    source: string;
+}
+
+export interface ObserveResult {
+    facts: FactInjection[];           // inject these into context
+    entitiesDetected: string[];       // entities found in context
+    alreadyPresent: number;           // facts skipped (already in context)
+    totalFound: number;               // total facts found before filtering
+}
+
 // ─── AttendantInstance ───────────────────────────────────────────────────────
 
 export class AttendantInstance {
@@ -156,6 +178,101 @@ export class AttendantInstance {
 
     getAgentId(): string {
         return this.agentId;
+    }
+
+    // ── Context Window Observation ────────────────────────────────────────────
+
+    async observe(input: ObserveInput): Promise<ObserveResult> {
+        const maxFacts = input.maxFacts ?? 5;
+
+        // Step 1 — extract entity mentions from context
+        const entityResponse = await route('extraction', [
+            {
+                role: 'user',
+                content: `Extract all entity references from this text.
+An entity is a person, organization, project, technology, or named concept.
+
+Return ONLY a JSON array of strings in format "entityType/entityId".
+Use snake_case for entityId. Infer entityType from context.
+Examples: "researcher/jane_smith", "company/openai", "project/iranti"
+
+If no clear entities, return: []
+
+Text:
+${input.currentContext.substring(0, 3000)}`,
+            },
+        ], 512);
+
+        let entitiesDetected: string[] = [];
+        try {
+            const clean = entityResponse.text.replace(/```json|```/g, '').trim();
+            const parsed = JSON.parse(clean);
+            if (Array.isArray(parsed)) {
+                entitiesDetected = parsed.filter((e) => typeof e === 'string' && e.includes('/'));
+            }
+        } catch {
+            // extraction failed — return empty result gracefully
+            return { facts: [], entitiesDetected: [], alreadyPresent: 0, totalFound: 0 };
+        }
+
+        if (entitiesDetected.length === 0) {
+            return { facts: [], entitiesDetected: [], alreadyPresent: 0, totalFound: 0 };
+        }
+
+        // Step 2 — query Library for facts about detected entities
+        const allFacts: FactInjection[] = [];
+
+        for (const entity of entitiesDetected.slice(0, 5)) { // cap at 5 entities
+            const parts = entity.split('/');
+            if (parts.length < 2) continue;
+            const entityType = parts[0];
+            const entityId = parts.slice(1).join('/');
+
+            try {
+                const entries = await findEntriesByEntity(entityType, entityId);
+                for (const entry of entries) {
+                    allFacts.push({
+                        entityKey: `${entityType}/${entityId}/${entry.key}`,
+                        summary: entry.valueSummary,
+                        value: entry.valueRaw,
+                        confidence: entry.confidence,
+                        source: entry.source,
+                    });
+                }
+            } catch {
+                continue;
+            }
+        }
+
+        // Step 3 — filter out facts already present in context
+        const contextLower = input.currentContext.toLowerCase();
+        let alreadyPresent = 0;
+        const newFacts: FactInjection[] = [];
+
+        for (const fact of allFacts) {
+            // Check if summary key words appear in context
+            const summaryWords = fact.summary.toLowerCase().split(' ').filter((w) => w.length > 4);
+            const alreadyInContext = summaryWords.length > 0 &&
+                summaryWords.filter((w) => contextLower.includes(w)).length >= Math.ceil(summaryWords.length * 0.6);
+
+            if (alreadyInContext) {
+                alreadyPresent++;
+            } else {
+                newFacts.push(fact);
+            }
+        }
+
+        // Step 4 — return top facts by confidence
+        const topFacts = newFacts
+            .sort((a, b) => b.confidence - a.confidence)
+            .slice(0, maxFacts);
+
+        return {
+            facts: topFacts,
+            entitiesDetected,
+            alreadyPresent,
+            totalFound: allFacts.length,
+        };
     }
 
     // ── Private ──────────────────────────────────────────────────────────────

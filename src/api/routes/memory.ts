@@ -46,5 +46,20 @@ export function memoryRoutes(iranti: Iranti): Router {
         }
     });
 
+    // POST /observe
+    router.post('/observe', async (req: Request, res: Response) => {
+        try {
+            const { agentId, currentContext, maxFacts } = req.body;
+            const result = await iranti.observe({
+                agent: agentId,
+                currentContext,
+                maxFacts,
+            });
+            res.json(result);
+        } catch (err) {
+            res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+    });
+
     return router;
 }
