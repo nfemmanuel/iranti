@@ -50,7 +50,7 @@ class MetricsTracker:
 
 def build_crew(target: dict, tracker: MetricsTracker) -> tuple:
     llm = LLM(
-        model="gemini/gemini-2.0-flash",
+        model="gemini/gemini-2.0-flash-lite",
         api_key=os.getenv("GEMINI_API_KEY"),
         temperature=0.3,
     )
@@ -185,8 +185,8 @@ def run_control():
 
             # Rate limit buffer
             if i < len(RESEARCH_TARGETS) - 1:
-                print("\n  [Rate limit buffer: 15s]")
-                time.sleep(15)
+                print("\n  [Rate limit buffer: 60s]")
+                time.sleep(60)
 
         except Exception as e:
             target_result["error"] = str(e)

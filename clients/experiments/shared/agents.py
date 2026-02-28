@@ -20,14 +20,15 @@ RESEARCH_TARGETS = [
         "entity": "researcher/yann_lecun",
         "task": "Research Yann LeCun's current affiliation, approximate publication count, primary research focus, and most notable contribution to AI.",
     },
-    {
-        "name": "Andrej Karpathy", 
-        "entity": "researcher/andrej_karpathy",
-        "task": "Research Andrej Karpathy's current affiliation, approximate publication count, primary research focus, and career history including any industry roles.",
-    },
-    {
-        "name": "Fei-Fei Li",
-        "entity": "researcher/fei_fei_li", 
-        "task": "Research Fei-Fei Li's current affiliation, approximate publication count, primary research focus, and most notable contribution to AI.",
-    },
+    # Temporarily disabled to test with one researcher first
+    # {
+    #     "name": "Andrej Karpathy", 
+    #     "entity": "researcher/andrej_karpathy",
+    #     "task": "Research Andrej Karpathy's current affiliation, approximate publication count, primary research focus, and career history including any industry roles.",
+    # },
+    # {
+    #     "name": "Fei-Fei Li",
+    #     "entity": "researcher/fei_fei_li", 
+    #     "task": "Research Fei-Fei Li's current affiliation, approximate publication count, primary research focus, and most notable contribution to AI.",
+    # },
 ]

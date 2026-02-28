@@ -1,0 +1,39 @@
+{
+  "mode": "control",
+  "timestamp": "2026-02-28T08:52:56.637697",
+  "targets": [
+    {
+      "name": "Yann LeCun",
+      "entity": "researcher/yann_lecun",
+      "researcher_output": null,
+      "analyst_output": null,
+      "consistency": null,
+      "api_calls_this_target": 0,
+      "error": "Google Gen AI native provider not available, to install: uv add \"crewai[google-genai]\""
+    },
+    {
+      "name": "Andrej Karpathy",
+      "entity": "researcher/andrej_karpathy",
+      "researcher_output": null,
+      "analyst_output": null,
+      "consistency": null,
+      "api_calls_this_target": 0,
+      "error": "Google Gen AI native provider not available, to install: uv add \"crewai[google-genai]\""
+    },
+    {
+      "name": "Fei-Fei Li",
+      "entity": "researcher/fei_fei_li",
+      "researcher_output": null,
+      "analyst_output": null,
+      "consistency": null,
+      "api_calls_this_target": 0,
+      "error": "Google Gen AI native provider not available, to install: uv add \"crewai[google-genai]\""
+    }
+  ],
+  "summary": {
+    "total_targets": 3,
+    "avg_consistency": 0,
+    "total_elapsed_seconds": 0.03,
+    "iranti_used": false
+  }
+}
