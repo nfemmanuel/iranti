@@ -4,6 +4,7 @@ import { EntryInput, EntryQuery, ConflictLogEntry } from '../types';
 import { KnowledgeEntry } from '../generated/prisma/client';
 import { ChunkInput } from './chunker';
 import { getReliabilityScores, weightedConfidence, recordResolution } from './source-reliability';
+import { updateStats } from '../library/agent-registry';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -39,6 +40,7 @@ export async function librarianWrite(input: EntryInput): Promise<{
     // No conflict — clean write
     if (!existing) {
         const entry = await createEntry(input);
+        await updateStats(input.createdBy, 'created', input.confidence);
         return { action: 'created', entry, reason: 'No existing entry found. Created.' };
     }
 
@@ -56,6 +58,7 @@ export async function librarianWrite(input: EntryInput): Promise<{
             );
             return { action: 'updated', entry, reason: 'Duplicate value. Updated confidence.' };
         }
+        await updateStats(input.createdBy, 'rejected', input.confidence);
         return { action: 'rejected', reason: 'Duplicate value with equal or lower confidence. No change.' };
     }
 

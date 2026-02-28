@@ -5,6 +5,7 @@ import { getAttendant, AttendantInstance } from '../attendant/registry';
 import { runArchivist } from '../archivist';
 import { queryEntry, findEntriesByEntity } from '../library/queries';
 import { createRelationship, getRelated, getRelatedDeep, RelatedEntity } from '../library/relationships';
+import { registerAgent, getAgent, whoKnows, listAgents, assignToTeam, AgentProfile, AgentRecord } from '../library/agent-registry';
 import { EntityType } from '../types';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -253,6 +254,33 @@ export class Iranti {
     async getRelatedDeep(entity: string, depth: number = 2): Promise<RelatedEntity[]> {
         const { entityType, entityId } = parseEntity(entity);
         return getRelatedDeep(entityType, entityId, depth);
+    }
+
+    // ── Agent Registry ──────────────────────────────────────────────────────
+
+    async registerAgent(profile: AgentProfile): Promise<void> {
+        return registerAgent(profile);
+    }
+
+    async getAgent(agentId: string): Promise<AgentRecord | null> {
+        return getAgent(agentId);
+    }
+
+    async whoKnows(entity: string): Promise<Array<{
+        agentId: string;
+        keys: string[];
+        totalContributions: number;
+    }>> {
+        const { entityType, entityId } = parseEntity(entity);
+        return whoKnows(entityType, entityId);
+    }
+
+    async listAgents(): Promise<AgentProfile[]> {
+        return listAgents();
+    }
+
+    async assignToTeam(agentId: string, teamId: string): Promise<void> {
+        return assignToTeam(agentId, teamId, 'sdk');
     }
 }
 
