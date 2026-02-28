@@ -26,10 +26,19 @@ class MockProvider implements LLMProvider {
             };
         }
 
+        // Simulate conflict resolution reasoning
+        if (lastMessage.includes('keep_existing') || lastMessage.includes('genuinely contradictory')) {
+            return {
+                text: 'KEEP_EXISTING: The existing entry has a more established source and the confidence difference is minimal.',
+                model: 'mock',
+                provider: 'mock',
+            };
+        }
+
         // Simulate conflict resolution
         if (lastMessage.includes('conflict') || lastMessage.includes('contradict')) {
             return {
-                text: 'Keep the existing entry — it has a more authoritative source.',
+                text: 'KEEP_EXISTING: The existing entry has a more established source and the confidence difference is minimal.',
                 model: 'mock',
                 provider: 'mock',
             };

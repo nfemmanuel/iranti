@@ -1,3 +1,4 @@
+import { route } from '../lib/router';
 import { findEntry, createEntry, updateEntry, archiveEntry, isProtectedEntry } from '../library/queries';
 import { EntryInput, EntryQuery, ConflictLogEntry } from '../types';
 import { KnowledgeEntry } from '../generated/prisma/client';
@@ -58,8 +59,81 @@ export async function librarianWrite(input: EntryInput): Promise<{
         return await resolveByConfidence(existing, input);
     }
 
-    // Gap too small — escalate
-    return await escalateConflict(existing, input);
+    // Gap too small — use LLM reasoning before escalating
+    return await resolveWithReasoning(existing, input);
+}
+
+// ─── Resolution ──────────────────────────────────────────────────────────────
+
+async function resolveWithReasoning(
+    existing: KnowledgeEntry,
+    incoming: EntryInput
+): Promise<{ action: 'created' | 'updated' | 'escalated' | 'rejected'; entry?: KnowledgeEntry; reason: string }> {
+    const response = await route('conflict_resolution', [
+        {
+            role: 'user',
+            content: `You are resolving a knowledge conflict between two AI agents.
+
+Entity: ${incoming.entityType} / ${incoming.entityId} / ${incoming.key}
+
+Existing entry:
+- Value: ${JSON.stringify(existing.valueRaw)}
+- Confidence: ${existing.confidence}
+- Source: ${existing.source}
+- Created: ${existing.createdAt.toISOString()}
+
+Incoming entry:
+- Value: ${JSON.stringify(incoming.valueRaw)}
+- Confidence: ${incoming.confidence}
+- Source: ${incoming.source}
+
+Consider:
+1. Which source is more authoritative for this type of data?
+2. Which entry is more recent?
+3. Are these values genuinely contradictory or measuring different things?
+4. Can you determine a clear winner?
+
+Respond with exactly one of these decisions and a one-sentence reason:
+KEEP_EXISTING: <reason>
+KEEP_INCOMING: <reason>
+ESCALATE: <reason>`,
+        },
+    ], 512);
+
+    const text = response.text.trim();
+
+    if (text.startsWith('KEEP_EXISTING')) {
+        const reason = text.replace('KEEP_EXISTING:', '').trim();
+        return {
+            action: 'rejected',
+            reason: `Librarian reasoning: kept existing. ${reason}`,
+        };
+    }
+
+    if (text.startsWith('KEEP_INCOMING')) {
+        const reason = text.replace('KEEP_INCOMING:', '').trim();
+        await archiveEntry(existing, 'superseded');
+        const entry = await createEntry({
+            ...incoming,
+            conflictLog: [{
+                detectedAt: new Date().toISOString(),
+                incomingSource: incoming.source,
+                incomingConfidence: incoming.confidence,
+                existingConfidence: existing.confidence,
+                resolution: 'overwritten',
+                resolvedBy: 'librarian_reasoning',
+                notes: reason,
+            }] as unknown as never,
+        });
+        return {
+            action: 'updated',
+            entry,
+            reason: `Librarian reasoning: replaced existing. ${reason}`,
+        };
+    }
+
+    // ESCALATE or anything unexpected
+    return await escalateConflict(existing, incoming);
 }
 
 // ─── Resolution ──────────────────────────────────────────────────────────────
