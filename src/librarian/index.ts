@@ -2,6 +2,7 @@ import { route } from '../lib/router';
 import { findEntry, createEntry, updateEntry, archiveEntry, isProtectedEntry } from '../library/queries';
 import { EntryInput, EntryQuery, ConflictLogEntry } from '../types';
 import { KnowledgeEntry } from '../generated/prisma/client';
+import { ChunkInput } from './chunker';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -205,4 +206,42 @@ async function escalateConflict(
         action: 'escalated',
         reason: `Conflict escalated to ${filePath}. Awaiting human resolution.`,
     };
+}
+
+// ─── Chunk and Write ─────────────────────────────────────────────────────────
+
+export async function librarianIngest(input: ChunkInput): Promise<{
+    written: number;
+    rejected: number;
+    escalated: number;
+    results: Array<{ key: string; action: string; reason: string }>;
+}> {
+    const { chunkContent } = await import('./chunker');
+
+    const { chunks, reason } = await chunkContent(input);
+
+    if (chunks.length === 0) {
+        return {
+            written: 0,
+            rejected: 0,
+            escalated: 0,
+            results: [{ key: 'chunker', action: 'failed', reason: reason ?? 'No chunks produced' }],
+        };
+    }
+
+    const results = [];
+    let written = 0;
+    let rejected = 0;
+    let escalated = 0;
+
+    for (const chunk of chunks) {
+        const result = await librarianWrite(chunk);
+        results.push({ key: chunk.key, action: result.action, reason: result.reason });
+
+        if (result.action === 'created' || result.action === 'updated') written++;
+        else if (result.action === 'escalated') escalated++;
+        else rejected++;
+    }
+
+    return { written, rejected, escalated, results };
 }

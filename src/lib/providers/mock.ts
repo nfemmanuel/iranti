@@ -26,6 +26,15 @@ class MockProvider implements LLMProvider {
             };
         }
 
+        // Simulate chunking / fact extraction
+        if (lastMessage.includes('extract every distinct') || lastMessage.includes('atomic facts')) {
+            return {
+                text: '[{"key":"affiliation","value":{"institution":"Carnegie Mellon University"},"summary":"Affiliated with Carnegie Mellon University"},{"key":"publication_count","value":{"count":31},"summary":"Has published 31 papers"},{"key":"previous_employer","value":{"institution":"Google DeepMind","from":2019,"to":2022},"summary":"Previously worked at Google DeepMind from 2019 to 2022"},{"key":"research_focus","value":{"primary":"reinforcement learning","secondary":"robotics"},"summary":"Primary research focus is reinforcement learning with secondary interest in robotics"}]',
+                model: 'mock',
+                provider: 'mock',
+            };
+        }
+
         // Simulate conflict resolution reasoning
         if (lastMessage.includes('keep_existing') || lastMessage.includes('genuinely contradictory')) {
             return {
