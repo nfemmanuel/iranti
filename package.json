@@ -19,7 +19,8 @@
     "test:relationships": "ts-node scripts/test-relationships.ts",
     "test:registry": "ts-node scripts/test-registry.ts",
     "test:sdk": "ts-node scripts/test-sdk.ts",
-    "test:integration": "ts-node scripts/test-integration.ts"
+    "test:integration": "ts-node scripts/test-integration.ts",
+    "demo": "ts-node scripts/demo.ts"
   },
   "repository": {
     "type": "git",

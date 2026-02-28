@@ -6,6 +6,7 @@ import { runArchivist } from '../archivist';
 import { queryEntry, findEntriesByEntity } from '../library/queries';
 import { createRelationship, getRelated, getRelatedDeep, RelatedEntity } from '../library/relationships';
 import { registerAgent, getAgent, whoKnows, listAgents, assignToTeam, AgentProfile, AgentRecord } from '../library/agent-registry';
+import { configureMock, MockConfig } from '../lib/providers/mock';
 import { EntityType } from '../types';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -287,6 +288,16 @@ export class Iranti {
 
     async assignToTeam(agentId: string, teamId: string): Promise<void> {
         return assignToTeam(agentId, teamId, 'sdk');
+    }
+
+    // ── Mock Configuration (dev/test only) ──────────────────────────────────
+
+    configureMock(config: Partial<MockConfig>): void {
+        if (process.env.LLM_PROVIDER !== 'mock') {
+            console.warn('[iranti] configureMock() called but LLM_PROVIDER is not mock. No effect.');
+            return;
+        }
+        configureMock(config);
     }
 }
 
