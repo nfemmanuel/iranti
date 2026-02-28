@@ -23,6 +23,14 @@ interface ArchivistReport {
 
 // ─── Main Cycle ──────────────────────────────────────────────────────────────
 
+async function ensureEscalationFolders(): Promise<void> {
+    await Promise.all([
+        fs.mkdir(ESCALATION_ACTIVE, { recursive: true }),
+        fs.mkdir(ESCALATION_RESOLVED, { recursive: true }),
+        fs.mkdir(ESCALATION_ARCHIVED, { recursive: true }),
+    ]);
+}
+
 export async function runArchivist(): Promise<ArchivistReport> {
     const report: ArchivistReport = {
         expiredArchived: 0,
@@ -32,6 +40,7 @@ export async function runArchivist(): Promise<ArchivistReport> {
         errors: [],
     };
 
+    await ensureEscalationFolders();
     await archiveExpired(report);
     await archiveLowConfidence(report);
     await processEscalations(report);
@@ -86,7 +95,8 @@ async function processEscalations(report: ArchivistReport): Promise<void> {
 
     try {
         files = await fs.readdir(ESCALATION_ACTIVE);
-    } catch {
+    } catch (err) {
+        report.errors.push(`Could not read escalation/active/: ${err}`);
         return;
     }
 

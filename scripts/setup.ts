@@ -60,6 +60,16 @@ async function setup() {
     run('npx ts-node scripts/seed-codebase.ts', 'seed codebase knowledge');
     console.log('  ✓ Codebase knowledge seeded\n');
 
+    // 5. Ensure escalation folders exist
+    console.log('Step 5 — Ensuring escalation folders...');
+    const { promises: fsp } = await import('fs');
+    await Promise.all([
+        fsp.mkdir('escalation/active', { recursive: true }),
+        fsp.mkdir('escalation/resolved', { recursive: true }),
+        fsp.mkdir('escalation/archived', { recursive: true }),
+    ]);
+    console.log('  ✓ Escalation folders ready\n');
+
     console.log('✅ Iranti setup complete.\n');
     console.log('Next steps:');
     console.log('  npm run test:integration   — verify everything works');
