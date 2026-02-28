@@ -1,4 +1,4 @@
-import { complete } from '../lib/llm';
+import { route } from '../lib/router';
 import { queryEntry, findEntriesByEntity } from '../library/queries';
 import { EntryQuery, QueryResult } from '../types';
 
@@ -33,7 +33,7 @@ export interface WorkingMemoryBrief {
 // ─── Task Inference ──────────────────────────────────────────────────────────
 
 async function inferTaskContext(context: AgentContext): Promise<string> {
-    const response = await complete([
+    const response = await route('task_inference', [
         {
             role: 'user',
             content: `You are analyzing what an AI agent is currently working on.
@@ -61,7 +61,7 @@ async function filterRelevantKnowledge(
 ): Promise<Array<{ key: string; summary: string; confidence: number }>> {
     if (allEntries.length === 0) return [];
 
-    const response = await complete([
+    const response = await route('relevance_filtering', [
         {
             role: 'user',
             content: `You are deciding what knowledge an AI agent needs for its current task.
