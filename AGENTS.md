@@ -185,12 +185,21 @@ iranti/
 │   │       └── ollama.ts       — Ollama local provider
 │   ├── sdk/
 │   │   └── index.ts            — Iranti class, public API
+│   ├── api/
+│   │   ├── server.ts           — Express REST API server
+│   │   ├── middleware/
+│   │   │   └── auth.ts         — API key authentication
+│   │   └── routes/
+│   │       ├── knowledge.ts    — Write, ingest, query, relationships
+│   │       ├── agents.ts       — Agent registration and management
+│   │       └── memory.ts       — Handshake, reconvene, whoKnows, maintenance
 │   └── types.ts                — Shared TypeScript types
 ├── prisma/
 │   ├── schema.prisma           — KnowledgeEntry, Archive, EntityRelationship
 │   └── migrations/             — Migration history
 ├── scripts/
 │   ├── seed.ts                 — Seeds Staff Namespace
+│   ├── demo.ts                 — Full system demo with two agents
 │   ├── test-librarian.ts       — Librarian smoke tests
 │   ├── test-attendant.ts       — Attendant smoke tests
 │   ├── test-archivist.ts       — Archivist smoke tests
@@ -208,6 +217,11 @@ iranti/
 ├── docs/
 │   ├── engineering/            — CODE_STANDARDS.md, COMMENTING_GUIDELINES.md
 │   └── decisions/              — One file per architectural decision
+├── clients/
+│   └── python/
+│       ├── iranti.py           — Python HTTP client for REST API
+│       ├── test_client.py      — Python client smoke test
+│       └── README.md           — Python client documentation
 ├── AGENTS.md                   — This file
 ├── docker-compose.yml          — PostgreSQL for local dev
 └── .env                        — Local environment (never committed)
@@ -337,6 +351,118 @@ Entity format: `"entityType/entityId"` e.g. `"researcher/jane_smith"`
   Status to RESOLVED when done
 - The Staff Namespace (entityType = system) is only modified by seed.ts
   or explicit system operations — never by external agents
+
+---
+
+## Documentation Standards
+
+### Doc Types and Where They Live
+
+- **docs/guides/** — How-to guides for developers using Iranti. One file per
+  topic. Written for external developers, not internal contributors.
+- **docs/decisions/** — Architectural decision records (ADRs). One file per
+  decision. Named `NNN-short-title.md` e.g. `001-agpl-license.md`. Never
+  deleted or edited after the fact — add a new ADR if a decision changes.
+- **docs/features/** — One subfolder per feature. Each contains `spec.md`
+  covering inputs, outputs, decision tree, edge cases, and test results.
+- **docs/engineering/** — Internal standards for contributors.
+  `CODE_STANDARDS.md`, `COMMENTING_GUIDELINES.md`.
+- **README.md** — Public-facing overview. Updated only when public API or
+  onboarding flow changes.
+- **AGENTS.md** — System context for AI agents and contributors. Updated
+  whenever components, rules, file structure, or schema change.
+- **Living Document (Iranti_Living_Document.docx)** — Full implementation
+  history, decisions, and current state. Updated after every significant
+  build session.
+
+### What Triggers a Documentation Update
+
+| Change Type | Required Updates |
+|---|---|
+| New SDK method | Update `src/sdk/index.ts` JSDoc, `docs/guides/quickstart.md`, README.md SDK section, AGENTS.md SDK table |
+| New provider | Update `docs/guides/providers.md`, `.env.example`, AGENTS.md providers table |
+| New feature | Create `docs/features/[feature-name]/spec.md`, update AGENTS.md file structure, update README.md if user-facing |
+| Architectural decision | Create `docs/decisions/NNN-title.md` |
+| Schema change | Update AGENTS.md schema section, update `docs/features/` spec if relevant |
+| Breaking API change | Update README.md, `docs/guides/quickstart.md`, `clients/python/iranti.py` docstrings, bump version in `package.json` |
+
+### ADR Format
+
+Every file in `docs/decisions/` must follow this exact structure:
+
+```markdown
+# NNN — Title
+
+## Context
+What situation or problem led to this decision?
+
+## Decision
+What was decided?
+
+## Consequences
+What are the results of this decision — good and bad?
+
+## Alternatives Considered
+What else was evaluated and why was it rejected?
+```
+
+### Feature Spec Format
+
+Every `docs/features/*/spec.md` must follow this structure:
+
+```markdown
+# Feature Name
+
+## Overview
+One paragraph describing what the feature does and why it exists.
+
+## Inputs
+Table of inputs with types and descriptions.
+
+## Outputs
+Table of outputs with types and descriptions.
+
+## Decision Tree / Flow
+Step-by-step logic or flowchart in text form.
+
+## Edge Cases
+List of edge cases and how they are handled.
+
+## Test Results
+Summary of test output confirming the feature works.
+
+## Related
+Links to related docs, decisions, and source files.
+```
+
+### Crosschecking Checklist
+
+Before committing any change, verify:
+
+- [ ] Does AGENTS.md reflect the current file structure?
+- [ ] Does AGENTS.md reflect the current schema?
+- [ ] Does AGENTS.md reflect the current SDK API?
+- [ ] If a new feature was added, does `docs/features/` have a spec?
+- [ ] If an architectural decision was made, does `docs/decisions/` have an ADR?
+- [ ] If the public API changed, is README.md updated?
+- [ ] If a new provider was added, is `docs/guides/providers.md` updated?
+- [ ] If onboarding steps changed, is `docs/guides/quickstart.md` updated?
+- [ ] Is the Living Document updated with implementation notes?
+
+### Living Document Rule
+
+The Living Document (`Iranti_Living_Document.docx`) is the authoritative
+record of implementation history. It is updated after every significant build
+session. It is not a substitute for inline docs or AGENTS.md — it is the
+audit trail. If the Living Document and AGENTS.md disagree, AGENTS.md is the
+source of truth for current state.
+
+Rules:
+- Do not summarize or compress existing Living Document entries
+- Add new entries at the end of the relevant section
+- Never edit past entries — add corrections as new entries
+- The Living Document is generated programmatically from `iranti_living_doc.js`
+  — do not edit the `.docx` directly
 
 ---
 
