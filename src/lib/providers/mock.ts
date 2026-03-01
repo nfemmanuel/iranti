@@ -133,8 +133,18 @@ class MockProvider implements LLMProvider {
             return this.respond('Compressed working memory summary for current task context.');
         }
 
-        // Default
-        return this.respond('Mock response.');
+        // Default — generic agent response
+        return this.respond(
+            `I have completed my analysis. Based on my research:\n\n` +
+            `{\n` +
+            `  "name": "Sample Researcher",\n` +
+            `  "affiliation": "MIT",\n` +
+            `  "publication_count": 45,\n` +
+            `  "research_focus": "machine learning",\n` +
+            `  "notable_contribution": "Foundational work in neural networks",\n` +
+            `  "confidence": 85\n` +
+            `}`
+        );
     }
 
     private respond(text: string): LLMResponse {

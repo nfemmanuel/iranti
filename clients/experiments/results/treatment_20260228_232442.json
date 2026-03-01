@@ -1,0 +1,81 @@
+{
+  "mode": "treatment",
+  "timestamp": "2026-02-28T23:24:12.274429",
+  "targets": [
+    {
+      "name": "Yann LeCun",
+      "entity": "researcher/yann_lecun",
+      "researcher_output": {
+        "name": "Yann LeCun",
+        "affiliation": "New York University (NYU) and Chief AI Scientist at Meta",
+        "publication_count": "over 200",
+        "research_focus": "Deep Learning",
+        "notable_contribution": "Convolutional Neural Networks (CNNs)",
+        "confidence": 90,
+        "facts_saved": 4
+      },
+      "analyst_output": {
+        "name": "Yann LeCun",
+        "affiliation": "New York University (NYU) and Facebook AI Research (FAIR)",
+        "publication_count": "approximately 300",
+        "research_focus": "Deep Learning",
+        "notable_contribution": "Convolutional Neural Networks (CNNs)",
+        "confidence": 95,
+        "facts_from_memory": 2,
+        "facts_added": 0
+      },
+      "consistency": {
+        "score": 100,
+        "matching_fields": 4,
+        "total_fields": 4,
+        "details": {
+          "affiliation": {
+            "researcher": "new york university (nyu) and chief ai scientist at meta",
+            "analyst": "new york university (nyu) and facebook ai research (fair)",
+            "match": true,
+            "overlap_words": [
+              "university",
+              "(nyu)"
+            ]
+          },
+          "research_focus": {
+            "researcher": "deep learning",
+            "analyst": "deep learning",
+            "match": true,
+            "overlap_words": [
+              "learning"
+            ]
+          },
+          "notable_contribution": {
+            "researcher": "convolutional neural networks (cnns)",
+            "analyst": "convolutional neural networks (cnns)",
+            "match": true,
+            "overlap_words": [
+              "neural",
+              "(cnns)",
+              "networks",
+              "convolutional"
+            ]
+          },
+          "confidence": {
+            "researcher": 90,
+            "analyst": 95,
+            "match": true,
+            "diff": 5
+          }
+        }
+      },
+      "facts_saved_to_iranti": 4,
+      "facts_loaded_from_iranti": 2,
+      "kb_facts_stored": 2
+    }
+  ],
+  "summary": {
+    "total_targets": 1,
+    "avg_consistency": 100.0,
+    "total_elapsed_seconds": 30.3,
+    "total_facts_saved_to_iranti": 4,
+    "total_facts_loaded_from_iranti": 2,
+    "iranti_used": true
+  }
+}

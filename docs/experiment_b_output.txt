@@ -1,0 +1,44 @@
+
+============================================================
+  EXPERIMENT B: Control (No Iranti)
+============================================================
+
++-------------------------[CrewAIEventsBus] Sync handler error in on_crew_started: 'charmap' codec can't 
+encode character '\U0001f680' in position 1: character maps to <undefined>
++-------------------------[CrewAIEventsBus] Sync handler error in on_task_started: 'charmap' codec can't 
+encode character '\U0001f680' in position 1: character maps to <undefined>
++-------------------------[CrewAIEventsBus] Sync handler error in on_agent_logs_started: 'charmap' codec 
+can't encode character '\U0001f680' in position 1: character maps to 
+<undefined>
++---------------------------[CrewAIEventsBus] Sync handler error in on_agent_logs_execution: 'charmap' 
+codec can't encode character '\u2705' in position 1: character maps to 
+<undefined>
++-------------------------[CrewAIEventsBus] Sync handler error in on_task_completed: 'charmap' codec 
+can't encode character '\U0001f680' in position 1: character maps to 
+<undefined>
++---------------------------[CrewAIEventsBus] Sync handler error in on_task_started: 'charmap' codec can't 
+encode character '\u2705' in position 1: character maps to <undefined>
++---------------------------[CrewAIEventsBus] Sync handler error in on_agent_logs_started: 'charmap' codec 
+can't encode character '\u2705' in position 1: character maps to <undefined>
++-------------------------[CrewAIEventsBus] Sync handler error in on_agent_logs_execution: 'charmap' 
+codec can't encode character '\U0001f680' in position 1: character maps to 
+<undefined>
++---------------------------[CrewAIEventsBus] Sync handler error in on_task_completed: 'charmap' codec 
+can't encode character '\u2705' in position 1: character maps to <undefined>
++-------------------------[CrewAIEventsBus] Sync handler error in on_crew_completed: 'charmap' codec 
+can't encode character '\U0001f680' in position 1: character maps to 
+<undefined>
+
+============================================================
+  CONTROL RESULTS
+  Facts recovered: 6/6
+  Analyst output: {
+  "lead": "Dr. Kofi Mensah-Larbi",
+  "budget": "$12.4 million",
+  "deadline": "June 18, 2028",
+  "status": "Phase 1: neural mesh calibration",
+  "blocker": "Hardware shortage from Veridian Systems batch 7C recall",
+  "tech_stack": "Distributed quantum coherence layer on Helix-9 processors"
+}
+============================================================
+

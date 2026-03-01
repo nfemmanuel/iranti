@@ -1,0 +1,12 @@
+{
+  "entity": "project/resonance_field",
+  "facts": {
+    "coordinator": "Dr. Nkiru Okonkwo",
+    "funding": "$31.5 million from Horizon Equity Fund IV",
+    "milestone": "December 3, 2027",
+    "current_phase": "Phase 7: resonance field stabilization",
+    "challenge": "Integration conflict with Legacy Systems protocol v4.2.1"
+  },
+  "written_at": "2026-03-01T01:55:50.177641",
+  "process": "4a_write"
+}

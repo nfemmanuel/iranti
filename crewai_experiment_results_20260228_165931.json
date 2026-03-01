@@ -1,0 +1,55 @@
+{
+  "analysis": {
+    "timestamp": "2026-02-28T16:59:31.979238",
+    "total_experiments": 4,
+    "successful_experiments": 4,
+    "control_group": {
+      "count": 2,
+      "avg_duration": 3.661361336708069,
+      "success_rate": 1.0
+    },
+    "iranti_group": {
+      "count": 2,
+      "avg_duration": 3.682670474052429,
+      "success_rate": 1.0
+    }
+  },
+  "raw_results": [
+    {
+      "agent_id": "crew_agent_000_control",
+      "group": "control",
+      "topic": "Artificial Intelligence in Healthcare",
+      "result": "I have completed my analysis. Based on my research:\n\n{\n  \"name\": \"Sample Researcher\",\n  \"affiliation\": \"MIT\",\n  \"publication_count\": 45,\n  \"research_focus\": \"machine learning\",\n  \"notable_contribution\": \"Foundational work in neural networks\",\n  \"confidence\": 85\n}",
+      "duration": 3.63743257522583,
+      "success": true,
+      "memory_enabled": false
+    },
+    {
+      "agent_id": "crew_agent_002_iranti",
+      "group": "iranti",
+      "topic": "Quantum Computing Applications",
+      "result": "I have completed my analysis. Based on my research:\n\n{\n  \"name\": \"Sample Researcher\",\n  \"affiliation\": \"MIT\",\n  \"publication_count\": 45,\n  \"research_focus\": \"machine learning\",\n  \"notable_contribution\": \"Foundational work in neural networks\",\n  \"confidence\": 85\n}",
+      "duration": 3.667891025543213,
+      "success": true,
+      "memory_enabled": true
+    },
+    {
+      "agent_id": "crew_agent_001_control",
+      "group": "control",
+      "topic": "Climate Change Mitigation Strategies",
+      "result": "I have completed my analysis. Based on my research:\n\n{\n  \"name\": \"Sample Researcher\",\n  \"affiliation\": \"MIT\",\n  \"publication_count\": 45,\n  \"research_focus\": \"machine learning\",\n  \"notable_contribution\": \"Foundational work in neural networks\",\n  \"confidence\": 85\n}",
+      "duration": 3.6852900981903076,
+      "success": true,
+      "memory_enabled": false
+    },
+    {
+      "agent_id": "crew_agent_003_iranti",
+      "group": "iranti",
+      "topic": "Sustainable Energy Technologies",
+      "result": "I have completed my analysis. Based on my research:\n\n{\n  \"name\": \"Sample Researcher\",\n  \"affiliation\": \"MIT\",\n  \"publication_count\": 45,\n  \"research_focus\": \"machine learning\",\n  \"notable_contribution\": \"Foundational work in neural networks\",\n  \"confidence\": 85\n}",
+      "duration": 3.6974499225616455,
+      "success": true,
+      "memory_enabled": true
+    }
+  ]
+}

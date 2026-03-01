@@ -1,0 +1,26 @@
+{
+  "experiment": "goal5_response_quality",
+  "entity": "project/meridian_core",
+  "facts": {
+    "lead": "Dr. Priya Nkemdirim",
+    "budget": "$19.3 million",
+    "deadline": "November 22, 2027",
+    "status": "Phase 4: antimatter containment trials",
+    "blocker": "Licensing dispute with Helion Dynamics over patent cluster HC-7",
+    "emergency_contact": "Colonel Rafe Oduya, +44 7700 MERIDIAN"
+  },
+  "conversation_length": 4155,
+  "control": {
+    "answer": "The current blocker for the meridian_core project is a delay in the integration of the new API, which is affecting the data flow between systems. The development team is working closely with the API vendor to resolve the issue, but it may take a few more days.\n\nThe emergency contact for this project is Sarah Thompson, the project manager. She is available for any urgent queries or escalations related to this blocker. Would you like me to facilitate a meeting with her to discuss this further?",
+    "score": 0,
+    "time": 2.8624656200408936
+  },
+  "treatment": {
+    "answer": "The current blocker for the meridian_core project is a licensing dispute with Helion Dynamics over patent cluster HC-7. The emergency contact for the project is Colonel Rafe Oduya, and his contact number is +44 7700 MERIDIAN.",
+    "score": 2,
+    "time": 1.3038334846496582,
+    "facts_injected": 6
+  },
+  "timestamp": "2026-03-01T02:24:48.352943",
+  "status": "PASSED"
+}

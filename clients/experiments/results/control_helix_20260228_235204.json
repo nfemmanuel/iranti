@@ -1,0 +1,30 @@
+{
+  "mode": "control_helix",
+  "timestamp": "2026-02-28T23:52:04.342029",
+  "entity": "project/helix_protocol",
+  "researcher_output": {
+    "lead": "Dr. Mara Osei-Bonsu",
+    "budget": "$7.8 million",
+    "deadline": "March 3, 2027",
+    "status": "Phase 3: quantum relay integration",
+    "blocker": "Vendor lock-in with Synthos Labs contract clause 14B"
+  },
+  "analyst_output": {
+    "lead": "Dr. Mara Osei-Bonsu",
+    "budget": "$7.8 million",
+    "deadline": "March 3, 2027",
+    "status": "Phase 3: quantum relay integration",
+    "blocker": "Vendor lock-in with Synthos Labs contract clause 14B"
+  },
+  "expected_facts": {
+    "lead": "Dr. Mara Osei-Bonsu",
+    "budget": "$7.8 million",
+    "deadline": "March 3, 2027",
+    "status": "Phase 3: quantum relay integration",
+    "blocker": "Vendor lock-in with Synthos Labs contract clause 14B"
+  },
+  "facts_recovered": 5,
+  "total_facts": 5,
+  "accuracy_pct": 100.0,
+  "iranti_used": false
+}

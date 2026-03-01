@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "c:\Users\NF\Documents\Projects\iranti\clients\experiments\validate_nexus_treatment.py", line 50, in <module>
+    @tool("Write finding to shared memory")
+     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\NF\Documents\Projects\iranti\clients\experiments\venv\Lib\site-packages\crewai\tools\base_tool.py", line 508, in _make_tool
+    raise ValueError("Function must have a docstring")
+ValueError: Function must have a docstring

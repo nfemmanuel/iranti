@@ -1,0 +1,202 @@
+{
+  "experiment": "stellar_nexus_stress_test",
+  "entity": "project/stellar_nexus",
+  "facts": {
+    "lead": "Dr. Amara Okafor",
+    "budget": "$15.3 million",
+    "deadline": "October 7, 2027",
+    "status": "Phase 4: neural substrate mapping",
+    "blocker": "Patent dispute with NeuroLink Corp case #2024-CV-8821",
+    "tech": "Biomimetic synaptic arrays on Cortex-12 architecture"
+  },
+  "iterations": 5,
+  "started_at": "2026-03-01T01:18:45.569965",
+  "control_runs": [
+    {
+      "iteration": 1,
+      "timestamp": "2026-03-01T01:18:51.060160",
+      "score": 6,
+      "total": 6,
+      "elapsed": 4.55,
+      "output": {
+        "lead": "Dr. Amara Okafor",
+        "budget": "$15.3 million",
+        "deadline": "October 7, 2027",
+        "status": "Phase 4: neural substrate mapping",
+        "blocker": "Patent dispute with NeuroLink Corp case #2024-CV-8821",
+        "tech": "Biomimetic synaptic arrays on Cortex-12 architecture"
+      }
+    },
+    {
+      "iteration": 2,
+      "timestamp": "2026-03-01T01:19:55.707726",
+      "score": 6,
+      "total": 6,
+      "elapsed": 4.23,
+      "output": {
+        "lead": "Dr. Amara Okafor",
+        "budget": "$15.3 million",
+        "deadline": "October 7, 2027",
+        "status": "Phase 4: neural substrate mapping",
+        "blocker": "Patent dispute with NeuroLink Corp case #2024-CV-8821",
+        "tech": "Biomimetic synaptic arrays on Cortex-12 architecture"
+      }
+    },
+    {
+      "iteration": 3,
+      "timestamp": "2026-03-01T01:21:03.475264",
+      "score": 6,
+      "total": 6,
+      "elapsed": 4.85,
+      "output": {
+        "lead": "Dr. Amara Okafor",
+        "budget": "$15.3 million",
+        "deadline": "October 7, 2027",
+        "status": "Phase 4: neural substrate mapping",
+        "blocker": "Patent dispute with NeuroLink Corp case #2024-CV-8821",
+        "tech": "Biomimetic synaptic arrays on Cortex-12 architecture"
+      }
+    },
+    {
+      "iteration": 4,
+      "timestamp": "2026-03-01T01:22:05.485151",
+      "score": 6,
+      "total": 6,
+      "elapsed": 3.63,
+      "output": {
+        "lead": "Dr. Amara Okafor",
+        "budget": "$15.3 million",
+        "deadline": "October 7, 2027",
+        "status": "Phase 4: neural substrate mapping",
+        "blocker": "Patent dispute with NeuroLink Corp case #2024-CV-8821",
+        "tech": "Biomimetic synaptic arrays on Cortex-12 architecture"
+      }
+    },
+    {
+      "iteration": 5,
+      "timestamp": "2026-03-01T01:22:58.178331",
+      "score": 6,
+      "total": 6,
+      "elapsed": 3.2,
+      "output": {
+        "lead": "Dr. Amara Okafor",
+        "budget": "$15.3 million",
+        "deadline": "October 7, 2027",
+        "status": "Phase 4: neural substrate mapping",
+        "blocker": "Patent dispute with NeuroLink Corp case #2024-CV-8821",
+        "tech": "Biomimetic synaptic arrays on Cortex-12 architecture"
+      }
+    }
+  ],
+  "treatment_runs": [
+    {
+      "iteration": 1,
+      "timestamp": "2026-03-01T01:19:35.743951",
+      "score": 6,
+      "total": 6,
+      "elapsed": 28.82,
+      "output": {
+        "facts_from_memory": 6,
+        "lead": "Dr. Amara Okafor",
+        "budget": "$15.3 million",
+        "deadline": "October 7, 2027",
+        "status": "Phase 4: neural substrate mapping",
+        "blocker": "Patent dispute with NeuroLink Corp case #2024-CV-8821",
+        "tech": "Biomimetic synaptic arrays on Cortex-12 architecture"
+      },
+      "facts_saved": 0,
+      "facts_loaded": 6
+    },
+    {
+      "iteration": 2,
+      "timestamp": "2026-03-01T01:20:42.503701",
+      "score": 6,
+      "total": 6,
+      "elapsed": 31.15,
+      "output": {
+        "facts_from_memory": 6,
+        "lead": "Dr. Amara Okafor",
+        "budget": "$15.3 million",
+        "deadline": "October 7, 2027",
+        "status": "Phase 4: neural substrate mapping",
+        "blocker": "Patent dispute with NeuroLink Corp case #2024-CV-8821",
+        "tech": "Biomimetic synaptic arrays on Cortex-12 architecture"
+      },
+      "facts_saved": 0,
+      "facts_loaded": 6
+    },
+    {
+      "iteration": 3,
+      "timestamp": "2026-03-01T01:21:46.177353",
+      "score": 6,
+      "total": 6,
+      "elapsed": 26.68,
+      "output": {
+        "facts_from_memory": 6,
+        "lead": "Dr. Amara Okafor",
+        "budget": "$15.3 million",
+        "deadline": "October 7, 2027",
+        "status": "Phase 4: neural substrate mapping",
+        "blocker": "Patent dispute with NeuroLink Corp case #2024-CV-8821",
+        "tech": "Biomimetic synaptic arrays on Cortex-12 architecture"
+      },
+      "facts_saved": 0,
+      "facts_loaded": 6
+    },
+    {
+      "iteration": 4,
+      "timestamp": "2026-03-01T01:22:38.127484",
+      "score": 6,
+      "total": 6,
+      "elapsed": 16.85,
+      "output": {
+        "facts_from_memory": 14,
+        "lead": "Dr. Amara Okafor",
+        "budget": "$15.3 million",
+        "deadline": "October 7, 2027",
+        "status": "Phase 4: neural substrate mapping",
+        "blocker": "Patent dispute with NeuroLink Corp case #2024-CV-8821",
+        "tech": "Biomimetic synaptic arrays on Cortex-12 architecture"
+      },
+      "facts_saved": 0,
+      "facts_loaded": 14
+    },
+    {
+      "iteration": 5,
+      "timestamp": "2026-03-01T01:23:42.156323",
+      "score": 6,
+      "total": 6,
+      "elapsed": 27.67,
+      "output": {
+        "facts_from_memory": 6,
+        "lead": "Dr. Amara Okafor",
+        "budget": "$15.3 million",
+        "deadline": "October 7, 2027",
+        "status": "Phase 4: neural substrate mapping",
+        "blocker": "Patent dispute with NeuroLink Corp case #2024-CV-8821",
+        "tech": "Biomimetic synaptic arrays on Cortex-12 architecture"
+      },
+      "facts_saved": 0,
+      "facts_loaded": 6
+    }
+  ],
+  "summary": {
+    "completed_at": "2026-03-01T01:23:42.156323",
+    "control": {
+      "avg_score": 6,
+      "score_stdev": 0.0,
+      "avg_time": 4.09,
+      "success_rate": "5/5"
+    },
+    "treatment": {
+      "avg_score": 6,
+      "score_stdev": 0.0,
+      "avg_time": 26.23,
+      "success_rate": "5/5"
+    },
+    "improvement": {
+      "score_delta": 0,
+      "score_improvement_pct": 0.0
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "mode": "control",
+  "timestamp": "2026-02-28T18:22:31.485179",
+  "targets": [
+    {
+      "name": "Yann LeCun",
+      "entity": "researcher/yann_lecun",
+      "researcher_output": {
+        "raw": "I have completed my analysis. Based on my research:\n\n{\n  \"name\": \"Sample Researcher\",\n  \"affiliation\": \"MIT\",\n  \"publication_count\": 45,\n  \"research_focus\": \"machine learning\",\n  \"notable_contribution\": \"Foundational work in neural networks\",\n  \"confidence\": 85\n}",
+        "parse_error": true
+      },
+      "analyst_output": {
+        "raw": "I have completed my analysis. Based on my research:\n\n{\n  \"name\": \"Sample Researcher\",\n  \"affiliation\": \"MIT\",\n  \"publication_count\": 45,\n  \"research_focus\": \"machine learning\",\n  \"notable_contribution\": \"Foundational work in neural networks\",\n  \"confidence\": 85\n}",
+        "parse_error": true
+      },
+      "consistency": {
+        "score": 0,
+        "matching_fields": 0,
+        "total_fields": 0,
+        "details": {}
+      },
+      "api_calls_this_target": 2
+    }
+  ],
+  "summary": {
+    "total_targets": 1,
+    "avg_consistency": 0.0,
+    "total_elapsed_seconds": 1.24,
+    "iranti_used": false
+  }
+}

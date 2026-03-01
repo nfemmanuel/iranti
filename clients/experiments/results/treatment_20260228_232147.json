@@ -1,0 +1,84 @@
+{
+  "mode": "treatment",
+  "timestamp": "2026-02-28T23:21:21.460608",
+  "targets": [
+    {
+      "name": "Yann LeCun",
+      "entity": "researcher/yann_lecun",
+      "researcher_output": {
+        "name": "Yann LeCun",
+        "affiliation": "New York University (NYU) and Facebook AI Research (FAIR)",
+        "publication_count": "approximately 300",
+        "research_focus": "deep learning",
+        "notable_contribution": "convolutional neural networks (CNNs)",
+        "confidence": 95,
+        "facts_saved": 3
+      },
+      "analyst_output": {
+        "name": "Yann LeCun",
+        "affiliation": "New York University (NYU) and Facebook AI Research (FAIR)",
+        "publication_count": "approximately 300",
+        "research_focus": "deep learning",
+        "notable_contribution": "convolutional neural networks (CNNs)",
+        "confidence": 95,
+        "facts_from_memory": 0,
+        "facts_added": 0
+      },
+      "consistency": {
+        "score": 100,
+        "matching_fields": 4,
+        "total_fields": 4,
+        "details": {
+          "affiliation": {
+            "researcher": "new york university (nyu) and facebook ai research (fair)",
+            "analyst": "new york university (nyu) and facebook ai research (fair)",
+            "match": true,
+            "overlap_words": [
+              "research",
+              "university",
+              "facebook",
+              "(fair)",
+              "(nyu)"
+            ]
+          },
+          "research_focus": {
+            "researcher": "deep learning",
+            "analyst": "deep learning",
+            "match": true,
+            "overlap_words": [
+              "learning"
+            ]
+          },
+          "notable_contribution": {
+            "researcher": "convolutional neural networks (cnns)",
+            "analyst": "convolutional neural networks (cnns)",
+            "match": true,
+            "overlap_words": [
+              "convolutional",
+              "networks",
+              "neural",
+              "(cnns)"
+            ]
+          },
+          "confidence": {
+            "researcher": 95,
+            "analyst": 95,
+            "match": true,
+            "diff": 0
+          }
+        }
+      },
+      "facts_saved_to_iranti": 3,
+      "facts_loaded_from_iranti": 0,
+      "kb_facts_stored": 2
+    }
+  ],
+  "summary": {
+    "total_targets": 1,
+    "avg_consistency": 100.0,
+    "total_elapsed_seconds": 26.45,
+    "total_facts_saved_to_iranti": 3,
+    "total_facts_loaded_from_iranti": 0,
+    "iranti_used": true
+  }
+}

@@ -179,7 +179,11 @@ class IrantiClient:
         if response.status_code == 401:
             raise IrantiAuthError('Invalid or missing API key.')
         if response.status_code == 404:
-            raise IrantiNotFoundError(response.json().get('error', 'Not found.'))
+            try:
+                error_msg = response.json().get('error', 'Not found.')
+            except Exception:
+                error_msg = 'Not found.'
+            raise IrantiNotFoundError(error_msg)
         if response.status_code == 400:
             raise IrantiValidationError(response.json().get('error', 'Bad request.'))
         if not response.ok:

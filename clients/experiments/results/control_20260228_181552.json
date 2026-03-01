@@ -1,0 +1,21 @@
+{
+  "mode": "control",
+  "timestamp": "2026-02-28T18:15:37.461817",
+  "targets": [
+    {
+      "name": "Yann LeCun",
+      "entity": "researcher/yann_lecun",
+      "researcher_output": null,
+      "analyst_output": null,
+      "consistency": null,
+      "api_calls_this_target": 0,
+      "error": "litellm.APIError: APIError: OpenAIException - Connection error."
+    }
+  ],
+  "summary": {
+    "total_targets": 1,
+    "avg_consistency": 0,
+    "total_elapsed_seconds": 14.94,
+    "iranti_used": false
+  }
+}

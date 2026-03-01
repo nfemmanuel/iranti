@@ -23,8 +23,10 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent.parent.parent / '.env')
 
+os.environ['CREWAI_TRACING_ENABLED'] = 'true'
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from python.iranti import IrantiClient, IrantiError
+from python.iranti import IrantiClient, IrantiError, IrantiNotFoundError
 
 sys.path.insert(0, str(Path(__file__).parent.parent / 'shared'))
 from agents import (
@@ -37,7 +39,10 @@ from control.crew import calculate_consistency
 
 # ─── Iranti Client ────────────────────────────────────────────────────────────
 
-iranti = IrantiClient()
+iranti = IrantiClient(
+    base_url='http://localhost:3001',
+    api_key='dev_test_key_12345',
+)
 CURRENT_ENTITY = None  # set per target
 
 
@@ -80,6 +85,8 @@ def read_finding(key: str) -> str:
         if result.found:
             return f"Found '{key}': {result.value} (confidence: {result.confidence}, source: {result.source})"
         return f"No finding for '{key}' in shared memory yet."
+    except IrantiNotFoundError:
+        return f"No finding for '{key}' in shared memory yet."
     except IrantiError as e:
         return f"Could not read from memory: {e}"
 
@@ -118,7 +125,9 @@ def get_all_findings() -> str:
             return "No findings in shared memory for this entity."
         lines = [f"All findings for {CURRENT_ENTITY}:"]
         for fact in facts:
-            lines.append(f"  [{fact['key']}] {fact['valueSummary']} (confidence: {fact['confidence']})")
+            # handle both possible field names
+            summary = fact.get('valueSummary') or fact.get('summary') or fact.get('value', '')
+            lines.append(f"  [{fact['key']}] {summary} (confidence: {fact['confidence']})")
         return "\n".join(lines)
     except IrantiError as e:
         return f"Could not retrieve findings: {e}"
@@ -128,8 +137,7 @@ def get_all_findings() -> str:
 
 def build_treatment_crew(target: dict) -> tuple:
     llm = LLM(
-        model="gemini/gemini-2.0-flash-lite",
-        api_key=os.getenv("GEMINI_API_KEY"),
+        model="gpt-4o-mini",
         temperature=0.3,
     )
 
@@ -268,9 +276,18 @@ def run_treatment():
 
             def parse_output(raw: str) -> dict:
                 try:
+                    # Try direct parse first
                     clean = raw.replace('```json', '').replace('```', '').strip()
                     return json.loads(clean)
                 except:
+                    # Extract JSON block from prose response
+                    import re
+                    match = re.search(r'\{[^{}]+\}', raw, re.DOTALL)
+                    if match:
+                        try:
+                            return json.loads(match.group())
+                        except:
+                            pass
                     return {"raw": raw, "parse_error": True}
 
             researcher_data = parse_output(research_task.output.raw if research_task.output else "")

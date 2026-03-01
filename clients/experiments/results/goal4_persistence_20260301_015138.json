@@ -1,0 +1,8 @@
+{
+  "experiment": "goal4_persistence",
+  "entity": "project/resonance_field",
+  "expected_facts": 5,
+  "retrieved_facts": 5,
+  "timestamp": "2026-03-01T01:51:38.556769",
+  "status": "PASSED"
+}

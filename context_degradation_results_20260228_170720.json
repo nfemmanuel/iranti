@@ -1,0 +1,561 @@
+{
+  "analysis": {
+    "traditional_agent": {
+      "early_tasks": 0.8989765220327538,
+      "mid_tasks": null,
+      "late_tasks": null,
+      "final_accuracy": 0.8504348231346106,
+      "final_context_util": 0.26875
+    },
+    "iranti_agent": {
+      "early_tasks": 0.9018393768718187,
+      "mid_tasks": null,
+      "late_tasks": null,
+      "final_accuracy": 0.8757773626683764,
+      "final_context_util": 0.15475
+    },
+    "performance_comparison": {
+      "traditional_degradation_percent": 5.399662583888325,
+      "iranti_degradation_percent": 2.8898731716331585,
+      "iranti_advantage_percent": 2.509789412255167
+    }
+  },
+  "raw_results": {
+    "iranti_results": [
+      {
+        "agent_id": "iranti_001",
+        "task": "Research task 1: Analyze topic with 50 data points",
+        "accuracy": 0.9204186812122142,
+        "context_utilization": 0.013,
+        "memory_items": 1
+      },
+      {
+        "agent_id": "iranti_001",
+        "task": "Research task 2: Analyze topic with 70 data points",
+        "accuracy": 0.9175624134480742,
+        "context_utilization": 0.05875,
+        "memory_items": 2
+      },
+      {
+        "agent_id": "iranti_001",
+        "task": "Research task 3: Analyze topic with 90 data points",
+        "accuracy": 0.8592330501208262,
+        "context_utilization": 0.105,
+        "memory_items": 3
+      },
+      {
+        "agent_id": "iranti_001",
+        "task": "Research task 4: Analyze topic with 110 data points",
+        "accuracy": 0.9437122052466586,
+        "context_utilization": 0.1515,
+        "memory_items": 4
+      },
+      {
+        "agent_id": "iranti_001",
+        "task": "Research task 5: Analyze topic with 130 data points",
+        "accuracy": 0.8848235677383106,
+        "context_utilization": 0.152,
+        "memory_items": 5
+      },
+      {
+        "agent_id": "iranti_001",
+        "task": "Research task 6: Analyze topic with 150 data points",
+        "accuracy": 0.9060753090867484,
+        "context_utilization": 0.1525,
+        "memory_items": 6
+      },
+      {
+        "agent_id": "iranti_001",
+        "task": "Research task 7: Analyze topic with 170 data points",
+        "accuracy": 0.9116880762319176,
+        "context_utilization": 0.153,
+        "memory_items": 7
+      },
+      {
+        "agent_id": "iranti_001",
+        "task": "Research task 8: Analyze topic with 190 data points",
+        "accuracy": 0.8610057696979152,
+        "context_utilization": 0.153,
+        "memory_items": 8
+      },
+      {
+        "agent_id": "iranti_001",
+        "task": "Research task 9: Analyze topic with 210 data points",
+        "accuracy": 0.8846197165841233,
+        "context_utilization": 0.153,
+        "memory_items": 9
+      },
+      {
+        "agent_id": "iranti_001",
+        "task": "Research task 10: Analyze topic with 230 data points",
+        "accuracy": 0.8688885150567208,
+        "context_utilization": 0.15325,
+        "memory_items": 10
+      },
+      {
+        "agent_id": "iranti_001",
+        "task": "Research task 11: Analyze topic with 250 data points",
+        "accuracy": 0.9116571452630929,
+        "context_utilization": 0.15375,
+        "memory_items": 11
+      },
+      {
+        "agent_id": "iranti_001",
+        "task": "Research task 12: Analyze topic with 270 data points",
+        "accuracy": 0.921346112259552,
+        "context_utilization": 0.15425,
+        "memory_items": 12
+      },
+      {
+        "agent_id": "iranti_001",
+        "task": "Research task 13: Analyze topic with 290 data points",
+        "accuracy": 0.9066889790639701,
+        "context_utilization": 0.15475,
+        "memory_items": 13
+      },
+      {
+        "agent_id": "iranti_001",
+        "task": "Research task 14: Analyze topic with 310 data points",
+        "accuracy": 0.9092156658979927,
+        "context_utilization": 0.15475,
+        "memory_items": 14
+      },
+      {
+        "agent_id": "iranti_001",
+        "task": "Research task 15: Analyze topic with 330 data points",
+        "accuracy": 0.9334516135834762,
+        "context_utilization": 0.15475,
+        "memory_items": 15
+      },
+      {
+        "agent_id": "iranti_001",
+        "task": "Research task 16: Analyze topic with 350 data points",
+        "accuracy": 0.8912600283414994,
+        "context_utilization": 0.15475,
+        "memory_items": 16
+      },
+      {
+        "agent_id": "iranti_001",
+        "task": "Research task 17: Analyze topic with 370 data points",
+        "accuracy": 0.9419543661960603,
+        "context_utilization": 0.15475,
+        "memory_items": 17
+      },
+      {
+        "agent_id": "iranti_001",
+        "task": "Research task 18: Analyze topic with 390 data points",
+        "accuracy": 0.8913449707829103,
+        "context_utilization": 0.15475,
+        "memory_items": 18
+      },
+      {
+        "agent_id": "iranti_001",
+        "task": "Research task 19: Analyze topic with 410 data points",
+        "accuracy": 0.9040551266732535,
+        "context_utilization": 0.15475,
+        "memory_items": 19
+      },
+      {
+        "agent_id": "iranti_001",
+        "task": "Research task 20: Analyze topic with 430 data points",
+        "accuracy": 0.9454051809910995,
+        "context_utilization": 0.15475,
+        "memory_items": 20
+      },
+      {
+        "agent_id": "iranti_001",
+        "task": "Research task 21: Analyze topic with 450 data points",
+        "accuracy": 0.9321201072570364,
+        "context_utilization": 0.15475,
+        "memory_items": 21
+      },
+      {
+        "agent_id": "iranti_001",
+        "task": "Research task 22: Analyze topic with 470 data points",
+        "accuracy": 0.8643562425702922,
+        "context_utilization": 0.15475,
+        "memory_items": 22
+      },
+      {
+        "agent_id": "iranti_001",
+        "task": "Research task 23: Analyze topic with 490 data points",
+        "accuracy": 0.869488877743077,
+        "context_utilization": 0.15475,
+        "memory_items": 23
+      },
+      {
+        "agent_id": "iranti_001",
+        "task": "Research task 24: Analyze topic with 510 data points",
+        "accuracy": 0.889835338080268,
+        "context_utilization": 0.15475,
+        "memory_items": 24
+      },
+      {
+        "agent_id": "iranti_001",
+        "task": "Research task 25: Analyze topic with 530 data points",
+        "accuracy": 0.8757773626683764,
+        "context_utilization": 0.15475,
+        "memory_items": 25
+      }
+    ],
+    "traditional_results": [
+      {
+        "agent_id": "traditional_001",
+        "task": "Research task 1: Analyze topic with 50 data points",
+        "accuracy": 0.8944421262403416,
+        "context_utilization": 0.01075,
+        "context_size": 43
+      },
+      {
+        "agent_id": "traditional_001",
+        "task": "Research task 2: Analyze topic with 70 data points",
+        "accuracy": 0.8752954452672318,
+        "context_utilization": 0.0215,
+        "context_size": 86
+      },
+      {
+        "agent_id": "traditional_001",
+        "task": "Research task 3: Analyze topic with 90 data points",
+        "accuracy": 0.9059685234676138,
+        "context_utilization": 0.03225,
+        "context_size": 129
+      },
+      {
+        "agent_id": "traditional_001",
+        "task": "Research task 4: Analyze topic with 110 data points",
+        "accuracy": 0.9210102710057484,
+        "context_utilization": 0.043,
+        "context_size": 172
+      },
+      {
+        "agent_id": "traditional_001",
+        "task": "Research task 5: Analyze topic with 130 data points",
+        "accuracy": 0.857071091344189,
+        "context_utilization": 0.05375,
+        "context_size": 215
+      },
+      {
+        "agent_id": "traditional_001",
+        "task": "Research task 6: Analyze topic with 150 data points",
+        "accuracy": 0.9002700458447166,
+        "context_utilization": 0.0645,
+        "context_size": 258
+      },
+      {
+        "agent_id": "traditional_001",
+        "task": "Research task 7: Analyze topic with 170 data points",
+        "accuracy": 0.9318908141231583,
+        "context_utilization": 0.07525,
+        "context_size": 301
+      },
+      {
+        "agent_id": "traditional_001",
+        "task": "Research task 8: Analyze topic with 190 data points",
+        "accuracy": 0.8520127877731252,
+        "context_utilization": 0.086,
+        "context_size": 344
+      },
+      {
+        "agent_id": "traditional_001",
+        "task": "Research task 9: Analyze topic with 210 data points",
+        "accuracy": 0.9445277947399594,
+        "context_utilization": 0.09675,
+        "context_size": 387
+      },
+      {
+        "agent_id": "traditional_001",
+        "task": "Research task 10: Analyze topic with 230 data points",
+        "accuracy": 0.8746935873089203,
+        "context_utilization": 0.1075,
+        "context_size": 430
+      },
+      {
+        "agent_id": "traditional_001",
+        "task": "Research task 11: Analyze topic with 250 data points",
+        "accuracy": 0.8660283863830593,
+        "context_utilization": 0.11825,
+        "context_size": 473
+      },
+      {
+        "agent_id": "traditional_001",
+        "task": "Research task 12: Analyze topic with 270 data points",
+        "accuracy": 0.8638868901159171,
+        "context_utilization": 0.129,
+        "context_size": 516
+      },
+      {
+        "agent_id": "traditional_001",
+        "task": "Research task 13: Analyze topic with 290 data points",
+        "accuracy": 0.9315397558213963,
+        "context_utilization": 0.13975,
+        "context_size": 559
+      },
+      {
+        "agent_id": "traditional_001",
+        "task": "Research task 14: Analyze topic with 310 data points",
+        "accuracy": 0.9028001008200762,
+        "context_utilization": 0.1505,
+        "context_size": 602
+      },
+      {
+        "agent_id": "traditional_001",
+        "task": "Research task 15: Analyze topic with 330 data points",
+        "accuracy": 0.8628232648349253,
+        "context_utilization": 0.16125,
+        "context_size": 645
+      },
+      {
+        "agent_id": "traditional_001",
+        "task": "Research task 16: Analyze topic with 350 data points",
+        "accuracy": 0.9486695390893534,
+        "context_utilization": 0.172,
+        "context_size": 688
+      },
+      {
+        "agent_id": "traditional_001",
+        "task": "Research task 17: Analyze topic with 370 data points",
+        "accuracy": 0.9434739433540449,
+        "context_utilization": 0.18275,
+        "context_size": 731
+      },
+      {
+        "agent_id": "traditional_001",
+        "task": "Research task 18: Analyze topic with 390 data points",
+        "accuracy": 0.9241721751117753,
+        "context_utilization": 0.1935,
+        "context_size": 774
+      },
+      {
+        "agent_id": "traditional_001",
+        "task": "Research task 19: Analyze topic with 410 data points",
+        "accuracy": 0.8539230291496802,
+        "context_utilization": 0.20425,
+        "context_size": 817
+      },
+      {
+        "agent_id": "traditional_001",
+        "task": "Research task 20: Analyze topic with 430 data points",
+        "accuracy": 0.93229116021729,
+        "context_utilization": 0.215,
+        "context_size": 860
+      },
+      {
+        "agent_id": "traditional_001",
+        "task": "Research task 21: Analyze topic with 450 data points",
+        "accuracy": 0.9173546473607067,
+        "context_utilization": 0.22575,
+        "context_size": 903
+      },
+      {
+        "agent_id": "traditional_001",
+        "task": "Research task 22: Analyze topic with 470 data points",
+        "accuracy": 0.9152844356596339,
+        "context_utilization": 0.2365,
+        "context_size": 946
+      },
+      {
+        "agent_id": "traditional_001",
+        "task": "Research task 23: Analyze topic with 490 data points",
+        "accuracy": 0.8700047828795382,
+        "context_utilization": 0.24725,
+        "context_size": 989
+      },
+      {
+        "agent_id": "traditional_001",
+        "task": "Research task 24: Analyze topic with 510 data points",
+        "accuracy": 0.9345436297718341,
+        "context_utilization": 0.258,
+        "context_size": 1032
+      },
+      {
+        "agent_id": "traditional_001",
+        "task": "Research task 25: Analyze topic with 530 data points",
+        "accuracy": 0.8504348231346106,
+        "context_utilization": 0.26875,
+        "context_size": 1075
+      }
+    ],
+    "context_progression": [
+      {
+        "task_number": 1,
+        "traditional_context_util": 0.01075,
+        "iranti_context_util": 0.013,
+        "traditional_accuracy": 0.8944421262403416,
+        "iranti_accuracy": 0.9204186812122142
+      },
+      {
+        "task_number": 2,
+        "traditional_context_util": 0.0215,
+        "iranti_context_util": 0.05875,
+        "traditional_accuracy": 0.8752954452672318,
+        "iranti_accuracy": 0.9175624134480742
+      },
+      {
+        "task_number": 3,
+        "traditional_context_util": 0.03225,
+        "iranti_context_util": 0.105,
+        "traditional_accuracy": 0.9059685234676138,
+        "iranti_accuracy": 0.8592330501208262
+      },
+      {
+        "task_number": 4,
+        "traditional_context_util": 0.043,
+        "iranti_context_util": 0.1515,
+        "traditional_accuracy": 0.9210102710057484,
+        "iranti_accuracy": 0.9437122052466586
+      },
+      {
+        "task_number": 5,
+        "traditional_context_util": 0.05375,
+        "iranti_context_util": 0.152,
+        "traditional_accuracy": 0.857071091344189,
+        "iranti_accuracy": 0.8848235677383106
+      },
+      {
+        "task_number": 6,
+        "traditional_context_util": 0.0645,
+        "iranti_context_util": 0.1525,
+        "traditional_accuracy": 0.9002700458447166,
+        "iranti_accuracy": 0.9060753090867484
+      },
+      {
+        "task_number": 7,
+        "traditional_context_util": 0.07525,
+        "iranti_context_util": 0.153,
+        "traditional_accuracy": 0.9318908141231583,
+        "iranti_accuracy": 0.9116880762319176
+      },
+      {
+        "task_number": 8,
+        "traditional_context_util": 0.086,
+        "iranti_context_util": 0.153,
+        "traditional_accuracy": 0.8520127877731252,
+        "iranti_accuracy": 0.8610057696979152
+      },
+      {
+        "task_number": 9,
+        "traditional_context_util": 0.09675,
+        "iranti_context_util": 0.153,
+        "traditional_accuracy": 0.9445277947399594,
+        "iranti_accuracy": 0.8846197165841233
+      },
+      {
+        "task_number": 10,
+        "traditional_context_util": 0.1075,
+        "iranti_context_util": 0.15325,
+        "traditional_accuracy": 0.8746935873089203,
+        "iranti_accuracy": 0.8688885150567208
+      },
+      {
+        "task_number": 11,
+        "traditional_context_util": 0.11825,
+        "iranti_context_util": 0.15375,
+        "traditional_accuracy": 0.8660283863830593,
+        "iranti_accuracy": 0.9116571452630929
+      },
+      {
+        "task_number": 12,
+        "traditional_context_util": 0.129,
+        "iranti_context_util": 0.15425,
+        "traditional_accuracy": 0.8638868901159171,
+        "iranti_accuracy": 0.921346112259552
+      },
+      {
+        "task_number": 13,
+        "traditional_context_util": 0.13975,
+        "iranti_context_util": 0.15475,
+        "traditional_accuracy": 0.9315397558213963,
+        "iranti_accuracy": 0.9066889790639701
+      },
+      {
+        "task_number": 14,
+        "traditional_context_util": 0.1505,
+        "iranti_context_util": 0.15475,
+        "traditional_accuracy": 0.9028001008200762,
+        "iranti_accuracy": 0.9092156658979927
+      },
+      {
+        "task_number": 15,
+        "traditional_context_util": 0.16125,
+        "iranti_context_util": 0.15475,
+        "traditional_accuracy": 0.8628232648349253,
+        "iranti_accuracy": 0.9334516135834762
+      },
+      {
+        "task_number": 16,
+        "traditional_context_util": 0.172,
+        "iranti_context_util": 0.15475,
+        "traditional_accuracy": 0.9486695390893534,
+        "iranti_accuracy": 0.8912600283414994
+      },
+      {
+        "task_number": 17,
+        "traditional_context_util": 0.18275,
+        "iranti_context_util": 0.15475,
+        "traditional_accuracy": 0.9434739433540449,
+        "iranti_accuracy": 0.9419543661960603
+      },
+      {
+        "task_number": 18,
+        "traditional_context_util": 0.1935,
+        "iranti_context_util": 0.15475,
+        "traditional_accuracy": 0.9241721751117753,
+        "iranti_accuracy": 0.8913449707829103
+      },
+      {
+        "task_number": 19,
+        "traditional_context_util": 0.20425,
+        "iranti_context_util": 0.15475,
+        "traditional_accuracy": 0.8539230291496802,
+        "iranti_accuracy": 0.9040551266732535
+      },
+      {
+        "task_number": 20,
+        "traditional_context_util": 0.215,
+        "iranti_context_util": 0.15475,
+        "traditional_accuracy": 0.93229116021729,
+        "iranti_accuracy": 0.9454051809910995
+      },
+      {
+        "task_number": 21,
+        "traditional_context_util": 0.22575,
+        "iranti_context_util": 0.15475,
+        "traditional_accuracy": 0.9173546473607067,
+        "iranti_accuracy": 0.9321201072570364
+      },
+      {
+        "task_number": 22,
+        "traditional_context_util": 0.2365,
+        "iranti_context_util": 0.15475,
+        "traditional_accuracy": 0.9152844356596339,
+        "iranti_accuracy": 0.8643562425702922
+      },
+      {
+        "task_number": 23,
+        "traditional_context_util": 0.24725,
+        "iranti_context_util": 0.15475,
+        "traditional_accuracy": 0.8700047828795382,
+        "iranti_accuracy": 0.869488877743077
+      },
+      {
+        "task_number": 24,
+        "traditional_context_util": 0.258,
+        "iranti_context_util": 0.15475,
+        "traditional_accuracy": 0.9345436297718341,
+        "iranti_accuracy": 0.889835338080268
+      },
+      {
+        "task_number": 25,
+        "traditional_context_util": 0.26875,
+        "iranti_context_util": 0.15475,
+        "traditional_accuracy": 0.8504348231346106,
+        "iranti_accuracy": 0.8757773626683764
+      }
+    ]
+  },
+  "experiment_params": {
+    "num_tasks": 25,
+    "max_context_size": 4000,
+    "experiment_time": 0.0010046958923339844
+  }
+}

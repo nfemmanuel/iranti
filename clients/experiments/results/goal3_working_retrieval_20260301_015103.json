@@ -1,0 +1,17 @@
+{
+  "experiment": "goal3_working_retrieval",
+  "entity": "project/photon_cascade",
+  "facts": {
+    "principal": "Dr. Ama Boateng",
+    "capital": "$22.1 million from Titan Ventures Series D",
+    "completion": "August 9, 2029",
+    "stage": "Phase 6: photonic relay calibration",
+    "impediment": "Supply chain delay from Quantum Dynamics order #QD-2025-3391"
+  },
+  "score": 5,
+  "total": 5,
+  "elapsed_agent1": 12.19775915145874,
+  "elapsed_agent2": 2.237001419067383,
+  "timestamp": "2026-03-01T01:51:03.980910",
+  "status": "PASSED"
+}

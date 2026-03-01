@@ -1,0 +1,80 @@
+{
+  "mode": "treatment",
+  "timestamp": "2026-02-28T18:25:05.839560",
+  "targets": [
+    {
+      "name": "Yann LeCun",
+      "entity": "researcher/yann_lecun",
+      "researcher_output": {
+        "name": "Sample Researcher",
+        "affiliation": "MIT",
+        "publication_count": 45,
+        "research_focus": "machine learning",
+        "notable_contribution": "Foundational work in neural networks",
+        "confidence": 85
+      },
+      "analyst_output": {
+        "name": "Sample Researcher",
+        "affiliation": "MIT",
+        "publication_count": 45,
+        "research_focus": "machine learning",
+        "notable_contribution": "Foundational work in neural networks",
+        "confidence": 85
+      },
+      "consistency": {
+        "score": 80,
+        "matching_fields": 4,
+        "total_fields": 5,
+        "details": {
+          "affiliation": {
+            "researcher": "mit",
+            "analyst": "mit",
+            "match": false,
+            "overlap_words": []
+          },
+          "research_focus": {
+            "researcher": "machine learning",
+            "analyst": "machine learning",
+            "match": true,
+            "overlap_words": [
+              "machine",
+              "learning"
+            ]
+          },
+          "notable_contribution": {
+            "researcher": "foundational work in neural networks",
+            "analyst": "foundational work in neural networks",
+            "match": true,
+            "overlap_words": [
+              "neural",
+              "networks",
+              "foundational"
+            ]
+          },
+          "publication_count": {
+            "researcher": 45,
+            "analyst": 45,
+            "match": true,
+            "diff": 0
+          },
+          "confidence": {
+            "researcher": 85,
+            "analyst": 85,
+            "match": true,
+            "diff": 0
+          }
+        }
+      },
+      "facts_saved_to_iranti": 0,
+      "facts_loaded_from_iranti": 0
+    }
+  ],
+  "summary": {
+    "total_targets": 1,
+    "avg_consistency": 80.0,
+    "total_elapsed_seconds": 31.02,
+    "total_facts_saved_to_iranti": 0,
+    "total_facts_loaded_from_iranti": 0,
+    "iranti_used": true
+  }
+}

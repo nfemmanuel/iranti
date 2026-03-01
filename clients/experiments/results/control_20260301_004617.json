@@ -1,0 +1,84 @@
+{
+  "mode": "control",
+  "timestamp": "2026-03-01T00:46:13.419220",
+  "targets": [
+    {
+      "name": "Yann LeCun",
+      "entity": "researcher/yann_lecun",
+      "researcher_output": {
+        "name": "Yann LeCun",
+        "affiliation": "New York University (NYU) and Chief AI Scientist at Meta (formerly Facebook)",
+        "publication_count": 300,
+        "research_focus": "Deep Learning",
+        "notable_contribution": "Convolutional Neural Networks (CNNs)",
+        "confidence": 95
+      },
+      "analyst_output": {
+        "name": "Yann LeCun",
+        "affiliation": "New York University (NYU) and Chief AI Scientist at Meta (formerly Facebook)",
+        "publication_count": 300,
+        "research_focus": "Deep Learning",
+        "notable_contribution": "Convolutional Neural Networks (CNNs)",
+        "confidence": 95
+      },
+      "consistency": {
+        "score": 100,
+        "matching_fields": 5,
+        "total_fields": 5,
+        "details": {
+          "affiliation": {
+            "researcher": "new york university (nyu) and chief ai scientist at meta (formerly facebook)",
+            "analyst": "new york university (nyu) and chief ai scientist at meta (formerly facebook)",
+            "match": true,
+            "overlap_words": [
+              "(formerly",
+              "facebook)",
+              "university",
+              "scientist",
+              "(nyu)",
+              "chief"
+            ]
+          },
+          "research_focus": {
+            "researcher": "deep learning",
+            "analyst": "deep learning",
+            "match": true,
+            "overlap_words": [
+              "learning"
+            ]
+          },
+          "notable_contribution": {
+            "researcher": "convolutional neural networks (cnns)",
+            "analyst": "convolutional neural networks (cnns)",
+            "match": true,
+            "overlap_words": [
+              "convolutional",
+              "networks",
+              "neural",
+              "(cnns)"
+            ]
+          },
+          "publication_count": {
+            "researcher": 300,
+            "analyst": 300,
+            "match": true,
+            "diff": 0
+          },
+          "confidence": {
+            "researcher": 95,
+            "analyst": 95,
+            "match": true,
+            "diff": 0
+          }
+        }
+      },
+      "api_calls_this_target": 2
+    }
+  ],
+  "summary": {
+    "total_targets": 1,
+    "avg_consistency": 100.0,
+    "total_elapsed_seconds": 4.39,
+    "iranti_used": false
+  }
+}

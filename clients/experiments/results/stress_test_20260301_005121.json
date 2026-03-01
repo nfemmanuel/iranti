@@ -1,0 +1,871 @@
+{
+  "test_config": {
+    "iterations": 5,
+    "delay_seconds": 30,
+    "started_at": "2026-03-01T00:44:46.186078",
+    "model": "gpt-4o-mini"
+  },
+  "control_runs": [
+    {
+      "iteration": 1,
+      "timestamp": "2026-03-01T00:44:51.383422",
+      "summary": {
+        "total_targets": 1,
+        "avg_consistency": 100.0,
+        "total_elapsed_seconds": 5.19,
+        "iranti_used": false
+      },
+      "targets": [
+        {
+          "name": "Yann LeCun",
+          "entity": "researcher/yann_lecun",
+          "researcher_output": {
+            "name": "Yann LeCun",
+            "affiliation": "New York University (NYU) and Chief AI Scientist at Meta Platforms, Inc.",
+            "publication_count": 300,
+            "research_focus": "Deep Learning",
+            "notable_contribution": "Convolutional Neural Networks (CNNs)",
+            "confidence": 95
+          },
+          "analyst_output": {
+            "name": "Yann LeCun",
+            "affiliation": "New York University (NYU) and Chief AI Scientist at Meta Platforms, Inc.",
+            "publication_count": 300,
+            "research_focus": "Deep Learning",
+            "notable_contribution": "Convolutional Neural Networks (CNNs)",
+            "confidence": 95
+          },
+          "consistency": {
+            "score": 100,
+            "matching_fields": 5,
+            "total_fields": 5,
+            "details": {
+              "affiliation": {
+                "researcher": "new york university (nyu) and chief ai scientist at meta platforms, inc.",
+                "analyst": "new york university (nyu) and chief ai scientist at meta platforms, inc.",
+                "match": true,
+                "overlap_words": [
+                  "university",
+                  "platforms,",
+                  "scientist",
+                  "(nyu)",
+                  "chief"
+                ]
+              },
+              "research_focus": {
+                "researcher": "deep learning",
+                "analyst": "deep learning",
+                "match": true,
+                "overlap_words": [
+                  "learning"
+                ]
+              },
+              "notable_contribution": {
+                "researcher": "convolutional neural networks (cnns)",
+                "analyst": "convolutional neural networks (cnns)",
+                "match": true,
+                "overlap_words": [
+                  "convolutional",
+                  "networks",
+                  "neural",
+                  "(cnns)"
+                ]
+              },
+              "publication_count": {
+                "researcher": 300,
+                "analyst": 300,
+                "match": true,
+                "diff": 0
+              },
+              "confidence": {
+                "researcher": 95,
+                "analyst": 95,
+                "match": true,
+                "diff": 0
+              }
+            }
+          },
+          "api_calls_this_target": 2
+        }
+      ]
+    },
+    {
+      "iteration": 2,
+      "timestamp": "2026-03-01T00:46:17.813930",
+      "summary": {
+        "total_targets": 1,
+        "avg_consistency": 100.0,
+        "total_elapsed_seconds": 4.39,
+        "iranti_used": false
+      },
+      "targets": [
+        {
+          "name": "Yann LeCun",
+          "entity": "researcher/yann_lecun",
+          "researcher_output": {
+            "name": "Yann LeCun",
+            "affiliation": "New York University (NYU) and Chief AI Scientist at Meta (formerly Facebook)",
+            "publication_count": 300,
+            "research_focus": "Deep Learning",
+            "notable_contribution": "Convolutional Neural Networks (CNNs)",
+            "confidence": 95
+          },
+          "analyst_output": {
+            "name": "Yann LeCun",
+            "affiliation": "New York University (NYU) and Chief AI Scientist at Meta (formerly Facebook)",
+            "publication_count": 300,
+            "research_focus": "Deep Learning",
+            "notable_contribution": "Convolutional Neural Networks (CNNs)",
+            "confidence": 95
+          },
+          "consistency": {
+            "score": 100,
+            "matching_fields": 5,
+            "total_fields": 5,
+            "details": {
+              "affiliation": {
+                "researcher": "new york university (nyu) and chief ai scientist at meta (formerly facebook)",
+                "analyst": "new york university (nyu) and chief ai scientist at meta (formerly facebook)",
+                "match": true,
+                "overlap_words": [
+                  "(formerly",
+                  "facebook)",
+                  "university",
+                  "scientist",
+                  "(nyu)",
+                  "chief"
+                ]
+              },
+              "research_focus": {
+                "researcher": "deep learning",
+                "analyst": "deep learning",
+                "match": true,
+                "overlap_words": [
+                  "learning"
+                ]
+              },
+              "notable_contribution": {
+                "researcher": "convolutional neural networks (cnns)",
+                "analyst": "convolutional neural networks (cnns)",
+                "match": true,
+                "overlap_words": [
+                  "convolutional",
+                  "networks",
+                  "neural",
+                  "(cnns)"
+                ]
+              },
+              "publication_count": {
+                "researcher": 300,
+                "analyst": 300,
+                "match": true,
+                "diff": 0
+              },
+              "confidence": {
+                "researcher": 95,
+                "analyst": 95,
+                "match": true,
+                "diff": 0
+              }
+            }
+          },
+          "api_calls_this_target": 2
+        }
+      ]
+    },
+    {
+      "iteration": 3,
+      "timestamp": "2026-03-01T00:47:39.568832",
+      "summary": {
+        "total_targets": 1,
+        "avg_consistency": 100.0,
+        "total_elapsed_seconds": 3.47,
+        "iranti_used": false
+      },
+      "targets": [
+        {
+          "name": "Yann LeCun",
+          "entity": "researcher/yann_lecun",
+          "researcher_output": {
+            "name": "Yann LeCun",
+            "affiliation": "New York University (NYU)",
+            "publication_count": 300,
+            "research_focus": "Deep Learning",
+            "notable_contribution": "Convolutional Neural Networks (CNNs)",
+            "confidence": 95
+          },
+          "analyst_output": {
+            "name": "Yann LeCun",
+            "affiliation": "New York University (NYU)",
+            "publication_count": 300,
+            "research_focus": "Deep Learning",
+            "notable_contribution": "Convolutional Neural Networks (CNNs)",
+            "confidence": 95
+          },
+          "consistency": {
+            "score": 100,
+            "matching_fields": 5,
+            "total_fields": 5,
+            "details": {
+              "affiliation": {
+                "researcher": "new york university (nyu)",
+                "analyst": "new york university (nyu)",
+                "match": true,
+                "overlap_words": [
+                  "(nyu)",
+                  "university"
+                ]
+              },
+              "research_focus": {
+                "researcher": "deep learning",
+                "analyst": "deep learning",
+                "match": true,
+                "overlap_words": [
+                  "learning"
+                ]
+              },
+              "notable_contribution": {
+                "researcher": "convolutional neural networks (cnns)",
+                "analyst": "convolutional neural networks (cnns)",
+                "match": true,
+                "overlap_words": [
+                  "convolutional",
+                  "networks",
+                  "neural",
+                  "(cnns)"
+                ]
+              },
+              "publication_count": {
+                "researcher": 300,
+                "analyst": 300,
+                "match": true,
+                "diff": 0
+              },
+              "confidence": {
+                "researcher": 95,
+                "analyst": 95,
+                "match": true,
+                "diff": 0
+              }
+            }
+          },
+          "api_calls_this_target": 2
+        }
+      ]
+    },
+    {
+      "iteration": 4,
+      "timestamp": "2026-03-01T00:49:08.598501",
+      "summary": {
+        "total_targets": 1,
+        "avg_consistency": 100.0,
+        "total_elapsed_seconds": 3.61,
+        "iranti_used": false
+      },
+      "targets": [
+        {
+          "name": "Yann LeCun",
+          "entity": "researcher/yann_lecun",
+          "researcher_output": {
+            "name": "Yann LeCun",
+            "affiliation": "New York University",
+            "publication_count": 300,
+            "research_focus": "Deep Learning",
+            "notable_contribution": "Convolutional Neural Networks (CNNs)",
+            "confidence": 95
+          },
+          "analyst_output": {
+            "name": "Yann LeCun",
+            "affiliation": "New York University",
+            "publication_count": 300,
+            "research_focus": "Deep Learning",
+            "notable_contribution": "Convolutional Neural Networks (CNNs)",
+            "confidence": 95
+          },
+          "consistency": {
+            "score": 100,
+            "matching_fields": 5,
+            "total_fields": 5,
+            "details": {
+              "affiliation": {
+                "researcher": "new york university",
+                "analyst": "new york university",
+                "match": true,
+                "overlap_words": [
+                  "university"
+                ]
+              },
+              "research_focus": {
+                "researcher": "deep learning",
+                "analyst": "deep learning",
+                "match": true,
+                "overlap_words": [
+                  "learning"
+                ]
+              },
+              "notable_contribution": {
+                "researcher": "convolutional neural networks (cnns)",
+                "analyst": "convolutional neural networks (cnns)",
+                "match": true,
+                "overlap_words": [
+                  "convolutional",
+                  "networks",
+                  "neural",
+                  "(cnns)"
+                ]
+              },
+              "publication_count": {
+                "researcher": 300,
+                "analyst": 300,
+                "match": true,
+                "diff": 0
+              },
+              "confidence": {
+                "researcher": 95,
+                "analyst": 95,
+                "match": true,
+                "diff": 0
+              }
+            }
+          },
+          "api_calls_this_target": 2
+        }
+      ]
+    },
+    {
+      "iteration": 5,
+      "timestamp": "2026-03-01T00:50:26.949265",
+      "summary": {
+        "total_targets": 1,
+        "avg_consistency": 100.0,
+        "total_elapsed_seconds": 3.93,
+        "iranti_used": false
+      },
+      "targets": [
+        {
+          "name": "Yann LeCun",
+          "entity": "researcher/yann_lecun",
+          "researcher_output": {
+            "name": "Yann LeCun",
+            "affiliation": "New York University (NYU)",
+            "publication_count": 300,
+            "research_focus": "Deep Learning",
+            "notable_contribution": "Convolutional Neural Networks (CNNs)",
+            "confidence": 95
+          },
+          "analyst_output": {
+            "name": "Yann LeCun",
+            "affiliation": "New York University (NYU)",
+            "publication_count": 300,
+            "research_focus": "Deep Learning",
+            "notable_contribution": "Convolutional Neural Networks (CNNs)",
+            "confidence": 95
+          },
+          "consistency": {
+            "score": 100,
+            "matching_fields": 5,
+            "total_fields": 5,
+            "details": {
+              "affiliation": {
+                "researcher": "new york university (nyu)",
+                "analyst": "new york university (nyu)",
+                "match": true,
+                "overlap_words": [
+                  "(nyu)",
+                  "university"
+                ]
+              },
+              "research_focus": {
+                "researcher": "deep learning",
+                "analyst": "deep learning",
+                "match": true,
+                "overlap_words": [
+                  "learning"
+                ]
+              },
+              "notable_contribution": {
+                "researcher": "convolutional neural networks (cnns)",
+                "analyst": "convolutional neural networks (cnns)",
+                "match": true,
+                "overlap_words": [
+                  "convolutional",
+                  "networks",
+                  "neural",
+                  "(cnns)"
+                ]
+              },
+              "publication_count": {
+                "researcher": 300,
+                "analyst": 300,
+                "match": true,
+                "diff": 0
+              },
+              "confidence": {
+                "researcher": 95,
+                "analyst": 95,
+                "match": true,
+                "diff": 0
+              }
+            }
+          },
+          "api_calls_this_target": 2
+        }
+      ]
+    }
+  ],
+  "treatment_runs": [
+    {
+      "iteration": 1,
+      "timestamp": "2026-03-01T00:45:43.416831",
+      "summary": {
+        "total_targets": 1,
+        "avg_consistency": 100.0,
+        "total_elapsed_seconds": 22.0,
+        "total_facts_saved_to_iranti": 4,
+        "total_facts_loaded_from_iranti": 4,
+        "iranti_used": true
+      },
+      "targets": [
+        {
+          "name": "Yann LeCun",
+          "entity": "researcher/yann_lecun",
+          "researcher_output": {
+            "name": "Yann LeCun",
+            "affiliation": "New York University (NYU) and Chief AI Scientist at Facebook (Meta)",
+            "publication_count": "over 300",
+            "research_focus": "Deep Learning",
+            "notable_contribution": "Convolutional Neural Networks (CNNs)",
+            "confidence": 95,
+            "facts_saved": 4
+          },
+          "analyst_output": {
+            "name": "Yann LeCun",
+            "affiliation": "New York University (NYU) and Chief AI Scientist at Facebook (Meta)",
+            "publication_count": "over 300",
+            "research_focus": "Deep Learning",
+            "notable_contribution": "Convolutional Neural Networks (CNNs)",
+            "confidence": 95,
+            "facts_from_memory": 4,
+            "facts_added": 0
+          },
+          "consistency": {
+            "score": 100,
+            "matching_fields": 4,
+            "total_fields": 4,
+            "details": {
+              "affiliation": {
+                "researcher": "new york university (nyu) and chief ai scientist at facebook (meta)",
+                "analyst": "new york university (nyu) and chief ai scientist at facebook (meta)",
+                "match": true,
+                "overlap_words": [
+                  "facebook",
+                  "university",
+                  "scientist",
+                  "(nyu)",
+                  "chief",
+                  "(meta)"
+                ]
+              },
+              "research_focus": {
+                "researcher": "deep learning",
+                "analyst": "deep learning",
+                "match": true,
+                "overlap_words": [
+                  "learning"
+                ]
+              },
+              "notable_contribution": {
+                "researcher": "convolutional neural networks (cnns)",
+                "analyst": "convolutional neural networks (cnns)",
+                "match": true,
+                "overlap_words": [
+                  "convolutional",
+                  "networks",
+                  "neural",
+                  "(cnns)"
+                ]
+              },
+              "confidence": {
+                "researcher": 95,
+                "analyst": 95,
+                "match": true,
+                "diff": 0
+              }
+            }
+          },
+          "facts_saved_to_iranti": 4,
+          "facts_loaded_from_iranti": 4,
+          "kb_facts_stored": 4
+        }
+      ]
+    },
+    {
+      "iteration": 2,
+      "timestamp": "2026-03-01T00:47:06.092199",
+      "summary": {
+        "total_targets": 1,
+        "avg_consistency": 100.0,
+        "total_elapsed_seconds": 18.27,
+        "total_facts_saved_to_iranti": 4,
+        "total_facts_loaded_from_iranti": 0,
+        "iranti_used": true
+      },
+      "targets": [
+        {
+          "name": "Yann LeCun",
+          "entity": "researcher/yann_lecun",
+          "researcher_output": {
+            "name": "Yann LeCun",
+            "affiliation": "New York University (NYU) and Chief AI Scientist at Facebook (Meta)",
+            "publication_count": "approximately 300",
+            "research_focus": "Deep Learning",
+            "notable_contribution": "Convolutional Neural Networks (CNNs)",
+            "confidence": 95,
+            "facts_saved": 4
+          },
+          "analyst_output": {
+            "name": "Yann LeCun",
+            "affiliation": "New York University (NYU) and Chief AI Scientist at Facebook (Meta)",
+            "publication_count": "approximately 300",
+            "research_focus": "Deep Learning",
+            "notable_contribution": "Convolutional Neural Networks (CNNs)",
+            "confidence": 95,
+            "facts_from_memory": 0,
+            "facts_added": 0
+          },
+          "consistency": {
+            "score": 100,
+            "matching_fields": 4,
+            "total_fields": 4,
+            "details": {
+              "affiliation": {
+                "researcher": "new york university (nyu) and chief ai scientist at facebook (meta)",
+                "analyst": "new york university (nyu) and chief ai scientist at facebook (meta)",
+                "match": true,
+                "overlap_words": [
+                  "facebook",
+                  "university",
+                  "scientist",
+                  "(nyu)",
+                  "chief",
+                  "(meta)"
+                ]
+              },
+              "research_focus": {
+                "researcher": "deep learning",
+                "analyst": "deep learning",
+                "match": true,
+                "overlap_words": [
+                  "learning"
+                ]
+              },
+              "notable_contribution": {
+                "researcher": "convolutional neural networks (cnns)",
+                "analyst": "convolutional neural networks (cnns)",
+                "match": true,
+                "overlap_words": [
+                  "convolutional",
+                  "networks",
+                  "neural",
+                  "(cnns)"
+                ]
+              },
+              "confidence": {
+                "researcher": 95,
+                "analyst": 95,
+                "match": true,
+                "diff": 0
+              }
+            }
+          },
+          "facts_saved_to_iranti": 4,
+          "facts_loaded_from_iranti": 0,
+          "kb_facts_stored": 4
+        }
+      ]
+    },
+    {
+      "iteration": 3,
+      "timestamp": "2026-03-01T00:48:34.982356",
+      "summary": {
+        "total_targets": 1,
+        "avg_consistency": 100.0,
+        "total_elapsed_seconds": 25.41,
+        "total_facts_saved_to_iranti": 4,
+        "total_facts_loaded_from_iranti": 0,
+        "iranti_used": true
+      },
+      "targets": [
+        {
+          "name": "Yann LeCun",
+          "entity": "researcher/yann_lecun",
+          "researcher_output": {
+            "name": "Yann LeCun",
+            "affiliation": "New York University (NYU) and Chief AI Scientist at Facebook (Meta)",
+            "publication_count": "Over 200 publications",
+            "research_focus": "Deep Learning",
+            "notable_contribution": "Convolutional Neural Networks (CNNs)",
+            "confidence": 95,
+            "facts_saved": 4
+          },
+          "analyst_output": {
+            "name": "Yann LeCun",
+            "affiliation": "New York University and Chief AI Scientist at Facebook (Meta)",
+            "publication_count": "Approximately 300 publications",
+            "research_focus": "Deep Learning",
+            "notable_contribution": "Convolutional Neural Networks (CNNs)",
+            "confidence": 90,
+            "facts_from_memory": 0,
+            "facts_added": 1
+          },
+          "consistency": {
+            "score": 100,
+            "matching_fields": 4,
+            "total_fields": 4,
+            "details": {
+              "affiliation": {
+                "researcher": "new york university (nyu) and chief ai scientist at facebook (meta)",
+                "analyst": "new york university and chief ai scientist at facebook (meta)",
+                "match": true,
+                "overlap_words": [
+                  "facebook",
+                  "university",
+                  "scientist",
+                  "chief",
+                  "(meta)"
+                ]
+              },
+              "research_focus": {
+                "researcher": "deep learning",
+                "analyst": "deep learning",
+                "match": true,
+                "overlap_words": [
+                  "learning"
+                ]
+              },
+              "notable_contribution": {
+                "researcher": "convolutional neural networks (cnns)",
+                "analyst": "convolutional neural networks (cnns)",
+                "match": true,
+                "overlap_words": [
+                  "convolutional",
+                  "networks",
+                  "neural",
+                  "(cnns)"
+                ]
+              },
+              "confidence": {
+                "researcher": 95,
+                "analyst": 90,
+                "match": true,
+                "diff": 5
+              }
+            }
+          },
+          "facts_saved_to_iranti": 4,
+          "facts_loaded_from_iranti": 0,
+          "kb_facts_stored": 4
+        }
+      ]
+    },
+    {
+      "iteration": 4,
+      "timestamp": "2026-03-01T00:49:53.019998",
+      "summary": {
+        "total_targets": 1,
+        "avg_consistency": 100.0,
+        "total_elapsed_seconds": 14.4,
+        "total_facts_saved_to_iranti": 4,
+        "total_facts_loaded_from_iranti": 4,
+        "iranti_used": true
+      },
+      "targets": [
+        {
+          "name": "Yann LeCun",
+          "entity": "researcher/yann_lecun",
+          "researcher_output": {
+            "name": "Yann LeCun",
+            "affiliation": "New York University (NYU) and Chief AI Scientist at Facebook (Meta)",
+            "publication_count": "approximately 300",
+            "research_focus": "Deep Learning",
+            "notable_contribution": "Convolutional Neural Networks (CNNs)",
+            "confidence": 90,
+            "facts_saved": 4
+          },
+          "analyst_output": {
+            "name": "Yann LeCun",
+            "affiliation": "New York University (NYU) and Chief AI Scientist at Facebook (Meta)",
+            "publication_count": "approximately 300",
+            "research_focus": "Deep Learning",
+            "notable_contribution": "Convolutional Neural Networks (CNNs)",
+            "confidence": 90,
+            "facts_from_memory": 4,
+            "facts_added": 0
+          },
+          "consistency": {
+            "score": 100,
+            "matching_fields": 4,
+            "total_fields": 4,
+            "details": {
+              "affiliation": {
+                "researcher": "new york university (nyu) and chief ai scientist at facebook (meta)",
+                "analyst": "new york university (nyu) and chief ai scientist at facebook (meta)",
+                "match": true,
+                "overlap_words": [
+                  "facebook",
+                  "university",
+                  "scientist",
+                  "(nyu)",
+                  "chief",
+                  "(meta)"
+                ]
+              },
+              "research_focus": {
+                "researcher": "deep learning",
+                "analyst": "deep learning",
+                "match": true,
+                "overlap_words": [
+                  "learning"
+                ]
+              },
+              "notable_contribution": {
+                "researcher": "convolutional neural networks (cnns)",
+                "analyst": "convolutional neural networks (cnns)",
+                "match": true,
+                "overlap_words": [
+                  "convolutional",
+                  "networks",
+                  "neural",
+                  "(cnns)"
+                ]
+              },
+              "confidence": {
+                "researcher": 90,
+                "analyst": 90,
+                "match": true,
+                "diff": 0
+              }
+            }
+          },
+          "facts_saved_to_iranti": 4,
+          "facts_loaded_from_iranti": 4,
+          "kb_facts_stored": 4
+        }
+      ]
+    },
+    {
+      "iteration": 5,
+      "timestamp": "2026-03-01T00:51:21.952891",
+      "summary": {
+        "total_targets": 1,
+        "avg_consistency": 100.0,
+        "total_elapsed_seconds": 25.0,
+        "total_facts_saved_to_iranti": 3,
+        "total_facts_loaded_from_iranti": 4,
+        "iranti_used": true
+      },
+      "targets": [
+        {
+          "name": "Yann LeCun",
+          "entity": "researcher/yann_lecun",
+          "researcher_output": {
+            "name": "Yann LeCun",
+            "affiliation": "New York University (NYU) and Chief AI Scientist at Facebook (Meta)",
+            "publication_count": "approximately 200",
+            "research_focus": "deep learning",
+            "notable_contribution": "Convolutional Neural Networks (CNNs)",
+            "confidence": 90,
+            "facts_saved": 3
+          },
+          "analyst_output": {
+            "name": "Yann LeCun",
+            "affiliation": "New York University (NYU) and Chief AI Scientist at Facebook (Meta)",
+            "publication_count": "approximately 300",
+            "research_focus": "deep learning",
+            "notable_contribution": "Convolutional Neural Networks (CNNs)",
+            "confidence": 90,
+            "facts_from_memory": 4,
+            "facts_added": 1
+          },
+          "consistency": {
+            "score": 100,
+            "matching_fields": 4,
+            "total_fields": 4,
+            "details": {
+              "affiliation": {
+                "researcher": "new york university (nyu) and chief ai scientist at facebook (meta)",
+                "analyst": "new york university (nyu) and chief ai scientist at facebook (meta)",
+                "match": true,
+                "overlap_words": [
+                  "facebook",
+                  "university",
+                  "scientist",
+                  "(nyu)",
+                  "chief",
+                  "(meta)"
+                ]
+              },
+              "research_focus": {
+                "researcher": "deep learning",
+                "analyst": "deep learning",
+                "match": true,
+                "overlap_words": [
+                  "learning"
+                ]
+              },
+              "notable_contribution": {
+                "researcher": "convolutional neural networks (cnns)",
+                "analyst": "convolutional neural networks (cnns)",
+                "match": true,
+                "overlap_words": [
+                  "convolutional",
+                  "networks",
+                  "neural",
+                  "(cnns)"
+                ]
+              },
+              "confidence": {
+                "researcher": 90,
+                "analyst": 90,
+                "match": true,
+                "diff": 0
+              }
+            }
+          },
+          "facts_saved_to_iranti": 3,
+          "facts_loaded_from_iranti": 4,
+          "kb_facts_stored": 4
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "completed_at": "2026-03-01T00:51:21.953913",
+    "total_iterations": 5,
+    "successful_control_runs": 5,
+    "successful_treatment_runs": 5,
+    "control": {
+      "avg_consistency": 100.0,
+      "consistency_stdev": 0.0,
+      "min_consistency": 100.0,
+      "max_consistency": 100.0,
+      "avg_time_seconds": 4.12,
+      "time_stdev": 0.7
+    },
+    "treatment": {
+      "avg_consistency": 100.0,
+      "consistency_stdev": 0.0,
+      "min_consistency": 100.0,
+      "max_consistency": 100.0,
+      "avg_time_seconds": 21.02,
+      "time_stdev": 4.68,
+      "avg_facts_saved": 3.8,
+      "avg_facts_loaded": 2.4
+    },
+    "comparison": {
+      "consistency_improvement": 0.0,
+      "consistency_improvement_pct": 0.0,
+      "time_difference": 16.9
+    }
+  }
+}

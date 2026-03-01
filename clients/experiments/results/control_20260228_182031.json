@@ -1,0 +1,21 @@
+{
+  "mode": "control",
+  "timestamp": "2026-02-28T18:20:30.549382",
+  "targets": [
+    {
+      "name": "Yann LeCun",
+      "entity": "researcher/yann_lecun",
+      "researcher_output": null,
+      "analyst_output": null,
+      "consistency": null,
+      "api_calls_this_target": 0,
+      "error": "litellm.AuthenticationError: AuthenticationError: OpenAIException - Error code: 401 - {'error': 'Unauthorized'}"
+    }
+  ],
+  "summary": {
+    "total_targets": 1,
+    "avg_consistency": 0,
+    "total_elapsed_seconds": 0.93,
+    "iranti_used": false
+  }
+}

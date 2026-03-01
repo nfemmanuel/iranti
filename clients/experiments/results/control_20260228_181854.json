@@ -1,0 +1,21 @@
+{
+  "mode": "control",
+  "timestamp": "2026-02-28T18:18:53.885570",
+  "targets": [
+    {
+      "name": "Yann LeCun",
+      "entity": "researcher/yann_lecun",
+      "researcher_output": null,
+      "analyst_output": null,
+      "consistency": null,
+      "api_calls_this_target": 0,
+      "error": "litellm.NotFoundError: NotFoundError: OpenAIException - <!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<title>Error</title>\n</head>\n<body>\n<pre>Cannot POST /chat/completions</pre>\n</body>\n</html>"
+    }
+  ],
+  "summary": {
+    "total_targets": 1,
+    "avg_consistency": 0,
+    "total_elapsed_seconds": 0.93,
+    "iranti_used": false
+  }
+}

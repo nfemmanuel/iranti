@@ -21,6 +21,8 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent.parent.parent / '.env')
 
+os.environ['CREWAI_TRACING_ENABLED'] = 'true'
+
 sys.path.insert(0, str(Path(__file__).parent.parent / 'shared'))
 from agents import (
     RESEARCHER_ROLE, RESEARCHER_GOAL, RESEARCHER_BACKSTORY,
@@ -50,8 +52,7 @@ class MetricsTracker:
 
 def build_crew(target: dict, tracker: MetricsTracker) -> tuple:
     llm = LLM(
-        model="gemini/gemini-2.0-flash-lite",
-        api_key=os.getenv("GEMINI_API_KEY"),
+        model="gpt-4o-mini",
         temperature=0.3,
     )
 
@@ -163,9 +164,18 @@ def run_control():
             # Parse JSON outputs
             def parse_output(raw: str) -> dict:
                 try:
+                    # Try direct parse first
                     clean = raw.replace('```json', '').replace('```', '').strip()
                     return json.loads(clean)
                 except:
+                    # Extract JSON block from prose response
+                    import re
+                    match = re.search(r'\{[^{}]+\}', raw, re.DOTALL)
+                    if match:
+                        try:
+                            return json.loads(match.group())
+                        except:
+                            pass
                     return {"raw": raw, "parse_error": True}
 
             researcher_data = parse_output(researcher_raw)

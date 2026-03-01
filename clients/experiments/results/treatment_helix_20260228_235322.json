@@ -1,0 +1,61 @@
+{
+  "mode": "treatment_helix",
+  "timestamp": "2026-02-28T23:53:22.926825",
+  "entity": "project/helix_protocol",
+  "researcher_output": {
+    "facts_saved": 5,
+    "lead": "Dr. Mara Osei-Bonsu",
+    "budget": "$7.8 million",
+    "deadline": "March 3, 2027",
+    "status": "Phase 3: quantum relay integration",
+    "blocker": "Vendor lock-in with Synthos Labs contract clause 14B"
+  },
+  "analyst_output": {
+    "facts_from_memory": 5,
+    "lead": "Dr. Mara Osei-Bonsu",
+    "budget": "$7.8 million",
+    "deadline": "March 3, 2027",
+    "status": "Phase 3: quantum relay integration",
+    "blocker": "Vendor lock-in with Synthos Labs contract clause 14B"
+  },
+  "expected_facts": {
+    "lead": "Dr. Mara Osei-Bonsu",
+    "budget": "$7.8 million",
+    "deadline": "March 3, 2027",
+    "status": "Phase 3: quantum relay integration",
+    "blocker": "Vendor lock-in with Synthos Labs contract clause 14B"
+  },
+  "facts_recovered": 5,
+  "total_facts": 5,
+  "accuracy_pct": 100.0,
+  "facts_saved_to_iranti": 5,
+  "facts_loaded_from_iranti": 5,
+  "kb_snapshot": [
+    {
+      "key": "lead",
+      "summary": "Project lead name for Project Helix Protocol",
+      "confidence": 90
+    },
+    {
+      "key": "budget",
+      "summary": "Budget amount for Project Helix Protocol",
+      "confidence": 90
+    },
+    {
+      "key": "deadline",
+      "summary": "Deadline date for Project Helix Protocol",
+      "confidence": 90
+    },
+    {
+      "key": "status",
+      "summary": "Current status of Project Helix Protocol",
+      "confidence": 90
+    },
+    {
+      "key": "blocker",
+      "summary": "Primary blocker for Project Helix Protocol",
+      "confidence": 90
+    }
+  ],
+  "iranti_used": true
+}

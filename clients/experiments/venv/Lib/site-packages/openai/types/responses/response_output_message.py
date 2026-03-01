@@ -1,6 +1,6 @@
 # File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
 
-from typing import List, Union
+from typing import List, Union, Optional
 from typing_extensions import Literal, Annotated, TypeAlias
 
 from ..._utils import PropertyInfo
@@ -14,6 +14,8 @@ Content: TypeAlias = Annotated[Union[ResponseOutputText, ResponseOutputRefusal],
 
 
 class ResponseOutputMessage(BaseModel):
+    """An output message from the model."""
+
     id: str
     """The unique ID of the output message."""
 
@@ -32,3 +34,12 @@ class ResponseOutputMessage(BaseModel):
 
     type: Literal["message"]
     """The type of the output message. Always `message`."""
+
+    phase: Optional[Literal["commentary", "final_answer"]] = None
+    """The phase of an assistant message.
+
+    Use `commentary` for an intermediate assistant message and `final_answer` for
+    the final assistant message. For follow-up requests with models like
+    `gpt-5.3-codex` and later, preserve and resend phase on all assistant messages.
+    Omitting it can degrade performance. Not used for user messages.
+    """

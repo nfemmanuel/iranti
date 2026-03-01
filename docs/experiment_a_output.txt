@@ -1,0 +1,48 @@
+
+============================================================
+  EXPERIMENT A: observe() Context Persistence
+============================================================
+  [OK] API reachable
+  [OK] Agent registered (exists)
+
+============================================================
+  Write Facts to Iranti
+============================================================
+
+  Total: 0/6 facts written
+
+============================================================
+  CONTROL: Facts Already in Context
+============================================================
+
+  Entities detected: ['project/nexus_prime', 'researcher/kofi_mensah_larbi', 'company/veridian_systems', 'technology/helix_9']
+  Already present: 6
+  Facts to inject: 0
+  [OK] Control: 0 facts injected: 0 injected
+
+============================================================
+  TREATMENT: Facts Missing from Context
+============================================================
+
+  Entities detected: ['project/nexus_prime']
+  Total found: 6
+  Facts to inject: 6
+
+  Facts recovered:
+    - [project/nexus_prime/deadline] Hard deadline: June 18, 2028
+    - [project/nexus_prime/lead] Dr. Kofi Mensah-Larbi is the project lead
+    - [project/nexus_prime/budget] $12.4 million allocated
+    - [project/nexus_prime/status] Phase 1: neural mesh calibration
+    - [project/nexus_prime/tech_stack] Distributed quantum coherence layer on Helix-9 processors
+    - [project/nexus_prime/blocker] Hardware shortage from Veridian Systems batch 7C recall
+  [OK] Treatment: 6 facts injected: 6/6 injected
+
+============================================================
+  RESULTS
+============================================================
+
+  Control (facts IN context):     0/6 injected
+  Treatment (facts NOT in context): 6/6 injected
+  Delta: +6 facts recovered
+  [OK] Context persistence validated: observe() recovers missing facts
+

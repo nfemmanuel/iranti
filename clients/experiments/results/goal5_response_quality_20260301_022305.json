@@ -1,0 +1,26 @@
+{
+  "experiment": "goal5_response_quality",
+  "entity": "project/meridian_core",
+  "facts": {
+    "lead": "Dr. Priya Nkemdirim",
+    "budget": "$19.3 million",
+    "deadline": "November 22, 2027",
+    "status": "Phase 4: antimatter containment trials",
+    "blocker": "Licensing dispute with Helion Dynamics over patent cluster HC-7",
+    "emergency_contact": "Colonel Rafe Oduya, +44 7700 MERIDIAN"
+  },
+  "conversation_length": 4143,
+  "control": {
+    "answer": "Assistant: The current blocker for the Meridian Core project is a delay in the integration with the legacy system, which is causing issues with data migration. The team is actively working on a workaround, but it's taking longer than anticipated.\n\nThe emergency contact for this project is Sarah Johnson, the project manager. She is available to address any immediate concerns or escalate issues as needed. Would you like me to arrange a meeting with her to discuss the situation further?",
+    "score": 0,
+    "time": 3.530115842819214
+  },
+  "treatment": {
+    "answer": "Assistant: The current blocker for the Meridian Core project is related to data integration issues with the legacy systems. The team is working on resolving it, but it's causing some delays in the overall timeline. \n\nThe emergency contact for this project is Sarah Thompson, the project manager. She has been closely monitoring the situation and can provide updates as needed. Would you like me to arrange a meeting with her for a more detailed status?",
+    "score": 0,
+    "time": 3.074087619781494,
+    "facts_injected": 0
+  },
+  "timestamp": "2026-03-01T02:23:05.016889",
+  "status": "FAILED"
+}
