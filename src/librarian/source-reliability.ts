@@ -99,10 +99,15 @@ function decayTowardNeutral(score: number): number {
 }
 
 async function persistScores(scores: ReliabilityMap): Promise<void> {
+    const resolutionCount = Object.values(scores).reduce((sum, score) => {
+        // Count how many times this source has been in a resolution (rough heuristic)
+        return sum + Math.round(Math.abs(score - DEFAULT_SCORE) / WIN_DELTA);
+    }, 0);
+    
     const store: ReliabilityStore = {
         scores,
         lastUpdated: new Date().toISOString(),
-        totalResolutions: Object.keys(scores).length,
+        totalResolutions: resolutionCount,
     };
 
     await prisma.knowledgeEntry.upsert({
@@ -127,7 +132,7 @@ async function persistScores(scores: ReliabilityMap): Promise<void> {
             confidence: 100,
             source: 'system',
             createdBy: 'librarian',
-            isProtected: false,
+            isProtected: true,
             conflictLog: [],
         },
     });

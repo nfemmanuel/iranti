@@ -5,7 +5,7 @@ export function agentRoutes(iranti: Iranti): Router {
     const router = Router();
 
     // POST /agents/register
-    router.post('/register', async (req: Request, res: Response) => {
+    router.post('/agents/register', async (req: Request, res: Response) => {
         try {
             await iranti.registerAgent(req.body);
             res.json({ success: true });
@@ -15,7 +15,7 @@ export function agentRoutes(iranti: Iranti): Router {
     });
 
     // GET /agents
-    router.get('/', async (_req: Request, res: Response) => {
+    router.get('/agents', async (_req: Request, res: Response) => {
         try {
             const result = await iranti.listAgents();
             res.json(result);
@@ -25,7 +25,7 @@ export function agentRoutes(iranti: Iranti): Router {
     });
 
     // GET /agents/:agentId
-    router.get('/:agentId', async (req: Request, res: Response) => {
+    router.get('/agents/:agentId', async (req: Request, res: Response) => {
         try {
             const agentId = Array.isArray(req.params.agentId) ? req.params.agentId[0] : req.params.agentId;
             const result = await iranti.getAgent(agentId);
@@ -40,7 +40,7 @@ export function agentRoutes(iranti: Iranti): Router {
     });
 
     // POST /agents/:agentId/team
-    router.post('/:agentId/team', async (req: Request, res: Response) => {
+    router.post('/agents/:agentId/team', async (req: Request, res: Response) => {
         try {
             const agentId = Array.isArray(req.params.agentId) ? req.params.agentId[0] : req.params.agentId;
             const { teamId } = req.body;

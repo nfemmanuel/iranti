@@ -32,21 +32,17 @@ const iranti = new Iranti({
 });
 
 // Register API routes with auth (skip auth for health and chat endpoints)
-app.use('/write', authenticate);
-app.use('/ingest', authenticate);
-app.use('/query', authenticate);
-app.use('/relate', authenticate);
-app.use('/related', authenticate);
-app.use('/handshake', authenticate);
-app.use('/reconvene', authenticate);
-app.use('/whoknows', authenticate);
-app.use('/agents', authenticate);
-app.use('/maintenance', authenticate);
-app.use('/observe', authenticate);
-
-app.use(knowledgeRoutes(iranti));
-app.use(memoryRoutes(iranti));
-app.use(agentRoutes(iranti));
+app.use('/agents', authenticate, agentRoutes(iranti));
+app.use('/write', authenticate, knowledgeRoutes(iranti));
+app.use('/ingest', authenticate, knowledgeRoutes(iranti));
+app.use('/query', authenticate, knowledgeRoutes(iranti));
+app.use('/relate', authenticate, knowledgeRoutes(iranti));
+app.use('/related', authenticate, knowledgeRoutes(iranti));
+app.use('/handshake', authenticate, memoryRoutes(iranti));
+app.use('/reconvene', authenticate, memoryRoutes(iranti));
+app.use('/whoknows', authenticate, memoryRoutes(iranti));
+app.use('/maintenance', authenticate, memoryRoutes(iranti));
+app.use('/observe', authenticate, memoryRoutes(iranti));
 
 app.post(['/v1/chat/completions', '/chat/completions'], async (req, res) => {
     const providedKey = req.headers['authorization']?.replace('Bearer ', '');

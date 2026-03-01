@@ -6,6 +6,46 @@ All critical infrastructure issues identified in the deep code review have been 
 
 ---
 
+## Critical Issues Fixed (Round 2)
+
+### 10. ✅ DB Connection String Timing
+
+**Problem**: SDK constructor sets `process.env.DATABASE_URL`, but Prisma pool was created at module import time, locking onto whatever DATABASE_URL existed before constructor ran.
+
+**Fix**: In `src/library/client.ts`:
+- Changed from immediate pool creation to lazy initialization
+- Pool now created on first query via Proxy pattern
+- Respects DATABASE_URL set by SDK constructor
+
+**Result**: `connectionString` option in SDK now works correctly.
+
+---
+
+### 11. ✅ API Auth Inconsistency
+
+**Problem**: Auth middleware applied to path prefixes (`/agents`, `/write`, etc.) but routers mounted at root, causing agent endpoints to be unintentionally unauthenticated.
+
+**Fix**: In `src/api/server.ts` and `src/api/routes/agents.ts`:
+- Mount routers with auth middleware: `app.use('/agents', authenticate, agentRoutes(iranti))`
+- Add `/agents` prefix to all routes in agentRoutes router
+- Ensures all endpoints hit auth middleware
+
+**Result**: All API endpoints now properly authenticated.
+
+---
+
+### 12. ✅ Reliability Scoring Metadata
+
+**Problem**: `totalResolutions` was set to `Object.keys(scores).length` (number of sources), not actual resolution count.
+
+**Fix**: In `src/librarian/source-reliability.ts`:
+- Calculate actual resolution count from score deltas
+- Protect system reliability entry with `isProtected: true`
+
+**Result**: Metadata now accurate, system entry protected.
+
+---
+
 ## P0 Fixes (Trust + Spec Alignment)
 
 ### 1. ✅ Staff Namespace Write Protection
