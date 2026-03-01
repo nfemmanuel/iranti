@@ -44,6 +44,20 @@ All five goals validated with fictional entities and invented facts that GPT-4o-
 | **4. Per-Agent Persistence** | Cross-process | 5/5 facts | ✓ PASSED |
 | **5. Response Quality** | Memory injection | 0/2 → 2/2 | ✓ PASSED |
 
+### Framework Compatibility
+
+Validated with multiple agent frameworks:
+
+| Framework | Entity | Facts | Score | Time |
+|---|---|---|---|---|
+| **Raw OpenAI API** | project/void_runner | 5 | 5/5 ✓ | 14.0s |
+| **LangChain** | project/stellar_drift | 5 | 5/5 ✓ | 2.9s |
+| **CrewAI** | project/nexus_prime | 6 | 6/6 ✓ | 60s |
+
+**Total: 16/16 facts transferred (100%)**
+
+Full validation report: [`docs/validation_results.md`](docs/validation_results.md) | Multi-framework details: [`docs/MULTI_FRAMEWORK_VALIDATION.md`](docs/MULTI_FRAMEWORK_VALIDATION.md)
+
 ### Goal 1: Easy Integration
 
 - **Entity**: `project/quantum_bridge`
@@ -81,8 +95,6 @@ All five goals validated with fictional entities and invented facts that GPT-4o-
 - **Conclusion**: Memory injection eliminates hallucination, improves response accuracy
 
 Full validation report: [`docs/validation_results.md`](docs/validation_results.md)
-
----
 
 ## Quickstart
 
@@ -397,7 +409,7 @@ docs/
 
 - **Issues**: [GitHub Issues](https://github.com/nfemmanuel/iranti/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/nfemmanuel/iranti/discussions)
-- **Email**: [your-email@example.com]
+- **Email**: oluwaniifemi.emmanuel@uni.minerva.edu
 
 ---
 

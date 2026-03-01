@@ -1,0 +1,12 @@
+{
+  "experiment": "AutoGen Integration",
+  "entity": "project/crimson_horizon",
+  "framework": "Microsoft AutoGen",
+  "facts_total": 5,
+  "facts_saved": 5,
+  "facts_retrieved": 5,
+  "score": "5/5",
+  "elapsed_seconds": 0.090249,
+  "status": "PASSED",
+  "timestamp": "2026-03-01T03:33:28.617460"
+}

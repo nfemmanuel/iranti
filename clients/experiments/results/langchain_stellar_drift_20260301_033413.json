@@ -1,0 +1,19 @@
+{
+  "experiment": "LangChain Integration",
+  "entity": "project/stellar_drift",
+  "framework": "LangChain + OpenAI",
+  "facts_total": 5,
+  "facts_saved": 5,
+  "facts_retrieved": 5,
+  "score": "5/5",
+  "details": {
+    "director": true,
+    "funding": true,
+    "launch": true,
+    "phase": true,
+    "risk": true
+  },
+  "elapsed_seconds": 2.906526,
+  "status": "PASSED",
+  "timestamp": "2026-03-01T03:34:13.461646"
+}

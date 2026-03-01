@@ -1,0 +1,19 @@
+{
+  "experiment": "Raw OpenAI API",
+  "entity": "project/void_runner",
+  "framework": "OpenAI API + Function Calling",
+  "facts_total": 5,
+  "facts_saved": 5,
+  "facts_retrieved": 5,
+  "score": "5/5",
+  "details": {
+    "architect": true,
+    "investment": true,
+    "completion": true,
+    "milestone": true,
+    "challenge": true
+  },
+  "elapsed_seconds": 13.98098,
+  "status": "PASSED",
+  "timestamp": "2026-03-01T03:32:58.392098"
+}
