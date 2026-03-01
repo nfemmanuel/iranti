@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { prisma } from '../library/client';
+import { getDb } from '../library/client';
 import { archiveEntry } from '../library/queries';
 import { complete } from '../lib/llm';
 
@@ -19,6 +19,53 @@ interface ArchivistReport {
     duplicatesMerged: number;
     escalationsProcessed: number;
     errors: string[];
+}
+
+type AuthoritativeResolution = {
+    entityType: string;
+    entityId: string;
+    key: string;
+    value: any;
+    summary: string;
+    validUntil?: string | null;
+    notes?: string;
+};
+
+function extractAuthoritativeJson(fileText: string): AuthoritativeResolution {
+    const marker = '### AUTHORITATIVE_JSON';
+    const markerIndex = fileText.indexOf(marker);
+    if (markerIndex === -1) {
+        throw new Error("Missing '### AUTHORITATIVE_JSON' section.");
+    }
+
+    const afterMarker = fileText.slice(markerIndex + marker.length);
+    const fenceStart = afterMarker.indexOf('```json');
+    if (fenceStart === -1) {
+        throw new Error('Missing ```json block after AUTHORITATIVE_JSON.');
+    }
+
+    const afterFence = afterMarker.slice(fenceStart + '```json'.length);
+    const fenceEnd = afterFence.indexOf('```');
+    if (fenceEnd === -1) {
+        throw new Error('Unclosed ```json block in AUTHORITATIVE_JSON.');
+    }
+
+    const jsonText = afterFence.slice(0, fenceEnd).trim();
+
+    let payload: any;
+    try {
+        payload = JSON.parse(jsonText);
+    } catch {
+        throw new Error('Invalid JSON in AUTHORITATIVE_JSON.');
+    }
+
+    for (const field of ['entityType', 'entityId', 'key', 'value', 'summary']) {
+        if (payload[field] === undefined || payload[field] === null) {
+            throw new Error(`AUTHORITATIVE_JSON missing required field: ${field}`);
+        }
+    }
+
+    return payload as AuthoritativeResolution;
 }
 
 // ─── Main Cycle ──────────────────────────────────────────────────────────────
@@ -51,7 +98,7 @@ export async function runArchivist(): Promise<ArchivistReport> {
 // ─── Expired Entries ─────────────────────────────────────────────────────────
 
 async function archiveExpired(report: ArchivistReport): Promise<void> {
-    const expired = await prisma.knowledgeEntry.findMany({
+    const expired = await getDb().knowledgeEntry.findMany({
         where: {
             validUntil: { lt: new Date() },
             isProtected: false,
@@ -71,7 +118,7 @@ async function archiveExpired(report: ArchivistReport): Promise<void> {
 // ─── Low Confidence Entries ──────────────────────────────────────────────────
 
 async function archiveLowConfidence(report: ArchivistReport): Promise<void> {
-    const lowConfidence = await prisma.knowledgeEntry.findMany({
+    const lowConfidence = await getDb().knowledgeEntry.findMany({
         where: {
             confidence: { lt: LOW_CONFIDENCE_THRESHOLD },
             isProtected: false,
@@ -119,58 +166,50 @@ async function processEscalationFile(
     const filePath = path.join(ESCALATION_ACTIVE, sanitizedFilename);
     const content = await fs.readFile(filePath, 'utf-8');
 
-    // Only process RESOLVED files
     if (!content.includes('**Status:** RESOLVED')) {
         return;
     }
 
-    // Extract human resolution section
-    const humanResolutionMatch = content.split('## HUMAN RESOLUTION')[1];
-    if (!humanResolutionMatch) return;
-
-    // Strip HTML comments and whitespace
-    const humanResolution = humanResolutionMatch
-        .replace(/<!--[\s\S]*?-->/g, '')
-        .trim();
-
-    if (!humanResolution) return;
-
-    // Extract entity info from the file
-    const entityMatch = content.match(/\*\*Entity:\*\* (.+?) \/ (.+?) \/ (.+)/);
-    if (!entityMatch) return;
-
-    const [, entityType, entityId, key] = entityMatch;
-
-    // P0: Parse deterministic JSON format (no LLM)
-    let resolved: { value: unknown; summary: string };
+    let auth: AuthoritativeResolution;
     try {
-        const jsonMatch = humanResolution.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) {
-            report.errors.push(`Escalation ${filename}: No JSON found in HUMAN RESOLUTION section`);
-            return;
-        }
-        resolved = JSON.parse(jsonMatch[0]);
-        if (!resolved.value || !resolved.summary) {
-            report.errors.push(`Escalation ${filename}: JSON must have 'value' and 'summary' fields`);
-            return;
-        }
+        auth = extractAuthoritativeJson(content);
     } catch (err) {
-        report.errors.push(`Escalation ${filename}: Invalid JSON in HUMAN RESOLUTION: ${err}`);
+        report.errors.push(`Escalation ${filename}: ${err}`);
         return;
     }
 
-    // P0: Route through Librarian instead of direct upsert
     const { librarianWrite } = await import('../librarian/index');
-    await librarianWrite({
-        entityType: entityType.trim(),
-        entityId: entityId.trim(),
-        key: key.trim(),
-        valueRaw: resolved.value,
-        valueSummary: resolved.summary,
+    const result = await librarianWrite({
+        entityType: auth.entityType,
+        entityId: auth.entityId,
+        key: auth.key,
+        valueRaw: auth.value,
+        valueSummary: auth.summary,
         confidence: 100,
         source: 'HumanReview',
-        createdBy: 'archivist',
+        createdBy: 'Archivist',
+        validUntil: auth.validUntil ? new Date(auth.validUntil) : undefined,
+        conflictLog: [{
+            detectedAt: new Date().toISOString(),
+            incomingSource: 'HumanReview',
+            incomingConfidence: 100,
+            existingConfidence: 0,
+            resolution: 'human_resolved',
+            resolvedBy: 'archivist',
+            notes: `Applied from escalation file: ${filename}`,
+        }] as unknown as never,
     });
+
+    // LLM enrichment (non-authoritative)
+    try {
+        const enrichment = await generateEnrichment(content, auth);
+        if (enrichment) {
+            await appendEnrichmentToFile(filePath, enrichment);
+        }
+    } catch (err) {
+        // Enrichment failure doesn't block commit
+        report.errors.push(`Escalation ${filename}: enrichment failed: ${err}`);
+    }
 
     // Move file to resolved folder
     const resolvedPath = path.join(ESCALATION_RESOLVED, sanitizedFilename);
@@ -182,4 +221,43 @@ async function processEscalationFile(
     await fs.copyFile(resolvedPath, archivedPath);
 
     report.escalationsProcessed++;
+}
+
+// ─── LLM Enrichment (Non-Authoritative) ─────────────────────────────────────
+
+type Enrichment = {
+    explanation: string;
+    suggestedValidUntil?: string;
+    normalizationWarnings?: string[];
+};
+
+async function generateEnrichment(
+    fileContent: string,
+    auth: AuthoritativeResolution
+): Promise<Enrichment | null> {
+    const prompt = `You are analyzing a resolved conflict. The human provided this authoritative resolution:
+
+${JSON.stringify(auth, null, 2)}
+
+Provide enrichment (non-authoritative):
+1. Brief explanation of why this resolution makes sense
+2. Suggested validUntil (ISO 8601) if none provided and fact seems time-bound
+3. Any normalization warnings
+
+Respond with JSON: { "explanation": "...", "suggestedValidUntil": "..." or null, "normalizationWarnings": [...] }`;
+
+    const response = await complete(prompt, { temperature: 0.3 });
+    try {
+        return JSON.parse(response);
+    } catch {
+        return null;
+    }
+}
+
+async function appendEnrichmentToFile(
+    filePath: string,
+    enrichment: Enrichment
+): Promise<void> {
+    const enrichmentBlock = `\n\n### LLM_ENRICHMENT (non-authoritative)\n\`\`\`json\n${JSON.stringify(enrichment, null, 2)}\n\`\`\`\n`;
+    await fs.appendFile(filePath, enrichmentBlock);
 }

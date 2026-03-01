@@ -1,4 +1,4 @@
-import { LLMProvider, LLMMessage, LLMResponse } from '../llm';
+import { LLMProvider, LLMMessage, LLMResponse, CompleteOptions } from '../llm';
 
 interface GeminiResponse {
     candidates?: Array<{
@@ -21,9 +21,12 @@ class GeminiProvider implements LLMProvider {
         }
     }
 
-    async complete(messages: LLMMessage[], maxTokens: number = 512): Promise<LLMResponse> {
+    async complete(messages: LLMMessage[], options?: CompleteOptions): Promise<LLMResponse> {
+        const model = options?.model ?? this.model;
+        const maxTokens = options?.maxTokens ?? 512;
+        
         const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`,
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`,
             {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -48,7 +51,7 @@ class GeminiProvider implements LLMProvider {
 
         return {
             text: text.trim(),
-            model: this.model,
+            model: model,
             provider: 'gemini',
         };
     }

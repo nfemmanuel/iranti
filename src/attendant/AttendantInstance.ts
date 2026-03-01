@@ -1,9 +1,11 @@
 import { route } from '../lib/router';
 import { queryEntry, findEntriesByEntity } from '../library/queries';
 import { getRelatedDeep } from '../library/relationships';
-import { prisma } from '../library/client';
+import { getDb } from '../library/client';
 import { Prisma } from '../generated/prisma/client';
 import { EntryQuery, QueryResult } from '../types';
+import { timeStart, timeEnd } from '../lib/metrics';
+import { getConflictPolicy } from '../librarian/getPolicy';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -76,6 +78,7 @@ export class AttendantInstance {
     // ── Handshake ────────────────────────────────────────────────────────────
 
     async handshake(context: AgentContext): Promise<WorkingMemoryBrief> {
+        const t0 = timeStart();
         // Try to resume from persisted state first
         const persisted = await this.loadPersistedState();
 
@@ -99,13 +102,19 @@ export class AttendantInstance {
         };
 
         await this.persistState();
+        timeEnd('attendant.handshake_ms', t0);
         return this.brief;
     }
 
     // ── Reconvene ────────────────────────────────────────────────────────────
 
     async reconvene(context: AgentContext): Promise<WorkingMemoryBrief> {
-        if (!this.brief) return this.handshake(context);
+        const t0 = timeStart();
+        if (!this.brief) {
+            const result = await this.handshake(context);
+            timeEnd('attendant.reconvene_ms', t0);
+            return result;
+        }
 
         const newTaskType = await this.inferTask(context);
 
@@ -117,6 +126,7 @@ export class AttendantInstance {
                 contextCallCount: this.contextCallCount,
             };
             await this.persistState();
+            timeEnd('attendant.reconvene_ms', t0);
             return this.brief;
         }
 
@@ -131,6 +141,7 @@ export class AttendantInstance {
         };
 
         await this.persistState();
+        timeEnd('attendant.reconvene_ms', t0);
         return this.brief;
     }
 
@@ -183,6 +194,7 @@ export class AttendantInstance {
     // ── Context Window Observation ────────────────────────────────────────────
 
     async observe(input: ObserveInput): Promise<ObserveResult> {
+        const t0 = timeStart();
         const maxFacts = input.maxFacts ?? 5;
 
         // Step 1 — extract entity mentions from context
@@ -212,25 +224,40 @@ ${input.currentContext.substring(0, 3000)}`,
             }
         } catch {
             // extraction failed — return empty result gracefully
+            timeEnd('attendant.observe_ms', t0);
             return { facts: [], entitiesDetected: [], alreadyPresent: 0, totalFound: 0 };
         }
 
         if (entitiesDetected.length === 0) {
+            timeEnd('attendant.observe_ms', t0);
             return { facts: [], entitiesDetected: [], alreadyPresent: 0, totalFound: 0 };
         }
 
-        // Step 2 — query Library for facts about detected entities
+        // Step 2 — query Library for facts about detected entities (with key prioritization)
+        const policy = await getConflictPolicy();
+        const maxEntities = policy.maxEntitiesPerObserve ?? 5;
+        const maxKeysPerEntity = policy.maxKeysPerEntity ?? 5;
         const allFacts: FactInjection[] = [];
 
-        for (const entity of entitiesDetected.slice(0, 5)) { // cap at 5 entities
+        for (const entity of entitiesDetected.slice(0, maxEntities)) {
             const parts = entity.split('/');
             if (parts.length < 2) continue;
             const entityType = parts[0];
             const entityId = parts.slice(1).join('/');
 
             try {
-                const entries = await findEntriesByEntity(entityType, entityId);
-                for (const entry of entries) {
+                const allEntries = await findEntriesByEntity(entityType, entityId);
+                
+                // Priority keys first
+                const priorityKeys = policy.observeKeyPriority?.[entityType] ?? [];
+                const priorityEntries = allEntries.filter(e => priorityKeys.includes(e.key));
+                const remainingEntries = allEntries
+                    .filter(e => !priorityKeys.includes(e.key))
+                    .sort((a, b) => b.confidence - a.confidence);
+                
+                const selectedEntries = [...priorityEntries, ...remainingEntries].slice(0, maxKeysPerEntity);
+                
+                for (const entry of selectedEntries) {
                     allFacts.push({
                         entityKey: `${entityType}/${entityId}/${entry.key}`,
                         summary: entry.valueSummary,
@@ -267,6 +294,7 @@ ${input.currentContext.substring(0, 3000)}`,
             .sort((a, b) => b.confidence - a.confidence)
             .slice(0, maxFacts);
 
+        timeEnd('attendant.observe_ms', t0);
         return {
             facts: topFacts,
             entitiesDetected,
@@ -365,7 +393,7 @@ If nothing is relevant, return: none`,
     private async persistState(): Promise<void> {
         if (!this.brief) return;
 
-        await prisma.knowledgeEntry.upsert({
+        await getDb().knowledgeEntry.upsert({
             where: {
                 entityType_entityId_key: {
                     entityType: 'agent',
@@ -386,7 +414,7 @@ If nothing is relevant, return: none`,
                 valueSummary: `Attendant state for ${this.agentId}`,
                 confidence: 100,
                 source: 'attendant',
-                createdBy: 'attendant',
+                createdBy: 'Attendant',
                 isProtected: false,
                 conflictLog: [],
             },
@@ -394,7 +422,7 @@ If nothing is relevant, return: none`,
     }
 
     private async loadPersistedState(): Promise<WorkingMemoryBrief | null> {
-        const entry = await prisma.knowledgeEntry.findUnique({
+        const entry = await getDb().knowledgeEntry.findUnique({
             where: {
                 entityType_entityId_key: {
                     entityType: 'agent',

@@ -1,5 +1,12 @@
 import 'dotenv/config';
+import { initDb } from '../src/library/client';
 import { createEntry } from '../src/library/queries';
+
+// Initialize DB
+if (!process.env.DATABASE_URL) {
+    throw new Error('DATABASE_URL environment variable is required');
+}
+initDb(process.env.DATABASE_URL);
 
 // ─── Staff Operating Rules ───────────────────────────────────────────────────
 
@@ -25,7 +32,7 @@ const STAFF_ENTRIES = [
         valueSummary: 'Librarian manages all Library writes, detects and resolves conflicts, escalates when uncertain.',
         confidence: 100,
         source: 'seed',
-        createdBy: 'system',
+        createdBy: 'Seed',
         isProtected: true,
     },
     {
@@ -47,7 +54,7 @@ const STAFF_ENTRIES = [
         valueSummary: 'Attendant manages per-agent working memory via handshake, relevance filtering, and periodic reconvene.',
         confidence: 100,
         source: 'seed',
-        createdBy: 'system',
+        createdBy: 'Seed',
         isProtected: true,
     },
     {
@@ -69,7 +76,7 @@ const STAFF_ENTRIES = [
         valueSummary: 'Archivist runs periodic cleanup, archives challenged entries, and processes human-resolved escalations.',
         confidence: 100,
         source: 'seed',
-        createdBy: 'system',
+        createdBy: 'Seed',
         isProtected: true,
     },
     {
@@ -80,7 +87,7 @@ const STAFF_ENTRIES = [
         valueSummary: 'Current Library schema version.',
         confidence: 100,
         source: 'seed',
-        createdBy: 'system',
+        createdBy: 'Seed',
         isProtected: true,
     },
     {
@@ -94,7 +101,7 @@ const STAFF_ENTRIES = [
         valueSummary: 'Record of when and how this Library was initialized.',
         confidence: 100,
         source: 'seed',
-        createdBy: 'system',
+        createdBy: 'Seed',
         isProtected: true,
     },
 ];

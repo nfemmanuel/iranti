@@ -7,17 +7,30 @@ import { knowledgeRoutes } from './routes/knowledge';
 import { memoryRoutes } from './routes/memory';
 import { agentRoutes } from './routes/agents';
 import { authenticate } from './middleware/auth';
+import { snapshot, reset } from '../lib/metrics';
+import { resetLLMBudget } from '../lib/llm';
+import { snapshot, reset } from '../lib/metrics';
 
 const app = express();
 
+// Route prefixes
+const ROUTES = {
+    agents: '/agents',
+    kb: '/kb',
+    memory: '/memory',
+    health: '/health',
+};
+
 app.use((req, res, next) => {
     console.log(`${req.method} ${req.path}`);
+    resetLLMBudget();
     next();
 });
 
 app.use(express.json());
 
-app.get('/health', (_req, res) => {
+// Public health check
+app.get(ROUTES.health, (_req, res) => {
     res.json({
         status: 'ok',
         version: '0.1.0',
@@ -31,18 +44,30 @@ const iranti = new Iranti({
     llmProvider: (process.env.LLM_PROVIDER as 'gemini' | 'openai' | 'mock') ?? 'mock',
 });
 
-// Register API routes with auth (skip auth for health and chat endpoints)
-app.use('/agents', authenticate, agentRoutes(iranti));
-app.use('/write', authenticate, knowledgeRoutes(iranti));
-app.use('/ingest', authenticate, knowledgeRoutes(iranti));
-app.use('/query', authenticate, knowledgeRoutes(iranti));
-app.use('/relate', authenticate, knowledgeRoutes(iranti));
-app.use('/related', authenticate, knowledgeRoutes(iranti));
-app.use('/handshake', authenticate, memoryRoutes(iranti));
-app.use('/reconvene', authenticate, memoryRoutes(iranti));
-app.use('/whoknows', authenticate, memoryRoutes(iranti));
-app.use('/maintenance', authenticate, memoryRoutes(iranti));
-app.use('/observe', authenticate, memoryRoutes(iranti));
+// Mount protected routes (prefix + auth + router in one line)
+app.use(ROUTES.agents, authenticate, agentRoutes(iranti));
+app.use(ROUTES.kb, authenticate, knowledgeRoutes(iranti));
+app.use(ROUTES.memory, authenticate, memoryRoutes(iranti));
+
+// Metrics endpoints
+app.get('/metrics', authenticate, (_req, res) => {
+    res.json(snapshot());
+});
+
+app.post('/metrics/reset', authenticate, (_req, res) => {
+    reset();
+    res.json({ ok: true });
+});
+
+// Metrics endpoints
+app.get('/metrics', authenticate, (_req, res) => {
+    res.json(snapshot());
+});
+
+app.post('/metrics/reset', authenticate, (_req, res) => {
+    reset();
+    res.json({ ok: true });
+});
 
 app.post(['/v1/chat/completions', '/chat/completions'], async (req, res) => {
     const providedKey = req.headers['authorization']?.replace('Bearer ', '');

@@ -1,4 +1,4 @@
-import { LLMProvider, LLMMessage, LLMResponse } from '../llm';
+import { LLMProvider, LLMMessage, LLMResponse, CompleteOptions } from '../llm';
 
 // ─── Scenario Types ───────────────────────────────────────────────────────────
 
@@ -83,10 +83,11 @@ class MockProvider implements LLMProvider {
         this.callCount = 0;
     }
 
-    async complete(messages: LLMMessage[], _maxTokens?: number): Promise<LLMResponse> {
+    async complete(messages: LLMMessage[], options?: CompleteOptions): Promise<LLMResponse> {
         this.callCount++;
         const lastMessage = messages[messages.length - 1].content.toLowerCase();
         const scenario = this.config.scenario;
+        const model = options?.model ?? 'mock';
 
         // Simulate failure rate
         const failureRate = this.config.failureRate ?? 0;
@@ -98,16 +99,16 @@ class MockProvider implements LLMProvider {
         if (lastMessage.includes('specific type of task')) {
             const options = TASK_INFERENCES[scenario] ?? TASK_INFERENCES.default;
             const idx = Math.floor(this.rand() * options.length);
-            return this.respond(options[idx]);
+            return this.respond(options[idx], model);
         }
 
         // Relevance filtering
         if (lastMessage.includes('directly relevant')) {
             if (scenario === 'noisy') {
                 // Sometimes return nothing relevant
-                return this.respond(this.rand() > 0.5 ? 'none' : '1,2');
+                return this.respond(this.rand() > 0.5 ? 'none' : '1,2', model);
             }
-            return this.respond('none');
+            return this.respond('none', model);
         }
 
         // Conflict resolution
@@ -115,22 +116,22 @@ class MockProvider implements LLMProvider {
             if (scenario === 'disagreement') {
                 // Disagreement scenario escalates more
                 const r = this.rand();
-                if (r < 0.4) return this.respond(CONFLICT_RESOLUTIONS.KEEP_EXISTING);
-                if (r < 0.7) return this.respond(CONFLICT_RESOLUTIONS.KEEP_INCOMING);
-                return this.respond(CONFLICT_RESOLUTIONS.ESCALATE);
+                if (r < 0.4) return this.respond(CONFLICT_RESOLUTIONS.KEEP_EXISTING, model);
+                if (r < 0.7) return this.respond(CONFLICT_RESOLUTIONS.KEEP_INCOMING, model);
+                return this.respond(CONFLICT_RESOLUTIONS.ESCALATE, model);
             }
-            return this.respond(CONFLICT_RESOLUTIONS.KEEP_EXISTING);
+            return this.respond(CONFLICT_RESOLUTIONS.KEEP_EXISTING, model);
         }
 
         // Extraction / chunking
         if (lastMessage.includes('atomic facts') || lastMessage.includes('extract every distinct')) {
             const response = EXTRACTION_RESPONSES[scenario] ?? EXTRACTION_RESPONSES.default;
-            return this.respond(response);
+            return this.respond(response, model);
         }
 
         // Summarization
         if (lastMessage.includes('compress') || lastMessage.includes('summarize')) {
-            return this.respond('Compressed working memory summary for current task context.');
+            return this.respond('Compressed working memory summary for current task context.', model);
         }
 
         // Default — generic agent response
@@ -143,12 +144,13 @@ class MockProvider implements LLMProvider {
             `  "research_focus": "machine learning",\n` +
             `  "notable_contribution": "Foundational work in neural networks",\n` +
             `  "confidence": 85\n` +
-            `}`
+            `}`,
+            model
         );
     }
 
-    private respond(text: string): LLMResponse {
-        return { text, model: 'mock', provider: 'mock' };
+    private respond(text: string, model: string = 'mock'): LLMResponse {
+        return { text, model, provider: 'mock' };
     }
 
     getCallCount(): number {

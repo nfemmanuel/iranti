@@ -1,14 +1,14 @@
 import { route } from '../lib/router';
-import { findEntry, createEntry, updateEntry, archiveEntry, isProtectedEntry, canWriteToStaffNamespace } from '../library/queries';
+import { findEntry, createEntry, updateEntry, archiveEntry, isProtectedEntry, canWriteToStaffNamespace, appendConflictLog, getWriteReceipt, createWriteReceipt } from '../library/queries';
+import { withIdentityLock } from '../library/locks';
 import { EntryInput, EntryQuery, ConflictLogEntry } from '../types';
 import { KnowledgeEntry } from '../generated/prisma/client';
 import { ChunkInput } from './chunker';
-import { getReliabilityScores, weightedConfidence, recordResolution } from './source-reliability';
 import { updateStats } from '../library/agent-registry';
-
-// ─── Constants ───────────────────────────────────────────────────────────────
-
-const CONFLICT_THRESHOLD = 10;
+import { enforceWritePermissions } from './guards';
+import { getConflictPolicy } from './getPolicy';
+import { scoreCandidate } from './scoring';
+import { inc, timeStart, timeEnd } from '../lib/metrics';
 
 // ─── Input Validation ────────────────────────────────────────────────────────
 
@@ -19,86 +19,250 @@ function clampConfidence(input: EntryInput): EntryInput {
     };
 }
 
+function applyTTL(input: EntryInput, policy: any): EntryInput {
+    if (input.validUntil) return input;
+    const ttlDays = policy.ttlDefaultsByKey[input.key];
+    if (!ttlDays) return input;
+    
+    const validUntil = new Date();
+    validUntil.setDate(validUntil.getDate() + ttlDays);
+    return { ...input, validUntil };
+}
+
 // ─── Core Write Logic ────────────────────────────────────────────────────────
 
 export async function librarianWrite(input: EntryInput): Promise<{
     action: 'created' | 'updated' | 'escalated' | 'rejected';
     entry?: KnowledgeEntry;
     reason: string;
+    idempotentReplay?: boolean;
 }> {
+    const t0 = timeStart();
     input = clampConfidence(input);
     
-    // P0: Enforce Staff namespace write ban
-    if (!canWriteToStaffNamespace(input.createdBy, input.entityType, input.key)) {
-        return {
-            action: 'rejected',
-            reason: `Staff namespace '${input.entityType}' is protected. Only staff writers can modify it.`,
-        };
+    // Idempotency check (outside lock)
+    if (input.requestId) {
+        const receipt = await getWriteReceipt(input.requestId);
+        if (receipt) {
+            timeEnd('librarian.write_ms', t0);
+            return {
+                action: receipt.outcome as any,
+                reason: 'Idempotent replay of previous request',
+                idempotentReplay: true,
+            };
+        }
     }
     
-    // Guard: never write to protected entries
-    const protected_ = await isProtectedEntry({
+    // Hard namespace protection (before lock)
+    enforceWritePermissions({
         entityType: input.entityType,
         entityId: input.entityId,
         key: input.key,
+        createdBy: input.createdBy,
     });
+    
+    // Serialize writes to same identity triple
+    return withIdentityLock(
+        { entityType: input.entityType, entityId: input.entityId, key: input.key },
+        async (tx) => {
+            // P0: Enforce Staff namespace write ban
+            if (!canWriteToStaffNamespace(input.createdBy, input.entityType, input.key)) {
+                timeEnd('librarian.write_ms', t0);
+                return {
+                    action: 'rejected',
+                    reason: `Staff namespace '${input.entityType}' is protected. Only staff writers can modify it.`,
+                };
+            }
+            
+            // Guard: never write to protected entries
+            const protected_ = await isProtectedEntry({
+                entityType: input.entityType,
+                entityId: input.entityId,
+                key: input.key,
+            }, tx);
 
-    if (protected_) {
-        return {
-            action: 'rejected',
-            reason: 'Entry is protected. Only the seed script can write to the Staff Namespace.',
-        };
-    }
+            if (protected_) {
+                timeEnd('librarian.write_ms', t0);
+                return {
+                    action: 'rejected',
+                    reason: 'Entry is protected. Only the seed script can write to the Staff Namespace.',
+                };
+            }
 
-    const existing = await findEntry({
-        entityType: input.entityType,
-        entityId: input.entityId,
-        key: input.key,
-    });
+            const existing = await findEntry({
+                entityType: input.entityType,
+                entityId: input.entityId,
+                key: input.key,
+            }, tx);
 
-    // No conflict — clean write
-    if (!existing) {
-        const entry = await createEntry(input);
-        await updateStats(input.createdBy, 'created', input.confidence);
-        return { action: 'created', entry, reason: 'No existing entry found. Created.' };
-    }
+            // No conflict — clean write
+            if (!existing) {
+                const policy = await getConflictPolicy(tx);
+                const inputWithTTL = applyTTL(input, policy);
+                const entry = await createEntry(inputWithTTL, tx);
+                await updateStats(input.createdBy, 'created', input.confidence);
+                
+                if (input.requestId) {
+                    await createWriteReceipt({
+                        requestId: input.requestId,
+                        entityType: input.entityType,
+                        entityId: input.entityId,
+                        key: input.key,
+                        outcome: 'created',
+                        resultEntryId: entry.id,
+                    }, tx);
+                }
+                
+                inc('librarian.created');
+                timeEnd('librarian.write_ms', t0);
+                return { action: 'created', entry, reason: 'No existing entry found. Created.' };
+            }
 
-    // Load source reliability scores
-    const reliabilityScores = await getReliabilityScores();
-    const existingWeighted = weightedConfidence(existing.confidence, existing.source, reliabilityScores);
-    const incomingWeighted = weightedConfidence(input.confidence, input.source, reliabilityScores);
-
-    // Exact duplicate — keep higher weighted confidence
-    if (JSON.stringify(existing.valueRaw) === JSON.stringify(input.valueRaw)) {
-        if (incomingWeighted > existingWeighted) {
-            const entry = await updateEntry(
-                { entityType: input.entityType, entityId: input.entityId, key: input.key },
-                { confidence: input.confidence, source: input.source }
-            );
-            return { action: 'updated', entry, reason: 'Duplicate value. Updated confidence.' };
+            // Conflict detected — use policy engine
+            const result = await resolveConflict(existing, input, tx);
+            
+            // Track outcome
+            if (result.action === 'updated') inc('librarian.updated');
+            else if (result.action === 'rejected') inc('librarian.rejected');
+            else if (result.action === 'escalated') inc('librarian.escalated');
+            
+            timeEnd('librarian.write_ms', t0);
+            return result;
         }
-        await updateStats(input.createdBy, 'rejected', input.confidence);
-        return { action: 'rejected', reason: 'Duplicate value with equal or lower confidence. No change.' };
-    }
-
-    // Conflict detected — check confidence gap
-    const gap = Math.abs(incomingWeighted - existingWeighted);
-
-    if (gap >= CONFLICT_THRESHOLD) {
-        return await resolveByConfidence(existing, input, incomingWeighted, existingWeighted, reliabilityScores);
-    }
-
-    // Gap too small — use LLM reasoning before escalating
-    return await resolveWithReasoning(existing, input);
+    );
 }
 
-// ─── Resolution ──────────────────────────────────────────────────────────────
+// ─── Policy-Based Resolution ─────────────────────────────────────────────────
+
+async function resolveConflict(
+    existing: KnowledgeEntry,
+    incoming: EntryInput,
+    tx: any
+): Promise<{ action: 'created' | 'updated' | 'escalated' | 'rejected'; entry?: KnowledgeEntry; reason: string }> {
+    const policy = await getConflictPolicy(tx);
+    const inputWithTTL = applyTTL(incoming, policy);
+    
+    // Exact duplicate — keep higher score
+    if (JSON.stringify(existing.valueRaw) === JSON.stringify(inputWithTTL.valueRaw)) {
+        const existingScore = scoreCandidate({ confidence: existing.confidence, source: existing.source, validUntil: existing.validUntil, policy });
+        const incomingScore = scoreCandidate({ confidence: inputWithTTL.confidence, source: inputWithTTL.source, validUntil: inputWithTTL.validUntil, policy });
+        
+        if (incomingScore > existingScore) {
+            const entry = await updateEntry(
+                { entityType: inputWithTTL.entityType, entityId: inputWithTTL.entityId, key: inputWithTTL.key },
+                { confidence: inputWithTTL.confidence, source: inputWithTTL.source, validUntil: inputWithTTL.validUntil },
+                tx
+            );
+            await logDecision(existing.id, 'CONFLICT_UPDATED', inputWithTTL, existingScore, incomingScore, 'Duplicate value, higher score', false, tx);
+            await saveReceipt(inputWithTTL, 'updated', entry.id, tx);
+            return { action: 'updated', entry, reason: 'Duplicate value. Updated confidence.' };
+        }
+        
+        await logDecision(existing.id, 'CONFLICT_REJECTED', inputWithTTL, existingScore, incomingScore, 'Duplicate value, equal or lower score', false, tx);
+        await saveReceipt(inputWithTTL, 'rejected', existing.id, tx);
+        return { action: 'rejected', reason: 'Duplicate value with equal or lower score.' };
+    }
+    
+    // Rule 1: Authoritative sources
+    const authSources = policy.authoritativeSourcesByKey[inputWithTTL.key] ?? [];
+    if (authSources.length > 0) {
+        const existingAuth = authSources.includes(existing.source);
+        const incomingAuth = authSources.includes(inputWithTTL.source);
+        
+        if (existingAuth && !incomingAuth) {
+            await logDecision(existing.id, 'CONFLICT_REJECTED', inputWithTTL, 0, 0, `Existing from authoritative source (${existing.source})`, false, tx);
+            await saveReceipt(inputWithTTL, 'rejected', existing.id, tx);
+            return { action: 'rejected', reason: `Existing from authoritative source: ${existing.source}` };
+        }
+        
+        if (incomingAuth && !existingAuth) {
+            const entry = await replaceEntry(existing, inputWithTTL, tx);
+            await logDecision(existing.id, 'CONFLICT_REPLACED', inputWithTTL, 0, 0, `Incoming from authoritative source (${inputWithTTL.source})`, false, tx);
+            await saveReceipt(inputWithTTL, 'updated', entry.id, tx);
+            return { action: 'updated', entry, reason: `Incoming from authoritative source: ${inputWithTTL.source}` };
+        }
+    }
+    
+    // Rule 2: Score-based resolution
+    const existingScore = scoreCandidate({ confidence: existing.confidence, source: existing.source, validUntil: existing.validUntil, policy });
+    const incomingScore = scoreCandidate({ confidence: inputWithTTL.confidence, source: inputWithTTL.source, validUntil: inputWithTTL.validUntil, policy });
+    const gap = Math.abs(incomingScore - existingScore);
+    
+    if (gap >= policy.minConfidenceToOverwrite) {
+        if (incomingScore > existingScore) {
+            const entry = await replaceEntry(existing, inputWithTTL, tx);
+            await logDecision(existing.id, 'CONFLICT_REPLACED', inputWithTTL, existingScore, incomingScore, `Score gap ${gap.toFixed(1)} >= threshold ${policy.minConfidenceToOverwrite}`, false, tx);
+            await saveReceipt(inputWithTTL, 'updated', entry.id, tx);
+            return { action: 'updated', entry, reason: `Incoming score (${incomingScore.toFixed(1)}) higher than existing (${existingScore.toFixed(1)})` };
+        } else {
+            await logDecision(existing.id, 'CONFLICT_REJECTED', inputWithTTL, existingScore, incomingScore, `Score gap ${gap.toFixed(1)} >= threshold, existing wins`, false, tx);
+            await saveReceipt(inputWithTTL, 'rejected', existing.id, tx);
+            return { action: 'rejected', reason: `Existing score (${existingScore.toFixed(1)}) higher than incoming (${incomingScore.toFixed(1)})` };
+        }
+    }
+    
+    // Rule 3: Both below acceptance threshold → escalate
+    if (Math.max(existingScore, incomingScore) < policy.minConfidenceToAccept) {
+        await logDecision(existing.id, 'CONFLICT_ESCALATED', inputWithTTL, existingScore, incomingScore, 'Both below acceptance threshold', false, tx);
+        return await escalateConflict(existing, inputWithTTL, tx);
+    }
+    
+    // Rule 4: LLM arbitration
+    return await resolveWithReasoning(existing, inputWithTTL, existingScore, incomingScore, policy, tx);
+}
+
+async function replaceEntry(existing: KnowledgeEntry, incoming: EntryInput, tx: any): Promise<KnowledgeEntry> {
+    const entry = await createEntry(incoming, tx);
+    await archiveEntry(existing, 'superseded', {
+        entityType: existing.entityType,
+        entityId: existing.entityId,
+        key: existing.key,
+    }, tx);
+    return entry;
+}
+
+async function logDecision(entryId: number, type: string, incoming: EntryInput, existingScore: number, incomingScore: number, reason: string, usedLLM: boolean, tx: any) {
+    await appendConflictLog(entryId, {
+        type,
+        at: new Date().toISOString(),
+        incoming: {
+            valueRaw: incoming.valueRaw,
+            valueSummary: incoming.valueSummary,
+            confidence: incoming.confidence,
+            source: incoming.source,
+        },
+        existingScore: existingScore > 0 ? existingScore : undefined,
+        incomingScore: incomingScore > 0 ? incomingScore : undefined,
+        reason,
+        usedLLM,
+    }, tx);
+}
+
+async function saveReceipt(input: EntryInput, outcome: string, entryId: number, tx: any, escalationFile?: string) {
+    if (!input.requestId) return;
+    await createWriteReceipt({
+        requestId: input.requestId,
+        entityType: input.entityType,
+        entityId: input.entityId,
+        key: input.key,
+        outcome,
+        resultEntryId: entryId,
+        escalationFile,
+    }, tx);
+}
+
+// ─── LLM Arbitration ─────────────────────────────────────────────────────────
 
 async function resolveWithReasoning(
     existing: KnowledgeEntry,
-    incoming: EntryInput
+    incoming: EntryInput,
+    existingScore: number,
+    incomingScore: number,
+    policy: any,
+    tx: any
 ): Promise<{ action: 'created' | 'updated' | 'escalated' | 'rejected'; entry?: KnowledgeEntry; reason: string }> {
-    const response = await route('conflict_resolution', [
+    try {
+        const response = await route('conflict_resolution', [
         {
             role: 'user',
             content: `You are resolving a knowledge conflict between two AI agents.
@@ -133,89 +297,53 @@ ESCALATE: <reason>`,
 
     if (text.startsWith('KEEP_EXISTING')) {
         const reason = text.replace('KEEP_EXISTING:', '').trim();
+        await logDecision(existing.id, 'CONFLICT_REJECTED', incoming, existingScore, incomingScore, `LLM: ${reason}`, true, tx);
+        await saveReceipt(incoming, 'rejected', existing.id, tx);
+        
         return {
             action: 'rejected',
-            reason: `Librarian reasoning: kept existing. ${reason}`,
+            reason: `LLM arbitration: ${reason}`,
         };
     }
 
     if (text.startsWith('KEEP_INCOMING')) {
         const reason = text.replace('KEEP_INCOMING:', '').trim();
-        const newEntry = await createEntry({
-            ...incoming,
-            conflictLog: [{
-                detectedAt: new Date().toISOString(),
-                incomingSource: incoming.source,
-                incomingConfidence: incoming.confidence,
-                existingConfidence: existing.confidence,
-                resolution: 'overwritten',
-                resolvedBy: 'librarian_reasoning',
-                notes: reason,
-            }] as unknown as never,
-        });
-        await archiveEntry(existing, 'superseded', newEntry.id);
+        const entry = await replaceEntry(existing, incoming, tx);
+        await logDecision(existing.id, 'CONFLICT_REPLACED', incoming, existingScore, incomingScore, `LLM: ${reason}`, true, tx);
+        await saveReceipt(incoming, 'updated', entry.id, tx);
+        
         return {
             action: 'updated',
-            entry: newEntry,
-            reason: `Librarian reasoning: replaced existing. ${reason}`,
+            entry,
+            reason: `LLM arbitration: ${reason}`,
         };
     }
 
     // ESCALATE or anything unexpected
-    return await escalateConflict(existing, incoming);
-}
-
-// ─── Resolution ──────────────────────────────────────────────────────────────
-
-async function resolveByConfidence(
-    existing: KnowledgeEntry,
-    incoming: EntryInput,
-    incomingWeighted: number,
-    existingWeighted: number,
-    reliabilityScores: Record<string, number>
-): Promise<{ action: 'created' | 'updated' | 'escalated' | 'rejected'; entry?: KnowledgeEntry; reason: string }> {
-    const conflictEntry: ConflictLogEntry = {
-        detectedAt: new Date().toISOString(),
-        incomingSource: incoming.source,
-        incomingConfidence: incoming.confidence,
-        existingConfidence: existing.confidence,
-        resolution: incomingWeighted > existingWeighted ? 'overwritten' : 'kept',
-        resolvedBy: 'librarian',
-        notes: `Weighted scores — incoming: ${incomingWeighted}, existing: ${existingWeighted}`,
-    };
-
-    if (incomingWeighted > existingWeighted) {
-        await recordResolution(incoming.source, existing.source);
-        const newEntry = await createEntry({
-            ...incoming,
-            conflictLog: [conflictEntry] as unknown as never,
-        });
-        await archiveEntry(existing, 'superseded', newEntry.id);
-        return {
-            action: 'updated',
-            entry: newEntry,
-            reason: `Incoming weighted confidence (${incomingWeighted}) higher than existing (${existingWeighted}). Existing archived.`,
-        };
+    await logDecision(existing.id, 'CONFLICT_ESCALATED', incoming, existingScore, incomingScore, 'LLM recommended escalation', true, tx);
+    return await escalateConflict(existing, incoming, tx);
+    } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        await logDecision(existing.id, 'CONFLICT_ESCALATED', incoming, existingScore, incomingScore, `LLM error: ${reason}`, true, tx);
+        return await escalateConflict(existing, incoming, tx);
     }
-
-    await recordResolution(existing.source, incoming.source);
-    return {
-        action: 'rejected',
-        reason: `Existing weighted confidence (${existingWeighted}) higher than incoming (${incomingWeighted}). No change.`,
-    };
 }
+
+// ─── Escalation ──────────────────────────────────────────────────────────────
 
 async function escalateConflict(
     existing: KnowledgeEntry,
-    incoming: EntryInput
+    incoming: EntryInput,
+    tx: any
 ): Promise<{ action: 'escalated'; reason: string }> {
     const fs = await import('fs/promises');
     const path = await import('path');
 
-    const id = `conflict_${Date.now()}`;
+    const id = incoming.requestId ?? `conflict_${Date.now()}`;
     const escalationDir = path.join(process.cwd(), 'escalation', 'active');
     const filename = `${id}.md`;
     const filePath = path.join(escalationDir, filename);
+    const tempPath = filePath + '.tmp';
 
     const content = `# Escalation: ${id}
 
@@ -226,8 +354,7 @@ async function escalateConflict(
 - **Existing confidence:** ${existing.confidence}
 - **Incoming value:** ${JSON.stringify(incoming.valueRaw)}
 - **Incoming confidence:** ${incoming.confidence}
-- **Confidence gap:** ${Math.abs(existing.confidence - incoming.confidence)}
-- **Reasoning:** Confidence gap below threshold (${CONFLICT_THRESHOLD}). Too close to resolve automatically.
+- **Reasoning:** Ambiguous conflict requiring human judgment.
 - **Status:** PENDING
 
 ## HUMAN RESOLUTION
@@ -240,7 +367,31 @@ async function escalateConflict(
 Change Status to RESOLVED when done. -->
 `;
 
-    await fs.writeFile(filePath, content, 'utf-8');
+    try {
+        await fs.writeFile(tempPath, content, { encoding: 'utf-8', flag: 'wx' });
+        await fs.rename(tempPath, filePath);
+    } catch (err) {
+        if ((err as any).code === 'EEXIST') {
+            // File already exists (idempotent replay)
+        } else {
+            throw err;
+        }
+    }
+
+    await appendConflictLog(existing.id, {
+        type: 'CONFLICT_ESCALATED',
+        at: new Date().toISOString(),
+        incoming: {
+            valueRaw: incoming.valueRaw,
+            valueSummary: incoming.valueSummary,
+            confidence: incoming.confidence,
+            source: incoming.source,
+        },
+        reason: 'Escalated for human resolution',
+        escalationFile: filename,
+    }, tx);
+    
+    await saveReceipt(incoming, 'escalated', existing.id, tx, filename);
 
     return {
         action: 'escalated',

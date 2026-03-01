@@ -33,22 +33,25 @@ model KnowledgeEntry {
 }
 
 model Archive {
-    id             Int       @id @default(autoincrement())
-    entityType     String
-    entityId       String
-    key            String
-    valueRaw       Json
-    valueSummary   String
-    confidence     Int
-    source         String
-    validUntil     DateTime?
-    createdBy      String
-    createdAt      DateTime
-    conflictLog    Json      @default("[]")
-    properties     Json      @default("{}")
-    archivedAt     DateTime  @default(now())
-    archivedReason String
-    supersededBy   Int?
+    id                     Int       @id @default(autoincrement())
+    entityType             String
+    entityId               String
+    key                    String
+    valueRaw               Json
+    valueSummary           String
+    confidence             Int
+    source                 String
+    validUntil             DateTime?
+    createdBy              String
+    createdAt              DateTime
+    conflictLog            Json      @default("[]")
+    properties             Json      @default("{}")
+    archivedAt             DateTime  @default(now())
+    archivedReason         String
+    supersededBy           Int?
+    supersededByEntityType String?
+    supersededByEntityId   String?
+    supersededByKey        String?
 
     @@index([entityType, entityId, key])
     @@map("archive")
@@ -68,4 +71,19 @@ model EntityRelationship {
     @@unique([fromType, fromId, relationshipType, toType, toId])
     @@index([fromType, fromId])
     @@index([toType, toId])
+}
+
+model WriteReceipt {
+    id             Int      @id @default(autoincrement())
+    requestId      String   @unique
+    entityType     String
+    entityId       String
+    key            String
+    outcome        String
+    resultEntryId  Int?
+    escalationFile String?
+    createdAt      DateTime @default(now())
+
+    @@index([entityType, entityId, key])
+    @@map("write_receipts")
 }

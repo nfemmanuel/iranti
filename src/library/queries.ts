@@ -1,11 +1,14 @@
-import { prisma } from './client';
+import { getDb } from './client';
 import { EntryInput, EntryQuery, QueryResult } from '../types';
-import { KnowledgeEntry, Prisma } from '../generated/prisma/client';
+import { KnowledgeEntry, Prisma, PrismaClient } from '../generated/prisma/client';
+
+type DbClient = PrismaClient | Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
 
 // ─── Read ────────────────────────────────────────────────────────────────────
 
-export async function findEntry(query: EntryQuery): Promise<KnowledgeEntry | null> {
-    return prisma.knowledgeEntry.findUnique({
+export async function findEntry(query: EntryQuery, db?: DbClient): Promise<KnowledgeEntry | null> {
+    const client = db ?? getDb();
+    return client.knowledgeEntry.findUnique({
         where: {
             entityType_entityId_key: {
                 entityType: query.entityType,
@@ -16,8 +19,8 @@ export async function findEntry(query: EntryQuery): Promise<KnowledgeEntry | nul
     });
 }
 
-export async function queryEntry(query: EntryQuery): Promise<QueryResult> {
-    const entry = await findEntry(query);
+export async function queryEntry(query: EntryQuery, db?: DbClient): Promise<QueryResult> {
+    const entry = await findEntry(query, db);
 
     if (!entry) {
         return { found: false };
@@ -37,17 +40,20 @@ export async function queryEntry(query: EntryQuery): Promise<QueryResult> {
 
 export async function findEntriesByEntity(
     entityType: string,
-    entityId: string
+    entityId: string,
+    db?: DbClient
 ): Promise<KnowledgeEntry[]> {
-    return prisma.knowledgeEntry.findMany({
+    const client = db ?? getDb();
+    return client.knowledgeEntry.findMany({
         where: { entityType, entityId },
     });
 }
 
 // ─── Write ───────────────────────────────────────────────────────────────────
 
-export async function createEntry(input: EntryInput): Promise<KnowledgeEntry> {
-    return prisma.knowledgeEntry.create({
+export async function createEntry(input: EntryInput, db?: DbClient): Promise<KnowledgeEntry> {
+    const client = db ?? getDb();
+    return client.knowledgeEntry.create({
         data: {
             entityType: input.entityType,
             entityId: input.entityId,
@@ -66,11 +72,13 @@ export async function createEntry(input: EntryInput): Promise<KnowledgeEntry> {
 
 export async function updateEntry(
     query: EntryQuery,
-    updates: Partial<EntryInput>
+    updates: Partial<EntryInput>,
+    db?: DbClient
 ): Promise<KnowledgeEntry> {
     const { valueRaw, conflictLog, ...rest } = updates;
+    const client = db ?? getDb();
 
-    return prisma.knowledgeEntry.update({
+    return client.knowledgeEntry.update({
         where: {
             entityType_entityId_key: {
                 entityType: query.entityType,
@@ -93,13 +101,21 @@ export async function updateEntry(
 
 // ─── Archive ─────────────────────────────────────────────────────────────────
 
+type SupersededByPointer = {
+    entityType: string;
+    entityId: string;
+    key: string;
+};
+
 export async function archiveEntry(
     entry: KnowledgeEntry,
     reason: 'superseded' | 'contradicted' | 'expired' | 'duplicate',
-    supersededBy?: number
+    supersededBy?: SupersededByPointer,
+    db?: DbClient
 ): Promise<void> {
-    await prisma.$transaction([
-        prisma.archive.create({
+    const client = db ?? getDb();
+    await Promise.all([
+        client.archive.create({
             data: {
                 entityType: entry.entityType,
                 entityId: entry.entityId,
@@ -113,10 +129,13 @@ export async function archiveEntry(
                 createdAt: entry.createdAt,
                 conflictLog: entry.conflictLog as Prisma.InputJsonValue,
                 archivedReason: reason,
-                supersededBy: supersededBy ?? null,
+                supersededBy: null,
+                supersededByEntityType: supersededBy?.entityType ?? null,
+                supersededByEntityId: supersededBy?.entityId ?? null,
+                supersededByKey: supersededBy?.key ?? null,
             },
         }),
-        prisma.knowledgeEntry.update({
+        client.knowledgeEntry.update({
             where: { id: entry.id },
             data: { 
                 valueSummary: '[ARCHIVED]',
@@ -132,8 +151,8 @@ export async function archiveEntry(
 const STAFF_NAMESPACES = ['system', 'agent'];
 const STAFF_WRITERS = ['seed', 'archivist', 'attendant'];
 
-export async function isProtectedEntry(query: EntryQuery): Promise<boolean> {
-    const entry = await findEntry(query);
+export async function isProtectedEntry(query: EntryQuery, db?: DbClient): Promise<boolean> {
+    const entry = await findEntry(query, db);
     return entry?.isProtected ?? false;
 }
 
@@ -147,4 +166,42 @@ export function canWriteToStaffNamespace(createdBy: string, entityType: string, 
     // Allow agents to write their own attendant_state only
     if (entityType === 'agent' && key === 'attendant_state') return true;
     return false;
+}
+
+// ─── Conflict Log ────────────────────────────────────────────────────────────
+
+export async function appendConflictLog(entryId: number, event: any, db?: DbClient) {
+    const client = db ?? getDb();
+    const existing = await client.knowledgeEntry.findUnique({
+        where: { id: entryId },
+        select: { conflictLog: true },
+    });
+
+    const current = (existing?.conflictLog ?? []) as any[];
+    const next = [...current, event];
+
+    return client.knowledgeEntry.update({
+        where: { id: entryId },
+        data: { conflictLog: next as Prisma.InputJsonValue },
+    });
+}
+
+// ─── Write Receipts (Idempotency) ────────────────────────────────────────────
+
+export async function getWriteReceipt(requestId: string, db?: DbClient) {
+    const client = db ?? getDb();
+    return client.writeReceipt.findUnique({ where: { requestId } });
+}
+
+export async function createWriteReceipt(data: {
+    requestId: string;
+    entityType: string;
+    entityId: string;
+    key: string;
+    outcome: string;
+    resultEntryId?: number | null;
+    escalationFile?: string | null;
+}, db?: DbClient) {
+    const client = db ?? getDb();
+    return client.writeReceipt.create({ data });
 }

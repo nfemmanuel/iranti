@@ -19,6 +19,7 @@ export interface EntryInput {
     createdBy: string;
     isProtected?: boolean;
     conflictLog?: ConflictLogEntry[];
+    requestId?: string;
 }
 
 export interface ConflictLogEntry {

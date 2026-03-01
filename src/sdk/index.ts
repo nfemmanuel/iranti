@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { initDb } from '../library/client';
 import { librarianWrite, librarianIngest } from '../librarian';
 import { WorkingMemoryBrief } from '../attendant';
 import { getAttendant, AttendantInstance } from '../attendant/registry';
@@ -94,9 +95,12 @@ export class Iranti {
     constructor(config: IrantiConfig = {}) {
         this.config = config;
 
-        if (config.connectionString) {
-            process.env.DATABASE_URL = config.connectionString;
+        const connectionString = config.connectionString ?? process.env.DATABASE_URL;
+        if (!connectionString) {
+            throw new Error('connectionString is required. Provide it in config or set DATABASE_URL environment variable.');
         }
+
+        initDb(connectionString);
 
         if (config.llmProvider) {
             process.env.LLM_PROVIDER = config.llmProvider;

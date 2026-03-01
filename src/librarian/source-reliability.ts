@@ -1,4 +1,4 @@
-import { prisma } from '../library/client';
+import { getDb } from '../library/client';
 import { Prisma } from '../generated/prisma/client';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -29,7 +29,7 @@ interface ReliabilityStore {
 // ─── Read ────────────────────────────────────────────────────────────────────
 
 export async function getReliabilityScores(): Promise<ReliabilityMap> {
-    const entry = await prisma.knowledgeEntry.findUnique({
+    const entry = await getDb().knowledgeEntry.findUnique({
         where: {
             entityType_entityId_key: {
                 entityType: RELIABILITY_ENTITY_TYPE,
@@ -110,7 +110,7 @@ async function persistScores(scores: ReliabilityMap): Promise<void> {
         totalResolutions: resolutionCount,
     };
 
-    await prisma.knowledgeEntry.upsert({
+    await getDb().knowledgeEntry.upsert({
         where: {
             entityType_entityId_key: {
                 entityType: RELIABILITY_ENTITY_TYPE,

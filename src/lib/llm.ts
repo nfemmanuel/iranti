@@ -1,5 +1,21 @@
 // ─── Provider Interface ──────────────────────────────────────────────────────
 
+import { inc, timeStart, timeEnd } from './metrics';
+
+let requestLLMCount = 0;
+const MAX_LLM_CALLS_PER_REQUEST = 10;
+
+export function resetLLMBudget() {
+    requestLLMCount = 0;
+}
+
+function incrementLLMBudget() {
+    requestLLMCount++;
+    if (requestLLMCount > MAX_LLM_CALLS_PER_REQUEST) {
+        throw new Error(`LLM call budget exceeded (${MAX_LLM_CALLS_PER_REQUEST} max per request)`);
+    }
+}
+
 export interface LLMMessage {
     role: 'user' | 'assistant';
     content: string;
@@ -11,8 +27,13 @@ export interface LLMResponse {
     provider: string;
 }
 
+export type CompleteOptions = {
+    model?: string;
+    maxTokens?: number;
+};
+
 export interface LLMProvider {
-    complete(messages: LLMMessage[], maxTokens?: number): Promise<LLMResponse>;
+    complete(messages: LLMMessage[], options?: CompleteOptions): Promise<LLMResponse>;
 }
 
 // ─── Provider Registry ───────────────────────────────────────────────────────
@@ -40,8 +61,10 @@ export function getLLM(): LLMProvider {
 
 export async function initProvider(name: string): Promise<LLMProvider> {
     if (providerCache.has(name)) {
+        inc('llm.cache_hit');
         return providerCache.get(name)!;
     }
+    inc('llm.cache_miss');
     const provider = await loadProvider(name);
     providerCache.set(name, provider);
     return provider;
@@ -76,30 +99,46 @@ async function loadProvider(name: string): Promise<LLMProvider> {
 
 export async function completeWithFallback(
     messages: LLMMessage[],
-    maxTokens?: number,
-    preferredProvider?: string
+    options?: { preferredProvider?: string; model?: string; maxTokens?: number }
 ): Promise<LLMResponse & { providerUsed: string }> {
-    const chain = preferredProvider 
-        ? [preferredProvider, ...getFallbackChain().filter(p => p !== preferredProvider)]
+    const chain = options?.preferredProvider 
+        ? [options.preferredProvider, ...getFallbackChain().filter(p => p !== options.preferredProvider)]
         : getFallbackChain();
     const errors: string[] = [];
 
     for (const providerName of chain) {
         try {
+            incrementLLMBudget();
+            inc('llm.calls');
+            const t0 = timeStart();
+            
             let provider = providerCache.get(providerName);
             if (!provider) {
+                inc('llm.cache_miss');
                 provider = await loadProvider(providerName);
                 providerCache.set(providerName, provider);
+            } else {
+                inc('llm.cache_hit');
             }
-            const response = await provider.complete(messages, maxTokens);
             
-            // Log fallback usage if not primary
+            const response = await provider.complete(messages, {
+                model: options?.model,
+                maxTokens: options?.maxTokens,
+            });
+            
+            timeEnd('llm.latency_ms', t0);
+            
+            if (process.env.DEBUG_LLM) {
+                console.log(`[LLM] ${providerName} / ${response.model}`);
+            }
+            
             if (providerName !== chain[0]) {
                 console.warn(`  [router] Primary provider failed. Used fallback: ${providerName}`);
             }
 
             return { ...response, providerUsed: providerName };
         } catch (err) {
+            inc('llm.failures');
             const message = err instanceof Error ? err.message : String(err);
             errors.push(`${providerName}: ${message}`);
             continue;
@@ -111,9 +150,22 @@ export async function completeWithFallback(
 
 // ─── Convenience ─────────────────────────────────────────────────────────────
 
+export async function completeRouted(
+    messages: LLMMessage[],
+    route: { provider: string; model?: string; maxTokens?: number }
+): Promise<LLMResponse> {
+    incrementLLMBudget();
+    let provider = providerCache.get(route.provider);
+    if (!provider) {
+        provider = await loadProvider(route.provider);
+        providerCache.set(route.provider, provider);
+    }
+    return provider.complete(messages, { model: route.model, maxTokens: route.maxTokens });
+}
+
 export async function complete(
     messages: LLMMessage[],
     maxTokens?: number
 ): Promise<LLMResponse> {
-    return completeWithFallback(messages, maxTokens);
+    return completeWithFallback(messages, { maxTokens });
 }
