@@ -9,7 +9,6 @@ import { agentRoutes } from './routes/agents';
 import { authenticate } from './middleware/auth';
 import { snapshot, reset } from '../lib/metrics';
 import { resetLLMBudget } from '../lib/llm';
-import { snapshot, reset } from '../lib/metrics';
 
 const app = express();
 
@@ -49,17 +48,7 @@ app.use(ROUTES.agents, authenticate, agentRoutes(iranti));
 app.use(ROUTES.kb, authenticate, knowledgeRoutes(iranti));
 app.use(ROUTES.memory, authenticate, memoryRoutes(iranti));
 
-// Metrics endpoints
-app.get('/metrics', authenticate, (_req, res) => {
-    res.json(snapshot());
-});
-
-app.post('/metrics/reset', authenticate, (_req, res) => {
-    reset();
-    res.json({ ok: true });
-});
-
-// Metrics endpoints
+// Observability
 app.get('/metrics', authenticate, (_req, res) => {
     res.json(snapshot());
 });

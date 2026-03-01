@@ -149,7 +149,13 @@ export async function archiveEntry(
 // ─── Guards ──────────────────────────────────────────────────────────────────
 
 const STAFF_NAMESPACES = ['system', 'agent'];
-const STAFF_WRITERS = ['seed', 'archivist', 'attendant'];
+const STAFF_WRITERS = new Set([
+    'seed',
+    'archivist',
+    'attendant',
+    'librarian',
+    'system',
+]);
 
 export async function isProtectedEntry(query: EntryQuery, db?: DbClient): Promise<boolean> {
     const entry = await findEntry(query, db);
@@ -162,7 +168,10 @@ export function isStaffNamespace(entityType: string): boolean {
 
 export function canWriteToStaffNamespace(createdBy: string, entityType: string, key?: string): boolean {
     if (!isStaffNamespace(entityType)) return true;
-    if (STAFF_WRITERS.includes(createdBy)) return true;
+    
+    const writer = createdBy.toLowerCase();
+    if (STAFF_WRITERS.has(writer)) return true;
+    
     // Allow agents to write their own attendant_state only
     if (entityType === 'agent' && key === 'attendant_state') return true;
     return false;

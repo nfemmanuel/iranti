@@ -21,6 +21,7 @@
     "test:sdk": "ts-node scripts/test-sdk.ts",
     "test:integration": "ts-node scripts/test-integration.ts",
     "test:concurrency": "ts-node scripts/test_concurrent_writes.ts",
+    "test:staff": "ts-node scripts/test_staff_normalization.ts",
     "seed:policy": "ts-node scripts/seed_policy.ts",
     "demo": "ts-node scripts/demo.ts",
     "api": "ts-node src/api/server.ts"

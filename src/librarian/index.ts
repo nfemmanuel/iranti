@@ -39,6 +39,7 @@ export async function librarianWrite(input: EntryInput): Promise<{
 }> {
     const t0 = timeStart();
     input = clampConfidence(input);
+    input.createdBy = input.createdBy.toLowerCase();
     
     // Idempotency check (outside lock)
     if (input.requestId) {

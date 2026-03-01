@@ -187,7 +187,7 @@ async function processEscalationFile(
         valueSummary: auth.summary,
         confidence: 100,
         source: 'HumanReview',
-        createdBy: 'Archivist',
+        createdBy: 'archivist',
         validUntil: auth.validUntil ? new Date(auth.validUntil) : undefined,
         conflictLog: [{
             detectedAt: new Date().toISOString(),

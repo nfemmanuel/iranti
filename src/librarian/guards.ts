@@ -1,21 +1,21 @@
 export const STAFF_WRITERS = new Set([
-  "Librarian",
-  "Archivist",
-  "Seed",
-  "System",
-  "Attendant",
+  "librarian",
+  "archivist",
+  "seed",
+  "system",
+  "attendant",
 ]);
 
 // Reserved keys that only specific staffers may write
 export const RESERVED_KEY_WRITERS: Record<string, Set<string>> = {
   // Only Attendant should write the per-agent state blob
-  "attendant_state": new Set(["Attendant", "Librarian", "Archivist"]),
+  "attendant_state": new Set(["attendant", "librarian", "archivist"]),
 
   // Only seed/system migration logic should write schema version
-  "schema_version": new Set(["Seed", "System", "Librarian"]),
+  "schema_version": new Set(["seed", "system", "librarian"]),
 
   // Agent registry profile
-  "agent_profile": new Set(["Librarian", "Archivist", "Seed", "System"]),
+  "agent_profile": new Set(["librarian", "archivist", "seed", "system"]),
 
   // Add more as you need
 };
@@ -27,7 +27,8 @@ export function enforceWritePermissions(input: {
   key: string;
   createdBy: string;
 }) {
-  const { entityType, entityId, key, createdBy } = input;
+  const { entityType, entityId, key } = input;
+  const createdBy = input.createdBy.toLowerCase();
 
   // 1) System namespace is always protected
   if (entityType === "system") {
