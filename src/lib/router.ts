@@ -61,7 +61,7 @@ export async function route(
     maxTokens?: number
 ): Promise<LLMResponse & { taskType: TaskType; modelProfile: ModelProfile; providerUsed: string }> {
     const profile = MODEL_PROFILES[taskType];
-    const response = await completeWithFallback(messages, maxTokens);
+    const response = await completeWithFallback(messages, maxTokens, profile.provider);
 
     return {
         ...response,

@@ -303,7 +303,7 @@ Iranti has four internal components:
 
 | Component | Role |
 |---|---|
-| **Library** | PostgreSQL knowledge base. Active truth + full archive. Nothing is ever deleted. |
+| **Library** | PostgreSQL knowledge base. Active truth (soft-deleted entries marked as archived). Full provenance in Archive table. |
 | **Librarian** | Manages all writes. Detects conflicts, reasons about resolution, escalates when uncertain. |
 | **Attendant** | Per-agent working memory manager. Implements `observe()` and `handshake()` APIs. |
 | **Archivist** | Periodic cleanup. Archives expired and low-confidence entries. Processes human-resolved conflicts. |
@@ -331,12 +331,14 @@ All endpoints require `X-Iranti-Key` header for authentication.
 Three PostgreSQL tables:
 
 ```
-knowledge_base          — active truth
-archive                 — full provenance history, never deleted
+knowledge_base          — active truth (archived entries soft-deleted with confidence=0)
+archive                 — full provenance history, never deleted, includes supersededBy links
 entity_relationships    — directional graph: MEMBER_OF, PART_OF, AUTHORED, etc.
 ```
 
 Every table has a `properties` JSON column for caller-defined metadata. New entity types, relationship types, and fact keys never require migrations — they are just strings you define.
+
+**Archive semantics**: When an entry is archived, it remains in knowledge_base with confidence set to 0 and summary marked as `[ARCHIVED]`. A full copy is written to the archive table with supersededBy linking for traceability. Nothing is ever truly deleted.
 
 ---
 

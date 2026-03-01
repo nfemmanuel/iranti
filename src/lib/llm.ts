@@ -29,11 +29,22 @@ const PROVIDERS: Record<string, () => Promise<LLMProvider>> = {
 
 // ─── Provider Cache ──────────────────────────────────────────────────────────
 
-let cachedProvider: LLMProvider | null = null;
+const providerCache: Map<string, LLMProvider> = new Map();
 
 export function getLLM(): LLMProvider {
-    if (cachedProvider) return cachedProvider;
+    const primary = process.env.LLM_PROVIDER ?? 'mock';
+    const cached = providerCache.get(primary);
+    if (cached) return cached;
     throw new Error('Call initProvider() first or use complete() directly');
+}
+
+export async function initProvider(name: string): Promise<LLMProvider> {
+    if (providerCache.has(name)) {
+        return providerCache.get(name)!;
+    }
+    const provider = await loadProvider(name);
+    providerCache.set(name, provider);
+    return provider;
 }
 
 // ─── Fallback-Aware Provider ─────────────────────────────────────────────────
@@ -65,14 +76,21 @@ async function loadProvider(name: string): Promise<LLMProvider> {
 
 export async function completeWithFallback(
     messages: LLMMessage[],
-    maxTokens?: number
+    maxTokens?: number,
+    preferredProvider?: string
 ): Promise<LLMResponse & { providerUsed: string }> {
-    const chain = getFallbackChain();
+    const chain = preferredProvider 
+        ? [preferredProvider, ...getFallbackChain().filter(p => p !== preferredProvider)]
+        : getFallbackChain();
     const errors: string[] = [];
 
     for (const providerName of chain) {
         try {
-            const provider = await loadProvider(providerName);
+            let provider = providerCache.get(providerName);
+            if (!provider) {
+                provider = await loadProvider(providerName);
+                providerCache.set(providerName, provider);
+            }
             const response = await provider.complete(messages, maxTokens);
             
             // Log fallback usage if not primary

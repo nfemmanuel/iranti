@@ -1,5 +1,5 @@
 import { route } from '../lib/router';
-import { findEntry, createEntry, updateEntry, archiveEntry, isProtectedEntry } from '../library/queries';
+import { findEntry, createEntry, updateEntry, archiveEntry, isProtectedEntry, canWriteToStaffNamespace } from '../library/queries';
 import { EntryInput, EntryQuery, ConflictLogEntry } from '../types';
 import { KnowledgeEntry } from '../generated/prisma/client';
 import { ChunkInput } from './chunker';
@@ -27,6 +27,15 @@ export async function librarianWrite(input: EntryInput): Promise<{
     reason: string;
 }> {
     input = clampConfidence(input);
+    
+    // P0: Enforce Staff namespace write ban
+    if (!canWriteToStaffNamespace(input.createdBy, input.entityType, input.key)) {
+        return {
+            action: 'rejected',
+            reason: `Staff namespace '${input.entityType}' is protected. Only staff writers can modify it.`,
+        };
+    }
+    
     // Guard: never write to protected entries
     const protected_ = await isProtectedEntry({
         entityType: input.entityType,
@@ -132,8 +141,7 @@ ESCALATE: <reason>`,
 
     if (text.startsWith('KEEP_INCOMING')) {
         const reason = text.replace('KEEP_INCOMING:', '').trim();
-        await archiveEntry(existing, 'superseded');
-        const entry = await createEntry({
+        const newEntry = await createEntry({
             ...incoming,
             conflictLog: [{
                 detectedAt: new Date().toISOString(),
@@ -145,9 +153,10 @@ ESCALATE: <reason>`,
                 notes: reason,
             }] as unknown as never,
         });
+        await archiveEntry(existing, 'superseded', newEntry.id);
         return {
             action: 'updated',
-            entry,
+            entry: newEntry,
             reason: `Librarian reasoning: replaced existing. ${reason}`,
         };
     }
@@ -177,14 +186,14 @@ async function resolveByConfidence(
 
     if (incomingWeighted > existingWeighted) {
         await recordResolution(incoming.source, existing.source);
-        await archiveEntry(existing, 'superseded');
-        const entry = await createEntry({
+        const newEntry = await createEntry({
             ...incoming,
             conflictLog: [conflictEntry] as unknown as never,
         });
+        await archiveEntry(existing, 'superseded', newEntry.id);
         return {
             action: 'updated',
-            entry,
+            entry: newEntry,
             reason: `Incoming weighted confidence (${incomingWeighted}) higher than existing (${existingWeighted}). Existing archived.`,
         };
     }
@@ -204,7 +213,9 @@ async function escalateConflict(
     const path = await import('path');
 
     const id = `conflict_${Date.now()}`;
-    const filePath = path.join(process.cwd(), 'escalation', 'active', `${id}.md`);
+    const escalationDir = path.join(process.cwd(), 'escalation', 'active');
+    const filename = `${id}.md`;
+    const filePath = path.join(escalationDir, filename);
 
     const content = `# Escalation: ${id}
 
@@ -221,7 +232,12 @@ async function escalateConflict(
 
 ## HUMAN RESOLUTION
 
-<!-- Write your resolution here in plain language. Change Status to RESOLVED when done. -->
+<!-- Write your resolution as JSON in this format:
+{
+  "value": <the correct value>,
+  "summary": "one sentence summary"
+}
+Change Status to RESOLVED when done. -->
 `;
 
     await fs.writeFile(filePath, content, 'utf-8');

@@ -59,7 +59,7 @@ export async function createEntry(input: EntryInput): Promise<KnowledgeEntry> {
             validUntil: input.validUntil,
             createdBy: input.createdBy,
             isProtected: input.isProtected ?? false,
-            conflictLog: [],
+            conflictLog: (input.conflictLog ?? []) as Prisma.InputJsonValue,
         },
     });
 }
@@ -116,15 +116,35 @@ export async function archiveEntry(
                 supersededBy: supersededBy ?? null,
             },
         }),
-        prisma.knowledgeEntry.delete({
+        prisma.knowledgeEntry.update({
             where: { id: entry.id },
+            data: { 
+                valueSummary: '[ARCHIVED]',
+                confidence: 0,
+                updatedAt: new Date()
+            },
         }),
     ]);
 }
 
 // ─── Guards ──────────────────────────────────────────────────────────────────
 
+const STAFF_NAMESPACES = ['system', 'agent'];
+const STAFF_WRITERS = ['seed', 'archivist', 'attendant'];
+
 export async function isProtectedEntry(query: EntryQuery): Promise<boolean> {
     const entry = await findEntry(query);
     return entry?.isProtected ?? false;
+}
+
+export function isStaffNamespace(entityType: string): boolean {
+    return STAFF_NAMESPACES.includes(entityType);
+}
+
+export function canWriteToStaffNamespace(createdBy: string, entityType: string, key?: string): boolean {
+    if (!isStaffNamespace(entityType)) return true;
+    if (STAFF_WRITERS.includes(createdBy)) return true;
+    // Allow agents to write their own attendant_state only
+    if (entityType === 'agent' && key === 'attendant_state') return true;
+    return false;
 }
