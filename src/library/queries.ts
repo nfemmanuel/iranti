@@ -148,7 +148,7 @@ export async function archiveEntry(
 
 // ─── Guards ──────────────────────────────────────────────────────────────────
 
-const STAFF_NAMESPACES = ['system', 'agent'];
+const STAFF_NAMESPACES = ['system'];
 const STAFF_WRITERS = new Set([
     'seed',
     'archivist',
@@ -166,15 +166,9 @@ export function isStaffNamespace(entityType: string): boolean {
     return STAFF_NAMESPACES.includes(entityType);
 }
 
-export function canWriteToStaffNamespace(createdBy: string, entityType: string, key?: string): boolean {
+export function canWriteToStaffNamespace(createdBy: string, entityType: string): boolean {
     if (!isStaffNamespace(entityType)) return true;
-    
-    const writer = createdBy.toLowerCase();
-    if (STAFF_WRITERS.has(writer)) return true;
-    
-    // Allow agents to write their own attendant_state only
-    if (entityType === 'agent' && key === 'attendant_state') return true;
-    return false;
+    return STAFF_WRITERS.has(createdBy.toLowerCase());
 }
 
 // ─── Conflict Log ────────────────────────────────────────────────────────────

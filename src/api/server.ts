@@ -8,7 +8,7 @@ import { memoryRoutes } from './routes/memory';
 import { agentRoutes } from './routes/agents';
 import { authenticate } from './middleware/auth';
 import { snapshot, reset } from '../lib/metrics';
-import { resetLLMBudget } from '../lib/llm';
+import { requestContext } from '../lib/requestContext';
 
 const app = express();
 
@@ -22,8 +22,7 @@ const ROUTES = {
 
 app.use((req, res, next) => {
     console.log(`${req.method} ${req.path}`);
-    resetLLMBudget();
-    next();
+    requestContext.run({ llmCount: 0 }, () => next());
 });
 
 app.use(express.json());

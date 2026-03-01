@@ -1,18 +1,18 @@
 // ─── Provider Interface ──────────────────────────────────────────────────────
 
 import { inc, timeStart, timeEnd } from './metrics';
+import { getContext } from './requestContext';
 
-let requestLLMCount = 0;
 const MAX_LLM_CALLS_PER_REQUEST = 10;
 
-export function resetLLMBudget() {
-    requestLLMCount = 0;
-}
-
 function incrementLLMBudget() {
-    requestLLMCount++;
-    if (requestLLMCount > MAX_LLM_CALLS_PER_REQUEST) {
-        throw new Error(`LLM call budget exceeded (${MAX_LLM_CALLS_PER_REQUEST} max per request)`);
+    const ctx = getContext();
+    if (!ctx) {
+        return;
+    }
+    ctx.llmCount += 1;
+    if (ctx.llmCount > MAX_LLM_CALLS_PER_REQUEST) {
+        throw new Error('LLM call budget exceeded for request.');
     }
 }
 

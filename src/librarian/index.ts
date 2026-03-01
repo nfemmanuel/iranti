@@ -41,6 +41,14 @@ export async function librarianWrite(input: EntryInput): Promise<{
     input = clampConfidence(input);
     input.createdBy = input.createdBy.toLowerCase();
     
+    // Reserved key: attendant_state
+    if (input.entityType === 'agent' && input.key === 'attendant_state') {
+        const isStaff = new Set(['attendant', 'librarian', 'archivist', 'system', 'seed']).has(input.createdBy);
+        if (!isStaff) {
+            throw new Error('Write blocked: attendant_state is reserved for staff.');
+        }
+    }
+    
     // Idempotency check (outside lock)
     if (input.requestId) {
         const receipt = await getWriteReceipt(input.requestId);
@@ -67,7 +75,7 @@ export async function librarianWrite(input: EntryInput): Promise<{
         { entityType: input.entityType, entityId: input.entityId, key: input.key },
         async (tx) => {
             // P0: Enforce Staff namespace write ban
-            if (!canWriteToStaffNamespace(input.createdBy, input.entityType, input.key)) {
+            if (!canWriteToStaffNamespace(input.createdBy, input.entityType)) {
                 timeEnd('librarian.write_ms', t0);
                 return {
                     action: 'rejected',
