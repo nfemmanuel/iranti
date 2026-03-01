@@ -249,6 +249,42 @@ crew.kickoff()
 
 ---
 
+## Middleware for Any LLM
+
+Add Iranti memory to Claude, ChatGPT, or any LLM conversation:
+
+```python
+from clients.middleware.iranti_middleware import IrantiMiddleware
+
+middleware = IrantiMiddleware(
+    agent_id="my_agent",
+    iranti_url="http://localhost:3001"
+)
+
+# Before sending to LLM
+augmented = middleware.before_send(
+    user_message="What was the blocker?",
+    conversation_history=[...]
+)
+
+# After receiving response
+middleware.after_receive(
+    response="The blocker is...",
+    conversation_history=[...]
+)
+```
+
+**How it works**:
+1. `before_send()` calls `observe()` with conversation context
+2. Forgotten facts are prepended as `[MEMORY: ...]`
+3. `after_receive()` extracts new facts and saves them (best-effort)
+
+**Browser integration**: Chrome extension for claude.ai and chat.openai.com. See [`clients/middleware/BROWSER_INTEGRATION.md`](clients/middleware/BROWSER_INTEGRATION.md).
+
+**Examples**: [`clients/middleware/claude_example.py`](clients/middleware/claude_example.py)
+
+---
+
 ## Architecture
 
 Iranti has four internal components:
@@ -348,6 +384,7 @@ src/
 
 clients/
 ├── python/             — Python client (IrantiClient)
+├── middleware/         — LLM conversation wrappers (Claude, ChatGPT, etc.)
 └── experiments/        — Validated experiments with real results
 
 docs/
