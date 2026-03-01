@@ -251,7 +251,7 @@ crew.kickoff()
 
 ## Middleware for Any LLM
 
-Add Iranti memory to Claude, ChatGPT, or any LLM conversation:
+Add Iranti memory to Claude, ChatGPT, or any LLM via API wrapper:
 
 ```python
 from clients.middleware.iranti_middleware import IrantiMiddleware
@@ -279,7 +279,7 @@ middleware.after_receive(
 2. Forgotten facts are prepended as `[MEMORY: ...]`
 3. `after_receive()` extracts new facts and saves them (best-effort)
 
-**Browser integration**: Chrome extension for claude.ai and chat.openai.com. See [`clients/middleware/BROWSER_INTEGRATION.md`](clients/middleware/BROWSER_INTEGRATION.md).
+**Note**: Browser extensions are blocked by ChatGPT and Claude's Content Security Policy. Use API-based middleware instead.
 
 **Examples**: [`clients/middleware/claude_example.py`](clients/middleware/claude_example.py)
 
