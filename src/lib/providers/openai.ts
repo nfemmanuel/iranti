@@ -1,4 +1,4 @@
-import { LLMProvider, LLMMessage, LLMResponse } from '../llm';
+import { LLMProvider, LLMMessage, LLMResponse, CompleteOptions } from '../llm';
 
 interface OpenAIResponse {
     choices: Array<{
@@ -24,7 +24,7 @@ class OpenAIProvider implements LLMProvider {
         }
     }
 
-    async complete(messages: LLMMessage[], maxTokens: number = 1024): Promise<LLMResponse> {
+    async complete(messages: LLMMessage[], options?: CompleteOptions): Promise<LLMResponse> {
         const response = await fetch(`${this.baseUrl}/chat/completions`, {
             method: 'POST',
             headers: {
@@ -34,7 +34,7 @@ class OpenAIProvider implements LLMProvider {
             body: JSON.stringify({
                 model: this.model,
                 messages: messages.map((m) => ({ role: m.role, content: m.content })),
-                max_tokens: maxTokens,
+                max_tokens: options?.maxTokens ?? 1024,
             }),
         });
 

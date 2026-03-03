@@ -22,7 +22,7 @@ load_dotenv()
 # Configuration
 ENTITY = "project/stellar_drift"
 IRANTI_URL = "http://localhost:3001"
-IRANTI_API_KEY = os.getenv("IRANTI_API_KEY", "dev_test_key_12345")
+IRANTI_API_KEY = os.getenv("IRANTI_API_KEY", "dev-benchmark-key")
 
 # Initialize Iranti
 iranti = IrantiClient(base_url=IRANTI_URL, api_key=IRANTI_API_KEY)

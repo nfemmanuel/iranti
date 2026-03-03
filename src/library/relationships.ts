@@ -1,4 +1,4 @@
-import { prisma } from './client';
+import { getDb } from './client';
 import { Prisma } from '../generated/prisma/client';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -34,7 +34,7 @@ export interface RelatedEntity {
 // ─── Write ───────────────────────────────────────────────────────────────────
 
 export async function createRelationship(input: RelationshipInput): Promise<Relationship> {
-    const result = await prisma.entityRelationship.upsert({
+    const result = await getDb().entityRelationship.upsert({
         where: {
             fromType_fromId_relationshipType_toType_toId: {
                 fromType: input.fromType,
@@ -71,23 +71,23 @@ export async function getRelated(
     entityId: string
 ): Promise<RelatedEntity[]> {
     const [outbound, inbound] = await Promise.all([
-        prisma.entityRelationship.findMany({
+        getDb().entityRelationship.findMany({
             where: { fromType: entityType, fromId: entityId },
         }),
-        prisma.entityRelationship.findMany({
+        getDb().entityRelationship.findMany({
             where: { toType: entityType, toId: entityId },
         }),
     ]);
 
     const results: RelatedEntity[] = [
-        ...outbound.map((r) => ({
+        ...outbound.map((r: any) => ({
             entityType: r.toType,
             entityId: r.toId,
             relationshipType: r.relationshipType,
             direction: 'outbound' as const,
             properties: (r.properties ?? {}) as Record<string, unknown>,
         })),
-        ...inbound.map((r) => ({
+        ...inbound.map((r: any) => ({
             entityType: r.fromType,
             entityId: r.fromId,
             relationshipType: r.relationshipType,
@@ -132,7 +132,7 @@ export async function deleteRelationship(
     toType: string,
     toId: string
 ): Promise<void> {
-    await prisma.entityRelationship.delete({
+    await getDb().entityRelationship.delete({
         where: {
             fromType_fromId_relationshipType_toType_toId: {
                 fromType,

@@ -1,4 +1,4 @@
-import { prisma } from './client';
+import { getDb } from './client';
 import { Prisma } from '../generated/prisma/client';
 import { createRelationship } from './relationships';
 
@@ -35,7 +35,7 @@ export async function registerAgent(profile: AgentProfile): Promise<void> {
         registeredAt: new Date().toISOString(),
     };
 
-    await prisma.knowledgeEntry.upsert({
+    await getDb().knowledgeEntry.upsert({
         where: {
             entityType_entityId_key: {
                 entityType: 'agent',
@@ -69,7 +69,7 @@ export async function registerAgent(profile: AgentProfile): Promise<void> {
 // ─── Stats ───────────────────────────────────────────────────────────────────
 
 async function initStats(agentId: string): Promise<void> {
-    const existing = await prisma.knowledgeEntry.findUnique({
+    const existing = await getDb().knowledgeEntry.findUnique({
         where: {
             entityType_entityId_key: {
                 entityType: 'agent',
@@ -90,7 +90,7 @@ async function initStats(agentId: string): Promise<void> {
         isActive: true,
     };
 
-    await prisma.knowledgeEntry.create({
+    await getDb().knowledgeEntry.create({
         data: {
             entityType: 'agent',
             entityId: agentId,
@@ -111,7 +111,7 @@ export async function updateStats(
     action: 'created' | 'updated' | 'rejected' | 'escalated',
     confidence: number
 ): Promise<void> {
-    const entry = await prisma.knowledgeEntry.findUnique({
+    const entry = await getDb().knowledgeEntry.findUnique({
         where: {
             entityType_entityId_key: {
                 entityType: 'agent',
@@ -143,7 +143,7 @@ export async function updateStats(
     stats.lastSeen = new Date().toISOString();
     stats.isActive = true;
 
-    await prisma.knowledgeEntry.update({
+    await getDb().knowledgeEntry.update({
         where: {
             entityType_entityId_key: {
                 entityType: 'agent',
@@ -162,7 +162,7 @@ export async function updateStats(
 
 export async function getAgent(agentId: string): Promise<AgentRecord | null> {
     const [profileEntry, statsEntry] = await Promise.all([
-        prisma.knowledgeEntry.findUnique({
+        getDb().knowledgeEntry.findUnique({
             where: {
                 entityType_entityId_key: {
                     entityType: 'agent',
@@ -171,7 +171,7 @@ export async function getAgent(agentId: string): Promise<AgentRecord | null> {
                 },
             },
         }),
-        prisma.knowledgeEntry.findUnique({
+        getDb().knowledgeEntry.findUnique({
             where: {
                 entityType_entityId_key: {
                     entityType: 'agent',
@@ -194,7 +194,7 @@ export async function whoKnows(
     entityType: string,
     entityId: string
 ): Promise<Array<{ agentId: string; keys: string[]; totalContributions: number }>> {
-    const entries = await prisma.knowledgeEntry.findMany({
+    const entries = await getDb().knowledgeEntry.findMany({
         where: {
             entityType,
             entityId,
@@ -221,14 +221,14 @@ export async function whoKnows(
 }
 
 export async function listAgents(): Promise<AgentProfile[]> {
-    const entries = await prisma.knowledgeEntry.findMany({
+    const entries = await getDb().knowledgeEntry.findMany({
         where: {
             entityType: 'agent',
             key: 'profile',
         },
     });
 
-    return entries.map((e) => e.valueRaw as unknown as AgentProfile);
+    return entries.map((e: any) => e.valueRaw as unknown as AgentProfile);
 }
 
 // ─── Team Relationships ──────────────────────────────────────────────────────

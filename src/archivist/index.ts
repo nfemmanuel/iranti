@@ -246,9 +246,11 @@ Provide enrichment (non-authoritative):
 
 Respond with JSON: { "explanation": "...", "suggestedValidUntil": "..." or null, "normalizationWarnings": [...] }`;
 
-    const response = await complete(prompt, { temperature: 0.3 });
+    const response = await complete([
+        { role: 'user', content: prompt }
+    ], 1000);
     try {
-        return JSON.parse(response);
+        return JSON.parse(response.text);
     } catch {
         return null;
     }

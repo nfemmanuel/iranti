@@ -8,7 +8,7 @@ from python.iranti import IrantiClient
 import os, json
 from datetime import datetime
 
-client = IrantiClient(base_url="http://localhost:3001", api_key=os.getenv("IRANTI_API_KEY", "dev_test_key_12345"))
+client = IrantiClient(base_url="http://localhost:3001", api_key=os.getenv("IRANTI_API_KEY", "dev-benchmark-key"))
 
 ENTITY = "project/resonance_field"
 FACTS = {
@@ -57,3 +57,4 @@ print(f"Facts written: {len(FACTS)}/5 (PASS)")
 print(f"Metadata saved: results/goal4_metadata.json")
 print("\nProcess 1 complete. Now run goal4b_read.py in a NEW process.")
 print("This process will now exit completely.\n")
+

@@ -55,7 +55,7 @@ and not present in any public dataset or LLM training corpus.
 
 iranti = IrantiClient(
     base_url='http://localhost:3001',
-    api_key='dev_test_key_12345',
+    api_key=os.getenv("IRANTI_API_KEY", "dev-benchmark-key"),
 )
 
 # ─── Iranti Tools ─────────────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-import { LLMProvider, LLMMessage, LLMResponse } from '../llm';
+import { LLMProvider, LLMMessage, LLMResponse, CompleteOptions } from '../llm';
 
 interface MistralResponse {
     choices: Array<{
@@ -22,7 +22,9 @@ class MistralProvider implements LLMProvider {
         }
     }
 
-    async complete(messages: LLMMessage[], maxTokens: number = 1024): Promise<LLMResponse> {
+    async complete(messages: LLMMessage[], options?: CompleteOptions): Promise<LLMResponse> {
+        const maxTokens = options?.maxTokens ?? 1024;
+        const model = options?.model ?? this.model;
         const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
             method: 'POST',
             headers: {
@@ -30,7 +32,7 @@ class MistralProvider implements LLMProvider {
                 'Authorization': `Bearer ${this.apiKey}`,
             },
             body: JSON.stringify({
-                model: this.model,
+                model,
                 messages: messages.map((m) => ({ role: m.role, content: m.content })),
                 max_tokens: maxTokens,
             }),

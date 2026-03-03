@@ -151,10 +151,29 @@ async function resolveConflict(
     const policy = await getConflictPolicy(tx);
     const inputWithTTL = applyTTL(incoming, policy);
     
-    // Exact duplicate — keep higher score
+    // IMMEDIATE ESCALATION: Identical confidence values
+    if (existing.confidence === inputWithTTL.confidence) {
+        await logDecision(existing.id, 'CONFLICT_ESCALATED', inputWithTTL, existing.confidence, inputWithTTL.confidence, 'Identical confidence requires human judgment', false, tx);
+        return await escalateConflict(existing, inputWithTTL, tx);
+    }
+    
+    // Exact duplicate — escalate if equal scores, otherwise keep higher score
     if (JSON.stringify(existing.valueRaw) === JSON.stringify(inputWithTTL.valueRaw)) {
         const existingScore = scoreCandidate({ confidence: existing.confidence, source: existing.source, validUntil: existing.validUntil, policy });
         const incomingScore = scoreCandidate({ confidence: inputWithTTL.confidence, source: inputWithTTL.source, validUntil: inputWithTTL.validUntil, policy });
+        
+        // Check raw confidence values for exact equality first
+        if (existing.confidence === inputWithTTL.confidence && existing.source === inputWithTTL.source) {
+            // Truly identical - escalate
+            await logDecision(existing.id, 'CONFLICT_ESCALATED', inputWithTTL, existingScore, incomingScore, 'Duplicate value with identical confidence and source', false, tx);
+            return await escalateConflict(existing, inputWithTTL, tx);
+        }
+        
+        if (Math.abs(incomingScore - existingScore) < 1.0) {
+            // Equal scores - escalate for human decision
+            await logDecision(existing.id, 'CONFLICT_ESCALATED', inputWithTTL, existingScore, incomingScore, 'Duplicate value with equal scores', false, tx);
+            return await escalateConflict(existing, inputWithTTL, tx);
+        }
         
         if (incomingScore > existingScore) {
             const entry = await updateEntry(
@@ -167,9 +186,9 @@ async function resolveConflict(
             return { action: 'updated', entry, reason: 'Duplicate value. Updated confidence.' };
         }
         
-        await logDecision(existing.id, 'CONFLICT_REJECTED', inputWithTTL, existingScore, incomingScore, 'Duplicate value, equal or lower score', false, tx);
+        await logDecision(existing.id, 'CONFLICT_REJECTED', inputWithTTL, existingScore, incomingScore, 'Duplicate value, lower score', false, tx);
         await saveReceipt(inputWithTTL, 'rejected', existing.id, tx);
-        return { action: 'rejected', reason: 'Duplicate value with equal or lower score.' };
+        return { action: 'rejected', reason: 'Duplicate value with lower score.' };
     }
     
     // Rule 1: Authoritative sources
@@ -197,6 +216,19 @@ async function resolveConflict(
     const incomingScore = scoreCandidate({ confidence: inputWithTTL.confidence, source: inputWithTTL.source, validUntil: inputWithTTL.validUntil, policy });
     const gap = Math.abs(incomingScore - existingScore);
     
+    // Check raw confidence values for exact equality first
+    if (existing.confidence === inputWithTTL.confidence && existing.source === inputWithTTL.source) {
+        // Truly identical - escalate
+        await logDecision(existing.id, 'CONFLICT_ESCALATED', inputWithTTL, existingScore, incomingScore, 'Identical confidence and source require human judgment', false, tx);
+        return await escalateConflict(existing, inputWithTTL, tx);
+    }
+    
+    // Equal scores - escalate for human decision
+    if (gap < 1.0) {
+        await logDecision(existing.id, 'CONFLICT_ESCALATED', inputWithTTL, existingScore, incomingScore, 'Equal confidence scores require human judgment', false, tx);
+        return await escalateConflict(existing, inputWithTTL, tx);
+    }
+    
     if (gap >= policy.minConfidenceToOverwrite) {
         if (incomingScore > existingScore) {
             const entry = await replaceEntry(existing, inputWithTTL, tx);
@@ -221,13 +253,31 @@ async function resolveConflict(
 }
 
 async function replaceEntry(existing: KnowledgeEntry, incoming: EntryInput, tx: any): Promise<KnowledgeEntry> {
-    const entry = await createEntry(incoming, tx);
+    // Archive prior value, then update the same identity row.
+    // This avoids unique-key insert failures on (entityType, entityId, key).
     await archiveEntry(existing, 'superseded', {
         entityType: existing.entityType,
         entityId: existing.entityId,
         key: existing.key,
     }, tx);
-    return entry;
+
+    return updateEntry(
+        {
+            entityType: existing.entityType,
+            entityId: existing.entityId,
+            key: existing.key,
+        },
+        {
+            valueRaw: incoming.valueRaw,
+            valueSummary: incoming.valueSummary,
+            confidence: incoming.confidence,
+            source: incoming.source,
+            validUntil: incoming.validUntil,
+            createdBy: incoming.createdBy,
+            isProtected: incoming.isProtected ?? existing.isProtected,
+        },
+        tx
+    );
 }
 
 async function logDecision(entryId: number, type: string, incoming: EntryInput, existingScore: number, incomingScore: number, reason: string, usedLLM: boolean, tx: any) {

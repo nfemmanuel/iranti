@@ -25,12 +25,15 @@ License: AGPL
 Iranti has four internal components collectively called The Staff:
 
 ### The Library
-The knowledge base itself. PostgreSQL database with three tables:
+The knowledge base itself. PostgreSQL database with five core tables:
 - `knowledge_base` — active truth. What agents read from and write to.
 - `archive` — challenged truth. Superseded or contradicted entries with full
   provenance. Never deleted.
 - `entity_relationships` — directional relationships between entities. Caller-
   defined relationship types (MEMBER_OF, PART_OF, AUTHORED, etc.).
+- `entities` — canonical entity identity registry (`entityType + entityId`).
+- `entity_aliases` — normalized aliases mapped to canonical entities for
+  resolution across detector/extractor/query variants.
 
 There is also a protected Staff Namespace: entries where `entityType = 'system'`.
 No agent can write here. Only the seed script and explicit system operations
@@ -160,6 +163,7 @@ iranti/
 │   ├── library/
 │   │   ├── client.ts           — Prisma singleton
 │   │   ├── queries.ts          — All KB read/write operations
+│   │   ├── entity-resolution.ts — Canonical entity resolution + alias mapping
 │   │   ├── relationships.ts    — Entity relationship graph
 │   │   └── agent-registry.ts  — Agent profiles, stats, whoKnows
 │   ├── librarian/
@@ -190,12 +194,12 @@ iranti/
 │   │   ├── middleware/
 │   │   │   └── auth.ts         — API key authentication
 │   │   └── routes/
-│   │       ├── knowledge.ts    — Write, ingest, query, relationships
+│   │       ├── knowledge.ts    — Write, ingest, query, relationships, resolution
 │   │       ├── agents.ts       — Agent registration and management
 │   │       └── memory.ts       — Handshake, reconvene, whoKnows, maintenance
 │   └── types.ts                — Shared TypeScript types
 ├── prisma/
-│   ├── schema.prisma           — KnowledgeEntry, Archive, EntityRelationship
+│   ├── schema.prisma           — KnowledgeEntry, Archive, EntityRelationship, Entity, EntityAlias
 │   └── migrations/             — Migration history
 ├── scripts/
 │   ├── seed.ts                 — Seeds Staff Namespace
@@ -273,6 +277,32 @@ Same as knowledge_base, plus:
 
 Unique constraint: `(fromType, fromId, relationshipType, toType, toId)`.
 Indexed on both `(fromType, fromId)` and `(toType, toId)` for fast traversal.
+
+### entities
+| Column | Type | Notes |
+|---|---|---|
+| entityType | String | Canonical entity type |
+| entityId | String | Canonical entity ID |
+| displayName | String | Human-readable label |
+| createdAt | DateTime | Creation timestamp |
+
+Primary key: `(entityType, entityId)`.
+
+### entity_aliases
+| Column | Type | Notes |
+|---|---|---|
+| id | Int | Auto-increment primary key |
+| entityType | String | Alias type scope |
+| aliasNorm | String | Normalized alias key |
+| rawAlias | String | Raw alias text as observed |
+| canonicalEntityType | String | Canonical target type |
+| canonicalEntityId | String | Canonical target ID |
+| source | String | Where alias came from (observe/query/write/etc.) |
+| confidence | Int | Confidence attached to alias mapping |
+| createdAt | DateTime | Creation timestamp |
+
+Unique constraint: `(entityType, aliasNorm)`.
+Indexed on `(canonicalEntityType, canonicalEntityId)`.
 
 ---
 

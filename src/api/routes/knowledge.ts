@@ -1,5 +1,46 @@
 import { Router, Request, Response } from 'express';
 import { Iranti } from '../../sdk';
+import { addAlias, listAliases, parseEntityString, resolveEntity } from '../../library/entity-resolution';
+
+function heuristicEntityId(name: string): string {
+    return name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '');
+}
+
+function toProjectStyleEntityId(name: string): string {
+    const normalized = heuristicEntityId(name);
+    if (!normalized) return '';
+    return normalized.startsWith('project_') ? normalized : `project_${normalized}`;
+}
+
+function parseResolveTarget(entity: unknown): { entityType: string; entityId: string; rawName: string } {
+    if (typeof entity !== 'string' || entity.trim().length === 0) {
+        throw new Error('entity must be a non-empty string.');
+    }
+
+    const raw = entity.trim();
+    if (raw.includes('/')) {
+        const parsed = parseEntityString(raw);
+        return {
+            entityType: parsed.entityType,
+            entityId: parsed.entityId,
+            rawName: raw,
+        };
+    }
+
+    const entityId = toProjectStyleEntityId(raw);
+    if (!entityId) {
+        throw new Error(`Unable to resolve raw entity name: "${raw}"`);
+    }
+
+    return {
+        entityType: 'project',
+        entityId,
+        rawName: raw,
+    };
+}
 
 export function knowledgeRoutes(iranti: Iranti): Router {
     const router = Router();
@@ -18,6 +59,68 @@ export function knowledgeRoutes(iranti: Iranti): Router {
     router.post('/ingest', async (req: Request, res: Response) => {
         try {
             const result = await iranti.ingest(req.body);
+            res.json(result);
+        } catch (err) {
+            res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+    });
+
+    // POST /resolve
+    router.post('/resolve', async (req: Request, res: Response) => {
+        try {
+            const { entity, createIfMissing, aliases, source, confidence, agent } = req.body ?? {};
+            const parsed = parseResolveTarget(entity);
+            const resolved = await resolveEntity({
+                entityType: parsed.entityType,
+                entityId: parsed.entityId,
+                rawName: parsed.rawName,
+                aliases: Array.isArray(aliases) ? aliases : [parsed.rawName],
+                source: source ?? agent ?? 'api',
+                confidence: typeof confidence === 'number' ? confidence : undefined,
+                createIfMissing: createIfMissing !== false,
+            });
+
+            res.json({
+                canonicalEntity: resolved.canonicalEntity,
+                canonicalType: resolved.entityType,
+                canonicalId: resolved.entityId,
+                addedAliases: resolved.addedAliases,
+                matchedBy: resolved.matchedBy,
+                entityKey: resolved.canonicalEntity,
+            });
+        } catch (err) {
+            res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+    });
+
+    // POST /alias
+    router.post('/alias', async (req: Request, res: Response) => {
+        try {
+            const { canonicalEntity, alias, source, confidence, force } = req.body ?? {};
+            const result = await addAlias({
+                canonicalEntity,
+                alias,
+                source: source ?? 'api',
+                confidence: typeof confidence === 'number' ? confidence : undefined,
+                force: Boolean(force),
+            });
+
+            res.json({
+                ok: true,
+                canonicalEntity: result.canonicalEntity,
+                aliasNormalized: result.aliasNormalized,
+                created: result.created,
+            });
+        } catch (err) {
+            res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+    });
+
+    // GET /entity/:entityType/:entityId/aliases
+    router.get('/entity/:entityType/:entityId/aliases', async (req: Request, res: Response) => {
+        try {
+            const { entityType, entityId } = req.params;
+            const result = await listAliases(`${entityType}/${entityId}`);
             res.json(result);
         } catch (err) {
             res.status(400).json({ error: err instanceof Error ? err.message : String(err) });

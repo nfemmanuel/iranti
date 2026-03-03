@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { librarianWrite } from '../src/librarian/index';
-import { prisma } from '../src/library/client';
+import { getDb } from '../src/library/client';
 
 async function testArchiveTraceability() {
     console.log('Testing Archive Traceability...\n');
@@ -12,10 +12,10 @@ async function testArchiveTraceability() {
     };
 
     // Clean up any existing test data
-    await prisma.knowledgeEntry.deleteMany({
+    await getDb().knowledgeEntry.deleteMany({
         where: testEntity,
     });
-    await prisma.archive.deleteMany({
+    await getDb().archive.deleteMany({
         where: testEntity,
     });
 
@@ -55,7 +55,7 @@ async function testArchiveTraceability() {
 
     // Test 3: Verify archive entry exists
     console.log('Test 3: Verify archive entry');
-    const archiveEntries = await prisma.archive.findMany({
+    const archiveEntries = await getDb().archive.findMany({
         where: testEntity,
     });
 
@@ -117,7 +117,7 @@ async function testArchiveTraceability() {
 
     // Test 6: Verify KB has new value
     console.log('Test 6: Verify KB has new value');
-    const currentEntry = await prisma.knowledgeEntry.findUnique({
+    const currentEntry = await getDb().knowledgeEntry.findUnique({
         where: {
             entityType_entityId_key: testEntity,
         },
@@ -153,8 +153,8 @@ async function testArchiveTraceability() {
     console.log('  ✓ PASSED: conflictLog preserved\n');
 
     // Cleanup
-    await prisma.knowledgeEntry.deleteMany({ where: testEntity });
-    await prisma.archive.deleteMany({ where: testEntity });
+    await getDb().knowledgeEntry.deleteMany({ where: testEntity });
+    await getDb().archive.deleteMany({ where: testEntity });
 
     console.log('All tests passed! Archive traceability is working correctly.');
     process.exit(0);

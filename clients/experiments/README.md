@@ -52,6 +52,17 @@ python treatment/crew.py
 python compare.py
 ```
 
+### 60-Second Memory Demo
+```bash
+python demo_entity_memory_loop.py
+```
+This prints:
+- detected entities
+- resolved canonical entities
+- injected keys
+- already-present count
+- HTTP status metadata for write/query/observe
+
 ## What Gets Measured
 
 - **Consistency**: % of fields that match between researcher and analyst

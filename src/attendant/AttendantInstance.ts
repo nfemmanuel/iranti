@@ -1,6 +1,7 @@
 import { route } from '../lib/router';
 import { queryEntry, findEntriesByEntity } from '../library/queries';
 import { getRelatedDeep } from '../library/relationships';
+import { parseEntityString, resolveEntity } from '../library/entity-resolution';
 import { getDb } from '../library/client';
 import { Prisma } from '../generated/prisma/client';
 import { EntryQuery, QueryResult } from '../types';
@@ -15,6 +16,8 @@ const ATTENDANT_RULES_QUERY: EntryQuery = {
     key: 'operating_rules',
 };
 const CONTEXT_RECOVERY_THRESHOLD = 20;  // LLM calls before context recovery
+const ENTITY_DETECTION_WINDOW_CHARS = 1500;
+const MIN_ENTITY_CONFIDENCE = 0.75;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -46,6 +49,7 @@ export interface WorkingMemoryBrief {
 export interface ObserveInput {
     currentContext: string;
     maxFacts?: number;          // default 5 — don't overwhelm context
+    entityHints?: string[];     // deterministic canonical entities from caller
 }
 
 export interface FactInjection {
@@ -61,6 +65,110 @@ export interface ObserveResult {
     entitiesDetected: string[];       // entities found in context
     alreadyPresent: number;           // facts skipped (already in context)
     totalFound: number;               // total facts found before filtering
+    entitiesResolved?: Array<{
+        name: string;
+        input: string;
+        canonicalEntity: string;
+        confidence: number;
+        matchedBy: 'exact' | 'alias' | 'created' | 'hint';
+    }>;
+    debug?: {
+        skipped?: 'empty_context';
+        contextLength: number;
+        detectionWindowChars: number;
+        detectedCandidates: number;
+        keptCandidates: number;
+        hintsProvided?: number;
+        hintsResolved?: number;
+        dropped: Array<{ name: string; reason: string }>;
+    };
+}
+
+type EntityCandidate = {
+    type: string;
+    name: string;
+    id_guess: string;
+    confidence: number;
+    evidence: string;
+    start?: number;
+    end?: number;
+};
+
+function heuristicEntityId(name: string): string {
+    return name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '');
+}
+
+function extractFallbackCandidates(text: string): EntityCandidate[] {
+    const candidates: EntityCandidate[] = [];
+    const seen = new Set<string>();
+
+    // Explicit typed entities, e.g. project/atlas_2026
+    const typedRegex = /\b([a-z][a-z0-9_]*)\/([A-Za-z0-9][A-Za-z0-9_\-]{1,80})\b/g;
+    for (const match of text.matchAll(typedRegex)) {
+        const type = match[1];
+        const idGuess = heuristicEntityId(match[2]);
+        if (!idGuess) continue;
+        const evidence = match[0];
+        const key = `${type}/${idGuess}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        candidates.push({
+            type,
+            name: idGuess.replace(/_/g, ' '),
+            id_guess: idGuess,
+            confidence: 0.8,
+            evidence,
+            start: typeof match.index === 'number' ? match.index : undefined,
+            end: typeof match.index === 'number' ? match.index + evidence.length : undefined,
+        });
+    }
+
+    // Named project mentions, e.g. "Project Atlas 2026"
+    const projectRegex = /\bProject\s+([A-Z0-9][A-Za-z0-9_\-]*(?:\s+[A-Z0-9][A-Za-z0-9_\-]*){0,4})\b/g;
+    for (const match of text.matchAll(projectRegex)) {
+        const name = `Project ${match[1]}`.trim();
+        const normalized = heuristicEntityId(match[1]);
+        const idGuess = normalized ? `project_${normalized}` : '';
+        if (!idGuess) continue;
+        const key = `project/${idGuess}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        candidates.push({
+            type: 'project',
+            name,
+            id_guess: idGuess,
+            confidence: 0.78,
+            evidence: name,
+            start: typeof match.index === 'number' ? match.index : undefined,
+            end: typeof match.index === 'number' ? match.index + name.length : undefined,
+        });
+    }
+
+    // Capitalized multi-word names fallback, e.g. "Atlas Initiative"
+    const titleCaseRegex = /\b([A-Z][A-Za-z0-9]*(?:\s+[A-Z][A-Za-z0-9]*){1,3})\b/g;
+    for (const match of text.matchAll(titleCaseRegex)) {
+        const name = match[1].trim();
+        const normalized = heuristicEntityId(name);
+        if (!normalized) continue;
+        const idGuess = `project_${normalized}`;
+        const key = `project/${idGuess}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        candidates.push({
+            type: 'project',
+            name,
+            id_guess: idGuess,
+            confidence: 0.75,
+            evidence: name,
+            start: typeof match.index === 'number' ? match.index : undefined,
+            end: typeof match.index === 'number' ? match.index + name.length : undefined,
+        });
+    }
+
+    return candidates;
 }
 
 // ─── AttendantInstance ───────────────────────────────────────────────────────
@@ -196,83 +304,287 @@ export class AttendantInstance {
     async observe(input: ObserveInput): Promise<ObserveResult> {
         const t0 = timeStart();
         const maxFacts = input.maxFacts ?? 5;
+        const currentContext = input.currentContext ?? '';
+        const entityHints = Array.isArray(input.entityHints)
+            ? input.entityHints.filter((hint) => typeof hint === 'string' && hint.trim().length > 0)
+            : [];
 
-        // Step 1 — extract entity mentions from context
-        const entityResponse = await route('extraction', [
-            {
-                role: 'user',
-                content: `Extract all entity references from this text.
-An entity is a person, organization, project, technology, or named concept.
+        if (currentContext.trim().length === 0 && entityHints.length === 0) {
+            timeEnd('attendant.observe_ms', t0);
+            return {
+                facts: [],
+                entitiesDetected: [],
+                alreadyPresent: 0,
+                totalFound: 0,
+                entitiesResolved: [],
+                debug: {
+                    skipped: 'empty_context',
+                    contextLength: 0,
+                    detectionWindowChars: 0,
+                    detectedCandidates: 0,
+                    keptCandidates: 0,
+                    hintsProvided: 0,
+                    hintsResolved: 0,
+                    dropped: [],
+                },
+            };
+        }
 
-Return ONLY a JSON array of strings in format "entityType/entityId".
-Use snake_case for entityId. Infer entityType from context.
-Examples: "researcher/jane_smith", "company/openai", "project/iranti"
+        const detectionWindow = currentContext.length <= ENTITY_DETECTION_WINDOW_CHARS
+            ? currentContext
+            : currentContext.slice(-ENTITY_DETECTION_WINDOW_CHARS);
+        const droppedCandidates: Array<{ name: string; reason: string }> = [];
 
-If no clear entities, return: []
+        // Step 1 — extract entity mentions from context (if any text is available)
+        let parsedCandidates: EntityCandidate[] = [];
+        if (detectionWindow.trim().length > 0) {
+            const entityResponse = await route('extraction', [
+                {
+                    role: 'user',
+                    content: `Extract explicitly named entities from the text.
+An entity can be a person, organization, project, technology, or named concept.
+
+Return ONLY valid JSON as an array of objects in this exact shape:
+[
+  {
+    "type": "project",
+    "name": "Project Atlas",
+    "id_guess": "project_atlas",
+    "confidence": 0.92,
+    "evidence": "Project Atlas",
+    "start": 123,
+    "end": 136
+  }
+]
+
+Rules:
+- Only include entities explicitly named in the provided text.
+- Do not infer or carry over entities not present in the text.
+- If uncertain, omit.
+- If none are present, return [].
 
 Text:
-${input.currentContext.substring(0, 3000)}`,
-            },
-        ], 512);
+${detectionWindow}`,
+                },
+            ], 512);
 
-        let entitiesDetected: string[] = [];
-        try {
-            const clean = entityResponse.text.replace(/```json|```/g, '').trim();
-            const parsed = JSON.parse(clean);
-            if (Array.isArray(parsed)) {
-                entitiesDetected = parsed.filter((e) => typeof e === 'string' && e.includes('/'));
+            try {
+                const clean = entityResponse.text.replace(/```json|```/g, '').trim();
+                const parsed = JSON.parse(clean);
+                if (Array.isArray(parsed)) {
+                    for (const item of parsed) {
+                        if (typeof item === 'string') {
+                            const raw = item.trim();
+                            if (!raw) continue;
+
+                            if (raw.includes('/')) {
+                                const [type, ...rest] = raw.split('/');
+                                const idGuess = heuristicEntityId(rest.join('/'));
+                                if (!type || !idGuess) continue;
+                                parsedCandidates.push({
+                                    type,
+                                    name: idGuess.replace(/_/g, ' '),
+                                    id_guess: idGuess,
+                                    confidence: 0.9,
+                                    evidence: raw,
+                                });
+                            } else {
+                                const idGuess = heuristicEntityId(raw);
+                                if (!idGuess) continue;
+                                parsedCandidates.push({
+                                    type: 'project',
+                                    name: raw,
+                                    id_guess: `project_${idGuess}`,
+                                    confidence: 0.76,
+                                    evidence: raw,
+                                });
+                            }
+                            continue;
+                        }
+
+                        if (!item || typeof item !== 'object') continue;
+                        const candidate = item as Partial<EntityCandidate>;
+                        if (
+                            typeof candidate.type === 'string' &&
+                            typeof candidate.name === 'string' &&
+                            typeof candidate.id_guess === 'string' &&
+                            typeof candidate.confidence === 'number' &&
+                            typeof candidate.evidence === 'string'
+                        ) {
+                            parsedCandidates.push({
+                                type: candidate.type,
+                                name: candidate.name,
+                                id_guess: candidate.id_guess,
+                                confidence: candidate.confidence,
+                                evidence: candidate.evidence,
+                                start: candidate.start,
+                                end: candidate.end,
+                            });
+                        }
+                    }
+                }
+            } catch {
+                droppedCandidates.push({ name: 'parse_error', reason: 'invalid_json' });
             }
-        } catch {
-            // extraction failed — return empty result gracefully
-            timeEnd('attendant.observe_ms', t0);
-            return { facts: [], entitiesDetected: [], alreadyPresent: 0, totalFound: 0 };
+
+            if (parsedCandidates.length === 0) {
+                parsedCandidates = extractFallbackCandidates(detectionWindow);
+                if (parsedCandidates.length > 0) {
+                    droppedCandidates.push({ name: 'fallback_extraction', reason: 'heuristic_used' });
+                }
+            }
         }
 
-        if (entitiesDetected.length === 0) {
-            timeEnd('attendant.observe_ms', t0);
-            return { facts: [], entitiesDetected: [], alreadyPresent: 0, totalFound: 0 };
+        const gatedCandidates: EntityCandidate[] = [];
+        for (const candidate of parsedCandidates) {
+            if (candidate.confidence < MIN_ENTITY_CONFIDENCE) {
+                droppedCandidates.push({ name: candidate.name, reason: 'low_confidence' });
+                continue;
+            }
+            const evidenceLower = candidate.evidence.toLowerCase().trim();
+            if (!evidenceLower || !detectionWindow.toLowerCase().includes(evidenceLower)) {
+                droppedCandidates.push({ name: candidate.name, reason: 'missing_evidence' });
+                continue;
+            }
+            gatedCandidates.push(candidate);
         }
 
-        // Step 2 — query Library for facts about detected entities (with key prioritization)
+        if (gatedCandidates.length === 0 && entityHints.length === 0) {
+            timeEnd('attendant.observe_ms', t0);
+            return {
+                facts: [],
+                entitiesDetected: [],
+                alreadyPresent: 0,
+                totalFound: 0,
+                entitiesResolved: [],
+                debug: {
+                    contextLength: currentContext.length,
+                    detectionWindowChars: detectionWindow.length,
+                    detectedCandidates: parsedCandidates.length,
+                    keptCandidates: 0,
+                    hintsProvided: entityHints.length,
+                    hintsResolved: 0,
+                    dropped: droppedCandidates,
+                },
+            };
+        }
+
+        // Step 2 — resolve hints and candidates to canonical entities, then query Library
         const policy = await getConflictPolicy();
         const maxEntities = policy.maxEntitiesPerObserve ?? 5;
         const maxKeysPerEntity = policy.maxKeysPerEntity ?? 5;
         const allFacts: FactInjection[] = [];
+        const entitiesResolved: ObserveResult['entitiesResolved'] = [];
+        const entitiesDetected = new Set<string>();
+        const resolvedEntities = new Map<string, {
+            entityType: string;
+            entityId: string;
+            canonicalEntity: string;
+            name: string;
+            input: string;
+            confidence: number;
+            matchedBy: 'exact' | 'alias' | 'created' | 'hint';
+        }>();
 
-        for (const entity of entitiesDetected.slice(0, maxEntities)) {
-            const parts = entity.split('/');
-            if (parts.length < 2) continue;
-            const entityType = parts[0];
-            const entityId = parts.slice(1).join('/');
-
+        for (const hint of entityHints) {
             try {
-                const allEntries = await findEntriesByEntity(entityType, entityId);
-                
-                // Priority keys first
-                const priorityKeys = policy.observeKeyPriority?.[entityType] ?? [];
-                const priorityEntries = allEntries.filter(e => priorityKeys.includes(e.key));
-                const remainingEntries = allEntries
-                    .filter(e => !priorityKeys.includes(e.key))
-                    .sort((a, b) => b.confidence - a.confidence);
-                
-                const selectedEntries = [...priorityEntries, ...remainingEntries].slice(0, maxKeysPerEntity);
-                
-                for (const entry of selectedEntries) {
-                    allFacts.push({
-                        entityKey: `${entityType}/${entityId}/${entry.key}`,
-                        summary: entry.valueSummary,
-                        value: entry.valueRaw,
-                        confidence: entry.confidence,
-                        source: entry.source,
+                const parsedHint = parseEntityString(hint);
+                const resolved = await resolveEntity({
+                    entityType: parsedHint.entityType,
+                    entityId: parsedHint.entityId,
+                    rawName: hint,
+                    aliases: [hint, parsedHint.entityId],
+                    source: 'observe_hint',
+                    confidence: 100,
+                    createIfMissing: false,
+                });
+
+                if (!resolvedEntities.has(resolved.canonicalEntity)) {
+                    resolvedEntities.set(resolved.canonicalEntity, {
+                        entityType: resolved.entityType,
+                        entityId: resolved.entityId,
+                        canonicalEntity: resolved.canonicalEntity,
+                        name: parsedHint.entityId.replace(/_/g, ' '),
+                        input: hint,
+                        confidence: 1,
+                        matchedBy: 'hint',
                     });
                 }
             } catch {
+                droppedCandidates.push({ name: hint, reason: 'invalid_or_unresolved_hint' });
                 continue;
             }
         }
 
+        for (const candidate of gatedCandidates.slice(0, maxEntities)) {
+            const fallbackEntity = `${candidate.type}/${candidate.id_guess}`;
+
+            try {
+                const resolved = await resolveEntity({
+                    entityType: candidate.type,
+                    entityId: candidate.id_guess,
+                    rawName: candidate.name,
+                    aliases: [
+                        candidate.name,
+                        candidate.evidence,
+                        fallbackEntity,
+                    ],
+                    source: 'observe',
+                    confidence: Math.round(candidate.confidence * 100),
+                    createIfMissing: false,
+                });
+
+                if (!resolvedEntities.has(resolved.canonicalEntity)) {
+                    resolvedEntities.set(resolved.canonicalEntity, {
+                        entityType: resolved.entityType,
+                        entityId: resolved.entityId,
+                        canonicalEntity: resolved.canonicalEntity,
+                        name: candidate.name,
+                        input: fallbackEntity,
+                        confidence: candidate.confidence,
+                        matchedBy: resolved.matchedBy,
+                    });
+                }
+            } catch {
+                droppedCandidates.push({ name: candidate.name, reason: 'unresolved' });
+                continue;
+            }
+        }
+
+        for (const resolvedInfo of Array.from(resolvedEntities.values()).slice(0, maxEntities)) {
+            entitiesDetected.add(resolvedInfo.canonicalEntity);
+            entitiesResolved?.push({
+                name: resolvedInfo.name,
+                input: resolvedInfo.input,
+                canonicalEntity: resolvedInfo.canonicalEntity,
+                confidence: resolvedInfo.confidence,
+                matchedBy: resolvedInfo.matchedBy,
+            });
+
+            const allEntries = await findEntriesByEntity(resolvedInfo.entityType, resolvedInfo.entityId);
+
+            // Priority keys first
+            const priorityKeys = policy.observeKeyPriority?.[resolvedInfo.entityType] ?? [];
+            const priorityEntries = allEntries.filter((e) => priorityKeys.includes(e.key));
+            const remainingEntries = allEntries
+                .filter((e) => !priorityKeys.includes(e.key))
+                .sort((a, b) => b.confidence - a.confidence);
+
+            const selectedEntries = [...priorityEntries, ...remainingEntries].slice(0, maxKeysPerEntity);
+
+            for (const entry of selectedEntries) {
+                allFacts.push({
+                    entityKey: `${resolvedInfo.entityType}/${resolvedInfo.entityId}/${entry.key}`,
+                    summary: entry.valueSummary,
+                    value: entry.valueRaw,
+                    confidence: entry.confidence,
+                    source: entry.source,
+                });
+            }
+        }
+
         // Step 3 — filter out facts already present in context
-        const contextLower = input.currentContext.toLowerCase();
+        const contextLower = currentContext.toLowerCase();
         let alreadyPresent = 0;
         const newFacts: FactInjection[] = [];
 
@@ -297,9 +609,19 @@ ${input.currentContext.substring(0, 3000)}`,
         timeEnd('attendant.observe_ms', t0);
         return {
             facts: topFacts,
-            entitiesDetected,
+            entitiesDetected: Array.from(entitiesDetected),
             alreadyPresent,
             totalFound: allFacts.length,
+            entitiesResolved,
+            debug: {
+                contextLength: currentContext.length,
+                detectionWindowChars: detectionWindow.length,
+                detectedCandidates: parsedCandidates.length,
+                keptCandidates: gatedCandidates.length,
+                hintsProvided: entityHints.length,
+                hintsResolved: entitiesResolved?.filter((e) => e.matchedBy === 'hint').length ?? 0,
+                dropped: droppedCandidates,
+            },
         };
     }
 

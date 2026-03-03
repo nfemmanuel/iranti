@@ -7,22 +7,22 @@ from dotenv import load_dotenv
 
 load_dotenv()
 BASE_URL = "http://localhost:3001"
-API_KEY = os.getenv("IRANTI_API_KEY", "dev_test_key_12345")
+API_KEY = os.getenv("IRANTI_API_KEY", "dev-benchmark-key")
 HEADERS = {"X-Iranti-Key": API_KEY, "Content-Type": "application/json"}
 ENTITY = "project/quantum_bridge"
 
 # Integration code starts here (line count begins)
 def write(key, value, summary, confidence):
-    return requests.post(f"{BASE_URL}/write", headers=HEADERS, json={"entity": ENTITY, "key": key, "value": {"data": value}, "summary": summary, "confidence": confidence, "source": "test", "agent": "integration_test"}).json()
+    return requests.post(f"{BASE_URL}/kb/write", headers=HEADERS, json={"entity": ENTITY, "key": key, "value": {"data": value}, "summary": summary, "confidence": confidence, "source": "test", "agent": "integration_test"}).json()
 
 def query(key):
-    return requests.get(f"{BASE_URL}/query/{ENTITY.replace('/', '/')}/{key}", headers=HEADERS).json()
+    return requests.get(f"{BASE_URL}/kb/query/{ENTITY.replace('/', '/')}/{key}", headers=HEADERS).json()
 
 def query_all():
-    return requests.get(f"{BASE_URL}/query/{ENTITY.replace('/', '/')}", headers=HEADERS).json()
+    return requests.get(f"{BASE_URL}/kb/query/{ENTITY.replace('/', '/')}", headers=HEADERS).json()
 
 def observe(context):
-    return requests.post(f"{BASE_URL}/observe", headers=HEADERS, json={"agent_id": "integration_test", "current_context": context, "max_facts": 10}).json()
+    return requests.post(f"{BASE_URL}/memory/observe", headers=HEADERS, json={"agentId": "integration_test", "currentContext": context, "maxFacts": 10}).json()
 # Integration code ends here (9 lines total)
 
 # Test the integration
@@ -67,3 +67,5 @@ print(f"Content verified: {passed}/3 ({'PASS' if passed == 3 else 'FAIL'})")
 print(f"\nOverall: {'PASSED' if score == 3 and passed == 3 else 'FAILED'}")
 print("\nConclusion: Iranti can be integrated with raw HTTP in 9 lines of Python.")
 print("No framework dependencies, no SDK required, just standard requests library.")
+
+

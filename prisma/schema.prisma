@@ -87,3 +87,32 @@ model WriteReceipt {
     @@index([entityType, entityId, key])
     @@map("write_receipts")
 }
+
+model Entity {
+    entityType  String
+    entityId    String
+    displayName String
+    createdAt   DateTime      @default(now())
+    aliases     EntityAlias[] @relation("EntityAliasToEntity")
+
+    @@id([entityType, entityId])
+    @@map("entities")
+}
+
+model EntityAlias {
+    id                  Int      @id @default(autoincrement())
+    entityType          String
+    aliasNorm           String
+    rawAlias            String
+    canonicalEntityType String
+    canonicalEntityId   String
+    source              String
+    confidence          Int      @default(50)
+    createdAt           DateTime @default(now())
+
+    entity Entity @relation("EntityAliasToEntity", fields: [canonicalEntityType, canonicalEntityId], references: [entityType, entityId], onDelete: Cascade)
+
+    @@unique([entityType, aliasNorm])
+    @@index([canonicalEntityType, canonicalEntityId])
+    @@map("entity_aliases")
+}

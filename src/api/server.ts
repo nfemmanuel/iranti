@@ -6,6 +6,8 @@ import { Iranti } from '../sdk';
 import { knowledgeRoutes } from './routes/knowledge';
 import { memoryRoutes } from './routes/memory';
 import { agentRoutes } from './routes/agents';
+import { devRouter } from './routes/dev';
+import { batchRouter } from './routes/batch';
 import { authenticate } from './middleware/auth';
 import { snapshot, reset } from '../lib/metrics';
 import { requestContext } from '../lib/requestContext';
@@ -46,6 +48,8 @@ const iranti = new Iranti({
 app.use(ROUTES.agents, authenticate, agentRoutes(iranti));
 app.use(ROUTES.kb, authenticate, knowledgeRoutes(iranti));
 app.use(ROUTES.memory, authenticate, memoryRoutes(iranti));
+app.use('/kb', batchRouter);
+app.use('/dev', devRouter);
 
 // Observability
 app.get('/metrics', authenticate, (_req, res) => {

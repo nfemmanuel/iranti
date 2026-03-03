@@ -65,7 +65,7 @@ export async function createEntry(input: EntryInput, db?: DbClient): Promise<Kno
             validUntil: input.validUntil,
             createdBy: input.createdBy,
             isProtected: input.isProtected ?? false,
-            conflictLog: (input.conflictLog ?? []) as Prisma.InputJsonValue,
+            conflictLog: (input.conflictLog ?? []) as unknown as Prisma.InputJsonValue,
         },
     });
 }
@@ -129,7 +129,6 @@ export async function archiveEntry(
                 createdAt: entry.createdAt,
                 conflictLog: entry.conflictLog as Prisma.InputJsonValue,
                 archivedReason: reason,
-                supersededBy: null,
                 supersededByEntityType: supersededBy?.entityType ?? null,
                 supersededByEntityId: supersededBy?.entityId ?? null,
                 supersededByKey: supersededBy?.key ?? null,

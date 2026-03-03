@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-client = IrantiClient(base_url="http://localhost:3001", api_key=os.getenv("IRANTI_API_KEY", "dev_test_key_12345"))
+client = IrantiClient(base_url="http://localhost:3001", api_key=os.getenv("IRANTI_API_KEY", "dev-benchmark-key"))
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 ENTITY = "project/meridian_core"

@@ -31,7 +31,7 @@ from python.iranti import IrantiClient, IrantiError
 # ─── Config ───────────────────────────────────────────────────────────────────
 
 BASE_URL = os.getenv('IRANTI_URL', 'http://localhost:3001')
-API_KEY  = os.getenv('IRANTI_API_KEY', 'dev_test_key_12345')
+API_KEY  = os.getenv('IRANTI_API_KEY', 'dev-benchmark-key')
 
 # Fictional entity — no LLM prior knowledge can contaminate results
 ENTITY      = "project/aurora_station"
@@ -56,6 +56,14 @@ def check(label, passed, detail=""):
     icon = "✅" if passed else "❌"
     print(f"  {icon} {label}" + (f": {detail}" if detail else ""))
     return passed
+
+
+def print_http(client: IrantiClient, label: str) -> None:
+    meta = client.last_http()
+    print(
+        f"  [HTTP] {label}: status={meta.get('status')} "
+        f"method={meta.get('method')} path={meta.get('path')} ok={meta.get('ok')}"
+    )
 
 # ─── Test ─────────────────────────────────────────────────────────────────────
 
@@ -101,6 +109,8 @@ def run():
             )
             written = result.action in ("created", "updated")
             check(f"Write '{key}'", written, result.action)
+            print_http(client, f"write:{key}")
+            print(f"    resolvedEntity={result.resolved_entity} inputEntity={result.input_entity}")
             if written:
                 facts_written += 1
         except Exception as e:
@@ -141,7 +151,10 @@ def run():
             current_context=context_with_facts,
             max_facts=10,
         )
+        print_http(client, "observe-control")
         print(f"\n  Entities detected: {result.get('entitiesDetected', [])}")
+        print(f"  Entities resolved: {result.get('entitiesResolved', [])}")
+        print(f"  Debug: {result.get('debug', {})}")
         print(f"  Total facts found: {result.get('totalFound', 0)}")
         print(f"  Already in context: {result.get('alreadyPresent', 0)}")
         print(f"  Facts to inject: {len(result.get('facts', []))}")
@@ -181,7 +194,10 @@ def run():
             current_context=context_without_facts,
             max_facts=10,
         )
+        print_http(client, "observe-treatment")
         print(f"\n  Entities detected: {result.get('entitiesDetected', [])}")
+        print(f"  Entities resolved: {result.get('entitiesResolved', [])}")
+        print(f"  Debug: {result.get('debug', {})}")
         print(f"  Total facts found: {result.get('totalFound', 0)}")
         print(f"  Already in context: {result.get('alreadyPresent', 0)}")
         print(f"  Facts to inject: {len(result.get('facts', []))}")

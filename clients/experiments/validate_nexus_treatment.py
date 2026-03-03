@@ -45,7 +45,7 @@ Tech Stack: {NEXUS_FACTS['tech_stack']}
 All details are fictional and not in any LLM training data.
 """
 
-iranti = IrantiClient(base_url='http://localhost:3001', api_key='dev_test_key_12345')
+iranti = IrantiClient(base_url='http://localhost:3001', api_key=os.getenv("IRANTI_API_KEY", "dev-benchmark-key"))
 
 @tool("Write finding to shared memory")
 def write_finding(key: str, value: str, summary: str, confidence: int) -> str:
@@ -60,7 +60,11 @@ def write_finding(key: str, value: str, summary: str, confidence: int) -> str:
             source="nexus_briefing",
             agent="nexus_researcher",
         )
-        return f"Saved '{key}': {result.action}"
+        meta = iranti.last_http()
+        return (
+            f"Saved '{key}': {result.action} "
+            f"(resolved={result.resolved_entity}, status={meta.get('status')})"
+        )
     except IrantiError as e:
         return f"Error: {e}"
 

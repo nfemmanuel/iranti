@@ -1,4 +1,4 @@
-import { LLMProvider, LLMMessage, LLMResponse } from '../llm';
+import { LLMProvider, LLMMessage, LLMResponse, CompleteOptions } from '../llm';
 
 interface OllamaResponse {
     message: {
@@ -16,14 +16,16 @@ class OllamaProvider implements LLMProvider {
         this.baseUrl = process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434';
     }
 
-    async complete(messages: LLMMessage[], maxTokens: number = 1024): Promise<LLMResponse> {
+    async complete(messages: LLMMessage[], options?: CompleteOptions): Promise<LLMResponse> {
+        const maxTokens = options?.maxTokens ?? 1024;
+        const model = options?.model ?? this.model;
         const response = await fetch(`${this.baseUrl}/api/chat`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                model: this.model,
+                model,
                 messages: messages.map((m) => ({ role: m.role, content: m.content })),
                 stream: false,
                 options: {

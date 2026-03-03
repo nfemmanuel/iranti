@@ -36,6 +36,9 @@ class WriteResult:
     action: str
     key: str
     reason: str
+    resolved_entity: Optional[str] = None
+    input_entity: Optional[str] = None
+    http_status: Optional[int] = None
 
 
 @dataclass
@@ -54,6 +57,9 @@ class QueryResult:
     confidence: Optional[int] = None
     source: Optional[str] = None
     valid_until: Optional[str] = None
+    resolved_entity: Optional[str] = None
+    input_entity: Optional[str] = None
+    http_status: Optional[int] = None
 
 
 @dataclass
@@ -161,6 +167,10 @@ class IrantiClient:
             'Content-Type': 'application/json',
             'X-Iranti-Key': self.api_key,
         })
+        self.last_http_status: Optional[int] = None
+        self.last_http_method: Optional[str] = None
+        self.last_http_path: Optional[str] = None
+        self.last_http_ok: Optional[bool] = None
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
@@ -175,6 +185,11 @@ class IrantiClient:
             )
         except requests.Timeout:
             raise IrantiError(f'Request timed out after {self.timeout}s.')
+
+        self.last_http_status = response.status_code
+        self.last_http_method = method
+        self.last_http_path = path
+        self.last_http_ok = response.ok
 
         if response.status_code == 401:
             raise IrantiAuthError('Invalid or missing API key.')
@@ -252,11 +267,14 @@ class IrantiClient:
         if valid_until:
             payload['validUntil'] = valid_until
 
-        data = self._post('/write', payload)
+        data = self._post('/kb/write', payload)
         return WriteResult(**{
             'action': data['action'],
             'key': data['key'],
             'reason': data['reason'],
+            'resolved_entity': data.get('resolvedEntity'),
+            'input_entity': data.get('inputEntity'),
+            'http_status': self.last_http_status,
         })
 
     # ── Ingest ────────────────────────────────────────────────────────────────
@@ -298,7 +316,7 @@ class IrantiClient:
     def query(self, entity: str, key: str) -> QueryResult:
         """Query a specific fact about an entity."""
         entity_type, entity_id = entity.split('/', 1)
-        data = self._get(f'/query/{entity_type}/{entity_id}/{key}')
+        data = self._get(f'/kb/query/{entity_type}/{entity_id}/{key}')
         return QueryResult(
             found=data['found'],
             value=data.get('value'),
@@ -306,12 +324,15 @@ class IrantiClient:
             confidence=data.get('confidence'),
             source=data.get('source'),
             valid_until=data.get('validUntil'),
+            resolved_entity=data.get('resolvedEntity'),
+            input_entity=data.get('inputEntity'),
+            http_status=self.last_http_status,
         )
 
     def query_all(self, entity: str) -> list[dict]:
         """Query all facts about an entity."""
         entity_type, entity_id = entity.split('/', 1)
-        return self._get(f'/query/{entity_type}/{entity_id}')
+        return self._get(f'/kb/query/{entity_type}/{entity_id}')
 
     # ── Relationships ─────────────────────────────────────────────────────────
 
@@ -466,7 +487,7 @@ class IrantiClient:
               alreadyPresent  — facts skipped (already in context)
               totalFound      — total facts found before filtering
         """
-        return self._post('/observe', {
+        return self._post('/memory/observe', {
             'agentId': agent_id,
             'currentContext': current_context,
             'maxFacts': max_facts,
@@ -494,3 +515,13 @@ class IrantiClient:
             brief_generated_at=data['briefGeneratedAt'],
             context_call_count=data['contextCallCount'],
         )
+
+    def last_http(self) -> dict:
+        """Metadata for the most recent API call."""
+        return {
+            'status': self.last_http_status,
+            'method': self.last_http_method,
+            'path': self.last_http_path,
+            'ok': self.last_http_ok,
+        }
+

@@ -9,8 +9,9 @@ export function authenticate(req: Request, res: Response, next: NextFunction): v
     }
 
     const provided = req.headers['x-iranti-key'];
+    const providedStr = Array.isArray(provided) ? provided[0] : provided;
 
-    if (!provided || provided !== apiKey) {
+    if (!providedStr || providedStr !== apiKey) {
         res.status(401).json({ error: 'Unauthorized. Provide a valid X-Iranti-Key header.' });
         return;
     }

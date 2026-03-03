@@ -1,5 +1,5 @@
 import { execSync } from 'child_process';
-import { prisma } from '../src/library/client';
+import { getDb } from '../src/library/client';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -15,7 +15,7 @@ function run(command: string, label: string): void {
 
 async function isSeeded(): Promise<boolean> {
     try {
-        const entry = await prisma.knowledgeEntry.findUnique({
+        const entry = await getDb().knowledgeEntry.findUnique({
             where: {
                 entityType_entityId_key: {
                     entityType: 'system',
@@ -75,7 +75,7 @@ async function setup() {
     console.log('  npm run test:integration   — verify everything works');
     console.log('  npm run dev                — start development\n');
 
-    await prisma.$disconnect();
+    await getDb().$disconnect();
     process.exit(0);
 }
 

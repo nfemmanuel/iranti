@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from python.iranti import IrantiClient, IrantiError
 
 BASE_URL = os.getenv('IRANTI_URL', 'http://localhost:3001')
-API_KEY = os.getenv('IRANTI_API_KEY', 'dev_test_key_12345')
+API_KEY = os.getenv('IRANTI_API_KEY', 'dev-benchmark-key')
 
 ENTITY = "project/nexus_prime"
 AGENT_ID = "nexus_observer"
@@ -36,6 +36,14 @@ def check(label, passed, detail=""):
     icon = "[OK]" if passed else "[FAIL]"
     print(f"  {icon} {label}" + (f": {detail}" if detail else ""))
     return passed
+
+
+def print_http(client: IrantiClient, label: str) -> None:
+    meta = client.last_http()
+    print(
+        f"  [HTTP] {label}: status={meta.get('status')} "
+        f"method={meta.get('method')} path={meta.get('path')} ok={meta.get('ok')}"
+    )
 
 def run():
     client = IrantiClient(base_url=BASE_URL, api_key=API_KEY)
@@ -79,6 +87,8 @@ def run():
             if result.action in ("created", "updated"):
                 facts_written += 1
                 check(f"Write '{key}'", True, result.action)
+                print_http(client, f"write:{key}")
+                print(f"    resolvedEntity={result.resolved_entity} inputEntity={result.input_entity}")
         except Exception as e:
             check(f"Write '{key}'", False, str(e))
 
@@ -102,8 +112,11 @@ def run():
             current_context=context_with_facts,
             max_facts=10,
         )
+        print_http(client, "observe-control")
         control_inject = len(result.get('facts', []))
         print(f"\n  Entities detected: {result.get('entitiesDetected', [])}")
+        print(f"  Entities resolved: {result.get('entitiesResolved', [])}")
+        print(f"  Debug: {result.get('debug', {})}")
         print(f"  Already present: {result.get('alreadyPresent', 0)}")
         print(f"  Facts to inject: {control_inject}")
         check("Control: 0 facts injected", control_inject == 0, f"{control_inject} injected")
@@ -129,8 +142,11 @@ def run():
             current_context=context_without_facts,
             max_facts=10,
         )
+        print_http(client, "observe-treatment")
         treatment_inject = len(result.get('facts', []))
         print(f"\n  Entities detected: {result.get('entitiesDetected', [])}")
+        print(f"  Entities resolved: {result.get('entitiesResolved', [])}")
+        print(f"  Debug: {result.get('debug', {})}")
         print(f"  Total found: {result.get('totalFound', 0)}")
         print(f"  Facts to inject: {treatment_inject}")
         
