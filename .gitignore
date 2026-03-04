@@ -26,3 +26,15 @@ escalation/archived/*.md
 # Experiment outputs
 clients/experiments/results/
 experiments/*.json
+
+# Root-level local runtime/testing artifacts
+/api_runtime.log
+/api_runtime_verify.log
+/iranti.log
+/context_degradation_results_*.json
+/crewai_experiment_results_*.json
+/experiment_results_*.json
+/extreme_context_results_*.json
+/test-express.js
+/test-ts.ts
+/test.json
