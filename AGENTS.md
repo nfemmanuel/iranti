@@ -84,8 +84,9 @@ A periodic cleanup agent. Does not run on every write. Runs on a schedule or
 when conflict flags exceed a threshold. Responsibilities:
 - Archives expired entries (validUntil has passed)
 - Archives low confidence entries (below threshold)
-- Reads Escalation Folder for RESOLVED files, extracts resolution via LLM,
+- Reads Escalation Folder for RESOLVED files, parses `AUTHORITATIVE_JSON`,
   writes to KB as authoritative (confidence = 100, source = HumanReview)
+- Optionally appends non-authoritative LLM enrichment notes for human audit
 - Moves resolved files to escalation/resolved/, archives copy to
   escalation/archived/ with timestamp
 
@@ -179,6 +180,7 @@ iranti/
 │   ├── lib/
 │   │   ├── llm.ts              — LLMProvider interface, completeWithFallback(), fallback chain
 │   │   ├── router.ts           — route() by TaskType, model profiles
+│   │   ├── escalationPaths.ts  — Escalation runtime path resolution + folder bootstrap
 │   │   └── providers/
 │   │       ├── mock.ts         — Local dev provider
 │   │       ├── gemini.ts       — Google Gemini provider
@@ -196,13 +198,18 @@ iranti/
 │   │   └── routes/
 │   │       ├── knowledge.ts    — Write, ingest, query, relationships, resolution
 │   │       ├── agents.ts       — Agent registration and management
-│   │       └── memory.ts       — Handshake, reconvene, whoKnows, maintenance
+│   │       └── memory.ts       — Handshake, reconvene, observe, attend, whoKnows, maintenance
 │   └── types.ts                — Shared TypeScript types
 ├── prisma/
 │   ├── schema.prisma           — KnowledgeEntry, Archive, EntityRelationship, Entity, EntityAlias
 │   └── migrations/             — Migration history
 ├── scripts/
 │   ├── seed.ts                 — Seeds Staff Namespace
+│   ├── harness.ts              — Shared test harness bootstrap (DB + escalation path)
+│   ├── api-key-create.ts       — Creates/rotates per-user API key tokens
+│   ├── api-key-list.ts         — Lists API key registry entries
+│   ├── api-key-revoke.ts       — Revokes API key tokens
+│   ├── iranti-cli.ts           — Machine install + instance + project binding CLI
 │   ├── demo.ts                 — Full system demo with two agents
 │   ├── test-librarian.ts       — Librarian smoke tests
 │   ├── test-attendant.ts       — Attendant smoke tests
@@ -215,7 +222,9 @@ iranti/
 │   ├── test-integration.ts     — End-to-end integration test
 │   ├── test-fallback.ts        — LLM provider fallback chain test
 │   └── test-contracts.ts       — API/SDK/client contract drift checks
-├── escalation/
+├── bin/
+│   └── iranti.js               — CLI launcher used by npm global installs
+├── escalation/                 — Optional local folder if IRANTI_ESCALATION_DIR points here
 │   ├── active/                 — Unresolved conflicts (PENDING)
 │   ├── resolved/               — Processed by Archivist
 │   └── archived/               — Long-term conflict log
@@ -317,6 +326,7 @@ Indexed on `(canonicalEntityType, canonicalEntityId)`.
 | system / archivist / operating_rules | Archive triggers, escalation processing rules |
 | system / library / schema_version | Current schema version |
 | system / library / initialization_log | When Library was initialized |
+| system / auth / api_keys | Per-user API key registry (keyId + hashed secret + metadata) |
 
 ---
 
@@ -334,6 +344,7 @@ await iranti.ingest({ entity, content, source, confidence, agent });
 // Agent working memory
 const brief = await iranti.handshake({ agent, task, recentMessages });
 await iranti.reconvene(agentId, { task, recentMessages });
+const turn = await iranti.attend({ agent, latestMessage, currentContext, entityHints });
 const attendant = iranti.getAttendant(agentId);
 
 // Query
@@ -381,7 +392,7 @@ Entity format: `"entityType/entityId"` e.g. `"researcher/jane_smith"`
   human resolution goes in the HUMAN RESOLUTION section only, change
   Status to RESOLVED when done
 - The Staff Namespace (entityType = system) is only modified by seed.ts
-  or explicit system operations — never by external agents
+  or explicit system operations (including API key registry scripts) — never by external agents
 
 ---
 
@@ -500,14 +511,17 @@ Rules:
 ## Escalation Folder
 
 Unresolvable conflicts land in `escalation/active/` as markdown files.
+Runtime root is configurable with `IRANTI_ESCALATION_DIR` and defaults to
+`~/.iranti/escalation` if unset.
 Each file has two sections:
 
 **LIBRARIAN ASSESSMENT** — written by the Librarian. Contains entity,
 existing and incoming values, confidence scores, reasoning, and
 `**Status:** PENDING`.
 
-**HUMAN RESOLUTION** — written by a human in plain language. No code
-required. Change `**Status:** PENDING` to `**Status:** RESOLVED` when done.
+**HUMAN RESOLUTION** — written by a human, with optional plain-language notes.
+Change `**Status:** PENDING` to `**Status:** RESOLVED` when done and include
+`### AUTHORITATIVE_JSON` with valid JSON. JSON is the commit source.
 
 The Archivist watches for RESOLVED files, extracts the resolution via LLM,
 writes to KB as authoritative truth (confidence = 100, source = HumanReview),

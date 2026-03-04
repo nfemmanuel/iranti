@@ -50,7 +50,7 @@ augmented_message = middleware.before_send(
 # ...
 
 # After receiving response
-middleware.after_receive(
+final_response = middleware.after_receive(
     response="The blocker is...",
     conversation_history=[...]
 )
@@ -63,16 +63,17 @@ middleware.after_receive(
 ### before_send()
 
 1. Takes last N messages from conversation history (default 20)
-2. Calls Iranti's `observe()` API with that context
+2. Calls Iranti's `attend()` API with that context
 3. If facts are returned, prepends them as: `[MEMORY: fact1; fact2]\n\n{original_message}`
 4. Returns augmented message
 
 ### after_receive()
 
-1. Scans LLM response for factual statements (sentences with numbers, names, dates)
-2. Calls Iranti's `write()` API for each detected fact
-3. Confidence set to 70, source set to "conversation"
-4. Failures are silent (best-effort)
+1. Optionally enforces memory consistency for personal-memory questions
+2. If model reply conflicts with current memory, auto-corrects reply text
+3. Scans final reply for factual statements (numbers, names, dates)
+4. Calls Iranti's `write()` API for each detected fact (best-effort)
+5. Returns final response text (possibly corrected)
 
 ---
 
@@ -128,7 +129,7 @@ See `BROWSER_INTEGRATION.md` for complete guide.
 
 1. Create Chrome extension with `manifest.json` and `content.js`
 2. Intercept fetch() calls to Claude/ChatGPT APIs
-3. Call Iranti observe() before each request
+3. Call Iranti attend() before each request
 4. Inject facts into user message
 5. Forward modified request
 
@@ -143,6 +144,11 @@ See `BROWSER_INTEGRATION.md` for complete guide.
 - `iranti_api_key` (optional) - API key, or set `IRANTI_API_KEY` env var
 - `context_window` (default: 20) - Number of recent messages to include in context
 - `max_facts` (default: 5) - Maximum facts to inject per message
+- `memory_entity` (default: `conversation/<agent_id>`) - Entity for user/profile memory
+- `auto_remember` (default: `True`) - Auto-save explicit user profile updates/corrections
+- `enforce_consistency` (default: `True`) - Correct replies that conflict with known memory
+- `source` (default: `middleware_user`) - Source label for middleware writes
+- `write_confidence` (default: `100`) - Confidence for explicit user-memory writes
 
 ---
 
@@ -153,7 +159,7 @@ User types message
         ↓
 middleware.before_send()
         ↓
-Calls observe(conversation_context)
+Calls attend(conversation_context)
         ↓
 Iranti returns forgotten facts
         ↓
@@ -164,6 +170,8 @@ Send augmented message to LLM
 LLM responds with facts in context
         ↓
 middleware.after_receive()
+        ↓
+Consistency-checks reply against current memory
         ↓
 Extracts new facts from response
         ↓

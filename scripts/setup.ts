@@ -1,5 +1,8 @@
 import { execSync } from 'child_process';
+import fs from 'fs';
+import path from 'path';
 import { getDb } from '../src/library/client';
+import { ensureEscalationFolders } from '../src/lib/escalationPaths';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -11,6 +14,14 @@ function run(command: string, label: string): void {
         console.error(`  Failed: ${label}`);
         process.exit(1);
     }
+}
+
+function scriptCommand(distScriptName: string, sourceScriptPath: string): string {
+    const distScriptPath = path.resolve(__dirname, '..', 'dist', 'scripts', distScriptName);
+    if (fs.existsSync(distScriptPath)) {
+        return `node ${JSON.stringify(distScriptPath)}`;
+    }
+    return `npx ts-node ${sourceScriptPath}`;
 }
 
 async function isSeeded(): Promise<boolean> {
@@ -51,24 +62,19 @@ async function setup() {
     if (seeded) {
         console.log('  ✓ Already seeded, skipping\n');
     } else {
-        run('npx ts-node scripts/seed.ts', 'seed Staff Namespace');
+        run(scriptCommand('seed.js', 'scripts/seed.ts'), 'seed Staff Namespace');
         console.log('  ✓ Staff Namespace seeded\n');
     }
 
     // 4. Pre-populate codebase knowledge
     console.log('Step 4 — Pre-populating codebase knowledge...');
-    run('npx ts-node scripts/seed-codebase.ts', 'seed codebase knowledge');
+    run(scriptCommand('seed-codebase.js', 'scripts/seed-codebase.ts'), 'seed codebase knowledge');
     console.log('  ✓ Codebase knowledge seeded\n');
 
     // 5. Ensure escalation folders exist
     console.log('Step 5 — Ensuring escalation folders...');
-    const { promises: fsp } = await import('fs');
-    await Promise.all([
-        fsp.mkdir('escalation/active', { recursive: true }),
-        fsp.mkdir('escalation/resolved', { recursive: true }),
-        fsp.mkdir('escalation/archived', { recursive: true }),
-    ]);
-    console.log('  ✓ Escalation folders ready\n');
+    const escalationPaths = await ensureEscalationFolders();
+    console.log(`  ✓ Escalation folders ready at: ${escalationPaths.root}\n`);
 
     console.log('✅ Iranti setup complete.\n');
     console.log('Next steps:');

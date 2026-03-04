@@ -1,13 +1,9 @@
 import 'dotenv/config';
-import { initDb } from '../src/library/client';
 import { librarianWrite } from '../src/librarian/index';
 import { randomUUID } from 'crypto';
+import { bootstrapHarness } from './harness';
 
-// Initialize DB
-if (!process.env.DATABASE_URL) {
-    throw new Error('DATABASE_URL environment variable is required');
-}
-initDb(process.env.DATABASE_URL);
+bootstrapHarness();
 
 async function testIdempotency() {
     console.log('Testing Idempotency...\n');

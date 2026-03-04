@@ -469,6 +469,7 @@ class IrantiClient:
         agent_id: str,
         current_context: str,
         max_facts: int = 5,
+        entity_hints: Optional[list[str]] = None,
     ) -> dict:
         """
         Observe an agent's context window and return facts to inject.
@@ -487,11 +488,39 @@ class IrantiClient:
               alreadyPresent  — facts skipped (already in context)
               totalFound      — total facts found before filtering
         """
-        return self._post('/memory/observe', {
+        payload = {
             'agentId': agent_id,
             'currentContext': current_context,
             'maxFacts': max_facts,
-        })
+        }
+        if entity_hints:
+            payload['entityHints'] = entity_hints
+        return self._post('/memory/observe', payload)
+
+    def attend(
+        self,
+        agent_id: str,
+        current_context: str,
+        latest_message: Optional[str] = None,
+        max_facts: int = 5,
+        entity_hints: Optional[list[str]] = None,
+        force_inject: bool = False,
+    ) -> dict:
+        """
+        Ask Attendant to decide whether memory is needed for this turn.
+        If needed, returns facts to inject; otherwise returns shouldInject=false.
+        """
+        payload = {
+            'agentId': agent_id,
+            'currentContext': current_context,
+            'maxFacts': max_facts,
+            'forceInject': force_inject,
+        }
+        if latest_message is not None:
+            payload['latestMessage'] = latest_message
+        if entity_hints:
+            payload['entityHints'] = entity_hints
+        return self._post('/memory/attend', payload)
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 

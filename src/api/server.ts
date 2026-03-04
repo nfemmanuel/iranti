@@ -14,6 +14,9 @@ import { authenticate } from './middleware/auth';
 import { rateLimitMiddleware } from './middleware/rateLimit';
 import { snapshot, reset } from '../lib/metrics';
 import { requestContext } from '../lib/requestContext';
+import { validateApiKey } from '../security/apiKeys';
+import { startArchivistScheduler } from './archivistScheduler';
+import { getEscalationPaths } from '../lib/escalationPaths';
 
 const app = express();
 
@@ -84,6 +87,17 @@ const iranti = new Iranti({
     llmProvider: (process.env.LLM_PROVIDER as 'gemini' | 'openai' | 'mock') ?? 'mock',
 });
 
+let stopArchivistScheduler: (() => void) | null = null;
+void startArchivistScheduler(iranti)
+    .then((scheduler) => {
+        if (!scheduler.started) return;
+        stopArchivistScheduler = scheduler.stop;
+        console.log('[archivist] scheduler enabled');
+    })
+    .catch((err) => {
+        console.error('[archivist] scheduler startup failed:', err);
+    });
+
 // Mount protected routes
 app.use(ROUTES.agents, rateLimitMiddleware, authenticate, agentRoutes(iranti));
 app.use(ROUTES.kb, rateLimitMiddleware, authenticate, knowledgeRoutes(iranti));
@@ -103,10 +117,9 @@ app.post('/metrics/reset', authenticate, (_req, res) => {
 
 app.post(['/v1/chat/completions', '/chat/completions'], async (req, res) => {
     const providedKey = req.headers['authorization']?.replace('Bearer ', '');
-    const apiKey = process.env.IRANTI_API_KEY;
-
-    if (!providedKey || providedKey !== apiKey) {
-        res.status(401).json({ error: 'Unauthorized' });
+    const auth = await validateApiKey(providedKey);
+    if (!auth.ok) {
+        res.status(auth.status ?? 401).json({ error: auth.error ?? 'Unauthorized' });
         return;
     }
 
@@ -153,5 +166,13 @@ app.listen(PORT, () => {
     console.log(`\nIranti API running on port ${PORT}`);
     console.log(`Health: http://localhost:${PORT}/health`);
     console.log(`Provider: ${process.env.LLM_PROVIDER ?? 'mock'}\n`);
+    console.log(`Escalation root: ${getEscalationPaths().root}`);
     console.log(`Request log file: ${REQUEST_LOG_FILE}\n`);
 });
+
+for (const signal of ['SIGINT', 'SIGTERM']) {
+    process.on(signal, () => {
+        if (stopArchivistScheduler) stopArchivistScheduler();
+        requestLogStream.end(() => process.exit(0));
+    });
+}

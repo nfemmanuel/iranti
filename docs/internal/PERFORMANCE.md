@@ -430,15 +430,14 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
 Run included benchmarks:
 ```bash
 cd clients/experiments
-python benchmark_writes.py
-python benchmark_queries.py
-python benchmark_concurrent.py
+python stress_test.py
+python stress_test_stellar.py
+python visualize_stress_test.py
 ```
 
 Expected results (local deployment):
-- Writes: 50-100/sec
-- Queries: 200-500/sec
-- Concurrent (10 threads): 300-600/sec
+- Stress test throughput and latency are reported in script output JSON/plots.
+- Use `visualize_stress_test.py` to inspect percentile latency and throughput trends.
 
 Cloud deployment adds network latency (~10-50ms per request).
 

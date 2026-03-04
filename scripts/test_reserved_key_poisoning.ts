@@ -1,12 +1,8 @@
 import 'dotenv/config';
-import { initDb } from '../src/library/client';
 import { librarianWrite } from '../src/librarian/index';
+import { bootstrapHarness, errorMatches } from './harness';
 
-// Initialize DB
-if (!process.env.DATABASE_URL) {
-    throw new Error('DATABASE_URL environment variable is required');
-}
-initDb(process.env.DATABASE_URL);
+bootstrapHarness();
 
 async function testReservedKeyPoisoning() {
     console.log('Testing Reserved Key Poisoning Protection...\n');
@@ -27,7 +23,10 @@ async function testReservedKeyPoisoning() {
         console.log('  ✗ FAILED: Write should have been blocked\n');
         process.exit(1);
     } catch (err: any) {
-        if (err.message.includes("key 'attendant_state' is reserved")) {
+        if (errorMatches(err, [
+            /key 'attendant_state' is reserved/i,
+            /attendant_state is reserved for staff/i,
+        ])) {
             console.log('  ✓ PASSED: Reserved key write blocked\n');
         } else {
             console.log(`  ✗ FAILED: Wrong error: ${err.message}\n`);
@@ -171,7 +170,7 @@ async function testReservedKeyPoisoning() {
         console.log('  ✗ FAILED: Write should have been blocked\n');
         process.exit(1);
     } catch (err: any) {
-        if (err.message.includes("key 'agent_profile' is reserved")) {
+        if (errorMatches(err, [/key 'agent_profile' is reserved/i])) {
             console.log('  ✓ PASSED: Reserved key write blocked\n');
         } else {
             console.log(`  ✗ FAILED: Wrong error: ${err.message}\n`);

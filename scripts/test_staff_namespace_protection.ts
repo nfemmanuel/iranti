@@ -1,7 +1,9 @@
 import 'dotenv/config';
 import { librarianWrite } from '../src/librarian/index';
+import { bootstrapHarness, errorMatches } from './harness';
 
 async function testStaffNamespaceProtection() {
+    bootstrapHarness();
     console.log('Testing Staff Namespace Protection...\n');
 
     // Test 1: Agent tries to write to system namespace
@@ -44,7 +46,10 @@ async function testStaffNamespaceProtection() {
         console.log('  ✗ FAILED: Write should have been blocked\n');
         process.exit(1);
     } catch (err: any) {
-        if (err.message.includes("key 'attendant_state' is reserved")) {
+        if (errorMatches(err, [
+            /key 'attendant_state' is reserved/i,
+            /attendant_state is reserved for staff/i,
+        ])) {
             console.log('  ✓ PASSED: Write blocked correctly\n');
         } else {
             console.log(`  ✗ FAILED: Wrong error: ${err.message}\n`);

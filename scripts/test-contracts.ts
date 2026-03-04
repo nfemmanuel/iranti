@@ -102,6 +102,7 @@ function assertMemoryRoutes(): void {
     expectIncludes(filePath, content, "router.post('/handshake', validateInput('handshake')", 'Memory route: POST /handshake uses validation');
     expectIncludes(filePath, content, "router.post('/reconvene'", 'Memory route: POST /reconvene');
     expectIncludes(filePath, content, "router.post('/observe'", 'Memory route: POST /observe');
+    expectIncludes(filePath, content, "router.post('/attend'", 'Memory route: POST /attend');
     expectIncludes(filePath, content, "router.get('/whoknows/:entityType/:entityId'", 'Memory route: GET /whoknows/:type/:id');
     expectIncludes(filePath, content, "router.post('/maintenance'", 'Memory route: POST /maintenance');
 }
@@ -137,6 +138,7 @@ function assertPythonClientContract(): void {
     expectIncludes(filePath, content, "self._get(f'/kb/related/{entity_type}/{entity_id}/deep?depth={depth}')", 'Python client reads /kb/related/:type/:id/deep');
     expectIncludes(filePath, content, "self._post('/memory/handshake'", 'Python client handshakes via /memory/handshake');
     expectIncludes(filePath, content, "self._post('/memory/reconvene'", 'Python client reconvenes via /memory/reconvene');
+    expectIncludes(filePath, content, "self._post('/memory/attend'", 'Python client attends via /memory/attend');
     expectIncludes(filePath, content, "self._get(f'/memory/whoknows/{entity_type}/{entity_id}')", 'Python client reads /memory/whoknows/:type/:id');
     expectIncludes(filePath, content, "self._post('/memory/maintenance'", 'Python client calls /memory/maintenance');
     expectIncludes(filePath, content, "self._post('/memory/observe'", 'Python client observes via /memory/observe');
@@ -156,6 +158,7 @@ function assertTypeScriptSdkSurface(): void {
         'async ingest(',
         'async handshake(',
         'async reconvene(',
+        'async attend(',
         'async query(',
         'async queryAll(',
         'async runMaintenance(',
@@ -187,6 +190,7 @@ function assertApiDocsContract(): void {
         '- `POST /kb/relate`',
         '- `POST /memory/handshake`',
         '- `POST /memory/reconvene`',
+        '- `POST /memory/attend`',
         '- `POST /memory/observe`',
         '- `GET /memory/whoknows/:entityType/:entityId`',
         '- `POST /agents/register`',

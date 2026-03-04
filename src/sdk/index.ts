@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { initDb } from '../library/client';
 import { librarianWrite, librarianIngest } from '../librarian';
-import { WorkingMemoryBrief } from '../attendant';
+import type { WorkingMemoryBrief, AttendResult } from '../attendant';
 import { getAttendant, AttendantInstance } from '../attendant/registry';
 import { runArchivist } from '../archivist';
 import { queryEntry, findEntriesByEntity, findEntry } from '../library/queries';
@@ -74,6 +74,11 @@ export interface ObserveInput {
     currentContext: string;
     maxFacts?: number;
     entityHints?: string[];
+}
+
+export interface AttendInput extends ObserveInput {
+    latestMessage?: string;
+    forceInject?: boolean;
 }
 
 // ─── Entity Parsing ──────────────────────────────────────────────────────────
@@ -252,12 +257,30 @@ export class Iranti {
             return { found: false, resolvedEntity: resolved.canonicalEntity, inputEntity: entity };
         }
 
-        // Check if entry has escalated conflicts in its log
+        // Treat as hidden only when the latest relevant conflict event is an unresolved escalation.
+        // A historical escalation followed by replacement/update should still be queryable.
         if (entry.conflictLog) {
             const log = Array.isArray(entry.conflictLog) ? entry.conflictLog : [];
-            const hasEscalation = log.some((event: any) => event.type === 'CONFLICT_ESCALATED');
-            if (hasEscalation) {
+            const latestEscalationIndex = log.reduce((acc: number, event: any, idx: number) => {
+                return event?.type === 'CONFLICT_ESCALATED' ? idx : acc;
+            }, -1);
+
+            if (latestEscalationIndex >= 0) {
+                const resolutionTypes = new Set([
+                    'CONFLICT_REPLACED',
+                    'CONFLICT_UPDATED',
+                    'CONFLICT_REJECTED',
+                    'CONFLICT_RESOLVED',
+                    'CONFLICT_HUMAN_RESOLVED',
+                    'HUMAN_RESOLVED',
+                ]);
+                const resolvedAfterEscalation = log
+                    .slice(latestEscalationIndex + 1)
+                    .some((event: any) => resolutionTypes.has(event?.type));
+
+                if (!resolvedAfterEscalation) {
                 return { found: false, resolvedEntity: resolved.canonicalEntity, inputEntity: entity }; // Treat escalated entries as not found
+                }
             }
         }
 
@@ -403,6 +426,33 @@ export class Iranti {
             currentContext: input.currentContext,
             maxFacts: input.maxFacts,
             entityHints: input.entityHints,
+        });
+    }
+
+    async attend(input: AttendInput): Promise<AttendResult> {
+        if (!input.agent || typeof input.agent !== 'string' || input.agent.trim().length === 0) {
+            throw new Error('agent is required for attend().');
+        }
+
+        if (input.entityHints !== undefined) {
+            if (!Array.isArray(input.entityHints)) {
+                throw new Error('entityHints must be an array of "entityType/entityId" strings.');
+            }
+            for (const hint of input.entityHints) {
+                if (typeof hint !== 'string' || hint.trim().length === 0 || !hint.includes('/')) {
+                    throw new Error(`Invalid entity hint: "${String(hint)}". Expected "entityType/entityId".`);
+                }
+                parseEntity(hint);
+            }
+        }
+
+        const attendant = getAttendant(input.agent);
+        return attendant.attend({
+            currentContext: input.currentContext,
+            maxFacts: input.maxFacts,
+            entityHints: input.entityHints,
+            latestMessage: input.latestMessage,
+            forceInject: input.forceInject,
         });
     }
 

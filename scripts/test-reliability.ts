@@ -1,8 +1,10 @@
 import 'dotenv/config';
 import { librarianWrite } from '../src/librarian';
 import { getReliabilityScores, weightedConfidence } from '../src/librarian/source-reliability';
+import { bootstrapHarness } from './harness';
 
 async function test() {
+    bootstrapHarness();
     console.log('Testing Source Reliability Learning...\n');
 
     const entityType = 'researcher';

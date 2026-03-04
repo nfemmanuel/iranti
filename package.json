@@ -3,9 +3,33 @@
   "version": "0.1.0",
   "description": "Memory infrastructure for multi-agent AI systems",
   "main": "dist/src/sdk/index.js",
+  "files": [
+    "dist/src/**/*",
+    "dist/scripts/iranti-cli.js",
+    "dist/scripts/setup.js",
+    "dist/scripts/seed.js",
+    "dist/scripts/seed-codebase.js",
+    "dist/scripts/api-key-create.js",
+    "dist/scripts/api-key-list.js",
+    "dist/scripts/api-key-revoke.js",
+    "bin/iranti.js",
+    "prisma/schema.prisma",
+    "prisma/migrations/**/*",
+    ".env.example",
+    "README.md",
+    "LICENSE"
+  ],
+  "bin": {
+    "iranti": "bin/iranti.js"
+  },
   "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "build": "tsc",
+    "prepack": "npm run build",
+    "cli": "ts-node scripts/iranti-cli.ts",
     "dev": "ts-node src/api/server.ts",
     "setup": "ts-node scripts/setup.ts",
     "seed": "ts-node scripts/seed.ts",
@@ -23,7 +47,17 @@
     "test:contracts": "ts-node scripts/test-contracts.ts",
     "test:concurrency": "ts-node scripts/test_concurrent_writes.ts",
     "test:staff": "ts-node scripts/test_staff_normalization.ts",
+    "test:staff-namespace": "ts-node scripts/test_staff_namespace_protection.ts",
+    "test:reserved-key": "ts-node scripts/test_reserved_key_poisoning.ts",
+    "test:idempotency": "ts-node scripts/test_idempotency.ts",
+    "test:archive-traceability": "ts-node scripts/test_archive_traceability.ts",
+    "test:connection-string": "ts-node scripts/test_connection_string.ts",
+    "test:router": "ts-node scripts/test_router_enforcement.ts",
+    "test:verify-authoritative": "ts-node scripts/verify_authoritative_resolution_parsing.ts",
     "seed:policy": "ts-node scripts/seed_policy.ts",
+    "api-key:create": "ts-node scripts/api-key-create.ts",
+    "api-key:list": "ts-node scripts/api-key-list.ts",
+    "api-key:revoke": "ts-node scripts/api-key-revoke.ts",
     "demo": "ts-node scripts/demo.ts",
     "api": "ts-node src/api/server.ts"
   },

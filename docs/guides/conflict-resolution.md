@@ -273,7 +273,20 @@ Sources have comparable authority for this fact type. OpenAlex is generally reli
 
 ## HUMAN RESOLUTION
 
-<!-- Write your resolution here in plain language, then change Status to RESOLVED -->
+<!-- Optional plain-language notes -->
+
+### AUTHORITATIVE_JSON
+```json
+{
+  "entityType": "researcher",
+  "entityId": "jane_smith",
+  "key": "affiliation",
+  "value": { "institution": "Stanford", "department": "CS" },
+  "summary": "Affiliated with Stanford CS",
+  "validUntil": null,
+  "notes": "Verified on researcher website and latest publication."
+}
+```
 ```
 
 ---
@@ -298,20 +311,25 @@ Use external sources to determine the truth:
 
 ### Step 3: Write Your Resolution
 
-In the `HUMAN RESOLUTION` section, write your decision in plain language:
+In the `HUMAN RESOLUTION` section, include optional notes and a required `AUTHORITATIVE_JSON` block:
 
 ```markdown
 ## HUMAN RESOLUTION
 
-Checked the researcher's personal website (https://janesmith.com) and recent publications. She moved from MIT to Stanford in January 2024. Her most recent paper (published Jan 2024) lists Stanford as affiliation.
+Checked janesmith.com and Jan 2024 publication metadata. Stanford is current.
 
-**Decision:** Keep incoming (Stanford)
-
-**Confidence:** 100 (human verified)
-
-**Source:** HumanReview
-
-**Notes:** OpenAlex data was stale. ORCID was correct but confidence was too low. Updated source reliability: ORCID +0.08, OpenAlex -0.08.
+### AUTHORITATIVE_JSON
+```json
+{
+  "entityType": "researcher",
+  "entityId": "jane_smith",
+  "key": "affiliation",
+  "value": { "institution": "Stanford", "department": "CS" },
+  "summary": "Affiliated with Stanford CS",
+  "validUntil": null,
+  "notes": "OpenAlex appeared stale; ORCID matched current profile."
+}
+```
 ```
 
 ### Step 4: Mark as Resolved
@@ -332,33 +350,15 @@ Save the file. The Archivist will process it on the next maintenance cycle (or w
 
 When the Archivist finds a RESOLVED escalation file:
 
-1. **Extract resolution** — Uses LLM to parse the human resolution
+1. **Extract resolution** — Deterministically parses `AUTHORITATIVE_JSON`
 2. **Write to KB** — Writes the decision as authoritative truth:
    - Confidence: 100
    - Source: HumanReview
    - Created by: system
-3. **Update reliability** — Applies source reliability changes from resolution
+3. **Enrichment (optional)** — May append non-authoritative LLM notes for audit
 4. **Archive old entry** — Moves losing entry to archive with `archivedReason: 'human_resolved'`
 5. **Move file** — Moves escalation file to `escalation/resolved/`
 6. **Archive copy** — Copies file to `escalation/archived/` with timestamp
-
-**LLM extraction prompt:**
-
-```
-Extract the resolution from this human-written escalation file.
-
-File contents:
-[full file contents]
-
-Extract:
-1. Which entry to keep (existing or incoming)
-2. The final value to write
-3. Confidence score (default 100 if not specified)
-4. Source (default HumanReview if not specified)
-5. Any source reliability adjustments
-
-Return as JSON.
-```
 
 ---
 

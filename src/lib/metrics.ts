@@ -14,6 +14,7 @@ type CounterName =
 type TimerName =
   | "attendant.handshake_ms"
   | "attendant.observe_ms"
+  | "attendant.attend_ms"
   | "attendant.reconvene_ms"
   | "librarian.write_ms"
   | "llm.latency_ms"

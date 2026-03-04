@@ -1,13 +1,11 @@
 import { randomUUID } from 'crypto';
-import { initDb } from '../src/library/client';
 import { librarianWrite } from '../src/librarian';
-
-const DATABASE_URL = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/iranti';
+import { bootstrapHarness } from './harness';
 
 async function testStaffNormalization() {
     console.log('🔒 Testing staff identity normalization...\n');
-    
-    initDb(DATABASE_URL);
+
+    bootstrapHarness();
     
     // Test 1: Mixed-case staff writer should succeed
     console.log('Test 1: Mixed-case staff writer (Archivist)');

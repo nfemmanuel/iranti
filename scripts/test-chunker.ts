@@ -1,7 +1,9 @@
 import 'dotenv/config';
 import { librarianIngest } from '../src/librarian';
+import { bootstrapHarness } from './harness';
 
 async function test() {
+    bootstrapHarness();
     console.log('Testing Chunker + Librarian Ingest...\n');
 
     // Test 1 — ingest a rich text blob

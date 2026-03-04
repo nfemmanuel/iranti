@@ -10,9 +10,14 @@ http://localhost:3001
 
 ## Authentication
 
-- Most endpoints require: `X-Iranti-Key: <IRANTI_API_KEY>`
-- Chat-completions compatibility endpoints use: `Authorization: Bearer <IRANTI_API_KEY>`
+- Most endpoints require: `X-Iranti-Key: <api_key_token>`
+- Chat-completions compatibility endpoints use: `Authorization: Bearer <api_key_token>`
 - Public endpoint: `GET /health`
+
+Supported key modes:
+- Registry key (recommended): `<keyId>.<secret>` (create with `npm run api-key:create -- --key-id ... --owner ...`)
+- Legacy single key: `IRANTI_API_KEY`
+- Legacy key list: `IRANTI_API_KEYS` (comma-separated)
 
 ## Core Endpoints
 
@@ -90,6 +95,7 @@ Query response (`GET /kb/query/:entityType/:entityId/:key`):
 - `POST /memory/handshake`
 - `POST /memory/reconvene`
 - `POST /memory/observe`
+- `POST /memory/attend`
 - `GET /memory/whoknows/:entityType/:entityId`
 - `POST /memory/maintenance`
 
@@ -112,6 +118,45 @@ Observe response:
   "entitiesDetected": [],
   "alreadyPresent": 0,
   "totalFound": 0
+}
+```
+
+Attend request body:
+
+```json
+{
+  "agentId": "research_agent_001",
+  "latestMessage": "What is my favorite snack?",
+  "currentContext": "User: Hi\nAssistant: Hello",
+  "maxFacts": 5,
+  "entityHints": ["user/main"]
+}
+```
+
+Attend response:
+
+```json
+{
+  "shouldInject": true,
+  "reason": "memory_needed_injected",
+  "decision": {
+    "needed": true,
+    "confidence": 0.92,
+    "method": "heuristic",
+    "explanation": "memory_reference_detected"
+  },
+  "facts": [
+    {
+      "entityKey": "user/main/favorite_snack",
+      "summary": "favorite_snack: popcorn",
+      "value": {"text": "popcorn"},
+      "confidence": 90,
+      "source": "chatbot_user"
+    }
+  ],
+  "entitiesDetected": ["user/main"],
+  "alreadyPresent": 0,
+  "totalFound": 1
 }
 ```
 

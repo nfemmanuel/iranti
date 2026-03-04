@@ -38,6 +38,12 @@ LLM_PROVIDER=mock
 # For production, use a real provider:
 # LLM_PROVIDER=gemini
 # GEMINI_API_KEY=your_key_here
+
+# Optional runtime hygiene:
+# IRANTI_ESCALATION_DIR=C:/Users/<you>/.iranti/escalation
+# IRANTI_ARCHIVIST_WATCH=true
+# IRANTI_ARCHIVIST_DEBOUNCE_MS=60000
+# IRANTI_ARCHIVIST_INTERVAL_MS=21600000
 ```
 
 ---
@@ -70,7 +76,7 @@ The setup script:
 2. Generates the Prisma client
 3. Seeds the Staff Namespace with operating rules
 4. Pre-populates codebase knowledge
-5. Creates escalation folders
+5. Creates escalation folders at `IRANTI_ESCALATION_DIR` (or `~/.iranti/escalation` by default)
 
 You should see:
 
@@ -81,6 +87,47 @@ You should see:
 ✓ Codebase knowledge populated
 ✓ Escalation folders created
 ```
+
+---
+
+## Step 3.5: Optional Double-Layer Install Flow
+
+Use this when you want one machine-level Iranti runtime and multiple per-project chatbot bindings.
+
+### Install CLI
+
+```bash
+# Published package
+npm install -g iranti
+
+# Local simulation from this repo
+npm install -g .
+```
+
+### Initialize runtime root + create an instance
+
+```bash
+iranti install --scope user
+iranti instance create local --port 3001 --db-url "postgresql://postgres:yourpassword@localhost:5432/iranti_local"
+iranti instance show local
+```
+
+Edit the printed instance `.env` and set real `DATABASE_URL` and `IRANTI_API_KEY`.
+
+### Run instance
+
+```bash
+iranti run --instance local
+```
+
+### Bind a project
+
+```bash
+cd /path/to/chatbot-project
+iranti project init . --instance local --agent-id chatbot_main
+```
+
+This writes `.env.iranti` with `IRANTI_URL`, `IRANTI_API_KEY`, and `IRANTI_AGENT_ID`.
 
 ---
 
@@ -104,6 +151,14 @@ You should see all tests pass:
 ```
 
 ---
+
+Create a per-user API key token (recommended):
+
+```bash
+npm run api-key:create -- --key-id demo_user --owner "Demo User" --scopes memory,kb
+```
+
+Use the printed `keyId.secret` token in `X-Iranti-Key`.
 
 ## Your First Write
 
@@ -200,6 +255,22 @@ The Attendant:
 2. Loads operating rules from the Staff Namespace
 3. Filters the knowledge base for relevant entries
 4. Returns a compact brief with only what's needed
+
+Before each LLM response, use `attend()` so Attendant decides whether to inject memory for that turn:
+
+```typescript
+const turn = await iranti.attend({
+    agent: 'research_agent_001',
+    latestMessage: 'What is my favorite snack?',
+    currentContext: 'User: What is my favorite snack?\nAssistant:',
+    entityHints: ['user/main'],
+    maxFacts: 5,
+});
+
+if (turn.shouldInject) {
+    console.log('Inject these facts:', turn.facts.map((f) => f.summary));
+}
+```
 
 ---
 

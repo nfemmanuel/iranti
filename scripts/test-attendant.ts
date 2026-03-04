@@ -1,7 +1,9 @@
 import 'dotenv/config';
-import { handshake, reconvene } from '../src/attendant';
+import { handshake, reconvene, getAttendant } from '../src/attendant';
+import { bootstrapHarness } from './harness';
 
 async function test() {
+    bootstrapHarness();
     console.log('Testing Attendant...\n');
 
     // Test 1 — handshake with a fresh agent
@@ -43,6 +45,20 @@ async function test() {
     const shiftedBrief = await reconvene(brief, shiftedContext);
     console.log('  Task changed:', shiftedBrief.inferredTaskType !== brief.inferredTaskType);
     console.log('  New inferred task:', shiftedBrief.inferredTaskType);
+
+    // Test 4 — attend (inject only when memory is needed)
+    console.log('\nTest 4 — attend memory decision:');
+    const attendant = getAttendant(context.agentId);
+    const attendResult = await attendant.attend({
+        latestMessage: 'What is my favorite snack?',
+        currentContext: 'User: What is my favorite snack?\nAssistant:',
+        entityHints: ['user/main'],
+        maxFacts: 3,
+    });
+    console.log('  shouldInject:', attendResult.shouldInject);
+    console.log('  reason:', attendResult.reason);
+    console.log('  decision:', `${attendResult.decision.method} / ${attendResult.decision.confidence}`);
+    console.log('  facts returned:', attendResult.facts.length);
 
     process.exit(0);
 }

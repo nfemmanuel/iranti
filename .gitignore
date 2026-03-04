@@ -1,5 +1,7 @@
 node_modules
 dist
+.npm-cache/
+*.tgz
 *.log
 .history
 bench_logs/
@@ -38,3 +40,6 @@ experiments/*.json
 /test-express.js
 /test-ts.ts
 /test.json
+
+# Local planning notes (never commit)
+/docs/BACKLOG.local.md

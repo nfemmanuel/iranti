@@ -21,14 +21,20 @@ affiliated with Stanford, not MIT. The OpenAlex data was outdated.
 
 ## New Format (Required)
 
-```markdown
+````markdown
 ## HUMAN RESOLUTION
 
+### AUTHORITATIVE_JSON
+```json
 {
+  "entityType": "researcher",
+  "entityId": "jane_smith",
+  "key": "affiliation",
   "value": "Stanford University",
   "summary": "Researcher is affiliated with Stanford University"
 }
 ```
+````
 
 **Benefits**: 
 - Deterministic parsing (no LLM interpretation)
@@ -40,10 +46,13 @@ affiliated with Stanford, not MIT. The OpenAlex data was outdated.
 ## Format Rules
 
 1. **Must be valid JSON** - Use a JSON validator if unsure
-2. **Must have both fields**:
+2. **Must have required fields**:
+   - `entityType`: Canonical entity type
+   - `entityId`: Canonical entity id
+   - `key`: Fact key
    - `value`: The authoritative fact (can be string, number, object, array)
    - `summary`: One sentence description (string)
-3. **Can include comments** - HTML comments are stripped before parsing
+3. **Must be under `### AUTHORITATIVE_JSON` with fenced ` ```json ` block**
 4. **Status must be RESOLVED** - Change `**Status:** PENDING` to `**Status:** RESOLVED`
 
 ---
@@ -53,6 +62,9 @@ affiliated with Stanford, not MIT. The OpenAlex data was outdated.
 ### Simple String Value
 ```json
 {
+  "entityType": "researcher",
+  "entityId": "jane_smith",
+  "key": "affiliation",
   "value": "MIT",
   "summary": "Researcher is affiliated with MIT"
 }
@@ -61,6 +73,9 @@ affiliated with Stanford, not MIT. The OpenAlex data was outdated.
 ### Complex Object Value
 ```json
 {
+  "entityType": "researcher",
+  "entityId": "jane_smith",
+  "key": "affiliation",
   "value": {
     "institution": "Stanford University",
     "department": "Computer Science",
@@ -73,6 +88,9 @@ affiliated with Stanford, not MIT. The OpenAlex data was outdated.
 ### Numeric Value
 ```json
 {
+  "entityType": "project",
+  "entityId": "roadmap_2026",
+  "key": "deadline_year",
   "value": 2024,
   "summary": "Project deadline is 2024"
 }
@@ -81,6 +99,9 @@ affiliated with Stanford, not MIT. The OpenAlex data was outdated.
 ### Array Value
 ```json
 {
+  "entityType": "project",
+  "entityId": "roadmap_2026",
+  "key": "languages",
   "value": ["Python", "TypeScript", "Rust"],
   "summary": "Project uses Python, TypeScript, and Rust"
 }
@@ -104,9 +125,10 @@ If you have pending escalations in the old format:
 
 If your JSON is invalid, you'll see clear errors in the Archivist report:
 
-- `"No JSON found in HUMAN RESOLUTION section"` - Add JSON block
-- `"JSON must have 'value' and 'summary' fields"` - Add missing fields
-- `"Invalid JSON in HUMAN RESOLUTION: <error>"` - Fix JSON syntax
+- `"Missing '### AUTHORITATIVE_JSON' section."` - Add section header
+- `"Missing \`\`\`json block after AUTHORITATIVE_JSON."` - Add fenced JSON block
+- `"AUTHORITATIVE_JSON missing required field: <field>"` - Add missing field
+- `"Invalid JSON in AUTHORITATIVE_JSON."` - Fix JSON syntax
 
 ---
 

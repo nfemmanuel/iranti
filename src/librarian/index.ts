@@ -9,6 +9,8 @@ import { enforceWritePermissions } from './guards';
 import { getConflictPolicy } from './getPolicy';
 import { scoreCandidate } from './scoring';
 import { inc, timeStart, timeEnd } from '../lib/metrics';
+import { ensureEscalationFolders } from '../lib/escalationPaths';
+import { createHash } from 'crypto';
 
 // ─── Input Validation ────────────────────────────────────────────────────────
 
@@ -151,8 +153,25 @@ async function resolveConflict(
     const policy = await getConflictPolicy(tx);
     const inputWithTTL = applyTTL(incoming, policy);
     
-    // IMMEDIATE ESCALATION: Identical confidence values
+    // Identical confidence values:
+    // - same source: prefer latest update (common for user profile corrections)
+    // - different source: escalate for human judgment
     if (existing.confidence === inputWithTTL.confidence) {
+        if (existing.source === inputWithTTL.source) {
+            const entry = await replaceEntry(existing, inputWithTTL, tx);
+            await logDecision(
+                existing.id,
+                'CONFLICT_REPLACED',
+                inputWithTTL,
+                existing.confidence,
+                inputWithTTL.confidence,
+                'Equal confidence from same source; accepted latest update.',
+                false,
+                tx
+            );
+            await saveReceipt(inputWithTTL, 'updated', entry.id, tx);
+            return { action: 'updated', entry, reason: 'Equal confidence same-source update accepted.' };
+        }
         await logDecision(existing.id, 'CONFLICT_ESCALATED', inputWithTTL, existing.confidence, inputWithTTL.confidence, 'Identical confidence requires human judgment', false, tx);
         return await escalateConflict(existing, inputWithTTL, tx);
     }
@@ -397,43 +416,38 @@ async function escalateConflict(
 ): Promise<{ action: 'escalated'; reason: string }> {
     const fs = await import('fs/promises');
     const path = await import('path');
+    const escalationPaths = await ensureEscalationFolders();
 
-    const id = incoming.requestId ?? `conflict_${Date.now()}`;
-    const escalationDir = path.join(process.cwd(), 'escalation', 'active');
-    const filename = `${id}.md`;
-    const filePath = path.join(escalationDir, filename);
-    const tempPath = filePath + '.tmp';
+    const baseFilename = buildEscalationFilename(
+        incoming.entityType,
+        incoming.entityId,
+        incoming.key
+    );
 
-    const content = `# Escalation: ${id}
+    let filename = baseFilename;
+    let filePath = path.join(escalationPaths.active, filename);
+    let appendedToExisting = false;
 
-## LIBRARIAN ASSESSMENT
-
-- **Entity:** ${incoming.entityType} / ${incoming.entityId} / ${incoming.key}
-- **Existing value:** ${JSON.stringify(existing.valueRaw)}
-- **Existing confidence:** ${existing.confidence}
-- **Incoming value:** ${JSON.stringify(incoming.valueRaw)}
-- **Incoming confidence:** ${incoming.confidence}
-- **Reasoning:** Ambiguous conflict requiring human judgment.
-- **Status:** PENDING
-
-## HUMAN RESOLUTION
-
-<!-- Write your resolution as JSON in this format:
-{
-  "value": <the correct value>,
-  "summary": "one sentence summary"
-}
-Change Status to RESOLVED when done. -->
-`;
+    const content = buildInitialEscalationContent(existing, incoming);
+    const updateBlock = buildEscalationUpdateBlock(existing, incoming);
 
     try {
-        await fs.writeFile(tempPath, content, { encoding: 'utf-8', flag: 'wx' });
-        await fs.rename(tempPath, filePath);
+        await fs.writeFile(filePath, content, { encoding: 'utf-8', flag: 'wx' });
     } catch (err) {
-        if ((err as any).code === 'EEXIST') {
-            // File already exists (idempotent replay)
-        } else {
+        if ((err as any).code !== 'EEXIST') {
             throw err;
+        }
+
+        const existingContent = await fs.readFile(filePath, 'utf-8');
+        const alreadyResolved = existingContent.includes('**Status:** RESOLVED');
+
+        if (alreadyResolved) {
+            filename = baseFilename.replace('.md', `_${Date.now()}.md`);
+            filePath = path.join(escalationPaths.active, filename);
+            await fs.writeFile(filePath, content, { encoding: 'utf-8', flag: 'wx' });
+        } else {
+            await fs.appendFile(filePath, updateBlock, { encoding: 'utf-8' });
+            appendedToExisting = true;
         }
     }
 
@@ -454,8 +468,84 @@ Change Status to RESOLVED when done. -->
 
     return {
         action: 'escalated',
-        reason: `Conflict escalated to ${filePath}. Awaiting human resolution.`,
+        reason: appendedToExisting
+            ? `Conflict appended to unresolved escalation file ${filePath}. Awaiting human resolution.`
+            : `Conflict escalated to ${filePath}. Awaiting human resolution.`,
     };
+}
+
+function sanitizeEscalationPart(value: string): string {
+    const normalized = value
+        .toLowerCase()
+        .replace(/[^a-z0-9._-]+/g, '_')
+        .replace(/^_+|_+$/g, '');
+    return (normalized || 'unknown').slice(0, 64);
+}
+
+function buildEscalationFilename(entityType: string, entityId: string, key: string): string {
+    const safeType = sanitizeEscalationPart(entityType);
+    const safeId = sanitizeEscalationPart(entityId);
+    const safeKey = sanitizeEscalationPart(key);
+    const digest = createHash('sha1')
+        .update(`${entityType}|${entityId}|${key}`)
+        .digest('hex')
+        .slice(0, 10);
+
+    return `conflict_${safeType}_${safeId}_${safeKey}_${digest}.md`;
+}
+
+function buildConflictSnapshot(existing: KnowledgeEntry, incoming: EntryInput): string {
+    return [
+        `- **Detected at:** ${new Date().toISOString()}`,
+        `- **Request ID:** ${incoming.requestId ?? 'none'}`,
+        `- **Entity:** ${incoming.entityType} / ${incoming.entityId} / ${incoming.key}`,
+        `- **Existing value:** ${JSON.stringify(existing.valueRaw)}`,
+        `- **Existing confidence:** ${existing.confidence}`,
+        `- **Incoming value:** ${JSON.stringify(incoming.valueRaw)}`,
+        `- **Incoming confidence:** ${incoming.confidence}`,
+        `- **Reasoning:** Ambiguous conflict requiring human judgment.`,
+    ].join('\n');
+}
+
+function buildInitialEscalationContent(existing: KnowledgeEntry, incoming: EntryInput): string {
+    const filename = buildEscalationFilename(incoming.entityType, incoming.entityId, incoming.key);
+    const snapshot = buildConflictSnapshot(existing, incoming);
+
+    return `# Escalation: ${filename}
+
+## LIBRARIAN ASSESSMENT
+
+${snapshot}
+- **Status:** PENDING
+
+### CONFLICT_EVENTS
+
+#### EVENT_1
+${snapshot}
+
+## HUMAN RESOLUTION
+
+Update **Status** above to \`RESOLVED\` when done, then provide authoritative JSON:
+
+### AUTHORITATIVE_JSON
+\`\`\`json
+{
+  "entityType": "${incoming.entityType}",
+  "entityId": "${incoming.entityId}",
+  "key": "${incoming.key}",
+  "value": { "text": "..." },
+  "summary": "One sentence summary",
+  "validUntil": null,
+  "notes": "Optional human notes"
+}
+\`\`\`
+`;
+}
+
+function buildEscalationUpdateBlock(existing: KnowledgeEntry, incoming: EntryInput): string {
+    const snapshot = buildConflictSnapshot(existing, incoming);
+    const eventId = `EVENT_${Date.now()}`;
+    return `\n#### ${eventId}\n${snapshot}\n`;
 }
 
 // ─── Chunk and Write ─────────────────────────────────────────────────────────

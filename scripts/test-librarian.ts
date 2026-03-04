@@ -1,7 +1,9 @@
 import 'dotenv/config';
 import { librarianWrite } from '../src/librarian';
+import { bootstrapHarness } from './harness';
 
 async function test() {
+    bootstrapHarness();
     console.log('Testing Librarian...\n');
 
     // Test 1 — clean write

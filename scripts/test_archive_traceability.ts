@@ -1,8 +1,10 @@
 import 'dotenv/config';
 import { librarianWrite } from '../src/librarian/index';
 import { getDb } from '../src/library/client';
+import { bootstrapHarness } from './harness';
 
 async function testArchiveTraceability() {
+    bootstrapHarness();
     console.log('Testing Archive Traceability...\n');
 
     const testEntity = {

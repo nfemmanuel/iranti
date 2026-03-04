@@ -15,6 +15,7 @@ async function auditRoutes() {
         { method: 'POST', path: '/memory/handshake', expectAuth: true },
         { method: 'POST', path: '/memory/reconvene', expectAuth: true },
         { method: 'POST', path: '/memory/observe', expectAuth: true },
+        { method: 'POST', path: '/memory/attend', expectAuth: true },
         { method: 'POST', path: '/memory/maintenance', expectAuth: true },
     ];
 

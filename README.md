@@ -17,6 +17,18 @@ Iranti is a knowledge base for multi-agent systems. Unlike vector databases that
 
 ---
 
+## Runtime Roles
+
+- **User**: Person who interacts with an app or chatbot built on Iranti.
+- **Agent**: External AI worker that writes/reads facts through Iranti APIs.
+- **Attendant**: Per-agent memory manager that decides what to inject for each turn.
+- **Librarian**: Conflict-aware writer that owns all KB writes.
+- **Library**: Active truth store (`knowledge_base`) in PostgreSQL.
+- **Archive**: Historical/superseded truth store (`archive`) in PostgreSQL.
+- **Archivist**: Maintenance worker that archives stale/low-confidence facts and processes resolved escalations.
+
+---
+
 ## Why Not a Vector Database?
 
 | Feature | Vector DB | Iranti |
@@ -106,6 +118,12 @@ git clone https://github.com/nfemmanuel/iranti
 cd iranti
 cp .env.example .env          # Set DATABASE_URL and IRANTI_API_KEY
 
+# Optional runtime hygiene
+# IRANTI_ESCALATION_DIR=C:/Users/<you>/.iranti/escalation
+# IRANTI_ARCHIVIST_WATCH=true
+# IRANTI_ARCHIVIST_DEBOUNCE_MS=60000
+# IRANTI_ARCHIVIST_INTERVAL_MS=21600000
+
 # 2. Start PostgreSQL
 docker-compose up -d
 
@@ -119,6 +137,87 @@ npm run api                   # Runs on port 3001
 # 5. Install Python client
 pip install requests python-dotenv
 ```
+
+### Archivist Scheduling Knobs
+
+- `IRANTI_ARCHIVIST_WATCH=true` enables file-change watching on escalation `active/`.
+- `IRANTI_ARCHIVIST_DEBOUNCE_MS=60000` runs maintenance 60s after the latest file change.
+- `IRANTI_ARCHIVIST_INTERVAL_MS=21600000` runs maintenance every 6 hours (set `0` to disable).
+- `IRANTI_ESCALATION_DIR` sets escalation storage root. Default is `~/.iranti/escalation`, keeping escalation files out of the repo by default.
+
+### Per-User API Keys (Recommended)
+
+```bash
+# Create a key for one user/app (prints token once)
+npm run api-key:create -- --key-id chatbot_alice --owner "Alice chatbot" --scopes memory,kb
+
+# List keys
+npm run api-key:list
+
+# Revoke a key
+npm run api-key:revoke -- --key-id chatbot_alice
+```
+
+Use the printed token (`keyId.secret`) as `X-Iranti-Key`.
+
+---
+
+## Install Strategy (Double Layer)
+
+Iranti now supports a two-layer install flow:
+
+1. **Machine/runtime layer**: one local runtime root with one or more named Iranti instances.
+2. **Project layer**: each chatbot/app binds to one instance with a local `.env.iranti`.
+
+### 1) Install CLI
+
+```bash
+# If published package is available
+npm install -g iranti
+
+# Or from this repo (local simulation)
+npm install -g .
+```
+
+### 2) Initialize machine runtime root
+
+```bash
+iranti install --scope user
+```
+
+Defaults:
+- Windows user scope: `%USERPROFILE%\\.iranti`
+- Windows system scope: `%ProgramData%\\Iranti`
+- Linux system scope: `/var/lib/iranti`
+- macOS system scope: `/Library/Application Support/Iranti`
+
+### 3) Create a named instance
+
+```bash
+iranti instance create local --port 3001 --db-url "postgresql://postgres:yourpassword@localhost:5432/iranti_local"
+iranti instance show local
+```
+
+Then edit the printed instance `.env` file and set:
+- `DATABASE_URL` (real value)
+- `IRANTI_API_KEY` (real token)
+
+### 4) Run Iranti from that instance
+
+```bash
+iranti run --instance local
+```
+
+### 5) Bind any chatbot/app project to that instance
+
+```bash
+cd /path/to/your/chatbot
+iranti project init . --instance local --agent-id chatbot_main
+```
+
+This writes `.env.iranti` in the project with the correct `IRANTI_URL`, `IRANTI_API_KEY`, and default agent identity.
+
+For multi-agent systems, bind once per project and set unique agent IDs per worker (for example `planner_agent`, `research_agent`, `critic_agent`).
 
 ---
 
@@ -167,19 +266,20 @@ for fact in facts:
     print(f"[{fact['key']}] {fact['summary']} (confidence: {fact['confidence']})")
 ```
 
-### Context Persistence (observe)
+### Context Persistence (attend)
 
 ```python
-# Before each LLM call, check if relevant facts have fallen out of context
-result = client.observe(
+# Before each LLM call, let Attendant decide if memory is needed
+result = client.attend(
     agent_id="research_agent_001",
+    latest_message="What's Jane Smith's current affiliation?",
     current_context="User: What's Jane Smith's current affiliation?\nAssistant: Let me check...",
     max_facts=5
 )
 
-# Inject missing facts into prompt
-for fact in result['facts']:
-    print(f"Inject: [{fact['entityKey']}] {fact['summary']}")
+if result["shouldInject"]:
+    for fact in result['facts']:
+        print(f"Inject: [{fact['entityKey']}] {fact['summary']}")
 ```
 
 ### Working Memory (handshake)
@@ -287,7 +387,7 @@ middleware.after_receive(
 ```
 
 **How it works**:
-1. `before_send()` calls `observe()` with conversation context
+1. `before_send()` calls `attend()` with conversation context
 2. Forgotten facts are prepended as `[MEMORY: ...]`
 3. `after_receive()` extracts new facts and saves them (best-effort)
 
@@ -305,7 +405,7 @@ Iranti has four internal components:
 |---|---|
 | **Library** | PostgreSQL knowledge base. Active truth (soft-deleted entries marked as archived). Full provenance in Archive table. |
 | **Librarian** | Manages all writes. Detects conflicts, reasons about resolution, escalates when uncertain. |
-| **Attendant** | Per-agent working memory manager. Implements `observe()` and `handshake()` APIs. |
+| **Attendant** | Per-agent working memory manager. Implements `attend()`, `observe()`, and `handshake()` APIs. |
 | **Archivist** | Periodic cleanup. Archives expired and low-confidence entries. Processes human-resolved conflicts. |
 
 ### REST API
@@ -316,6 +416,7 @@ Express server on port 3001 with endpoints:
 - `POST /kb/ingest` - Ingest raw text, auto-chunk into facts
 - `GET /kb/query/:entityType/:entityId/:key` - Query specific fact
 - `GET /kb/query/:entityType/:entityId` - Query all facts for entity
+- `POST /memory/attend` - Decide whether to inject memory for this turn
 - `POST /memory/observe` - Context persistence (inject missing facts)
 - `POST /memory/handshake` - Working memory brief for agent session
 - `POST /kb/relate` - Create entity relationship

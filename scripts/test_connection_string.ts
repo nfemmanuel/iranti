@@ -1,7 +1,9 @@
 import 'dotenv/config';
 import { Iranti } from '../src/sdk';
+import { bootstrapHarness } from './harness';
 
 async function testConnectionString() {
+    bootstrapHarness({ requireDb: false });
     console.log('Testing Connection String Override...\n');
 
     const mainDb = process.env.DATABASE_URL;

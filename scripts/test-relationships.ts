@@ -1,7 +1,9 @@
 import 'dotenv/config';
 import { Iranti } from '../src/sdk';
+import { bootstrapHarness } from './harness';
 
 async function test() {
+    bootstrapHarness({ requireDb: false });
     console.log('Testing Knowledge Relationships...\n');
 
     const iranti = new Iranti();

@@ -1,15 +1,13 @@
 import { randomUUID } from 'crypto';
-import { initDb } from '../src/library/client';
 import { librarianWrite } from '../src/librarian';
 import { findEntry, findEntriesByEntity } from '../src/library/queries';
 import { getDb } from '../src/library/client';
-
-const DATABASE_URL = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/iranti';
+import { bootstrapHarness } from './harness';
 
 async function testConcurrentWrites() {
     console.log('🔒 Testing concurrent write safety...\n');
-    
-    initDb(DATABASE_URL);
+
+    bootstrapHarness();
     const db = getDb();
     
     // Clean slate

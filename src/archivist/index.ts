@@ -3,12 +3,10 @@ import path from 'path';
 import { getDb } from '../library/client';
 import { archiveEntry } from '../library/queries';
 import { complete } from '../lib/llm';
+import { ensureEscalationFolders } from '../lib/escalationPaths';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const ESCALATION_ACTIVE = path.join(process.cwd(), 'escalation', 'active');
-const ESCALATION_RESOLVED = path.join(process.cwd(), 'escalation', 'resolved');
-const ESCALATION_ARCHIVED = path.join(process.cwd(), 'escalation', 'archived');
 const LOW_CONFIDENCE_THRESHOLD = 30;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -70,14 +68,6 @@ function extractAuthoritativeJson(fileText: string): AuthoritativeResolution {
 
 // ─── Main Cycle ──────────────────────────────────────────────────────────────
 
-async function ensureEscalationFolders(): Promise<void> {
-    await Promise.all([
-        fs.mkdir(ESCALATION_ACTIVE, { recursive: true }),
-        fs.mkdir(ESCALATION_RESOLVED, { recursive: true }),
-        fs.mkdir(ESCALATION_ARCHIVED, { recursive: true }),
-    ]);
-}
-
 export async function runArchivist(): Promise<ArchivistReport> {
     const report: ArchivistReport = {
         expiredArchived: 0,
@@ -138,12 +128,13 @@ async function archiveLowConfidence(report: ArchivistReport): Promise<void> {
 // ─── Escalation Processing ───────────────────────────────────────────────────
 
 async function processEscalations(report: ArchivistReport): Promise<void> {
+    const paths = await ensureEscalationFolders();
     let files: string[];
 
     try {
-        files = await fs.readdir(ESCALATION_ACTIVE);
+        files = await fs.readdir(paths.active);
     } catch (err) {
-        report.errors.push(`Could not read escalation/active/: ${err}`);
+        report.errors.push(`Could not read ${paths.active}: ${err}`);
         return;
     }
 
@@ -151,7 +142,7 @@ async function processEscalations(report: ArchivistReport): Promise<void> {
 
     for (const filename of markdownFiles) {
         try {
-            await processEscalationFile(filename, report);
+            await processEscalationFile(filename, paths, report);
         } catch (err) {
             report.errors.push(`Failed to process escalation file ${filename}: ${err}`);
         }
@@ -160,10 +151,11 @@ async function processEscalations(report: ArchivistReport): Promise<void> {
 
 async function processEscalationFile(
     filename: string,
+    paths: { active: string; resolved: string; archived: string },
     report: ArchivistReport
 ): Promise<void> {
     const sanitizedFilename = filename.replace(/[^a-zA-Z0-9_.-]/g, '_');
-    const filePath = path.join(ESCALATION_ACTIVE, sanitizedFilename);
+    const filePath = path.join(paths.active, sanitizedFilename);
     const content = await fs.readFile(filePath, 'utf-8');
 
     if (!content.includes('**Status:** RESOLVED')) {
@@ -212,12 +204,12 @@ async function processEscalationFile(
     }
 
     // Move file to resolved folder
-    const resolvedPath = path.join(ESCALATION_RESOLVED, sanitizedFilename);
+    const resolvedPath = path.join(paths.resolved, sanitizedFilename);
     await fs.rename(filePath, resolvedPath);
 
     // Archive a copy with timestamp
     const archivedFilename = sanitizedFilename.replace('.md', `_archived_${Date.now()}.md`);
-    const archivedPath = path.join(ESCALATION_ARCHIVED, archivedFilename);
+    const archivedPath = path.join(paths.archived, archivedFilename);
     await fs.copyFile(resolvedPath, archivedPath);
 
     report.escalationsProcessed++;

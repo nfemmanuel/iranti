@@ -1,7 +1,9 @@
 import 'dotenv/config';
 import { runArchivist } from '../src/archivist';
+import { bootstrapHarness } from './harness';
 
 async function test() {
+    bootstrapHarness();
     console.log('Testing Archivist...\n');
 
     const report = await runArchivist();

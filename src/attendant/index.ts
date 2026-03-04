@@ -1,7 +1,16 @@
 // Re-export new class-based API
 export { AttendantInstance } from './AttendantInstance';
 export { getAttendant, clearAttendant, activeAttendants } from './registry';
-export type { AgentContext, WorkingMemoryBrief, WorkingMemoryEntry } from './AttendantInstance';
+export type {
+    AgentContext,
+    WorkingMemoryBrief,
+    WorkingMemoryEntry,
+    ObserveInput,
+    ObserveResult,
+    AttendInput,
+    AttendResult,
+    AttendDecision,
+} from './AttendantInstance';
 
 // Legacy functional API — kept for backward compatibility during transition
 import { getAttendant } from './registry';

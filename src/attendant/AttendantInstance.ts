@@ -18,6 +18,23 @@ const ATTENDANT_RULES_QUERY: EntryQuery = {
 const CONTEXT_RECOVERY_THRESHOLD = 20;  // LLM calls before context recovery
 const ENTITY_DETECTION_WINDOW_CHARS = 1500;
 const MIN_ENTITY_CONFIDENCE = 0.75;
+const MEMORY_DECISION_CONTEXT_WINDOW_CHARS = 2000;
+
+const MEMORY_NEED_POSITIVE_PATTERNS: RegExp[] = [
+    /\bwhat(?:'s| is| was)?\s+my\b/i,
+    /\bdo you remember\b/i,
+    /\bremind me\b/i,
+    /\bmy\s+(?:favorite|favourite|name|email|phone|address|city|country|movie|snack|color|colour)\b/i,
+    /\bwe decided\b/i,
+    /\bearlier\b/i,
+    /\bprevious(?:ly)?\b/i,
+    /\bagain\b/i,
+];
+
+const MEMORY_NEED_NEGATIVE_PATTERNS: RegExp[] = [
+    /^\s*(hi|hello|hey|yo|sup|good (?:morning|afternoon|evening))\b[!.?\s]*$/i,
+    /^\s*(thanks|thank you|cool|great|nice)\b[!.?\s]*$/i,
+];
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -84,6 +101,29 @@ export interface ObserveResult {
     };
 }
 
+export interface AttendInput extends ObserveInput {
+    latestMessage?: string;
+    forceInject?: boolean;
+}
+
+export interface AttendDecision {
+    needed: boolean;
+    confidence: number;
+    method: 'heuristic' | 'llm' | 'forced';
+    explanation: string;
+}
+
+export interface AttendResult extends ObserveResult {
+    shouldInject: boolean;
+    reason:
+        | 'forced'
+        | 'memory_not_needed'
+        | 'memory_needed_no_facts'
+        | 'memory_needed_but_in_context'
+        | 'memory_needed_injected';
+    decision: AttendDecision;
+}
+
 type EntityCandidate = {
     type: string;
     name: string;
@@ -92,6 +132,12 @@ type EntityCandidate = {
     evidence: string;
     start?: number;
     end?: number;
+};
+
+type MemoryDecisionHeuristic = {
+    needed: boolean | null;
+    confidence: number;
+    explanation: string;
 };
 
 function heuristicEntityId(name: string): string {
@@ -169,6 +215,54 @@ function extractFallbackCandidates(text: string): EntityCandidate[] {
     }
 
     return candidates;
+}
+
+function normalizeMessage(message: string | undefined): string {
+    return (message ?? '').trim();
+}
+
+function heuristicMemoryNeed(message: string): MemoryDecisionHeuristic {
+    const normalized = normalizeMessage(message);
+    if (!normalized) {
+        return {
+            needed: null,
+            confidence: 0.5,
+            explanation: 'no_latest_message',
+        };
+    }
+
+    if (MEMORY_NEED_NEGATIVE_PATTERNS.some((pattern) => pattern.test(normalized))) {
+        return {
+            needed: false,
+            confidence: 0.95,
+            explanation: 'simple_greeting_or_ack',
+        };
+    }
+
+    if (MEMORY_NEED_POSITIVE_PATTERNS.some((pattern) => pattern.test(normalized))) {
+        return {
+            needed: true,
+            confidence: 0.92,
+            explanation: 'memory_reference_detected',
+        };
+    }
+
+    const hasQuestion = normalized.includes('?');
+    const hasPersonalReference = /\b(my|our|we)\b/i.test(normalized);
+
+    if (!hasQuestion && !hasPersonalReference) {
+        return {
+            needed: false,
+            confidence: 0.8,
+            explanation: 'general_statement_without_memory_signal',
+        };
+    }
+
+    return {
+        needed: null,
+        confidence: 0.55,
+        explanation: 'ambiguous',
+    };
 }
 
 // ─── AttendantInstance ───────────────────────────────────────────────────────
@@ -299,7 +393,68 @@ export class AttendantInstance {
         return this.agentId;
     }
 
-    // ── Context Window Observation ────────────────────────────────────────────
+    async attend(input: AttendInput): Promise<AttendResult> {
+        const t0 = timeStart();
+        const currentContext = input.currentContext ?? '';
+        const latestMessage = normalizeMessage(input.latestMessage);
+        const forceInject = input.forceInject === true;
+
+        const decision = await this.decideMemoryNeed({
+            currentContext,
+            latestMessage,
+            forceInject,
+        });
+
+        if (!decision.needed) {
+            timeEnd('attendant.attend_ms', t0);
+            return {
+                shouldInject: false,
+                reason: 'memory_not_needed',
+                decision,
+                facts: [],
+                entitiesDetected: [],
+                alreadyPresent: 0,
+                totalFound: 0,
+                entitiesResolved: [],
+                debug: {
+                    skipped: 'empty_context',
+                    contextLength: currentContext.length,
+                    detectionWindowChars: Math.min(currentContext.length, ENTITY_DETECTION_WINDOW_CHARS),
+                    detectedCandidates: 0,
+                    keptCandidates: 0,
+                    hintsProvided: input.entityHints?.length ?? 0,
+                    hintsResolved: 0,
+                    dropped: [{ name: latestMessage || '(none)', reason: 'memory_not_needed' }],
+                },
+            };
+        }
+
+        const observed = await this.observe({
+            currentContext,
+            maxFacts: input.maxFacts,
+            entityHints: input.entityHints,
+        });
+
+        let reason: AttendResult['reason'] = 'memory_needed_injected';
+        const shouldInject = observed.facts.length > 0;
+
+        if (!shouldInject) {
+            const allAlreadyInContext = observed.totalFound > 0 && observed.alreadyPresent >= observed.totalFound;
+            reason = allAlreadyInContext ? 'memory_needed_but_in_context' : 'memory_needed_no_facts';
+        } else if (forceInject) {
+            reason = 'forced';
+        }
+
+        timeEnd('attendant.attend_ms', t0);
+        return {
+            ...observed,
+            shouldInject,
+            reason,
+            decision,
+        };
+    }
+
+    // Context Window Observation
 
     async observe(input: ObserveInput): Promise<ObserveResult> {
         const t0 = timeStart();
@@ -626,6 +781,100 @@ ${detectionWindow}`,
     }
 
     // ── Private ──────────────────────────────────────────────────────────────
+
+    private async decideMemoryNeed(input: {
+        currentContext: string;
+        latestMessage: string;
+        forceInject: boolean;
+    }): Promise<AttendDecision> {
+        if (input.forceInject) {
+            return {
+                needed: true,
+                confidence: 1,
+                method: 'forced',
+                explanation: 'force_inject',
+            };
+        }
+
+        const heuristic = heuristicMemoryNeed(input.latestMessage);
+        if (heuristic.needed !== null) {
+            return {
+                needed: heuristic.needed,
+                confidence: heuristic.confidence,
+                method: 'heuristic',
+                explanation: heuristic.explanation,
+            };
+        }
+
+        const contextWindow = input.currentContext.length <= MEMORY_DECISION_CONTEXT_WINDOW_CHARS
+            ? input.currentContext
+            : input.currentContext.slice(-MEMORY_DECISION_CONTEXT_WINDOW_CHARS);
+
+        const response = await route('classification', [
+            {
+                role: 'user',
+                content: `Decide whether this assistant should fetch persistent memory before replying.
+
+Latest user message:
+${input.latestMessage || '(none)'}
+
+Recent context excerpt:
+${contextWindow || '(empty)'}
+
+Return ONLY valid JSON with this exact shape:
+{"needsMemory":true,"confidence":0.81,"reason":"short_reason"}
+
+Rules:
+- needsMemory=true when the answer likely depends on user-specific or session-specific facts.
+- needsMemory=false for generic chit-chat, open-domain facts, or when no memory lookup is needed.
+- confidence is a float from 0 to 1.`,
+            },
+        ], 128);
+
+        const parsed = this.parseMemoryDecision(response.text);
+        if (parsed) {
+            return {
+                needed: parsed.needsMemory,
+                confidence: parsed.confidence,
+                method: 'llm',
+                explanation: parsed.reason,
+            };
+        }
+
+        return {
+            needed: false,
+            confidence: 0.5,
+            method: 'heuristic',
+            explanation: 'classification_parse_failed_default_false',
+        };
+    }
+
+    private parseMemoryDecision(raw: string): { needsMemory: boolean; confidence: number; reason: string } | null {
+        try {
+            const cleaned = raw.replace(/```json|```/g, '').trim();
+            const parsed = JSON.parse(cleaned) as {
+                needsMemory?: unknown;
+                confidence?: unknown;
+                reason?: unknown;
+            };
+
+            if (typeof parsed.needsMemory !== 'boolean') return null;
+            const confidence = typeof parsed.confidence === 'number'
+                ? Math.max(0, Math.min(1, parsed.confidence))
+                : 0.6;
+            const reason = typeof parsed.reason === 'string' && parsed.reason.trim().length > 0
+                ? parsed.reason.trim()
+                : 'llm_classification';
+
+            return {
+                needsMemory: parsed.needsMemory,
+                confidence,
+                reason,
+            };
+        } catch {
+            return null;
+        }
+    }
 
     private async inferTask(context: AgentContext): Promise<string> {
         this.contextCallCount++;

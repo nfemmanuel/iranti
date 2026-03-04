@@ -49,7 +49,9 @@ export IRANTI_URL=http://localhost:3001
 export IRANTI_API_KEY=your_api_key_here
 ```
 
-The API key must match `IRANTI_API_KEY` in the server's `.env` file.
+`IRANTI_API_KEY` can be either:
+- a registry token (`keyId.secret`, recommended), or
+- the legacy shared key from server `.env`.
 
 ---
 
@@ -211,6 +213,30 @@ brief = client.reconvene(
 ```
 
 **Returns:** Updated `WorkingMemoryBrief`
+
+### Attend (Per-Turn Memory Decision)
+
+Before each LLM turn, call `attend()` so Attendant decides whether memory is needed:
+
+```python
+turn = client.attend(
+    agent_id="my_agent",
+    latest_message="What is my favorite snack?",
+    current_context="User: What is my favorite snack?\nAssistant:",
+    entity_hints=["user/main"],
+    max_facts=5
+)
+
+if turn["shouldInject"]:
+    for fact in turn["facts"]:
+        print(f"Inject: {fact['summary']}")
+```
+
+**Returns:** dict with:
+- `shouldInject` (bool): whether to inject facts now
+- `reason` (str): decision reason (`memory_not_needed`, `memory_needed_injected`, etc.)
+- `decision` (dict): Attendant decision metadata (`needed`, `confidence`, `method`, `explanation`)
+- `facts` (list): facts to inject when needed
 
 ### Who Knows What
 
@@ -553,7 +579,7 @@ iranti.write(
 | Variable | Description | Default |
 |---|---|---|
 | `IRANTI_URL` | API server URL | `http://localhost:3001` |
-| `IRANTI_API_KEY` | API key for authentication | Required |
+| `IRANTI_API_KEY` | API key token (`keyId.secret`) or legacy shared key | Required |
 
 Set in your environment:
 
@@ -683,7 +709,7 @@ npm run api
 IrantiAuthError: Invalid or missing API key
 ```
 
-**Solution**: Check that `IRANTI_API_KEY` matches between client and server.
+**Solution**: Check that `IRANTI_API_KEY` is a valid active token (`keyId.secret`) or matches the legacy server key.
 
 ### Timeout errors
 

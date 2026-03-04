@@ -67,6 +67,15 @@ brief = client.handshake(
 )
 print(brief.inferred_task_type)
 
+# Per-turn memory decision (inject only when needed)
+turn = client.attend(
+    agent_id="my_agent",
+    latest_message="What is my favorite snack?",
+    current_context="User: What is my favorite snack?\nAssistant:",
+    entity_hints=["user/main"]
+)
+print(turn["shouldInject"], turn["reason"])
+
 # Query facts
 result = client.query("researcher/jane_smith", "affiliation")
 if result.found:
@@ -98,4 +107,4 @@ except IrantiError as e:
 | Variable | Description |
 |---|---|
 | `IRANTI_URL` | API server URL (default: http://localhost:3001) |
-| `IRANTI_API_KEY` | API key matching server's IRANTI_API_KEY |
+| `IRANTI_API_KEY` | API token (`keyId.secret`) or legacy shared server key |

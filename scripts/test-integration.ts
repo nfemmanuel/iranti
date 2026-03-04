@@ -3,6 +3,7 @@ import { librarianWrite } from '../src/librarian';
 import { handshake, reconvene } from '../src/attendant';
 import { runArchivist } from '../src/archivist';
 import { queryEntry } from '../src/library/queries';
+import { bootstrapHarness } from './harness';
 
 // ─── Mock Agent ──────────────────────────────────────────────────────────────
 // Simulates an external agent using Iranti as its memory layer.
@@ -102,6 +103,7 @@ async function mockAgent(agentId: string) {
 // ─── Integration Test ────────────────────────────────────────────────────────
 
 async function test() {
+    bootstrapHarness();
     console.log('=== Iranti Integration Test ===');
 
     // Run mock agent
