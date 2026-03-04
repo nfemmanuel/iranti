@@ -135,7 +135,7 @@ npm run setup                 # Runs migrations
 npm run api                   # Runs on port 3001
 
 # 5. Install Python client
-pip install requests python-dotenv
+pip install iranti
 ```
 
 ### Archivist Scheduling Knobs

@@ -6,17 +6,17 @@ Complete guide to using the Iranti Python client with any Python agent framework
 
 ## Installation
 
-The Python client requires only the `requests` library:
+Install from PyPI:
 
 ```bash
-pip install requests
+pip install iranti
 ```
 
-Copy `clients/python/iranti.py` into your project, or install from the repository:
+For local development from this repository:
 
 ```bash
-# From the iranti directory
-cp clients/python/iranti.py /path/to/your/project/
+cd clients/python
+pip install -e .
 ```
 
 ---
@@ -35,7 +35,7 @@ npm run api
 You should see:
 
 ```
-Iranti API running on port 3000
+Iranti API running on port 3001
 Health: http://localhost:3001/health
 Provider: mock
 ```

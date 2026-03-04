@@ -28,6 +28,8 @@ import requests
 from typing import Any, Optional
 from dataclasses import dataclass, field
 
+__version__ = "0.1.0"
+
 
 # ─── Types ────────────────────────────────────────────────────────────────────
 

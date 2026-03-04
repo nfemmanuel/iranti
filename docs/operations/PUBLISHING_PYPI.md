@@ -1,171 +1,76 @@
-# Publishing to PyPI
+# Publishing the Python Client to PyPI
 
-Guide for publishing Iranti Python client to PyPI.
+This guide publishes the Python client from `clients/python/`.
+
+## Package Metadata
+
+The Python package uses:
+
+- `clients/python/pyproject.toml`
+- module: `clients/python/iranti.py`
+- license: AGPL-3.0-or-later (`clients/python/LICENSE`)
 
 ## Prerequisites
 
 ```bash
-pip install build twine
+python -m pip install --upgrade pip
+python -m pip install build twine
 ```
 
-## Build Package
+## Build
 
 ```bash
-# Clean previous builds
-rm -rf dist/ build/ *.egg-info
-
-# Build package
+cd clients/python
 python -m build
-
-# This creates:
-# - dist/iranti-0.1.0.tar.gz (source distribution)
-# - dist/iranti-0.1.0-py3-none-any.whl (wheel)
 ```
 
-## Test Locally
+Artifacts:
+
+- `dist/iranti-<version>.tar.gz`
+- `dist/iranti-<version>-py3-none-any.whl`
+
+## Local Validation
 
 ```bash
-# Install locally
-pip install dist/iranti-0.1.0-py3-none-any.whl
-
-# Test import
-python -c "from iranti import IrantiClient; print('Success!')"
-
-# Uninstall
-pip uninstall iranti
+python -m pip install dist/iranti-0.1.0-py3-none-any.whl
+python -c "import iranti; from iranti import IrantiClient; print(iranti.__version__)"
+python -m pip uninstall -y iranti
 ```
 
-## Publish to TestPyPI (Recommended First)
+## Publish to TestPyPI
 
 ```bash
-# Upload to TestPyPI
 python -m twine upload --repository testpypi dist/*
-
-# Test installation from TestPyPI
-pip install --index-url https://test.pypi.org/simple/ iranti
-
-# Test it works
-python -c "from iranti import IrantiClient; print('Success!')"
+python -m pip install --index-url https://test.pypi.org/simple/ iranti
 ```
 
-## Publish to PyPI (Production)
+## Publish to PyPI
 
 ```bash
-# Upload to PyPI
 python -m twine upload dist/*
-
-# Enter credentials when prompted
-# Username: __token__
-# Password: pypi-... (your API token)
 ```
 
-## Get PyPI API Token
+Use token auth:
 
-1. Go to https://pypi.org/manage/account/token/
-2. Create new API token
-3. Scope: "Entire account" or "Project: iranti"
-4. Save token securely
+- username: `__token__`
+- password: `pypi-...`
 
-## Configure .pypirc (Optional)
+## Versioning
 
-```bash
-# Create ~/.pypirc
-cat > ~/.pypirc << EOF
-[pypi]
-username = __token__
-password = pypi-your-token-here
+Before each release, bump both:
 
-[testpypi]
-username = __token__
-password = pypi-your-test-token-here
-EOF
+1. `clients/python/pyproject.toml` -> `project.version`
+2. `clients/python/iranti.py` -> `__version__`
 
-chmod 600 ~/.pypirc
-```
-
-## Version Bumping
-
-Update version in:
-1. `setup.py` - version="0.1.1"
-2. `clients/python/iranti.py` - __version__ = "0.1.1"
+Then tag and push:
 
 ```bash
-# Tag release
 git tag v0.1.1
 git push origin v0.1.1
 ```
 
-## Verify Published Package
-
-```bash
-# Check on PyPI
-open https://pypi.org/project/iranti/
-
-# Install from PyPI
-pip install iranti
-
-# Test
-python -c "from iranti import IrantiClient; print(IrantiClient.__version__)"
-```
-
 ## Troubleshooting
 
-### "File already exists"
-- Version already published
-- Bump version number and rebuild
-
-### "Invalid distribution"
-- Check setup.py syntax
-- Ensure all required files exist
-- Run `python setup.py check`
-
-### "Authentication failed"
-- Check API token is correct
-- Ensure token has correct scope
-- Try re-creating token
-
-## Automation with GitHub Actions
-
-Create `.github/workflows/publish.yml`:
-
-```yaml
-name: Publish to PyPI
-
-on:
-  release:
-    types: [published]
-
-jobs:
-  publish:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install build twine
-      - name: Build package
-        run: python -m build
-      - name: Publish to PyPI
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-        run: twine upload dist/*
-```
-
-Add `PYPI_API_TOKEN` to GitHub repository secrets.
-
-## Checklist
-
-Before publishing:
-- [ ] Update version in setup.py
-- [ ] Update CHANGELOG.md
-- [ ] Test package locally
-- [ ] Test on TestPyPI
-- [ ] Create git tag
-- [ ] Publish to PyPI
-- [ ] Verify installation works
-- [ ] Update documentation
+- `File already exists`: version already published, bump version.
+- `Invalid distribution`: rebuild (`python -m build`) and retry.
+- `Authentication failed`: check PyPI token scope and account/project access.

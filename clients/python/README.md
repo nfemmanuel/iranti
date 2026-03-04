@@ -5,10 +5,15 @@ Python client for the Iranti REST API.
 ## Installation
 
 ```bash
-pip install requests
+pip install iranti
 ```
 
-No package install needed — copy `iranti.py` into your project.
+For local development from this repository:
+
+```bash
+cd clients/python
+pip install -e .
+```
 
 ## Setup
 
@@ -80,11 +85,6 @@ print(turn["shouldInject"], turn["reason"])
 result = client.query("researcher/jane_smith", "affiliation")
 if result.found:
     print(result.value)
-
-# Find who knows what
-knowers = client.who_knows("researcher/jane_smith")
-for k in knowers:
-    print(f"{k['agentId']}: {k['keys']}")
 ```
 
 ## Error Handling
@@ -108,3 +108,7 @@ except IrantiError as e:
 |---|---|
 | `IRANTI_URL` | API server URL (default: http://localhost:3001) |
 | `IRANTI_API_KEY` | API token (`keyId.secret`) or legacy shared server key |
+
+## License
+
+AGPL-3.0-or-later.

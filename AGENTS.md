@@ -235,7 +235,9 @@ iranti/
 │   └── python/
 │       ├── iranti.py           — Python HTTP client for REST API
 │       ├── test_client.py      — Python client smoke test
-│       └── README.md           — Python client documentation
+│       ├── README.md           — Python client documentation
+│       ├── pyproject.toml      — Python package metadata for PyPI
+│       └── LICENSE             — AGPL metadata for Python package
 ├── AGENTS.md                   — This file
 ├── docker-compose.yml          — PostgreSQL for local dev
 └── .env                        — Local environment (never committed)

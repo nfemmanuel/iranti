@@ -16,6 +16,11 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
+*.egg-info/
+**/*.egg-info/
+clients/python/build/
+clients/python/dist/
+.tmp_pybuild/
 # Keep environment variables out of version control
 .env
 /src/generated/prisma
