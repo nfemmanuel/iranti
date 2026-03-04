@@ -161,6 +161,15 @@ npm run api-key:revoke -- --key-id chatbot_alice
 Use the printed token (`keyId.secret`) as `X-Iranti-Key`.
 Scopes use `resource:action` format (for example `kb:read`, `memory:write`, `metrics:read`, `proxy:chat`).
 
+### Security Baseline
+
+- Use one scoped key per app/service identity.
+- Rotate any key that is exposed in logs, screenshots, or chat.
+- Keep escalation/log paths outside the repo working tree.
+- Use TLS/reverse proxy for non-local deployments.
+
+Security quickstart: [`docs/guides/security-quickstart.md`](docs/guides/security-quickstart.md)
+
 ---
 
 ## Install Strategy (Double Layer)
@@ -514,6 +523,7 @@ docs/
 - **Issues**: [GitHub Issues](https://github.com/nfemmanuel/iranti/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/nfemmanuel/iranti/discussions)
 - **Email**: oluwaniifemi.emmanuel@uni.minerva.edu
+- **Changelog**: [`CHANGELOG.md`](CHANGELOG.md)
 
 ---
 

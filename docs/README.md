@@ -10,6 +10,7 @@
 
 - [Conflict Resolution](guides/conflict-resolution.md) - How Iranti handles conflicting facts
 - [LLM Providers](guides/providers.md) - Configuring Gemini, OpenAI, Claude, etc.
+- [Security Quickstart](guides/security-quickstart.md) - Key scopes, rotation, and deployment baseline
 
 ## Operations
 
@@ -23,6 +24,7 @@
 
 - [Publishing to Docker Hub](operations/PUBLISHING_DOCKER.md)
 - [Publishing to PyPI](operations/PUBLISHING_PYPI.md)
+- [Changelog](../CHANGELOG.md)
 
 ## Internal
 
