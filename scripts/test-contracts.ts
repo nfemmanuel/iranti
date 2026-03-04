@@ -56,25 +56,25 @@ function assertServerRouteMounts(): void {
     expectRegex(
         filePath,
         content,
-        /app\.use\(ROUTES\.agents,\s*rateLimitMiddleware,\s*authenticate,\s*agentRoutes\(iranti\)\);/,
+        /app\.use\(ROUTES\.agents,\s*authenticate,\s*rateLimitMiddleware,\s*requireScopeByMethod\('agents:read',\s*'agents:write'\),\s*agentRoutes\(iranti\)\);/,
         'Server mounts /agents with auth + rate limit'
     );
     expectRegex(
         filePath,
         content,
-        /app\.use\(ROUTES\.kb,\s*rateLimitMiddleware,\s*authenticate,\s*knowledgeRoutes\(iranti\)\);/,
+        /app\.use\(ROUTES\.kb,\s*authenticate,\s*rateLimitMiddleware,\s*requireScopeByMethod\('kb:read',\s*'kb:write'\),\s*knowledgeRoutes\(iranti\)\);/,
         'Server mounts /kb with auth + rate limit'
     );
     expectRegex(
         filePath,
         content,
-        /app\.use\(ROUTES\.memory,\s*rateLimitMiddleware,\s*authenticate,\s*memoryRoutes\(iranti\)\);/,
+        /app\.use\(ROUTES\.memory,\s*authenticate,\s*rateLimitMiddleware,\s*requireScopeByMethod\('memory:read',\s*'memory:write'\),\s*memoryRoutes\(iranti\)\);/,
         'Server mounts /memory with auth + rate limit'
     );
     expectRegex(
         filePath,
         content,
-        /app\.use\('\/kb',\s*rateLimitMiddleware,\s*batchRouter\);/,
+        /app\.use\('\/kb',\s*authenticate,\s*rateLimitMiddleware,\s*requireAnyScope\(\['kb:read'\]\),\s*batchRouter\);/,
         'Server mounts /kb batch router with rate limit'
     );
 }

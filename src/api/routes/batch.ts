@@ -1,5 +1,4 @@
 import { Router, Request, Response } from "express";
-import { authenticate } from "../middleware/auth";
 import { getDb } from "../../library/client";
 
 export const batchRouter = Router();
@@ -7,7 +6,7 @@ export const batchRouter = Router();
 /**
  * Batch query endpoint: fetch multiple KB entries in one request
  */
-batchRouter.post("/batchQuery", authenticate, async (req: Request, res: Response) => {
+batchRouter.post("/batchQuery", async (req: Request, res: Response) => {
   try {
     const { items } = req.body as { items?: { entity: string; key: string }[] };
 
@@ -43,6 +42,9 @@ batchRouter.post("/batchQuery", authenticate, async (req: Request, res: Response
           });
 
           if (!row) {
+            return { entity: it.entity, key: it.key, hit: false };
+          }
+          if (row.isProtected) {
             return { entity: it.entity, key: it.key, hit: false };
           }
 

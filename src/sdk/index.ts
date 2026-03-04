@@ -256,6 +256,9 @@ export class Iranti {
         if (!entry) {
             return { found: false, resolvedEntity: resolved.canonicalEntity, inputEntity: entity };
         }
+        if (entry.isProtected) {
+            return { found: false, resolvedEntity: resolved.canonicalEntity, inputEntity: entity };
+        }
 
         // Treat as hidden only when the latest relevant conflict event is an unresolved escalation.
         // A historical escalation followed by replacement/update should still be queryable.
@@ -323,7 +326,9 @@ export class Iranti {
 
         const entries = await findEntriesByEntity(resolved.entityType, resolved.entityId);
 
-        return entries.map((e) => ({
+        return entries
+            .filter((e) => !e.isProtected)
+            .map((e) => ({
             key: e.key,
             value: e.valueRaw,
             summary: e.valueSummary,

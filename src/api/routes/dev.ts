@@ -1,5 +1,4 @@
 import { Router, Request, Response } from "express";
-import { authenticate } from "../middleware/auth";
 import { getDb } from "../../library/client";
 
 export const devRouter = Router();
@@ -8,7 +7,7 @@ export const devRouter = Router();
  * DEV ONLY: clears benchmark data so runs are comparable.
  * Deletes only entities written by the benchmark agent.
  */
-devRouter.post("/reset", authenticate, async (req: Request, res: Response) => {
+devRouter.post("/reset", async (req: Request, res: Response) => {
   try {
     // SAFETY: only allow in non-production
     if (process.env.NODE_ENV === "production") {

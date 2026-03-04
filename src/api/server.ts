@@ -11,10 +11,10 @@ import { agentRoutes } from './routes/agents';
 import { devRouter } from './routes/dev';
 import { batchRouter } from './routes/batch';
 import { authenticate } from './middleware/auth';
+import { requireAnyScope, requireScopeByMethod } from './middleware/authorization';
 import { rateLimitMiddleware } from './middleware/rateLimit';
 import { snapshot, reset } from '../lib/metrics';
 import { requestContext } from '../lib/requestContext';
-import { validateApiKey } from '../security/apiKeys';
 import { startArchivistScheduler } from './archivistScheduler';
 import { getEscalationPaths } from '../lib/escalationPaths';
 
@@ -99,30 +99,23 @@ void startArchivistScheduler(iranti)
     });
 
 // Mount protected routes
-app.use(ROUTES.agents, rateLimitMiddleware, authenticate, agentRoutes(iranti));
-app.use(ROUTES.kb, rateLimitMiddleware, authenticate, knowledgeRoutes(iranti));
-app.use(ROUTES.memory, rateLimitMiddleware, authenticate, memoryRoutes(iranti));
-app.use('/kb', rateLimitMiddleware, batchRouter);
-app.use('/dev', devRouter);
+app.use(ROUTES.agents, authenticate, rateLimitMiddleware, requireScopeByMethod('agents:read', 'agents:write'), agentRoutes(iranti));
+app.use('/kb', authenticate, rateLimitMiddleware, requireAnyScope(['kb:read']), batchRouter);
+app.use(ROUTES.kb, authenticate, rateLimitMiddleware, requireScopeByMethod('kb:read', 'kb:write'), knowledgeRoutes(iranti));
+app.use(ROUTES.memory, authenticate, rateLimitMiddleware, requireScopeByMethod('memory:read', 'memory:write'), memoryRoutes(iranti));
+app.use('/dev', authenticate, rateLimitMiddleware, requireAnyScope(['system:admin']), devRouter);
 
 // Observability
-app.get('/metrics', authenticate, (_req, res) => {
+app.get('/metrics', authenticate, rateLimitMiddleware, requireAnyScope(['metrics:read']), (_req, res) => {
     res.json(snapshot());
 });
 
-app.post('/metrics/reset', authenticate, (_req, res) => {
+app.post('/metrics/reset', authenticate, rateLimitMiddleware, requireAnyScope(['metrics:write']), (_req, res) => {
     reset();
     res.json({ ok: true });
 });
 
-app.post(['/v1/chat/completions', '/chat/completions'], async (req, res) => {
-    const providedKey = req.headers['authorization']?.replace('Bearer ', '');
-    const auth = await validateApiKey(providedKey);
-    if (!auth.ok) {
-        res.status(auth.status ?? 401).json({ error: auth.error ?? 'Unauthorized' });
-        return;
-    }
-
+app.post(['/v1/chat/completions', '/chat/completions'], authenticate, rateLimitMiddleware, requireAnyScope(['proxy:chat']), async (req, res) => {
     try {
         const messages = (req.body.messages ?? []).map((m: any) => ({
             role: m.role as 'user' | 'assistant',

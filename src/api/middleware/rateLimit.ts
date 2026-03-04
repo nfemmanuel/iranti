@@ -1,7 +1,9 @@
 /**
  * Rate Limiting Middleware
- * Prevents API abuse by limiting requests per API key
+ * Prevents API abuse by limiting requests per identity.
+ * Uses authenticated keyId when available, otherwise request IP.
  */
+import { NextFunction, Request, Response } from 'express';
 
 interface RateLimitEntry {
   count: number;
@@ -51,6 +53,10 @@ class RateLimiter {
       }
     }
   }
+
+  get limit(): number {
+    return this.maxRequests;
+  }
 }
 
 // Export singleton instance
@@ -59,18 +65,23 @@ export const rateLimiter = new RateLimiter(
   parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100')
 );
 
-// Express middleware
-export function rateLimitMiddleware(req: any, res: any, next: any) {
-  const apiKey = req.headers['x-iranti-key'] as string;
-  
-  if (!apiKey) {
-    return next(); // Let auth middleware handle missing key
+function getRequestIdentity(req: Request): string {
+  const auth = (req as any).irantiAuth;
+  if (auth?.keyId) {
+    return `key:${String(auth.keyId).toLowerCase()}`;
   }
 
-  const result = rateLimiter.check(apiKey);
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+  return `ip:${ip}`;
+}
+
+// Express middleware
+export function rateLimitMiddleware(req: Request, res: Response, next: NextFunction) {
+  const identity = getRequestIdentity(req);
+  const result = rateLimiter.check(identity);
 
   // Add rate limit headers
-  res.setHeader('X-RateLimit-Limit', rateLimiter['maxRequests']);
+  res.setHeader('X-RateLimit-Limit', rateLimiter.limit);
   res.setHeader('X-RateLimit-Remaining', result.remaining);
   res.setHeader('X-RateLimit-Reset', new Date(result.resetAt).toISOString());
 
