@@ -10,14 +10,24 @@ http://localhost:3001
 
 ## Authentication
 
-- Most endpoints require: `X-Iranti-Key: <api_key_token>`
-- Chat-completions compatibility endpoints use: `Authorization: Bearer <api_key_token>`
+- Most endpoints require an API token via either:
+  - `X-Iranti-Key: <api_key_token>` (recommended)
+  - `Authorization: Bearer <api_key_token>`
 - Public endpoint: `GET /health`
 
 Supported key modes:
 - Registry key (recommended): `<keyId>.<secret>` (create with `npm run api-key:create -- --key-id ... --owner ...`)
 - Legacy single key: `IRANTI_API_KEY`
 - Legacy key list: `IRANTI_API_KEYS` (comma-separated)
+
+Scope model:
+- `/kb/*`: `kb:read` for GET/read, `kb:write` for POST/write
+- `/memory/*`: `memory:read` for GET/read, `memory:write` for POST/write
+- `/agents/*`: `agents:read` for GET/read, `agents:write` for POST/write
+- `/metrics`: `metrics:read`
+- `/metrics/reset`: `metrics:write`
+- `/v1/chat/completions` and `/chat/completions`: `proxy:chat`
+- `/dev/*`: `system:admin`
 
 ## Core Endpoints
 

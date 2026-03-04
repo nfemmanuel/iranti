@@ -155,10 +155,11 @@ You should see all tests pass:
 Create a per-user API key token (recommended):
 
 ```bash
-npm run api-key:create -- --key-id demo_user --owner "Demo User" --scopes memory,kb
+npm run api-key:create -- --key-id demo_user --owner "Demo User" --scopes "kb:read,kb:write,memory:read,memory:write,agents:read,agents:write"
 ```
 
 Use the printed `keyId.secret` token in `X-Iranti-Key`.
+Scope format is `resource:action` (for example `kb:read`, `memory:write`, `metrics:read`).
 
 ## Your First Write
 

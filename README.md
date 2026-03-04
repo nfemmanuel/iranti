@@ -149,7 +149,7 @@ pip install requests python-dotenv
 
 ```bash
 # Create a key for one user/app (prints token once)
-npm run api-key:create -- --key-id chatbot_alice --owner "Alice chatbot" --scopes memory,kb
+npm run api-key:create -- --key-id chatbot_alice --owner "Alice chatbot" --scopes "kb:read,kb:write,memory:read,memory:write,agents:read,agents:write"
 
 # List keys
 npm run api-key:list
@@ -159,6 +159,7 @@ npm run api-key:revoke -- --key-id chatbot_alice
 ```
 
 Use the printed token (`keyId.secret`) as `X-Iranti-Key`.
+Scopes use `resource:action` format (for example `kb:read`, `memory:write`, `metrics:read`, `proxy:chat`).
 
 ---
 
