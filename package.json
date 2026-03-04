@@ -27,7 +27,8 @@
     "node": ">=18"
   },
   "scripts": {
-    "build": "tsc",
+    "prisma:generate": "prisma generate --schema prisma/schema.prisma",
+    "build": "npm run prisma:generate && tsc",
     "prepack": "npm run build",
     "cli": "ts-node scripts/iranti-cli.ts",
     "dev": "ts-node src/api/server.ts",

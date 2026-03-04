@@ -421,7 +421,7 @@ export async function listAliases(entity: string): Promise<{ canonicalEntity: st
 
     return {
         canonicalEntity: `${parsed.entityType}/${parsed.entityId}`,
-        aliases: rows.map((row) => ({
+        aliases: rows.map((row: { rawAlias: string; aliasNorm: string; source: string; confidence: number; createdAt: Date }) => ({
             alias: row.rawAlias,
             aliasNorm: row.aliasNorm,
             source: row.source,

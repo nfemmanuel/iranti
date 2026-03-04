@@ -81,7 +81,7 @@ async function testConcurrentWrites() {
         errors.push(`❌ Expected ${writes.length} receipts, found ${receipts.length}`);
     }
     
-    const uniqueRequestIds = new Set(receipts.map(r => r.requestId));
+    const uniqueRequestIds = new Set(receipts.map((r: { requestId: string }) => r.requestId));
     if (uniqueRequestIds.size !== writes.length) {
         errors.push(`❌ Duplicate receipts detected: ${receipts.length} receipts for ${uniqueRequestIds.size} unique requests`);
     }
