@@ -73,7 +73,7 @@ Extension is now installed!
 - Check console for `[Iranti] Error:` messages
 - Verify fact exists: 
   ```bash
-  curl -H "X-Iranti-Key: dev_test_key_12345" http://localhost:3001/query/project/test_demo
+  curl -H "X-Iranti-Key: dev_test_key_12345" http://localhost:3001/kb/query/project/test_demo
   ```
 
 ### CORS errors

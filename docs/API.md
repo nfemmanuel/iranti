@@ -1,585 +1,161 @@
 # API Reference
 
-Complete REST API documentation for Iranti.
-
----
+This document reflects the current Express API in `src/api/server.ts` and route handlers in `src/api/routes/*`.
 
 ## Base URL
 
 ```
-http://localhost:3001  # Development
-https://your-domain.com  # Production
+http://localhost:3001
 ```
 
 ## Authentication
 
-All endpoints require API key in header:
-```
-X-Iranti-Key: your_api_key_here
-```
+- Most endpoints require: `X-Iranti-Key: <IRANTI_API_KEY>`
+- Chat-completions compatibility endpoints use: `Authorization: Bearer <IRANTI_API_KEY>`
+- Public endpoint: `GET /health`
 
-**Example:**
-```bash
-curl -H "X-Iranti-Key: dev_test_key_12345" \
-     http://localhost:3001/health
-```
+## Core Endpoints
 
----
+### Health
 
-## Endpoints
+- `GET /health` (public)
 
-### Health Check
+Response:
 
-**GET** `/health`
-
-Check if API server is running.
-
-**Response:**
 ```json
 {
   "status": "ok",
   "version": "0.1.0",
-  "provider": "openai"
+  "provider": "mock"
 }
 ```
 
----
+### Knowledge Base (`/kb/*`)
 
-### Write Fact
+- `POST /kb/write`
+- `POST /kb/ingest`
+- `POST /kb/resolve`
+- `POST /kb/alias`
+- `GET /kb/entity/:entityType/:entityId/aliases`
+- `GET /kb/query/:entityType/:entityId/:key`
+- `GET /kb/query/:entityType/:entityId`
+- `POST /kb/relate`
+- `GET /kb/related/:entityType/:entityId`
+- `GET /kb/related/:entityType/:entityId/deep?depth=2`
+- `POST /kb/batchQuery`
 
-**POST** `/write`
+Write request body:
 
-Write or update a fact in the knowledge base.
-
-**Request Body:**
 ```json
 {
   "entity": "project/nexus_prime",
   "key": "deadline",
-  "value": {"date": "June 18, 2028"},
-  "summary": "Deadline: June 18, 2028",
+  "value": {"date": "2028-06-18"},
+  "summary": "Deadline is June 18, 2028",
   "confidence": 95,
   "source": "project_manager",
   "agent": "planning_agent_001"
 }
 ```
 
-**Parameters:**
-- `entity` (string, required): Entity identifier in format `entityType/entityId`
-- `key` (string, required): Fact key (e.g., "deadline", "budget", "status")
-- `value` (object, required): Fact value as JSON object
-- `summary` (string, required): Human-readable summary for working memory
-- `confidence` (number, required): Confidence score 0-100
-- `source` (string, required): Source of information
-- `agent` (string, required): Agent ID that wrote the fact
+Write response:
 
-**Response:**
 ```json
 {
-  "success": true,
   "action": "created",
-  "fact": {
-    "id": "uuid-here",
-    "entity_type": "project",
-    "entity_id": "nexus_prime",
-    "key": "deadline",
-    "value": {"date": "June 18, 2028"},
-    "summary": "Deadline: June 18, 2028",
-    "confidence": 95,
-    "source": "project_manager",
-    "agent": "planning_agent_001",
-    "created_at": "2024-03-01T10:30:00Z",
-    "updated_at": "2024-03-01T10:30:00Z"
-  }
+  "key": "deadline",
+  "reason": "No existing entry found. Created.",
+  "resolvedEntity": "project/nexus_prime",
+  "inputEntity": "project/nexus_prime"
 }
 ```
 
-**Actions:**
-- `created`: New fact created
-- `updated`: Existing fact updated (higher confidence)
-- `escalated`: Conflict detected, requires human review
-- `rejected`: Lower confidence than existing fact
+Query response (`GET /kb/query/:entityType/:entityId/:key`):
 
----
-
-### Query Specific Fact
-
-**GET** `/query/:entityType/:entityId/:key`
-
-Retrieve a specific fact.
-
-**Example:**
-```bash
-GET /query/project/nexus_prime/deadline
-```
-
-**Response (found):**
 ```json
 {
   "found": true,
-  "fact": {
-    "id": "uuid-here",
-    "entity_type": "project",
-    "entity_id": "nexus_prime",
-    "key": "deadline",
-    "value": {"date": "June 18, 2028"},
-    "summary": "Deadline: June 18, 2028",
-    "confidence": 95,
-    "source": "project_manager",
-    "agent": "planning_agent_001",
-    "created_at": "2024-03-01T10:30:00Z",
-    "updated_at": "2024-03-01T10:30:00Z"
-  }
+  "value": {"date": "2028-06-18"},
+  "summary": "Deadline is June 18, 2028",
+  "confidence": 95,
+  "source": "project_manager",
+  "validUntil": null,
+  "resolvedEntity": "project/nexus_prime",
+  "inputEntity": "project/nexus_prime"
 }
 ```
 
-**Response (not found):**
-```json
-{
-  "found": false,
-  "entity": "project/nexus_prime",
-  "key": "deadline"
-}
-```
+### Memory (`/memory/*`)
 
----
+- `POST /memory/handshake`
+- `POST /memory/reconvene`
+- `POST /memory/observe`
+- `GET /memory/whoknows/:entityType/:entityId`
+- `POST /memory/maintenance`
 
-### Query All Facts for Entity
+Observe request body:
 
-**GET** `/query/:entityType/:entityId`
-
-Retrieve all facts for an entity.
-
-**Example:**
-```bash
-GET /query/project/nexus_prime
-```
-
-**Response:**
-```json
-{
-  "entity": "project/nexus_prime",
-  "facts": [
-    {
-      "key": "deadline",
-      "value": {"date": "June 18, 2028"},
-      "summary": "Deadline: June 18, 2028",
-      "confidence": 95,
-      "source": "project_manager",
-      "agent": "planning_agent_001"
-    },
-    {
-      "key": "budget",
-      "value": {"amount": "$12.4 million"},
-      "summary": "Budget: $12.4 million",
-      "confidence": 90,
-      "source": "finance_system",
-      "agent": "budget_agent_002"
-    }
-  ],
-  "count": 2
-}
-```
-
----
-
-### Context Persistence (observe)
-
-**POST** `/observe`
-
-Get facts that have fallen out of context window.
-
-**Request Body:**
 ```json
 {
   "agentId": "research_agent_001",
-  "currentContext": "User: What's the deadline?\nAssistant: Let me check...",
-  "maxFacts": 5
+  "currentContext": "User: What's the deadline?",
+  "maxFacts": 5,
+  "entityHints": ["project/nexus_prime"]
 }
 ```
 
-**Parameters:**
-- `agentId` (string, required): Agent requesting facts
-- `currentContext` (string, required): Current conversation context
-- `maxFacts` (number, optional): Maximum facts to return (default: 10)
+Observe response:
 
-**Response:**
 ```json
 {
-  "facts": [
-    {
-      "entityKey": "project/nexus_prime:deadline",
-      "summary": "Deadline: June 18, 2028",
-      "confidence": 95,
-      "relevance": 0.92
-    },
-    {
-      "entityKey": "project/nexus_prime:budget",
-      "summary": "Budget: $12.4 million",
-      "confidence": 90,
-      "relevance": 0.85
-    }
-  ],
-  "count": 2,
-  "entitiesDetected": ["project/nexus_prime"],
-  "alreadyPresent": 0
+  "facts": [],
+  "entitiesDetected": [],
+  "alreadyPresent": 0,
+  "totalFound": 0
 }
 ```
 
----
+### Agents (`/agents/*`)
 
-### Working Memory (handshake)
+- `POST /agents/register`
+- `GET /agents`
+- `GET /agents/:agentId`
+- `POST /agents/:agentId/team`
 
-**POST** `/handshake`
+### Metrics
 
-Get personalized brief for agent session start.
+- `GET /metrics`
+- `POST /metrics/reset`
 
-**Request Body:**
-```json
-{
-  "agent": "research_agent_001",
-  "task": "Research publication history for Dr. Jane Smith",
-  "recentMessages": ["Starting literature review..."]
-}
-```
+### Chat-Completions Compatibility
 
-**Parameters:**
-- `agent` (string, required): Agent ID
-- `task` (string, required): Current task description
-- `recentMessages` (array, optional): Recent conversation messages
+- `POST /v1/chat/completions`
+- `POST /chat/completions`
 
-**Response:**
-```json
-{
-  "operatingRules": "You are research_agent_001. Focus on academic publications.",
-  "inferredTaskType": "research",
-  "workingMemory": [
-    {
-      "entityKey": "researcher/jane_smith:affiliation",
-      "summary": "Affiliated with MIT CSAIL",
-      "confidence": 85
-    }
-  ],
-  "relevantEntities": ["researcher/jane_smith"]
-}
-```
-
----
-
-### Create Relationship
-
-**POST** `/relate`
-
-Create relationship between entities.
-
-**Request Body:**
-```json
-{
-  "fromEntity": "researcher/jane_smith",
-  "toEntity": "project/nexus_prime",
-  "relationshipType": "MEMBER_OF",
-  "properties": {"role": "Lead Researcher", "since": "2023-01-01"}
-}
-```
-
-**Parameters:**
-- `fromEntity` (string, required): Source entity
-- `toEntity` (string, required): Target entity
-- `relationshipType` (string, required): Relationship type (MEMBER_OF, PART_OF, AUTHORED, etc.)
-- `properties` (object, optional): Additional metadata
-
-**Response:**
-```json
-{
-  "success": true,
-  "relationship": {
-    "id": "uuid-here",
-    "from_entity_type": "researcher",
-    "from_entity_id": "jane_smith",
-    "to_entity_type": "project",
-    "to_entity_id": "nexus_prime",
-    "relationship_type": "MEMBER_OF",
-    "properties": {"role": "Lead Researcher", "since": "2023-01-01"},
-    "created_at": "2024-03-01T10:30:00Z"
-  }
-}
-```
-
----
-
-### Query Relationships
-
-**GET** `/related/:entityType/:entityId`
-
-Get all relationships for an entity.
-
-**Query Parameters:**
-- `direction` (string, optional): "outgoing", "incoming", or "both" (default: "both")
-- `type` (string, optional): Filter by relationship type
-
-**Example:**
-```bash
-GET /related/researcher/jane_smith?direction=outgoing&type=MEMBER_OF
-```
-
-**Response:**
-```json
-{
-  "entity": "researcher/jane_smith",
-  "relationships": [
-    {
-      "type": "MEMBER_OF",
-      "target": "project/nexus_prime",
-      "properties": {"role": "Lead Researcher"},
-      "created_at": "2024-03-01T10:30:00Z"
-    }
-  ],
-  "count": 1
-}
-```
-
----
-
-### Register Agent
-
-**POST** `/agents/register`
-
-Register agent in registry.
-
-**Request Body:**
-```json
-{
-  "agentId": "research_agent_001",
-  "name": "Research Agent",
-  "type": "research",
-  "capabilities": ["literature_review", "fact_extraction"],
-  "metadata": {"version": "1.0.0"}
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "agent": {
-    "id": "research_agent_001",
-    "name": "Research Agent",
-    "type": "research",
-    "capabilities": ["literature_review", "fact_extraction"],
-    "metadata": {"version": "1.0.0"},
-    "registered_at": "2024-03-01T10:30:00Z"
-  }
-}
-```
-
----
-
-### Ingest Text (Future)
-
-**POST** `/ingest`
-
-Ingest raw text and auto-extract facts.
-
-**Request Body:**
-```json
-{
-  "text": "Project Nexus Prime has a deadline of June 18, 2028. The budget is $12.4 million.",
-  "entity": "project/nexus_prime",
-  "source": "project_document",
-  "agent": "ingest_agent_001"
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "factsExtracted": 2,
-  "facts": [
-    {"key": "deadline", "summary": "Deadline: June 18, 2028", "confidence": 85},
-    {"key": "budget", "summary": "Budget: $12.4 million", "confidence": 80}
-  ]
-}
-```
-
----
+These endpoints proxy to the configured provider and return OpenAI-style response objects.
 
 ## Error Responses
 
-### 400 Bad Request
+Common error envelope:
 
 ```json
 {
-  "error": "Missing required field: entity",
-  "code": "VALIDATION_ERROR"
+  "error": "message"
 }
 ```
 
-### 401 Unauthorized
+Typical status codes:
 
-```json
-{
-  "error": "Invalid API key",
-  "code": "UNAUTHORIZED"
-}
-```
+- `400`: validation/request errors
+- `401`: missing/invalid API key
+- `404`: missing resource (for agent lookup)
+- `429`: rate-limited
+- `500`: server-side error
 
-### 404 Not Found
+## Notes
 
-```json
-{
-  "error": "Entity not found",
-  "code": "NOT_FOUND"
-}
-```
-
-### 500 Internal Server Error
-
-```json
-{
-  "error": "Database connection failed",
-  "code": "INTERNAL_ERROR"
-}
-```
-
----
-
-## Rate Limiting
-
-Default limits (configurable):
-- 100 requests/minute per API key
-- 1000 requests/hour per API key
-
-**Response when rate limited:**
-```json
-{
-  "error": "Rate limit exceeded",
-  "code": "RATE_LIMIT_EXCEEDED",
-  "retryAfter": 60
-}
-```
-
----
-
-## Python Client
-
-Wrapper for REST API:
-
-```python
-from clients.python.iranti import IrantiClient
-
-client = IrantiClient(
-    base_url="http://localhost:3001",
-    api_key="your_key_here"
-)
-
-# Write
-result = client.write(
-    entity="project/test",
-    key="status",
-    value={"data": "active"},
-    summary="Status: active",
-    confidence=90,
-    source="test",
-    agent="test_agent"
-)
-
-# Query
-fact = client.query("project/test", "status")
-if fact.found:
-    print(fact.value)
-
-# Query all
-facts = client.query_all("project/test")
-
-# Observe
-result = client.observe(
-    agent_id="test_agent",
-    current_context="test context",
-    max_facts=5
-)
-
-# Handshake
-brief = client.handshake(
-    agent="test_agent",
-    task="test task",
-    recent_messages=[]
-)
-```
-
----
-
-## TypeScript SDK
-
-```typescript
-import { IrantiClient } from './src/sdk';
-
-const client = new IrantiClient({
-  baseUrl: 'http://localhost:3001',
-  apiKey: 'your_key_here'
-});
-
-// Write
-const result = await client.write({
-  entity: 'project/test',
-  key: 'status',
-  value: { data: 'active' },
-  summary: 'Status: active',
-  confidence: 90,
-  source: 'test',
-  agent: 'test_agent'
-});
-
-// Query
-const fact = await client.query('project/test', 'status');
-
-// Query all
-const facts = await client.queryAll('project/test');
-```
-
----
-
-## Webhooks (Future)
-
-Subscribe to events:
-
-```json
-POST /webhooks/subscribe
-{
-  "url": "https://your-app.com/webhook",
-  "events": ["fact.created", "fact.updated", "conflict.escalated"]
-}
-```
-
-**Webhook payload:**
-```json
-{
-  "event": "fact.created",
-  "timestamp": "2024-03-01T10:30:00Z",
-  "data": {
-    "entity": "project/nexus_prime",
-    "key": "deadline",
-    "value": {"date": "June 18, 2028"}
-  }
-}
-```
-
----
-
-## Versioning
-
-API version in URL (future):
-```
-/v1/write
-/v1/query/...
-```
-
-Current version: v0 (no version prefix)
-
----
-
-## Support
-
-- **Documentation**: https://github.com/nfemmanuel/iranti/tree/main/docs
-- **Issues**: https://github.com/nfemmanuel/iranti/issues
-- **Email**: oluwaniifemi.emmanuel@uni.minerva.edu
+- Request body validation is currently enforced on:
+  - `POST /kb/write`
+  - `POST /kb/relate`
+  - `POST /memory/handshake`
+- Rate limiting middleware is applied to protected route groups (`/kb`, `/memory`, `/agents`).

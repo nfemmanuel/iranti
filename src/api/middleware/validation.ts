@@ -8,13 +8,15 @@ import { Request, Response, NextFunction } from 'express';
 // Validation schemas
 const schemas = {
   write: {
-    entity: { type: 'string', required: true, pattern: /^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+$/, maxLength: 200 },
+    entity: { type: 'string', required: true, pattern: /^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_/-]+$/, maxLength: 200 },
     key: { type: 'string', required: true, pattern: /^[a-zA-Z0-9_-]+$/, maxLength: 100 },
-    value: { type: 'object', required: true, maxSize: 100000 }, // 100KB max
+    value: { type: 'any', required: true, maxSize: 100000 }, // 100KB max
     summary: { type: 'string', required: true, maxLength: 500 },
     confidence: { type: 'number', required: true, min: 0, max: 100 },
     source: { type: 'string', required: true, maxLength: 200 },
-    agent: { type: 'string', required: true, maxLength: 200 }
+    agent: { type: 'string', required: true, maxLength: 200 },
+    validUntil: { type: 'string', required: false, maxLength: 50 },
+    requestId: { type: 'string', required: false, maxLength: 100 }
   },
   observe: {
     agentId: { type: 'string', required: true, maxLength: 200 },
@@ -27,9 +29,10 @@ const schemas = {
     recentMessages: { type: 'array', required: false, maxLength: 100 }
   },
   relate: {
-    fromEntity: { type: 'string', required: true, pattern: /^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+$/, maxLength: 200 },
-    toEntity: { type: 'string', required: true, pattern: /^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+$/, maxLength: 200 },
+    fromEntity: { type: 'string', required: true, pattern: /^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_/-]+$/, maxLength: 200 },
+    toEntity: { type: 'string', required: true, pattern: /^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_/-]+$/, maxLength: 200 },
     relationshipType: { type: 'string', required: true, maxLength: 100 },
+    createdBy: { type: 'string', required: true, maxLength: 200 },
     properties: { type: 'object', required: false, maxSize: 10000 }
   }
 };
@@ -46,7 +49,7 @@ function validateField(value: any, schema: any, fieldName: string): string | nul
 
   // Type check
   const actualType = Array.isArray(value) ? 'array' : typeof value;
-  if (actualType !== schema.type) {
+  if (schema.type !== 'any' && actualType !== schema.type) {
     return `Invalid type for ${fieldName}: expected ${schema.type}, got ${actualType}`;
   }
 
@@ -70,10 +73,10 @@ function validateField(value: any, schema: any, fieldName: string): string | nul
     }
   }
 
-  // Object validations
-  if (schema.type === 'object') {
+  // Size validations for JSON payloads
+  if (schema.maxSize !== undefined) {
     const size = JSON.stringify(value).length;
-    if (schema.maxSize && size > schema.maxSize) {
+    if (size > schema.maxSize) {
       return `${fieldName} exceeds maximum size of ${schema.maxSize} bytes`;
     }
   }
@@ -138,7 +141,7 @@ export function sanitizeString(str: string): string {
 
 // Validate entity format
 export function validateEntity(entity: string): boolean {
-  return /^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+$/.test(entity);
+  return /^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_/-]+$/.test(entity);
 }
 
 // Validate key format

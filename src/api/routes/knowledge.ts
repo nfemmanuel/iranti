@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { Iranti } from '../../sdk';
 import { addAlias, listAliases, parseEntityString, resolveEntity } from '../../library/entity-resolution';
+import { validateInput } from '../middleware/validation';
 
 function heuristicEntityId(name: string): string {
     return name
@@ -46,7 +47,7 @@ export function knowledgeRoutes(iranti: Iranti): Router {
     const router = Router();
 
     // POST /write
-    router.post('/write', async (req: Request, res: Response) => {
+    router.post('/write', validateInput('write'), async (req: Request, res: Response) => {
         try {
             const result = await iranti.write(req.body);
             res.json(result);
@@ -152,7 +153,7 @@ export function knowledgeRoutes(iranti: Iranti): Router {
     });
 
     // POST /relate
-    router.post('/relate', async (req: Request, res: Response) => {
+    router.post('/relate', validateInput('relate'), async (req: Request, res: Response) => {
         try {
             const { fromEntity, relationshipType, toEntity, createdBy, properties } = req.body;
             await iranti.relate(fromEntity, relationshipType, toEntity, { createdBy, properties });

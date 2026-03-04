@@ -450,7 +450,7 @@ const IRANTI_URL = 'http://localhost:3001';  // Must match server
 const IRANTI_API_KEY = 'dev_test_key_12345';  // Must match .env
 
 # Test observe() manually
-fetch('http://localhost:3001/observe', {
+fetch('http://localhost:3001/memory/observe', {
   method: 'POST',
   headers: {
     'Content-Type': 'application/json',

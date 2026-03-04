@@ -32,7 +32,7 @@
           }
           
           console.log('[Iranti] Calling observe()...');
-          const resp = await originalFetch(\`\${IRANTI_URL}/observe\`, {
+          const resp = await originalFetch(\`\${IRANTI_URL}/memory/observe\`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',

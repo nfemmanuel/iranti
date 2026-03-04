@@ -36,7 +36,7 @@ You should see:
 
 ```
 Iranti API running on port 3000
-Health: http://localhost:3000/health
+Health: http://localhost:3001/health
 Provider: mock
 ```
 
@@ -45,7 +45,7 @@ Provider: mock
 Set these in your environment or `.env` file:
 
 ```bash
-export IRANTI_URL=http://localhost:3000
+export IRANTI_URL=http://localhost:3001
 export IRANTI_API_KEY=your_api_key_here
 ```
 
@@ -60,7 +60,7 @@ from iranti import IrantiClient
 
 # Initialize client
 client = IrantiClient(
-    base_url="http://localhost:3000",
+    base_url="http://localhost:3001",
     api_key="your_api_key_here"
 )
 
@@ -552,20 +552,20 @@ iranti.write(
 
 | Variable | Description | Default |
 |---|---|---|
-| `IRANTI_URL` | API server URL | `http://localhost:3000` |
+| `IRANTI_URL` | API server URL | `http://localhost:3001` |
 | `IRANTI_API_KEY` | API key for authentication | Required |
 
 Set in your environment:
 
 ```bash
-export IRANTI_URL=http://localhost:3000
+export IRANTI_URL=http://localhost:3001
 export IRANTI_API_KEY=your_key_here
 ```
 
 Or in a `.env` file:
 
 ```env
-IRANTI_URL=http://localhost:3000
+IRANTI_URL=http://localhost:3001
 IRANTI_API_KEY=your_key_here
 ```
 
@@ -589,7 +589,7 @@ from iranti import IrantiClient, IrantiError
 def main():
     # Initialize
     client = IrantiClient(
-        base_url="http://localhost:3000",
+        base_url="http://localhost:3001",
         api_key="your_key_here"
     )
 
@@ -668,7 +668,7 @@ if __name__ == "__main__":
 ### Connection refused
 
 ```
-IrantiError: Could not connect to Iranti API at http://localhost:3000
+IrantiError: Could not connect to Iranti API at http://localhost:3001
 ```
 
 **Solution**: Make sure the API server is running:
@@ -696,3 +696,4 @@ IrantiError: Request timed out after 30s
 ```python
 client = IrantiClient(timeout=60)  # 60 seconds
 ```
+

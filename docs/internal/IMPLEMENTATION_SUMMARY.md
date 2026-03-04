@@ -33,8 +33,8 @@ app.use(rateLimitMiddleware);
 **Usage**:
 ```typescript
 import { validateInput } from './middleware/validation';
-app.post('/write', validateInput('write'), writeHandler);
-app.post('/observe', validateInput('observe'), observeHandler);
+app.post('/kb/write', validateInput('write'), writeHandler);
+app.post('/memory/observe', validateInput('observe'), observeHandler);
 ```
 
 #### Security Audit
@@ -129,11 +129,11 @@ import { validateInput } from './middleware/validation';
 app.use(rateLimitMiddleware);
 
 // Add validation to POST endpoints
-app.post('/write', validateInput('write'), async (req, res) => {
+app.post('/kb/write', validateInput('write'), async (req, res) => {
   // existing handler
 });
 
-app.post('/observe', validateInput('observe'), async (req, res) => {
+app.post('/memory/observe', validateInput('observe'), async (req, res) => {
   // existing handler
 });
 
@@ -141,7 +141,7 @@ app.post('/handshake', validateInput('handshake'), async (req, res) => {
   // existing handler
 });
 
-app.post('/relate', validateInput('relate'), async (req, res) => {
+app.post('/kb/relate', validateInput('relate'), async (req, res) => {
   // existing handler
 });
 ```
@@ -154,7 +154,7 @@ for i in {1..150}; do curl -H "X-Iranti-Key: test" http://localhost:3001/health;
 # Should get 429 after 100 requests
 
 # Test validation
-curl -X POST http://localhost:3001/write \
+curl -X POST http://localhost:3001/kb/write \
   -H "X-Iranti-Key: test" \
   -H "Content-Type: application/json" \
   -d '{"entity": "invalid format"}'

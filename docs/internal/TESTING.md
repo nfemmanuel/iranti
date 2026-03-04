@@ -107,9 +107,9 @@ Before picking a new entity name:
 - Deterministic results
 
 **Example endpoints to test**:
-- `POST /write` - Write a fact
-- `GET /query/:entityType/:entityId/:key` - Query a fact
-- `POST /observe` - Context persistence
+- `POST /kb/write` - Write a fact
+- `GET /kb/query/:entityType/:entityId/:key` - Query a fact
+- `POST /memory/observe` - Context persistence
 - `POST /handshake` - Working memory brief
 
 **When to write**: Testing core Iranti functionality without agent complexity.

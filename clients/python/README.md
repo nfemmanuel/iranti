@@ -25,12 +25,12 @@ npm run api
 from iranti import IrantiClient
 
 client = IrantiClient(
-    base_url="http://localhost:3000",
+    base_url="http://localhost:3001",
     api_key="your_key_here"
 )
 
 # Or use environment variables
-# IRANTI_URL=http://localhost:3000
+# IRANTI_URL=http://localhost:3001
 # IRANTI_API_KEY=your_key_here
 client = IrantiClient()
 
@@ -97,5 +97,5 @@ except IrantiError as e:
 
 | Variable | Description |
 |---|---|
-| `IRANTI_URL` | API server URL (default: http://localhost:3000) |
+| `IRANTI_URL` | API server URL (default: http://localhost:3001) |
 | `IRANTI_API_KEY` | API key matching server's IRANTI_API_KEY |

@@ -11,7 +11,7 @@ def test():
     print('\nTesting Iranti Python Client...\n')
 
     client = IrantiClient(
-        base_url='http://localhost:3000',
+        base_url='http://localhost:3001',
         api_key='dev_test_key_12345'   # match IRANTI_API_KEY in .env
     )
 

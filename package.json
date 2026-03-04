@@ -6,7 +6,7 @@
   "type": "commonjs",
   "scripts": {
     "build": "tsc",
-    "dev": "ts-node src/index.ts",
+    "dev": "ts-node src/api/server.ts",
     "setup": "ts-node scripts/setup.ts",
     "seed": "ts-node scripts/seed.ts",
     "seed:codebase": "ts-node scripts/seed-codebase.ts",
@@ -31,7 +31,7 @@
     "url": "git+https://github.com/nfemmanuel/iranti.git"
   },
   "author": "NF",
-  "license": "ISC",
+  "license": "AGPL-3.0-or-later",
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/pg": "^8.16.0",

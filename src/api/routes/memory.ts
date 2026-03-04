@@ -1,12 +1,13 @@
 import { Router, Request, Response } from 'express';
 import { Iranti } from '../../sdk';
 import { parseEntityString } from '../../library/entity-resolution';
+import { validateInput } from '../middleware/validation';
 
 export function memoryRoutes(iranti: Iranti): Router {
     const router = Router();
 
     // POST /handshake
-    router.post('/handshake', async (req: Request, res: Response) => {
+    router.post('/handshake', validateInput('handshake'), async (req: Request, res: Response) => {
         try {
             const result = await iranti.handshake(req.body);
             res.json(result);

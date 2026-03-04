@@ -2,6 +2,18 @@ node_modules
 dist
 *.log
 .history
+bench_logs/
+logs/
+*.bak_*
+
+# Python environments and caches
+venv/
+**/venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
 # Keep environment variables out of version control
 .env
 /src/generated/prisma
@@ -10,3 +22,7 @@ dist
 escalation/active/*.md
 escalation/resolved/*.md
 escalation/archived/*.md
+
+# Experiment outputs
+clients/experiments/results/
+experiments/*.json

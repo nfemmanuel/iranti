@@ -57,7 +57,7 @@ Then send a message in ChatGPT and watch the console.
             `${m.author.role}: ${m.content.parts.join(' ')}`
           ).join('\n');
           
-          const resp = await originalFetch(`${IRANTI_URL}/observe`, {
+          const resp = await originalFetch(`${IRANTI_URL}/memory/observe`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',

@@ -1,6 +1,6 @@
 # Iranti
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://www.gnu.org/licenses/agpl-3.0.en.html)
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![TypeScript](https://img.shields.io/badge/typescript-5.0+-blue.svg)](https://www.typescriptlang.org/)
 [![CrewAI Compatible](https://img.shields.io/badge/CrewAI-compatible-green.svg)](https://www.crewai.com/)
@@ -56,7 +56,7 @@ Validated with multiple agent frameworks:
 
 **Total: 16/16 facts transferred (100%)**
 
-Full validation report: [`docs/validation_results.md`](docs/validation_results.md) | Multi-framework details: [`docs/MULTI_FRAMEWORK_VALIDATION.md`](docs/MULTI_FRAMEWORK_VALIDATION.md)
+Full validation report: [`docs/internal/validation_results.md`](docs/internal/validation_results.md) | Multi-framework details: [`docs/internal/MULTI_FRAMEWORK_VALIDATION.md`](docs/internal/MULTI_FRAMEWORK_VALIDATION.md)
 
 ### Goal 1: Easy Integration
 
@@ -94,7 +94,7 @@ Full validation report: [`docs/validation_results.md`](docs/validation_results.m
 - **Treatment**: With Iranti memory injection → 2/2 facts correct (accurate answers)
 - **Conclusion**: Memory injection eliminates hallucination, improves response accuracy
 
-Full validation report: [`docs/validation_results.md`](docs/validation_results.md)
+Full validation report: [`docs/internal/validation_results.md`](docs/internal/validation_results.md)
 
 ## Quickstart
 
@@ -312,14 +312,14 @@ Iranti has four internal components:
 
 Express server on port 3001 with endpoints:
 
-- `POST /write` - Write atomic fact
-- `POST /ingest` - Ingest raw text, auto-chunk into facts
-- `GET /query/:entityType/:entityId/:key` - Query specific fact
-- `GET /query/:entityType/:entityId` - Query all facts for entity
-- `POST /observe` - Context persistence (inject missing facts)
-- `POST /handshake` - Working memory brief for agent session
-- `POST /relate` - Create entity relationship
-- `GET /related/:entityType/:entityId` - Get related entities
+- `POST /kb/write` - Write atomic fact
+- `POST /kb/ingest` - Ingest raw text, auto-chunk into facts
+- `GET /kb/query/:entityType/:entityId/:key` - Query specific fact
+- `GET /kb/query/:entityType/:entityId` - Query all facts for entity
+- `POST /memory/observe` - Context persistence (inject missing facts)
+- `POST /memory/handshake` - Working memory brief for agent session
+- `POST /kb/relate` - Create entity relationship
+- `GET /kb/related/:entityType/:entityId` - Get related entities
 - `POST /agents/register` - Register agent in registry
 
 All endpoints require `X-Iranti-Key` header for authentication.
@@ -372,9 +372,9 @@ Contributions welcome! Please:
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details.
+GNU Affero General Public License v3.0 (AGPL-3.0) - see [LICENSE](LICENSE) file for details.
 
-Free to use, modify, and distribute. If you offer Iranti as a hosted service, attribution is appreciated but not required.
+Free to use, modify, and distribute under AGPL terms. If you offer Iranti as a hosted service and modify it, AGPL requires publishing those modifications.
 
 ---
 
@@ -402,7 +402,7 @@ clients/
 └── experiments/        — Validated experiments with real results
 
 docs/
-└── validation_results.md  — Full experiment outputs and analysis
+└── internal/validation_results.md  — Full experiment outputs and analysis
 ```
 
 ---

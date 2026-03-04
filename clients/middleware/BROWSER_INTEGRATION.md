@@ -97,7 +97,7 @@ async function handleClaudeRequest(url, options) {
     const context = messages.map(m => `${m.role}: ${m.content}`).join('\n');
     
     // Call Iranti observe()
-    const observeResponse = await fetch(`${IRANTI_URL}/observe`, {
+    const observeResponse = await fetch(`${IRANTI_URL}/memory/observe`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -150,7 +150,7 @@ async function handleChatGPTRequest(url, options) {
     ).join('\n');
     
     // Call Iranti observe()
-    const observeResponse = await fetch(`${IRANTI_URL}/observe`, {
+    const observeResponse = await fetch(`${IRANTI_URL}/memory/observe`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -283,7 +283,7 @@ def proxy(path):
                 
                 # Call observe()
                 observe_response = requests.post(
-                    f"{IRANTI_URL}/observe",
+                    f"{IRANTI_URL}/memory/observe",
                     headers={'X-Iranti-Key': IRANTI_API_KEY},
                     json={
                         'agentId': AGENT_ID,
@@ -401,7 +401,7 @@ if __name__ == '__main__':
 - Check console for errors
 - Verify Iranti server is running: `curl http://localhost:3001/health`
 - Check API key in `content.js` matches `.env`
-- Verify facts exist: `curl -H "X-Iranti-Key: your_key" http://localhost:3001/query/project/demo`
+- Verify facts exist: `curl -H "X-Iranti-Key: your_key" http://localhost:3001/kb/query/project/demo`
 
 ### CORS errors
 
@@ -412,7 +412,7 @@ if __name__ == '__main__':
 
 - Entity name must match exactly (use underscores: `project_demo` not `project demo`)
 - Mention entity explicitly in conversation
-- Check observe() response: `curl -X POST http://localhost:3001/observe -H "X-Iranti-Key: key" -d '{"agentId":"test","currentContext":"project demo"}'`
+- Check observe() response: `curl -X POST http://localhost:3001/memory/observe -H "X-Iranti-Key: key" -d '{"agentId":"test","currentContext":"project demo"}'`
 
 ---
 

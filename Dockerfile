@@ -9,11 +9,12 @@ WORKDIR /app
 COPY package*.json ./
 COPY tsconfig.json ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Install build dependencies
+RUN npm ci
 
 # Copy source code
 COPY src ./src
+COPY prisma ./prisma
 
 # Build TypeScript
 RUN npm run build
@@ -30,13 +31,15 @@ RUN apk add --no-cache dumb-init
 RUN addgroup -g 1001 -S iranti && \
     adduser -S iranti -u 1001
 
-# Copy built files from builder
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/package*.json ./
+# Copy package files and install production dependencies
+COPY package*.json ./
+RUN npm ci --omit=dev && npm cache clean --force
 
-# Copy migrations
-COPY migrations ./migrations
+# Copy built artifacts from builder
+COPY --from=builder /app/dist ./dist
+
+# Copy Prisma schema/migrations
+COPY prisma ./prisma
 
 # Set environment variables
 ENV NODE_ENV=production

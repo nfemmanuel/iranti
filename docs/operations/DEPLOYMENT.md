@@ -348,7 +348,7 @@ client = IrantiClient()  # Reads from env vars
 
 - All clients must point to SAME server URL
 - Check API key is identical across all clients
-- Verify facts exist: `curl -H "X-Iranti-Key: key" http://server:3001/query/project/test`
+- Verify facts exist: `curl -H "X-Iranti-Key: key" http://server:3001/kb/query/project/test`
 
 ---
 

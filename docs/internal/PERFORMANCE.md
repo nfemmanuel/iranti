@@ -157,7 +157,7 @@ import aiohttp
 async def query_many(entities):
     async with aiohttp.ClientSession() as session:
         tasks = [
-            session.get(f'{IRANTI_URL}/query/{entity}')
+            session.get(f'{IRANTI_URL}/kb/query/{entity}')
             for entity in entities
         ]
         return await asyncio.gather(*tasks)

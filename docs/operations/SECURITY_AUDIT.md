@@ -140,22 +140,22 @@ All P0 security vulnerabilities have been addressed. This document provides a co
 
 ## 6. Rate Limiting & DoS Protection
 
-### ⚠️ No Rate Limiting
-- **Status**: NOT IMPLEMENTED
-- **Risk**: API can be overwhelmed by rapid requests
-- **Recommendation**: Add express-rate-limit middleware
-- **Suggested Limits**:
-  - `/write`: 100 req/min per API key
-  - `/ingest`: 10 req/min per API key (LLM-heavy)
-  - `/observe`: 50 req/min per agent
+### Rate Limiting
+- **Status**: IMPLEMENTED (middleware mounted at `/kb`, `/memory`, `/agents`)
+- **Risk**: Remaining risk is misconfigured thresholds for workload spikes
+- **Recommendation**: Tune thresholds per deployment profile
+- **Configured Limits**:
+  - `/kb/write`: 100 req/min per API key
+  - `/kb/ingest`: 10 req/min per API key (LLM-heavy)
+  - `/memory/observe`: 50 req/min per agent
 
-### ⚠️ No Request Size Limits
-- **Status**: NOT IMPLEMENTED
-- **Risk**: Large payloads can exhaust memory
-- **Recommendation**: Add body-parser limits
-- **Suggested Limits**:
-  - JSON body: 1MB max
-  - `/ingest` content: 100KB max
+### Request Size Limits
+- **Status**: IMPLEMENTED
+- **Risk**: Oversized payload rejection can affect clients if not handled
+- **Recommendation**: Set `IRANTI_MAX_BODY_BYTES` explicitly in production
+- **Configured Limits**:
+  - JSON body: `IRANTI_MAX_BODY_BYTES` (default `256kb`)
+  - `/kb/ingest` content: 100KB max
 
 ### ⚠️ LLM Call Fanout
 - **Status**: POTENTIAL ISSUE
@@ -243,8 +243,8 @@ All P0 security vulnerabilities have been addressed. This document provides a co
 - [ ] Enable HTTPS (TLS 1.2+)
 - [ ] Rotate `IRANTI_API_KEY` from default
 - [ ] Set `NODE_ENV=production`
-- [ ] Add rate limiting middleware
-- [ ] Add request size limits
+- [x] Add rate limiting middleware
+- [x] Add request size limits
 - [ ] Set escalation directory permissions to 700
 - [ ] Review and sanitize error messages
 - [ ] Run `npm audit` and fix critical vulnerabilities
@@ -254,7 +254,7 @@ All P0 security vulnerabilities have been addressed. This document provides a co
 
 ### Recommended
 
-- [ ] Add request logging (without sensitive data)
+- [x] Add request logging (without sensitive data)
 - [ ] Set up alerting for escalation file creation
 - [ ] Implement team-based access control (if multi-tenant)
 - [ ] Add schema validation for attendant state
@@ -275,7 +275,7 @@ curl -X POST http://localhost:3001/agents/register -d '{}' -H "Content-Type: app
 # Expected: 401 Unauthorized
 
 # 2. Test staff namespace protection
-curl -X POST http://localhost:3001/write \
+curl -X POST http://localhost:3001/kb/write \
   -H "X-Iranti-Key: your_key" \
   -H "Content-Type: application/json" \
   -d '{
@@ -320,3 +320,5 @@ npm run test:security  # (create this)
 **Security Status**: Core vulnerabilities fixed. Production-ready with recommended hardening.
 
 **Next Steps**: Implement rate limiting, add request size limits, audit dependencies.
+
+

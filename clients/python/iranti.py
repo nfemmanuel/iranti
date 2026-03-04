@@ -8,7 +8,7 @@ Usage:
     from iranti import IrantiClient
 
     client = IrantiClient(
-        base_url="http://localhost:3000",
+        base_url="http://localhost:3001",
         api_key="your_key_here"
     )
 
@@ -136,7 +136,7 @@ class IrantiClient:
 
     Args:
         base_url: URL of the running Iranti API server.
-                  Defaults to IRANTI_URL env var or http://localhost:3000
+                  Defaults to IRANTI_URL env var or http://localhost:3001
         api_key:  API key for authentication.
                   Defaults to IRANTI_API_KEY env var
         timeout:  Request timeout in seconds. Default: 30
@@ -151,7 +151,7 @@ class IrantiClient:
         self.base_url = (
             base_url
             or os.getenv('IRANTI_URL')
-            or 'http://localhost:3000'
+            or 'http://localhost:3001'
         ).rstrip('/')
 
         self.api_key = api_key or os.getenv('IRANTI_API_KEY')
@@ -297,7 +297,7 @@ class IrantiClient:
             confidence: 0-100 applied to all extracted facts
             agent:      Agent ID ingesting this content
         """
-        data = self._post('/ingest', {
+        data = self._post('/kb/ingest', {
             'entity': entity,
             'content': content,
             'source': source,
@@ -345,7 +345,7 @@ class IrantiClient:
         properties: Optional[dict] = None,
     ) -> None:
         """Create a directional relationship between two entities."""
-        self._post('/relate', {
+        self._post('/kb/relate', {
             'fromEntity': from_entity,
             'relationshipType': relationship_type,
             'toEntity': to_entity,
@@ -356,12 +356,12 @@ class IrantiClient:
     def get_related(self, entity: str) -> list[dict]:
         """Get directly related entities (1 hop)."""
         entity_type, entity_id = entity.split('/', 1)
-        return self._get(f'/related/{entity_type}/{entity_id}')
+        return self._get(f'/kb/related/{entity_type}/{entity_id}')
 
     def get_related_deep(self, entity: str, depth: int = 2) -> list[dict]:
         """Get related entities up to N hops deep."""
         entity_type, entity_id = entity.split('/', 1)
-        return self._get(f'/related/{entity_type}/{entity_id}/deep?depth={depth}')
+        return self._get(f'/kb/related/{entity_type}/{entity_id}/deep?depth={depth}')
 
     # ── Working Memory ────────────────────────────────────────────────────────
 
@@ -375,7 +375,7 @@ class IrantiClient:
         Start an agent session. Returns a working memory brief
         containing operating rules and relevant knowledge for the task.
         """
-        data = self._post('/handshake', {
+        data = self._post('/memory/handshake', {
             'agent': agent,
             'task': task,
             'recentMessages': recent_messages,
@@ -389,7 +389,7 @@ class IrantiClient:
         recent_messages: list[str],
     ) -> WorkingMemoryBrief:
         """Update working memory if task context has shifted."""
-        data = self._post('/reconvene', {
+        data = self._post('/memory/reconvene', {
             'agentId': agent_id,
             'task': task,
             'recentMessages': recent_messages,
@@ -399,7 +399,7 @@ class IrantiClient:
     def who_knows(self, entity: str) -> list[dict]:
         """Find all agents that have written facts about an entity."""
         entity_type, entity_id = entity.split('/', 1)
-        return self._get(f'/whoknows/{entity_type}/{entity_id}')
+        return self._get(f'/memory/whoknows/{entity_type}/{entity_id}')
 
     # ── Agents ────────────────────────────────────────────────────────────────
 
@@ -456,7 +456,7 @@ class IrantiClient:
 
     def run_maintenance(self) -> MaintenanceReport:
         """Run the Archivist maintenance cycle."""
-        data = self._post('/maintenance', {})
+        data = self._post('/memory/maintenance', {})
         return MaintenanceReport(
             expired_archived=data['expiredArchived'],
             low_confidence_archived=data['lowConfidenceArchived'],
