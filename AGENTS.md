@@ -213,7 +213,8 @@ iranti/
 │   ├── test-registry.ts        — Agent registry tests
 │   ├── test-sdk.ts             — Full SDK smoke tests
 │   ├── test-integration.ts     — End-to-end integration test
-│   └── test-fallback.ts        — LLM provider fallback chain test
+│   ├── test-fallback.ts        — LLM provider fallback chain test
+│   └── test-contracts.ts       — API/SDK/client contract drift checks
 ├── escalation/
 │   ├── active/                 — Unresolved conflicts (PENDING)
 │   ├── resolved/               — Processed by Archivist

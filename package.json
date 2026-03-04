@@ -2,7 +2,7 @@
   "name": "iranti",
   "version": "0.1.0",
   "description": "Memory infrastructure for multi-agent AI systems",
-  "main": "dist/index.js",
+  "main": "dist/src/sdk/index.js",
   "type": "commonjs",
   "scripts": {
     "build": "tsc",
@@ -20,6 +20,7 @@
     "test:registry": "ts-node scripts/test-registry.ts",
     "test:sdk": "ts-node scripts/test-sdk.ts",
     "test:integration": "ts-node scripts/test-integration.ts",
+    "test:contracts": "ts-node scripts/test-contracts.ts",
     "test:concurrency": "ts-node scripts/test_concurrent_writes.ts",
     "test:staff": "ts-node scripts/test_staff_normalization.ts",
     "seed:policy": "ts-node scripts/seed_policy.ts",

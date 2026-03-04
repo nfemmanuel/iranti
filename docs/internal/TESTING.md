@@ -110,7 +110,7 @@ Before picking a new entity name:
 - `POST /kb/write` - Write a fact
 - `GET /kb/query/:entityType/:entityId/:key` - Query a fact
 - `POST /memory/observe` - Context persistence
-- `POST /handshake` - Working memory brief
+- `POST /memory/handshake` - Working memory brief
 
 **When to write**: Testing core Iranti functionality without agent complexity.
 
@@ -146,6 +146,7 @@ Before picking a new entity name:
 - Compare results to baseline
 - Flag any degradation in performance
 - Automated via CI/CD
+- Include API contract drift check: `npm run test:contracts`
 
 **When to run**: Before every release, after major refactors, weekly in CI.
 
