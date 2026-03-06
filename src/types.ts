@@ -68,3 +68,28 @@ export interface QueryResult {
         validUntil?: Date | null;
     };
 }
+
+export interface HybridSearchInput {
+    query: string;
+    limit?: number;
+    entityType?: EntityType;
+    entityId?: string;
+    lexicalWeight?: number;
+    vectorWeight?: number;
+    minScore?: number;
+}
+
+export interface HybridSearchResult {
+    id: number;
+    entityType: EntityType;
+    entityId: string;
+    key: string;
+    valueRaw: unknown;
+    valueSummary: string;
+    confidence: number;
+    source: string;
+    validUntil?: Date | null;
+    lexicalScore: number;
+    vectorScore: number;
+    score: number;
+}

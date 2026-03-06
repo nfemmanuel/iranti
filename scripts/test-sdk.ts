@@ -57,8 +57,20 @@ async function test() {
     console.log('  Entries found:', allResults.length);
     allResults.forEach((r) => console.log(`    [${r.key}] ${r.summary}`));
 
-    // Test 6 — maintenance
-    console.log('\nTest 6 — maintenance:');
+    // Test 6 — hybrid search
+    console.log('\nTest 6 — hybrid search:');
+    const searchResults = await iranti.search({
+        query: 'Oxford professor publications',
+        entityType: 'researcher',
+        limit: 5,
+    });
+    console.log('  Matches:', searchResults.length);
+    searchResults.forEach((result) => {
+        console.log(`    [${result.entity}] ${result.key} score=${result.score.toFixed(3)}`);
+    });
+
+    // Test 7 — maintenance
+    console.log('\nTest 7 — maintenance:');
     const maintenance = await iranti.runMaintenance();
     console.log('  Expired archived:', maintenance.expiredArchived);
     console.log('  Escalations processed:', maintenance.escalationsProcessed);

@@ -152,6 +152,56 @@ export function knowledgeRoutes(iranti: Iranti): Router {
         }
     });
 
+    // GET /search
+    router.get('/search', async (req: Request, res: Response) => {
+        try {
+            const query = String(req.query.query ?? '').trim();
+            if (!query) {
+                return res.status(400).json({ error: 'query is required.' });
+            }
+
+            const limit = req.query.limit ? Number(req.query.limit) : undefined;
+            const lexicalWeight = req.query.lexicalWeight ? Number(req.query.lexicalWeight) : undefined;
+            const vectorWeight = req.query.vectorWeight ? Number(req.query.vectorWeight) : undefined;
+            const minScore = req.query.minScore ? Number(req.query.minScore) : undefined;
+            const entityType = req.query.entityType ? String(req.query.entityType) : undefined;
+            const entityId = req.query.entityId ? String(req.query.entityId) : undefined;
+
+            if (limit !== undefined && (!Number.isFinite(limit) || limit < 1 || limit > 50)) {
+                return res.status(400).json({ error: 'limit must be between 1 and 50.' });
+            }
+            if (lexicalWeight !== undefined && (!Number.isFinite(lexicalWeight) || lexicalWeight < 0 || lexicalWeight > 1)) {
+                return res.status(400).json({ error: 'lexicalWeight must be between 0 and 1.' });
+            }
+            if (vectorWeight !== undefined && (!Number.isFinite(vectorWeight) || vectorWeight < 0 || vectorWeight > 1)) {
+                return res.status(400).json({ error: 'vectorWeight must be between 0 and 1.' });
+            }
+            if (minScore !== undefined && (!Number.isFinite(minScore) || minScore < 0 || minScore > 1)) {
+                return res.status(400).json({ error: 'minScore must be between 0 and 1.' });
+            }
+
+            const lexical = typeof lexicalWeight === 'number' ? lexicalWeight : 0.45;
+            const vector = typeof vectorWeight === 'number' ? vectorWeight : 0.55;
+            if ((lexical + vector) <= 0) {
+                return res.status(400).json({ error: 'lexicalWeight + vectorWeight must be greater than zero.' });
+            }
+
+            const result = await iranti.search({
+                query,
+                limit,
+                entityType,
+                entityId,
+                lexicalWeight: lexical,
+                vectorWeight: vector,
+                minScore,
+            });
+
+            res.json({ results: result });
+        } catch (err) {
+            res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+    });
+
     // POST /relate
     router.post('/relate', validateInput('relate'), async (req: Request, res: Response) => {
         try {

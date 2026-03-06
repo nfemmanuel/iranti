@@ -92,6 +92,8 @@ async function archiveExpired(report: ArchivistReport): Promise<void> {
         where: {
             validUntil: { lt: new Date() },
             isProtected: false,
+            confidence: { gt: 0 },
+            valueSummary: { not: '[ARCHIVED]' },
         },
     });
 
@@ -112,6 +114,7 @@ async function archiveLowConfidence(report: ArchivistReport): Promise<void> {
         where: {
             confidence: { lt: LOW_CONFIDENCE_THRESHOLD },
             isProtected: false,
+            valueSummary: { not: '[ARCHIVED]' },
         },
     });
 

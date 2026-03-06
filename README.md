@@ -7,13 +7,13 @@
 
 **Memory infrastructure for multi-agent AI systems.**
 
-Iranti gives agents persistent, identity-based memory. Facts written by one agent are retrievable by any other agent through exact entity+key lookup, not similarity search. Memory persists across sessions and survives context window limits.
+Iranti gives agents persistent, identity-based memory. Facts written by one agent are retrievable by any other agent through exact entity+key lookup. Iranti also supports hybrid search (lexical + vector) when exact keys are unknown. Memory persists across sessions and survives context window limits.
 
 ---
 
 ## What is Iranti?
 
-Iranti is a knowledge base for multi-agent systems. Unlike vector databases that retrieve by semantic similarity, Iranti retrieves by identity — this specific entity (`project/nexus_prime`), this specific key (`deadline`), with confidence attached. When Agent A writes a fact, Agent B can retrieve it by exact lookup without being told it exists. Facts persist in PostgreSQL and survive context window boundaries through the `observe()` API.
+Iranti is a knowledge base for multi-agent systems. The primary read path is identity retrieval — this specific entity (`project/nexus_prime`), this specific key (`deadline`), with confidence attached. When Agent A writes a fact, Agent B can retrieve it by exact lookup without being told it exists. Facts persist in PostgreSQL and survive context window boundaries through the `observe()` API. For discovery workflows, Iranti supports hybrid search (full-text + vector similarity).
 
 ---
 
@@ -33,14 +33,14 @@ Iranti is a knowledge base for multi-agent systems. Unlike vector databases that
 
 | Feature | Vector DB | Iranti |
 |---|---|---|
-| **Retrieval** | Similarity (nearest neighbor) | Identity (entity+key) |
+| **Retrieval** | Similarity (nearest neighbor) | Identity-first + optional hybrid search |
 | **Storage** | Embeddings in vector space | Structured facts with keys |
 | **Persistence** | Stateless between calls | Persistent across sessions |
 | **Confidence** | No confidence tracking | Per-fact confidence scores |
 | **Conflicts** | No conflict resolution | Automatic resolution + escalation |
 | **Context** | No context awareness | `observe()` injects missing facts |
 
-Vector databases answer "what's similar to X?" Iranti answers "what do we know about X?"
+Vector databases answer "what's similar to X?" Iranti answers "what do we know about X?" and can run hybrid search when exact keys are unknown.
 
 ---
 
@@ -276,6 +276,21 @@ for fact in facts:
     print(f"[{fact['key']}] {fact['summary']} (confidence: {fact['confidence']})")
 ```
 
+### Hybrid Search
+
+```python
+matches = client.search(
+    query="current blocker launch readiness",
+    entity_type="project",
+    limit=5,
+    lexical_weight=0.45,
+    vector_weight=0.55,
+)
+
+for item in matches:
+    print(item["entity"], item["key"], item["score"])
+```
+
 ### Context Persistence (attend)
 
 ```python
@@ -413,7 +428,7 @@ Iranti has four internal components:
 
 | Component | Role |
 |---|---|
-| **Library** | PostgreSQL knowledge base. Active truth (soft-deleted entries marked as archived). Full provenance in Archive table. |
+| **Library** | PostgreSQL knowledge base. Active truth in `knowledge_base` with full provenance in `archive`; archived rows are retained and marked `[ARCHIVED]` in active storage. |
 | **Librarian** | Manages all writes. Detects conflicts, reasons about resolution, escalates when uncertain. |
 | **Attendant** | Per-agent working memory manager. Implements `attend()`, `observe()`, and `handshake()` APIs. |
 | **Archivist** | Periodic cleanup. Archives expired and low-confidence entries. Processes human-resolved conflicts. |
@@ -426,6 +441,7 @@ Express server on port 3001 with endpoints:
 - `POST /kb/ingest` - Ingest raw text, auto-chunk into facts
 - `GET /kb/query/:entityType/:entityId/:key` - Query specific fact
 - `GET /kb/query/:entityType/:entityId` - Query all facts for entity
+- `GET /kb/search` - Hybrid search across facts
 - `POST /memory/attend` - Decide whether to inject memory for this turn
 - `POST /memory/observe` - Context persistence (inject missing facts)
 - `POST /memory/handshake` - Working memory brief for agent session
@@ -439,17 +455,20 @@ All endpoints require `X-Iranti-Key` header for authentication.
 
 ## Schema
 
-Three PostgreSQL tables:
+Six PostgreSQL tables:
 
 ```
-knowledge_base          — active truth (archived entries soft-deleted with confidence=0)
-archive                 — full provenance history, never deleted, includes supersededBy links
-entity_relationships    — directional graph: MEMBER_OF, PART_OF, AUTHORED, etc.
+knowledge_base          - active truth (archived rows retained with confidence=0)
+archive                 - full provenance history, never deleted
+entity_relationships    - directional graph: MEMBER_OF, PART_OF, AUTHORED, etc.
+entities                - canonical entity identity registry
+entity_aliases          - normalized aliases mapped to canonical entities
+write_receipts          - idempotency receipts for requestId replay safety
 ```
 
-Every table has a `properties` JSON column for caller-defined metadata. New entity types, relationship types, and fact keys never require migrations — they are just strings you define.
+New entity types, relationship types, and fact keys do not require migrations; they are caller-defined strings.
 
-**Archive semantics**: When an entry is archived, it remains in knowledge_base with confidence set to 0 and summary marked as `[ARCHIVED]`. A full copy is written to the archive table with supersededBy linking for traceability. Nothing is ever truly deleted.
+**Archive semantics**: When an entry is archived, it remains in knowledge_base with confidence set to 0 and summary marked as `[ARCHIVED]`. A full copy is written to the archive table for traceability. Nothing is ever truly deleted.
 
 ---
 
@@ -528,3 +547,4 @@ docs/
 ---
 
 **Built with ❤️ for the multi-agent AI community.**
+

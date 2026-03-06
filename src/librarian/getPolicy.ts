@@ -1,5 +1,6 @@
 import { DEFAULT_POLICY, ConflictPolicy } from './policy';
 import { findEntry } from '../library/queries';
+import { getReliabilityScores } from './source-reliability';
 
 export async function getConflictPolicy(db?: any): Promise<ConflictPolicy> {
   const entry = await findEntry({
@@ -8,12 +9,35 @@ export async function getConflictPolicy(db?: any): Promise<ConflictPolicy> {
     key: 'conflict_policy',
   }, db);
 
-  if (!entry) return DEFAULT_POLICY;
+  const learnedReliability = await getReliabilityScores().catch(() => ({}));
+  if (!entry) {
+    return {
+      ...DEFAULT_POLICY,
+      sourceReliability: {
+        ...DEFAULT_POLICY.sourceReliability,
+        ...learnedReliability,
+      },
+    };
+  }
 
   try {
     const parsed = typeof entry.valueRaw === 'string' ? JSON.parse(entry.valueRaw) : entry.valueRaw;
-    return { ...DEFAULT_POLICY, ...parsed };
+    return {
+      ...DEFAULT_POLICY,
+      ...parsed,
+      sourceReliability: {
+        ...DEFAULT_POLICY.sourceReliability,
+        ...(parsed?.sourceReliability ?? {}),
+        ...learnedReliability,
+      },
+    };
   } catch {
-    return DEFAULT_POLICY;
+    return {
+      ...DEFAULT_POLICY,
+      sourceReliability: {
+        ...DEFAULT_POLICY.sourceReliability,
+        ...learnedReliability,
+      },
+    };
   }
 }

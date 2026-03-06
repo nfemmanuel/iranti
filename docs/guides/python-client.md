@@ -168,6 +168,23 @@ for fact in facts:
 
 **Returns:** List of dicts with `key`, `value`, `summary`, `confidence`, `source`
 
+### Hybrid Search
+
+```python
+matches = client.search(
+    query="current blocker launch readiness",
+    entity_type="project",
+    limit=5,
+    lexical_weight=0.45,
+    vector_weight=0.55,
+)
+
+for item in matches:
+    print(item["entity"], item["key"], item["score"])
+```
+
+**Returns:** Ranked list of matching facts with `lexicalScore`, `vectorScore`, and `score`.
+
 ---
 
 ## Working Memory

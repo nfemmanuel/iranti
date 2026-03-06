@@ -225,6 +225,28 @@ Source: OpenAlex
 
 ---
 
+## Hybrid Search (Lexical + Vector)
+
+Use hybrid search when you do not know the exact key ahead of time:
+
+```typescript
+const matches = await iranti.search({
+    query: 'current project blocker',
+    entityType: 'project',
+    limit: 5,
+    lexicalWeight: 0.45,
+    vectorWeight: 0.55,
+});
+
+for (const match of matches) {
+    console.log(match.entity, match.key, match.score);
+}
+```
+
+This combines full-text relevance with embedding similarity and returns ranked facts.
+
+---
+
 ## Your First Handshake
 
 Working memory is what makes Iranti powerful. Before an agent starts a task, it calls `handshake()` to get a personalized brief:

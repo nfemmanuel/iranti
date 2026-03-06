@@ -34,6 +34,15 @@ const schemas = {
     relationshipType: { type: 'string', required: true, maxLength: 100 },
     createdBy: { type: 'string', required: true, maxLength: 200 },
     properties: { type: 'object', required: false, maxSize: 10000 }
+  },
+  search: {
+    query: { type: 'string', required: true, maxLength: 500 },
+    limit: { type: 'number', required: false, min: 1, max: 50, default: 10 },
+    entityType: { type: 'string', required: false, maxLength: 100 },
+    entityId: { type: 'string', required: false, maxLength: 200 },
+    lexicalWeight: { type: 'number', required: false, min: 0, max: 1, default: 0.45 },
+    vectorWeight: { type: 'number', required: false, min: 0, max: 1, default: 0.55 },
+    minScore: { type: 'number', required: false, min: 0, max: 1, default: 0 }
   }
 };
 

@@ -15,6 +15,9 @@ Iranti is not an agent framework. It does not orchestrate tasks or run agents.
 It is the memory layer that sits underneath agent systems. Other systems plug
 into it.
 
+Primary retrieval mode is identity-based lookup (`entityType/entityId + key`).
+Iranti also supports optional hybrid search (full-text + vector similarity).
+
 Product type: IaaS (Infrastructure as a Service)
 License: AGPL
 
@@ -38,7 +41,7 @@ The knowledge base itself. PostgreSQL database with five core tables:
 There is also a protected Staff Namespace: entries where `entityType = 'system'`.
 No agent can write here. Only the seed script and explicit system operations
 can. The Staff Namespace holds operating rules for all Staffers and system
-metadata including source reliability scores.
+metadata including source reliability scores and ontology governance records.
 
 ### The Librarian
 The agent that manages the Library. All writes from external agents go through
@@ -52,6 +55,8 @@ the Librarian — never directly to the database. Responsibilities:
 - Escalates genuinely unresolvable conflicts to the Escalation Folder
 - Updates agent stats after every write
 - Logs every decision with a reason — nothing is silently overwritten
+- May record repeated unknown concepts into ontology candidate tracking, but may not
+  promote new core ontology terms automatically
 
 ### The Attendant
 A stateful, per-agent class. One instance per external agent per process.
@@ -105,11 +110,11 @@ Each LLM call declares a task type. The router selects the appropriate model:
 
 | Task Type | Default Model | Reason |
 |---|---|---|
-| classification | gemini-2.0-flash-001 | Fast, cheap |
-| relevance_filtering | gemini-2.0-flash-001 | Fast enough |
+| classification | gemini-2.5-flash | Fast, cheap |
+| relevance_filtering | gemini-2.5-flash | Fast enough |
 | conflict_resolution | gemini-2.5-pro | Needs careful reasoning |
-| summarization | gemini-2.0-flash-001 | Well within fast model capability |
-| task_inference | gemini-2.0-flash-001 | Lightweight classification |
+| summarization | gemini-2.5-flash | Well within fast model capability |
+| task_inference | gemini-2.5-flash | Lightweight classification |
 
 Override any model via environment variable (e.g. `CONFLICT_MODEL=claude-opus-4`).
 
@@ -117,7 +122,7 @@ Override any model via environment variable (e.g. `CONFLICT_MODEL=claude-opus-4`
 Providers live in `src/lib/providers/`. Current implementations:
 - `mock.ts` — hardcoded responses for local dev and testing (default)
 - `gemini.ts` — Google Gemini via REST API
-- `claude.ts` — Anthropic Claude (stub, ready for API key)
+- `claude.ts` — Anthropic Claude via Anthropic SDK API
 
 Switch provider by setting `LLM_PROVIDER` in `.env`. Swap is a one-line
 config change — no code changes required.
@@ -164,6 +169,7 @@ iranti/
 │   ├── library/
 │   │   ├── client.ts           — Prisma singleton
 │   │   ├── queries.ts          — All KB read/write operations
+│   │   ├── embeddings.ts       — Deterministic embedding generation utilities
 │   │   ├── entity-resolution.ts — Canonical entity resolution + alias mapping
 │   │   ├── relationships.ts    — Entity relationship graph
 │   │   └── agent-registry.ts  — Agent profiles, stats, whoKnows
@@ -184,7 +190,7 @@ iranti/
 │   │   └── providers/
 │   │       ├── mock.ts         — Local dev provider
 │   │       ├── gemini.ts       — Google Gemini provider
-│   │       ├── claude.ts       — Anthropic Claude provider (stub)
+│   │       ├── claude.ts       — Anthropic Claude provider
 │   │       ├── openai.ts       — OpenAI provider
 │   │       ├── groq.ts         — Groq provider
 │   │       ├── mistral.ts      — Mistral AI provider
@@ -196,7 +202,7 @@ iranti/
 │   │   ├── middleware/
 │   │   │   └── auth.ts         — API key authentication
 │   │   └── routes/
-│   │       ├── knowledge.ts    — Write, ingest, query, relationships, resolution
+│   │       ├── knowledge.ts    — Write, ingest, query, hybrid search, relationships, resolution
 │   │       ├── agents.ts       — Agent registration and management
 │   │       └── memory.ts       — Handshake, reconvene, observe, attend, whoKnows, maintenance
 │   └── types.ts                — Shared TypeScript types
@@ -230,7 +236,8 @@ iranti/
 │   └── archived/               — Long-term conflict log
 ├── docs/
 │   ├── engineering/            — CODE_STANDARDS.md, COMMENTING_GUIDELINES.md
-│   └── decisions/              — One file per architectural decision
+│   ├── decisions/              — One file per architectural decision
+│   └── features/               — One subfolder per feature, including ontology-evolution
 ├── clients/
 │   └── python/
 │       ├── iranti.py           — Python HTTP client for REST API
@@ -263,6 +270,7 @@ iranti/
 | isProtected | Boolean | True for Staff Namespace entries |
 | conflictLog | Json | History of contradictions |
 | properties | Json | Caller-defined metadata escape hatch |
+| embedding | vector(256)? | Optional embedding used by hybrid search ranking |
 
 Primary index: `(entityType, entityId, key)` — unique constraint enforced.
 
@@ -329,6 +337,11 @@ Indexed on `(canonicalEntityType, canonicalEntityId)`.
 | system / library / schema_version | Current schema version |
 | system / library / initialization_log | When Library was initialized |
 | system / auth / api_keys | Per-user API key registry (keyId + hashed secret + metadata) |
+| system / ontology / core_schema | Canonical ontology base layer: core entity types, keys, relationships, normalization rules |
+| system / ontology / extension_registry | Registered extension namespaces and status |
+| system / ontology / candidate_terms | Repeated unknown terms staged for review |
+| system / ontology / promotion_policy | Deterministic promotion thresholds and blocked auto-promotions |
+| system / ontology / change_log | Append-only ontology governance log |
 
 ---
 
@@ -352,6 +365,7 @@ const attendant = iranti.getAttendant(agentId);
 // Query
 const result = await iranti.query(entity, key);
 const all = await iranti.queryAll(entity);
+const matches = await iranti.search({ query, entityType, limit });
 
 // Relationships
 await iranti.relate(fromEntity, relationshipType, toEntity, { createdBy });

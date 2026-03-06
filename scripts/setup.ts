@@ -1,7 +1,8 @@
+import 'dotenv/config';
 import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { getDb } from '../src/library/client';
+import { getDb, initDb } from '../src/library/client';
 import { ensureEscalationFolders } from '../src/lib/escalationPaths';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -45,6 +46,10 @@ async function isSeeded(): Promise<boolean> {
 
 async function setup() {
     console.log('\n🔧 Iranti Setup\n');
+    const dbUrl = process.env.DATABASE_URL;
+    if (dbUrl) {
+        initDb(dbUrl);
+    }
 
     // 1. Run migrations
     console.log('Step 1 — Running database migrations...');
@@ -81,7 +86,11 @@ async function setup() {
     console.log('  npm run test:integration   — verify everything works');
     console.log('  npm run dev                — start development\n');
 
-    await getDb().$disconnect();
+    try {
+        await getDb().$disconnect();
+    } catch {
+        // Setup can complete without an initialized in-process DB client.
+    }
     process.exit(0);
 }
 

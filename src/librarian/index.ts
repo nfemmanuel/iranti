@@ -8,6 +8,7 @@ import { updateStats } from '../library/agent-registry';
 import { enforceWritePermissions } from './guards';
 import { getConflictPolicy } from './getPolicy';
 import { scoreCandidate } from './scoring';
+import { recordResolution } from './source-reliability';
 import { inc, timeStart, timeEnd } from '../lib/metrics';
 import { ensureEscalationFolders } from '../lib/escalationPaths';
 import { createHash } from 'crypto';
@@ -31,10 +32,35 @@ function applyTTL(input: EntryInput, policy: any): EntryInput {
     return { ...input, validUntil };
 }
 
+type WriteAction = 'created' | 'updated' | 'escalated' | 'rejected';
+
+type ReliabilityUpdate = {
+    winnerSource: string;
+    loserSource: string;
+    humanOverride: boolean;
+};
+
+type WriteResultInternal = {
+    action: WriteAction;
+    entry?: KnowledgeEntry;
+    reason: string;
+    idempotentReplay?: boolean;
+    reliabilityUpdate?: ReliabilityUpdate;
+};
+
+function buildReliabilityUpdate(winnerSource: string, loserSource: string): ReliabilityUpdate | undefined {
+    if (winnerSource === loserSource) return undefined;
+    return {
+        winnerSource,
+        loserSource,
+        humanOverride: winnerSource === 'HumanReview' || loserSource === 'HumanReview',
+    };
+}
+
 // ─── Core Write Logic ────────────────────────────────────────────────────────
 
 export async function librarianWrite(input: EntryInput): Promise<{
-    action: 'created' | 'updated' | 'escalated' | 'rejected';
+    action: WriteAction;
     entry?: KnowledgeEntry;
     reason: string;
     idempotentReplay?: boolean;
@@ -73,9 +99,9 @@ export async function librarianWrite(input: EntryInput): Promise<{
     });
     
     // Serialize writes to same identity triple
-    return withIdentityLock(
+    const writeResult = await withIdentityLock(
         { entityType: input.entityType, entityId: input.entityId, key: input.key },
-        async (tx) => {
+        async (tx): Promise<WriteResultInternal> => {
             // P0: Enforce Staff namespace write ban
             if (!canWriteToStaffNamespace(input.createdBy, input.entityType)) {
                 timeEnd('librarian.write_ms', t0);
@@ -141,6 +167,22 @@ export async function librarianWrite(input: EntryInput): Promise<{
             return result;
         }
     );
+
+    if (writeResult.reliabilityUpdate) {
+        try {
+            await recordResolution(
+                writeResult.reliabilityUpdate.winnerSource,
+                writeResult.reliabilityUpdate.loserSource,
+                writeResult.reliabilityUpdate.humanOverride
+            );
+        } catch (err) {
+            const reason = err instanceof Error ? err.message : String(err);
+            console.warn('[librarian] reliability update failed:', reason);
+        }
+    }
+
+    const { reliabilityUpdate: _ignored, ...publicResult } = writeResult;
+    return publicResult;
 }
 
 // ─── Policy-Based Resolution ─────────────────────────────────────────────────
@@ -149,7 +191,7 @@ async function resolveConflict(
     existing: KnowledgeEntry,
     incoming: EntryInput,
     tx: any
-): Promise<{ action: 'created' | 'updated' | 'escalated' | 'rejected'; entry?: KnowledgeEntry; reason: string }> {
+): Promise<WriteResultInternal> {
     const policy = await getConflictPolicy(tx);
     const inputWithTTL = applyTTL(incoming, policy);
     
@@ -202,12 +244,21 @@ async function resolveConflict(
             );
             await logDecision(existing.id, 'CONFLICT_UPDATED', inputWithTTL, existingScore, incomingScore, 'Duplicate value, higher score', false, tx);
             await saveReceipt(inputWithTTL, 'updated', entry.id, tx);
-            return { action: 'updated', entry, reason: 'Duplicate value. Updated confidence.' };
+            return {
+                action: 'updated',
+                entry,
+                reason: 'Duplicate value. Updated confidence.',
+                reliabilityUpdate: buildReliabilityUpdate(inputWithTTL.source, existing.source),
+            };
         }
         
         await logDecision(existing.id, 'CONFLICT_REJECTED', inputWithTTL, existingScore, incomingScore, 'Duplicate value, lower score', false, tx);
         await saveReceipt(inputWithTTL, 'rejected', existing.id, tx);
-        return { action: 'rejected', reason: 'Duplicate value with lower score.' };
+        return {
+            action: 'rejected',
+            reason: 'Duplicate value with lower score.',
+            reliabilityUpdate: buildReliabilityUpdate(existing.source, inputWithTTL.source),
+        };
     }
     
     // Rule 1: Authoritative sources
@@ -219,14 +270,23 @@ async function resolveConflict(
         if (existingAuth && !incomingAuth) {
             await logDecision(existing.id, 'CONFLICT_REJECTED', inputWithTTL, 0, 0, `Existing from authoritative source (${existing.source})`, false, tx);
             await saveReceipt(inputWithTTL, 'rejected', existing.id, tx);
-            return { action: 'rejected', reason: `Existing from authoritative source: ${existing.source}` };
+            return {
+                action: 'rejected',
+                reason: `Existing from authoritative source: ${existing.source}`,
+                reliabilityUpdate: buildReliabilityUpdate(existing.source, inputWithTTL.source),
+            };
         }
         
         if (incomingAuth && !existingAuth) {
             const entry = await replaceEntry(existing, inputWithTTL, tx);
             await logDecision(existing.id, 'CONFLICT_REPLACED', inputWithTTL, 0, 0, `Incoming from authoritative source (${inputWithTTL.source})`, false, tx);
             await saveReceipt(inputWithTTL, 'updated', entry.id, tx);
-            return { action: 'updated', entry, reason: `Incoming from authoritative source: ${inputWithTTL.source}` };
+            return {
+                action: 'updated',
+                entry,
+                reason: `Incoming from authoritative source: ${inputWithTTL.source}`,
+                reliabilityUpdate: buildReliabilityUpdate(inputWithTTL.source, existing.source),
+            };
         }
     }
     
@@ -253,11 +313,20 @@ async function resolveConflict(
             const entry = await replaceEntry(existing, inputWithTTL, tx);
             await logDecision(existing.id, 'CONFLICT_REPLACED', inputWithTTL, existingScore, incomingScore, `Score gap ${gap.toFixed(1)} >= threshold ${policy.minConfidenceToOverwrite}`, false, tx);
             await saveReceipt(inputWithTTL, 'updated', entry.id, tx);
-            return { action: 'updated', entry, reason: `Incoming score (${incomingScore.toFixed(1)}) higher than existing (${existingScore.toFixed(1)})` };
+            return {
+                action: 'updated',
+                entry,
+                reason: `Incoming score (${incomingScore.toFixed(1)}) higher than existing (${existingScore.toFixed(1)})`,
+                reliabilityUpdate: buildReliabilityUpdate(inputWithTTL.source, existing.source),
+            };
         } else {
             await logDecision(existing.id, 'CONFLICT_REJECTED', inputWithTTL, existingScore, incomingScore, `Score gap ${gap.toFixed(1)} >= threshold, existing wins`, false, tx);
             await saveReceipt(inputWithTTL, 'rejected', existing.id, tx);
-            return { action: 'rejected', reason: `Existing score (${existingScore.toFixed(1)}) higher than incoming (${incomingScore.toFixed(1)})` };
+            return {
+                action: 'rejected',
+                reason: `Existing score (${existingScore.toFixed(1)}) higher than incoming (${incomingScore.toFixed(1)})`,
+                reliabilityUpdate: buildReliabilityUpdate(existing.source, inputWithTTL.source),
+            };
         }
     }
     
@@ -338,7 +407,7 @@ async function resolveWithReasoning(
     incomingScore: number,
     policy: any,
     tx: any
-): Promise<{ action: 'created' | 'updated' | 'escalated' | 'rejected'; entry?: KnowledgeEntry; reason: string }> {
+): Promise<WriteResultInternal> {
     try {
         const response = await route('conflict_resolution', [
         {
@@ -381,6 +450,7 @@ ESCALATE: <reason>`,
         return {
             action: 'rejected',
             reason: `LLM arbitration: ${reason}`,
+            reliabilityUpdate: buildReliabilityUpdate(existing.source, incoming.source),
         };
     }
 
@@ -394,6 +464,7 @@ ESCALATE: <reason>`,
             action: 'updated',
             entry,
             reason: `LLM arbitration: ${reason}`,
+            reliabilityUpdate: buildReliabilityUpdate(incoming.source, existing.source),
         };
     }
 

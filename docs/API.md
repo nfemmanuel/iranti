@@ -54,6 +54,7 @@ Response:
 - `GET /kb/entity/:entityType/:entityId/aliases`
 - `GET /kb/query/:entityType/:entityId/:key`
 - `GET /kb/query/:entityType/:entityId`
+- `GET /kb/search`
 - `POST /kb/relate`
 - `GET /kb/related/:entityType/:entityId`
 - `GET /kb/related/:entityType/:entityId/deep?depth=2`
@@ -97,6 +98,47 @@ Query response (`GET /kb/query/:entityType/:entityId/:key`):
   "validUntil": null,
   "resolvedEntity": "project/nexus_prime",
   "inputEntity": "project/nexus_prime"
+}
+```
+
+Hybrid search request (`GET /kb/search`):
+
+```json
+{
+  "query": "deadline blocker launch readiness",
+  "limit": 10,
+  "entityType": "project",
+  "lexicalWeight": 0.45,
+  "vectorWeight": 0.55,
+  "minScore": 0.05
+}
+```
+
+Equivalent query string:
+
+```
+/kb/search?query=deadline+blocker+launch+readiness&limit=10&entityType=project&lexicalWeight=0.45&vectorWeight=0.55&minScore=0.05
+```
+
+Hybrid search response:
+
+```json
+{
+  "results": [
+    {
+      "id": 42,
+      "entity": "project/nexus_prime",
+      "key": "blocker",
+      "value": {"text": "Vendor security review pending"},
+      "summary": "Current blocker is vendor security review",
+      "confidence": 91,
+      "source": "release_pm",
+      "validUntil": null,
+      "lexicalScore": 0.37,
+      "vectorScore": 0.82,
+      "score": 0.62
+    }
+  ]
 }
 ```
 

@@ -4,7 +4,7 @@ import { librarianWrite, librarianIngest } from '../librarian';
 import type { WorkingMemoryBrief, AttendResult } from '../attendant';
 import { getAttendant, AttendantInstance } from '../attendant/registry';
 import { runArchivist } from '../archivist';
-import { queryEntry, findEntriesByEntity, findEntry } from '../library/queries';
+import { findEntriesByEntity, findEntry, searchEntriesHybrid } from '../library/queries';
 import { createRelationship, getRelated, getRelatedDeep, RelatedEntity } from '../library/relationships';
 import { registerAgent, getAgent, whoKnows, listAgents, assignToTeam, AgentProfile, AgentRecord } from '../library/agent-registry';
 import { resolveEntity } from '../library/entity-resolution';
@@ -27,6 +27,7 @@ export interface WriteInput {
     source: string;
     agent: string;
     validUntil?: Date;
+    requestId?: string;
 }
 
 export interface IngestInput {
@@ -52,6 +53,30 @@ export interface QueryResult {
     validUntil?: Date | null;
     resolvedEntity?: string;
     inputEntity?: string;
+}
+
+export interface HybridSearchInput {
+    query: string;
+    limit?: number;
+    entityType?: string;
+    entityId?: string;
+    lexicalWeight?: number;
+    vectorWeight?: number;
+    minScore?: number;
+}
+
+export interface HybridSearchResult {
+    id: number;
+    entity: string;
+    key: string;
+    value: unknown;
+    summary: string;
+    confidence: number;
+    source: string;
+    validUntil?: Date | null;
+    lexicalScore: number;
+    vectorScore: number;
+    score: number;
 }
 
 export interface WriteResult {
@@ -168,6 +193,7 @@ export class Iranti {
             source: input.source,
             createdBy: input.agent,
             validUntil: input.validUntil,
+            requestId: input.requestId,
         });
 
         return {
@@ -339,6 +365,35 @@ export class Iranti {
 
     // ── Maintenance ─────────────────────────────────────────────────────────
 
+    async search(input: HybridSearchInput): Promise<HybridSearchResult[]> {
+        if (!input.query || typeof input.query !== 'string' || input.query.trim().length === 0) {
+            throw new Error('query is required for search().');
+        }
+
+        const rows = await searchEntriesHybrid({
+            query: input.query.trim(),
+            limit: input.limit,
+            entityType: input.entityType as EntityType | undefined,
+            entityId: input.entityId,
+            lexicalWeight: input.lexicalWeight,
+            vectorWeight: input.vectorWeight,
+            minScore: input.minScore,
+        });
+
+        return rows.map((row) => ({
+            id: row.id,
+            entity: `${row.entityType}/${row.entityId}`,
+            key: row.key,
+            value: row.valueRaw,
+            summary: row.valueSummary,
+            confidence: row.confidence,
+            source: row.source,
+            validUntil: row.validUntil,
+            lexicalScore: row.lexicalScore,
+            vectorScore: row.vectorScore,
+            score: row.score,
+        }));
+    }
     async runMaintenance(): Promise<{
         expiredArchived: number;
         lowConfidenceArchived: number;

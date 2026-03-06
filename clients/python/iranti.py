@@ -243,6 +243,7 @@ class IrantiClient:
         source: str,
         agent: str,
         valid_until: Optional[str] = None,
+        request_id: Optional[str] = None,
     ) -> WriteResult:
         """
         Write an atomic fact to the knowledge base.
@@ -256,6 +257,7 @@ class IrantiClient:
             source:      Data source name
             agent:       Agent ID writing this fact
             valid_until: ISO datetime string for expiry (optional)
+            request_id:  Optional idempotency key for safe retries
         """
         payload = {
             'entity': entity,
@@ -268,6 +270,8 @@ class IrantiClient:
         }
         if valid_until:
             payload['validUntil'] = valid_until
+        if request_id:
+            payload['requestId'] = request_id
 
         data = self._post('/kb/write', payload)
         return WriteResult(**{
@@ -335,6 +339,32 @@ class IrantiClient:
         """Query all facts about an entity."""
         entity_type, entity_id = entity.split('/', 1)
         return self._get(f'/kb/query/{entity_type}/{entity_id}')
+
+    def search(
+        self,
+        query: str,
+        limit: int = 10,
+        entity_type: Optional[str] = None,
+        entity_id: Optional[str] = None,
+        lexical_weight: float = 0.45,
+        vector_weight: float = 0.55,
+        min_score: float = 0.0,
+    ) -> list[dict]:
+        """Run hybrid search (lexical + vector) across knowledge entries."""
+        payload: dict[str, Any] = {
+            'query': query,
+            'limit': limit,
+            'lexicalWeight': lexical_weight,
+            'vectorWeight': vector_weight,
+            'minScore': min_score,
+        }
+        if entity_type is not None:
+            payload['entityType'] = entity_type
+        if entity_id is not None:
+            payload['entityId'] = entity_id
+
+        data = self._request('GET', '/kb/search', params=payload)
+        return data.get('results', [])
 
     # ── Relationships ─────────────────────────────────────────────────────────
 

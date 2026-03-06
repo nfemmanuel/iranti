@@ -14,7 +14,7 @@ class GeminiProvider implements LLMProvider {
 
     constructor() {
         this.apiKey = process.env.GEMINI_API_KEY ?? '';
-        this.model = process.env.GEMINI_MODEL ?? 'gemini-2.0-flash';
+        this.model = process.env.GEMINI_MODEL ?? 'gemini-2.5-flash';
 
         if (!this.apiKey) {
             throw new Error('GEMINI_API_KEY is not set in environment variables.');

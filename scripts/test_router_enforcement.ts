@@ -3,6 +3,7 @@ import { route, getAllProfiles } from '../src/lib/router';
 
 async function testRouterEnforcement() {
     console.log('Testing Router Enforcement...\n');
+    let mismatchCount = 0;
 
     // Enable debug logging
     process.env.DEBUG_LLM = '1';
@@ -27,6 +28,7 @@ async function testRouterEnforcement() {
     
     if (extractionResult.model !== extractionResult.modelProfile.model) {
         console.log(`  ⚠ WARNING: Model mismatch! Expected ${extractionResult.modelProfile.model}, got ${extractionResult.model}\n`);
+        mismatchCount++;
     } else {
         console.log(`  ✓ PASSED: Model matches profile\n`);
     }
@@ -43,6 +45,7 @@ async function testRouterEnforcement() {
     
     if (conflictResult.model !== conflictResult.modelProfile.model) {
         console.log(`  ⚠ WARNING: Model mismatch! Expected ${conflictResult.modelProfile.model}, got ${conflictResult.model}\n`);
+        mismatchCount++;
     } else {
         console.log(`  ✓ PASSED: Model matches profile\n`);
     }
@@ -59,6 +62,7 @@ async function testRouterEnforcement() {
     
     if (taskResult.model !== taskResult.modelProfile.model) {
         console.log(`  ⚠ WARNING: Model mismatch! Expected ${taskResult.modelProfile.model}, got ${taskResult.model}\n`);
+        mismatchCount++;
     } else {
         console.log(`  ✓ PASSED: Model matches profile\n`);
     }
@@ -82,7 +86,12 @@ async function testRouterEnforcement() {
     console.log('- Router profiles are being passed to LLM layer');
     console.log('- Provider caching is active (no repeated imports)');
     console.log('- Model selection is enforced per task type');
-    
+
+    if (mismatchCount > 0) {
+        console.error(`\nFAILED: ${mismatchCount} task/model mismatch(es) detected.`);
+        process.exit(1);
+    }
+
     process.exit(0);
 }
 

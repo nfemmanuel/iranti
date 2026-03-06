@@ -17,6 +17,7 @@ import { snapshot, reset } from '../lib/metrics';
 import { requestContext } from '../lib/requestContext';
 import { startArchivistScheduler } from './archivistScheduler';
 import { getEscalationPaths } from '../lib/escalationPaths';
+import { completeWithFallback } from '../lib/llm';
 
 const app = express();
 
@@ -117,31 +118,33 @@ app.post('/metrics/reset', authenticate, rateLimitMiddleware, requireAnyScope(['
 
 app.post(['/v1/chat/completions', '/chat/completions'], authenticate, rateLimitMiddleware, requireAnyScope(['proxy:chat']), async (req, res) => {
     try {
+        if (!Array.isArray(req.body?.messages)) {
+            return res.status(400).json({ error: 'messages must be an array.' });
+        }
+
         const messages = (req.body.messages ?? []).map((m: any) => ({
             role: m.role as 'user' | 'assistant',
             content: String(m.content),
         }));
 
-        // Dynamic provider selection
-        const provider = process.env.LLM_PROVIDER || 'mock';
-        let response;
-        
-        if (provider === 'gemini') {
-            const { default: geminiProvider } = await import('../lib/providers/gemini');
-            response = await geminiProvider.complete(messages);
-        } else if (provider === 'openai') {
-            const { default: openaiProvider } = await import('../lib/providers/openai');
-            response = await openaiProvider.complete(messages);
-        } else {
-            const { default: mockProvider } = await import('../lib/providers/mock');
-            response = await mockProvider.complete(messages);
-        }
+        const preferredProvider = process.env.LLM_PROVIDER || 'mock';
+        const model = typeof req.body?.model === 'string' && req.body.model.trim().length > 0
+            ? req.body.model.trim()
+            : undefined;
+        const maxTokensRaw = req.body?.max_tokens ?? req.body?.maxTokens;
+        const maxTokens = Number.isFinite(Number(maxTokensRaw)) ? Number(maxTokensRaw) : undefined;
+
+        const response = await completeWithFallback(messages, {
+            preferredProvider,
+            model,
+            maxTokens,
+        });
 
         res.json({
-            id: `mock-${Date.now()}`,
+            id: `${response.providerUsed}-${Date.now()}`,
             object: 'chat.completion',
             created: Math.floor(Date.now() / 1000),
-            model: 'mock',
+            model: response.model,
             choices: [{
                 index: 0,
                 message: { role: 'assistant', content: response.text },

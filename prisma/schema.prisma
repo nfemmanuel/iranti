@@ -26,6 +26,7 @@ model KnowledgeEntry {
     conflictLog  Json      @default("[]")
     isProtected  Boolean   @default(false)
     properties   Json      @default("{}")
+    embedding    Unsupported("vector(256)")?
 
     @@unique([entityType, entityId, key])
     @@index([entityType, entityId, key])
