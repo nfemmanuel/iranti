@@ -17,6 +17,13 @@ export const RESERVED_KEY_WRITERS: Record<string, Set<string>> = {
   // Agent registry profile
   "agent_profile": new Set(["librarian", "archivist", "seed", "system"]),
 
+  // Ontology governance keys
+  "core_schema": new Set(["librarian", "seed", "system"]),
+  "extension_registry": new Set(["librarian", "seed", "system"]),
+  "candidate_terms": new Set(["librarian", "seed", "system"]),
+  "promotion_policy": new Set(["librarian", "seed", "system"]),
+  "change_log": new Set(["librarian", "seed", "system"]),
+
   // Add more as you need
 };
 
