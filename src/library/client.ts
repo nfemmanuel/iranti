@@ -40,5 +40,22 @@ export function getDb(): PrismaClient {
     return prisma;
 }
 
+export async function disconnectDb(): Promise<void> {
+    const currentPrisma = prisma;
+    const currentPool = pool;
+
+    prisma = null;
+    pool = null;
+    initializedUrl = null;
+
+    if (currentPrisma) {
+        await currentPrisma.$disconnect();
+    }
+
+    if (currentPool) {
+        await currentPool.end();
+    }
+}
+
 // Legacy export for backward compatibility during migration
 export { getDb as prisma };

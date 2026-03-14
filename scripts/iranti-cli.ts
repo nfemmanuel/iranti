@@ -3,6 +3,9 @@ import fs from 'fs';
 import fsp from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import readline from 'readline/promises';
+import { initDb } from '../src/library/client';
+import { createOrRotateApiKey, listApiKeys, revokeApiKey } from '../src/security/apiKeys';
 
 type Scope = 'user' | 'system';
 
@@ -39,6 +42,16 @@ type DoctorCheck = {
 type StatusRow = {
     label: string;
     value: string;
+};
+
+const PROVIDER_ENV_KEYS: Record<string, string | null> = {
+    mock: null,
+    ollama: null,
+    gemini: 'GEMINI_API_KEY',
+    claude: 'ANTHROPIC_API_KEY',
+    openai: 'OPENAI_API_KEY',
+    groq: 'GROQ_API_KEY',
+    mistral: 'MISTRAL_API_KEY',
 };
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -187,6 +200,163 @@ function makeInstanceEnv(name: string, port: number, dbUrl: string, apiKey: stri
         '',
     ];
     return lines.join('\n');
+}
+
+function normalizeProvider(raw: string | undefined): string | undefined {
+    if (!raw) return undefined;
+    const normalized = raw.trim().toLowerCase();
+    if (!normalized) return undefined;
+    return normalized;
+}
+
+function providerKeyEnv(provider: string | undefined): string | undefined {
+    const normalized = normalizeProvider(provider);
+    if (!normalized) return undefined;
+    const envKey = PROVIDER_ENV_KEYS[normalized];
+    return envKey ?? undefined;
+}
+
+function formatEnvValue(value: string): string {
+    if (value === '') return '""';
+    return /[\s#"'`]/.test(value)
+        ? `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+        : value;
+}
+
+async function upsertEnvFile(filePath: string, updates: Record<string, string | undefined>): Promise<void> {
+    const existingRaw = fs.existsSync(filePath) ? await fsp.readFile(filePath, 'utf-8') : '';
+    const lines = existingRaw.length > 0 ? existingRaw.split(/\r?\n/) : [];
+    const pending = new Map<string, string | undefined>(Object.entries(updates));
+    const nextLines: string[] = [];
+
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) {
+            nextLines.push(line);
+            continue;
+        }
+
+        const idx = line.indexOf('=');
+        if (idx <= 0) {
+            nextLines.push(line);
+            continue;
+        }
+
+        const key = line.slice(0, idx).trim();
+        if (!pending.has(key)) {
+            nextLines.push(line);
+            continue;
+        }
+
+        const nextValue = pending.get(key);
+        pending.delete(key);
+        if (nextValue === undefined) {
+            continue;
+        }
+
+        nextLines.push(`${key}=${formatEnvValue(nextValue)}`);
+    }
+
+    for (const [key, value] of pending.entries()) {
+        if (value === undefined) continue;
+        nextLines.push(`${key}=${formatEnvValue(value)}`);
+    }
+
+    const finalLines = nextLines
+        .join('\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .replace(/^\n+/, '')
+        .trimEnd();
+
+    await writeText(filePath, `${finalLines}\n`);
+}
+
+function redactSecret(value: string | undefined): string {
+    if (!value) return '(unset)';
+    if (value.length <= 8) return '********';
+    return `${value.slice(0, 4)}...${value.slice(-4)}`;
+}
+
+function instancePaths(root: string, name: string): { instanceDir: string; envFile: string; metaFile: string } {
+    const instanceDir = path.join(root, 'instances', name);
+    return {
+        instanceDir,
+        envFile: path.join(instanceDir, '.env'),
+        metaFile: path.join(instanceDir, 'instance.json'),
+    };
+}
+
+async function loadInstanceEnv(root: string, name: string): Promise<{ instanceDir: string; envFile: string; metaFile: string; env: Record<string, string> }> {
+    const paths = instancePaths(root, name);
+    if (!fs.existsSync(paths.envFile)) {
+        throw new Error(`Instance '${name}' not found at ${paths.instanceDir}`);
+    }
+    return {
+        ...paths,
+        env: await readEnvFile(paths.envFile),
+    };
+}
+
+async function ensureProjectGitignore(projectPath: string): Promise<void> {
+    const gitignorePath = path.join(projectPath, '.gitignore');
+    const requiredLines = ['.env.iranti', '.env.iranti.local'];
+    if (fs.existsSync(gitignorePath)) {
+        const raw = await fsp.readFile(gitignorePath, 'utf-8');
+        const existing = new Set(raw.split(/\r?\n/));
+        const missing = requiredLines.filter((line) => !existing.has(line));
+        if (missing.length > 0) {
+            await fsp.writeFile(gitignorePath, `${raw.trimEnd()}\n${missing.join('\n')}\n`, 'utf-8');
+        }
+    } else {
+        await writeText(gitignorePath, `${requiredLines.join('\n')}\n`);
+    }
+}
+
+async function writeProjectBinding(projectPath: string, updates: Record<string, string | undefined>): Promise<string> {
+    await ensureDir(projectPath);
+    const outFile = path.join(projectPath, '.env.iranti');
+    if (!fs.existsSync(outFile)) {
+        await writeText(outFile, '# Iranti project binding\n');
+    }
+    await upsertEnvFile(outFile, updates);
+    await ensureProjectGitignore(projectPath);
+    return outFile;
+}
+
+type PromptSession = {
+    line: (prompt: string, currentValue?: string) => Promise<string | undefined>;
+    secret: (prompt: string, currentValue?: string) => Promise<string | undefined>;
+};
+
+async function withPromptSession<T>(run: (session: PromptSession) => Promise<T>): Promise<T> {
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+        throw new Error('--interactive requires a real terminal session.');
+    }
+
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+    });
+    const session: PromptSession = {
+        line: async (prompt: string, currentValue?: string) => {
+            const suffix = currentValue !== undefined ? ` [${currentValue}]` : '';
+            const answer = (await rl.question(`${prompt}${suffix}: `)).trim();
+            return answer.length > 0 ? answer : currentValue;
+        },
+        secret: async (prompt: string, currentValue?: string) => {
+            const placeholder = currentValue ? `${redactSecret(currentValue)} (enter new value to replace)` : 'leave blank to skip';
+            const answer = await session.line(prompt, placeholder);
+            if (!answer || answer === placeholder) return currentValue;
+            if (answer === '__clear__') return undefined;
+            return answer;
+        },
+    };
+
+    try {
+        return await run(session);
+    } finally {
+        rl.close();
+    }
 }
 
 function detectPlaceholder(value: string | undefined): boolean {
@@ -539,9 +709,14 @@ async function createInstanceCommand(args: ParsedArgs): Promise<void> {
         getFlag(args, 'db-url') ??
         `postgresql://postgres:yourpassword@localhost:5432/iranti_${name}`;
     const apiKey = getFlag(args, 'api-key');
+    const provider = normalizeProvider(getFlag(args, 'provider')) ?? 'mock';
+    const providerKey = getFlag(args, 'provider-key');
+    const providerKeyName = providerKeyEnv(provider);
+    if (providerKey && !providerKeyName) {
+        throw new Error(`Provider '${provider}' does not use a remote API key.`);
+    }
 
-    const instanceDir = path.join(root, 'instances', name);
-    const envFile = path.join(instanceDir, '.env');
+    const { instanceDir, envFile, metaFile } = instancePaths(root, name);
     if (fs.existsSync(instanceDir) && !hasFlag(args, 'force')) {
         throw new Error(`Instance '${name}' already exists at ${instanceDir}. Use --force to overwrite.`);
     }
@@ -553,6 +728,10 @@ async function createInstanceCommand(args: ParsedArgs): Promise<void> {
     await ensureDir(path.join(instanceDir, 'escalation', 'archived'));
 
     await writeText(envFile, makeInstanceEnv(name, port, dbUrl, apiKey, instanceDir));
+    await upsertEnvFile(envFile, {
+        LLM_PROVIDER: provider,
+        ...(providerKey && providerKeyName ? { [providerKeyName]: providerKey } : {}),
+    });
     const meta: InstanceMeta = {
         name,
         createdAt: new Date().toISOString(),
@@ -560,12 +739,16 @@ async function createInstanceCommand(args: ParsedArgs): Promise<void> {
         envFile,
         instanceDir,
     };
-    await writeJson(path.join(instanceDir, 'instance.json'), meta);
+    await writeJson(metaFile, meta);
 
     console.log(`Instance created: ${name}`);
     console.log(`  dir : ${instanceDir}`);
     console.log(`  env : ${envFile}`);
     console.log(`  port: ${port}`);
+    console.log(`  provider: ${provider}`);
+    if (providerKey && providerKeyName) {
+        console.log(`  ${providerKeyName}: ${redactSecret(providerKey)}`);
+    }
     console.log(`Next: iranti instance show ${name}`);
 }
 
@@ -650,48 +833,330 @@ async function projectInitCommand(args: ParsedArgs): Promise<void> {
     }
     const scope = normalizeScope(getFlag(args, 'scope'));
     const root = resolveInstallRoot(args, scope);
-    const envFile = path.join(root, 'instances', instanceName, '.env');
-    if (!fs.existsSync(envFile)) throw new Error(`Instance '${instanceName}' not found. Create it first.`);
-
-    const instanceEnv = await readEnvFile(envFile);
+    const { envFile, env: instanceEnv } = await loadInstanceEnv(root, instanceName);
     const port = instanceEnv.IRANTI_PORT ?? '3001';
     const apiKey = getFlag(args, 'api-key') ?? instanceEnv.IRANTI_API_KEY ?? 'replace_me_with_api_key';
     const agentId = getFlag(args, 'agent-id') ?? 'my_agent';
 
-    await ensureDir(projectPath);
     const outFile = path.join(projectPath, '.env.iranti');
     if (fs.existsSync(outFile) && !hasFlag(args, 'force')) {
         throw new Error(`${outFile} already exists. Use --force to overwrite.`);
     }
 
-    const content = [
-        '# Iranti project binding',
-        `IRANTI_URL=http://localhost:${port}`,
-        `IRANTI_API_KEY=${apiKey}`,
-        `IRANTI_AGENT_ID=${agentId}`,
-        'IRANTI_MEMORY_ENTITY=user/main',
-        `IRANTI_INSTANCE=${instanceName}`,
-        `IRANTI_INSTANCE_ENV=${envFile}`,
-        '',
-    ].join('\n');
-    await writeText(outFile, content);
-
-    const gitignorePath = path.join(projectPath, '.gitignore');
-    const requiredLines = ['.env.iranti', '.env.iranti.local'];
-    if (fs.existsSync(gitignorePath)) {
-        const raw = await fsp.readFile(gitignorePath, 'utf-8');
-        const existing = new Set(raw.split(/\r?\n/));
-        const missing = requiredLines.filter((line) => !existing.has(line));
-        if (missing.length > 0) {
-            await fsp.writeFile(gitignorePath, `${raw.trimEnd()}\n${missing.join('\n')}\n`, 'utf-8');
-        }
-    } else {
-        await writeText(gitignorePath, `${requiredLines.join('\n')}\n`);
-    }
+    await writeProjectBinding(projectPath, {
+        IRANTI_URL: `http://localhost:${port}`,
+        IRANTI_API_KEY: apiKey,
+        IRANTI_AGENT_ID: agentId,
+        IRANTI_MEMORY_ENTITY: 'user/main',
+        IRANTI_INSTANCE: instanceName,
+        IRANTI_INSTANCE_ENV: envFile,
+    });
 
     console.log(`Project initialized at ${projectPath}`);
     console.log(`  wrote ${outFile}`);
     console.log(`Use with Python client/middleware by loading .env.iranti`);
+}
+
+async function configureInstanceCommand(args: ParsedArgs): Promise<void> {
+    const name = args.positionals[0];
+    if (!name) {
+        throw new Error('Missing instance name. Usage: iranti configure instance <name> [--provider openai] [--provider-key <token>]');
+    }
+
+    const scope = normalizeScope(getFlag(args, 'scope'));
+    const root = resolveInstallRoot(args, scope);
+    const { envFile, env } = await loadInstanceEnv(root, name);
+    const updates: Record<string, string | undefined> = {};
+
+    let portRaw = getFlag(args, 'port');
+    let dbUrl = getFlag(args, 'db-url');
+    let apiKey = getFlag(args, 'api-key');
+    let providerInput = getFlag(args, 'provider');
+    let providerKey = getFlag(args, 'provider-key');
+    let clearProviderKey = hasFlag(args, 'clear-provider-key');
+
+    if (hasFlag(args, 'interactive')) {
+        await withPromptSession(async (prompt) => {
+            portRaw = await prompt.line('IRANTI_PORT', portRaw ?? env.IRANTI_PORT);
+            dbUrl = await prompt.line('DATABASE_URL', dbUrl ?? env.DATABASE_URL);
+            providerInput = await prompt.line('LLM_PROVIDER', providerInput ?? env.LLM_PROVIDER ?? 'mock');
+            const interactiveProvider = normalizeProvider(providerInput ?? env.LLM_PROVIDER ?? 'mock');
+            if (providerKeyEnv(interactiveProvider)) {
+                providerKey = await prompt.secret(`${providerKeyEnv(interactiveProvider)}`, providerKey ?? env[providerKeyEnv(interactiveProvider)!]);
+            }
+            apiKey = await prompt.secret('IRANTI_API_KEY', apiKey ?? env.IRANTI_API_KEY);
+        });
+        clearProviderKey = false;
+    }
+
+    if (portRaw) {
+        const port = Number.parseInt(portRaw, 10);
+        if (!Number.isFinite(port) || port <= 0) throw new Error(`Invalid --port '${portRaw}'.`);
+        updates.IRANTI_PORT = String(port);
+    }
+
+    if (dbUrl) updates.DATABASE_URL = dbUrl;
+
+    if (apiKey) updates.IRANTI_API_KEY = apiKey;
+
+    const provider = normalizeProvider(providerInput ?? env.LLM_PROVIDER ?? 'mock');
+    if (providerInput) updates.LLM_PROVIDER = provider ?? 'mock';
+
+    if (providerKey) {
+        const envKey = providerKeyEnv(provider);
+        if (!envKey) {
+            throw new Error(`Provider '${provider ?? 'unknown'}' does not use a remote API key.`);
+        }
+        updates[envKey] = providerKey;
+    }
+
+    if (clearProviderKey) {
+        const envKey = providerKeyEnv(provider);
+        if (!envKey) {
+            throw new Error(`Provider '${provider ?? 'unknown'}' does not use a remote API key.`);
+        }
+        updates[envKey] = undefined;
+    }
+
+    if (Object.keys(updates).length === 0) {
+        throw new Error('No changes provided. Use flags like --provider, --provider-key, --api-key, --db-url, or --port.');
+    }
+
+    await upsertEnvFile(envFile, updates);
+
+    const json = hasFlag(args, 'json');
+    const result = {
+        instance: name,
+        envFile,
+        updatedKeys: Object.keys(updates).sort(),
+        provider: updates.LLM_PROVIDER ?? env.LLM_PROVIDER ?? 'mock',
+        apiKeyChanged: Boolean(apiKey),
+        providerKeyChanged: Boolean(providerKey) || hasFlag(args, 'clear-provider-key'),
+    };
+
+    if (json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+    }
+
+    console.log(`Instance updated: ${name}`);
+    console.log(`  env      ${envFile}`);
+    console.log(`  keys     ${result.updatedKeys.join(', ')}`);
+    if (apiKey) {
+        console.log(`  api key  ${redactSecret(apiKey)}`);
+    }
+    if (providerKey) {
+        console.log(`  provider ${result.provider}`);
+    }
+}
+
+async function configureProjectCommand(args: ParsedArgs): Promise<void> {
+    const projectPath = path.resolve(args.positionals[0] ?? process.cwd());
+    const outFile = path.join(projectPath, '.env.iranti');
+    const existing = fs.existsSync(outFile) ? await readEnvFile(outFile) : {};
+
+    const scope = normalizeScope(getFlag(args, 'scope'));
+    let instanceName: string | undefined = getFlag(args, 'instance') ?? existing.IRANTI_INSTANCE;
+    let explicitUrl: string | undefined = getFlag(args, 'url');
+    let explicitApiKey: string | undefined = getFlag(args, 'api-key');
+    let explicitAgentId: string | undefined = getFlag(args, 'agent-id');
+    let explicitMemoryEntity: string | undefined = getFlag(args, 'memory-entity');
+
+    if (hasFlag(args, 'interactive')) {
+        await withPromptSession(async (prompt) => {
+            instanceName = await prompt.line('IRANTI_INSTANCE', instanceName);
+            explicitUrl = await prompt.line('IRANTI_URL', explicitUrl ?? existing.IRANTI_URL);
+            explicitApiKey = await prompt.secret('IRANTI_API_KEY', explicitApiKey ?? existing.IRANTI_API_KEY);
+            explicitAgentId = await prompt.line('IRANTI_AGENT_ID', explicitAgentId ?? existing.IRANTI_AGENT_ID ?? 'my_agent');
+            explicitMemoryEntity = await prompt.line('IRANTI_MEMORY_ENTITY', explicitMemoryEntity ?? existing.IRANTI_MEMORY_ENTITY ?? 'user/main');
+        });
+    }
+
+    let instanceEnvFile = existing.IRANTI_INSTANCE_ENV;
+    let derivedUrl = existing.IRANTI_URL;
+    let derivedApiKey = existing.IRANTI_API_KEY;
+
+    if (instanceName) {
+        const root = resolveInstallRoot(args, scope);
+        const { envFile, env } = await loadInstanceEnv(root, instanceName);
+        instanceEnvFile = envFile;
+        derivedUrl = `http://localhost:${env.IRANTI_PORT ?? '3001'}`;
+        derivedApiKey = env.IRANTI_API_KEY ?? derivedApiKey;
+    }
+
+    const updates: Record<string, string | undefined> = {
+        IRANTI_URL: explicitUrl ?? derivedUrl,
+        IRANTI_API_KEY: explicitApiKey ?? derivedApiKey,
+        IRANTI_AGENT_ID: explicitAgentId ?? existing.IRANTI_AGENT_ID ?? 'my_agent',
+        IRANTI_MEMORY_ENTITY: explicitMemoryEntity ?? existing.IRANTI_MEMORY_ENTITY ?? 'user/main',
+        IRANTI_INSTANCE: instanceName,
+        IRANTI_INSTANCE_ENV: instanceEnvFile,
+    };
+
+    if (!updates.IRANTI_URL) {
+        throw new Error('Unable to determine IRANTI_URL. Provide --instance <name> or --url <http://host:port>.');
+    }
+    if (!updates.IRANTI_API_KEY) {
+        throw new Error('Unable to determine IRANTI_API_KEY. Provide --api-key <token> or configure the instance first.');
+    }
+
+    const written = await writeProjectBinding(projectPath, updates);
+    const json = hasFlag(args, 'json');
+    const result = {
+        projectPath,
+        envFile: written,
+        url: updates.IRANTI_URL,
+        agentId: updates.IRANTI_AGENT_ID,
+        instance: updates.IRANTI_INSTANCE ?? null,
+    };
+
+    if (json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+    }
+
+    console.log(`Project binding updated`);
+    console.log(`  path     ${projectPath}`);
+    console.log(`  env      ${written}`);
+    console.log(`  url      ${updates.IRANTI_URL}`);
+    console.log(`  agent    ${updates.IRANTI_AGENT_ID}`);
+    if (updates.IRANTI_INSTANCE) {
+        console.log(`  instance ${updates.IRANTI_INSTANCE}`);
+    }
+}
+
+async function authCreateKeyCommand(args: ParsedArgs): Promise<void> {
+    const instanceName = getFlag(args, 'instance');
+    const keyId = getFlag(args, 'key-id');
+    const owner = getFlag(args, 'owner');
+    const scopesRaw = getFlag(args, 'scopes') ?? '';
+    const description = getFlag(args, 'description');
+    const projectPath = getFlag(args, 'project');
+    const agentId = getFlag(args, 'agent-id');
+    const writeInstance = hasFlag(args, 'write-instance');
+
+    if (!instanceName) throw new Error('Missing --instance <name>. Usage: iranti auth create-key --instance <name> --key-id <id> --owner <owner>');
+    if (!keyId || !owner) throw new Error('Missing --key-id or --owner.');
+
+    const scope = normalizeScope(getFlag(args, 'scope'));
+    const root = resolveInstallRoot(args, scope);
+    const { envFile, env } = await loadInstanceEnv(root, instanceName);
+    if (detectPlaceholder(env.DATABASE_URL)) {
+        throw new Error(`Instance '${instanceName}' still has a placeholder DATABASE_URL. Update ${envFile} first.`);
+    }
+
+    const scopes = scopesRaw.split(',').map((value) => value.trim()).filter(Boolean);
+
+    initDb(env.DATABASE_URL);
+    const created = await createOrRotateApiKey({
+        keyId,
+        owner,
+        scopes,
+        description,
+    });
+
+    if (writeInstance) {
+        await upsertEnvFile(envFile, { IRANTI_API_KEY: created.token });
+    }
+
+    if (projectPath) {
+        const resolvedProjectPath = path.resolve(projectPath);
+        const existingBindingFile = path.join(resolvedProjectPath, '.env.iranti');
+        const existingBinding = fs.existsSync(existingBindingFile) ? await readEnvFile(existingBindingFile) : {};
+        await writeProjectBinding(resolvedProjectPath, {
+            IRANTI_URL: `http://localhost:${env.IRANTI_PORT ?? '3001'}`,
+            IRANTI_API_KEY: created.token,
+            IRANTI_AGENT_ID: agentId ?? existingBinding.IRANTI_AGENT_ID ?? 'my_agent',
+            IRANTI_MEMORY_ENTITY: existingBinding.IRANTI_MEMORY_ENTITY ?? 'user/main',
+            IRANTI_INSTANCE: instanceName,
+            IRANTI_INSTANCE_ENV: envFile,
+        });
+    }
+
+    if (hasFlag(args, 'json')) {
+        console.log(JSON.stringify({
+            keyId: created.record.keyId,
+            owner: created.record.owner,
+            scopes: created.record.scopes,
+            token: created.token,
+            instance: instanceName,
+            wroteInstanceEnv: writeInstance,
+            wroteProjectPath: projectPath ? path.resolve(projectPath) : null,
+        }, null, 2));
+        process.exit(0);
+    }
+
+    console.log('API key created (or rotated):');
+    console.log(`  keyId   ${created.record.keyId}`);
+    console.log(`  owner   ${created.record.owner}`);
+    console.log(`  scopes  ${created.record.scopes.join(',') || '(none)'}`);
+    console.log(`  token   ${created.token}`);
+    if (writeInstance) {
+        console.log(`  synced  ${envFile}`);
+    }
+    if (projectPath) {
+        console.log(`  project ${path.resolve(projectPath)}`);
+    }
+    process.exit(0);
+}
+
+async function authListKeysCommand(args: ParsedArgs): Promise<void> {
+    const instanceName = getFlag(args, 'instance');
+    if (!instanceName) throw new Error('Missing --instance <name>. Usage: iranti auth list-keys --instance <name>');
+
+    const scope = normalizeScope(getFlag(args, 'scope'));
+    const root = resolveInstallRoot(args, scope);
+    const { envFile, env } = await loadInstanceEnv(root, instanceName);
+    if (detectPlaceholder(env.DATABASE_URL)) {
+        throw new Error(`Instance '${instanceName}' still has a placeholder DATABASE_URL. Update ${envFile} first.`);
+    }
+
+    initDb(env.DATABASE_URL);
+    const keys = await listApiKeys();
+    if (hasFlag(args, 'json')) {
+        console.log(JSON.stringify({ instance: instanceName, keys }, null, 2));
+        process.exit(0);
+    }
+
+    if (keys.length === 0) {
+        console.log('No registry API keys found.');
+        process.exit(0);
+    }
+
+    console.log(`Registry API keys for ${instanceName}:`);
+    for (const key of keys) {
+        console.log(`  - ${key.keyId} owner=${key.owner} active=${key.isActive} scopes=${key.scopes.join(',') || '(none)'}`);
+    }
+    process.exit(0);
+}
+
+async function authRevokeKeyCommand(args: ParsedArgs): Promise<void> {
+    const instanceName = getFlag(args, 'instance');
+    const keyId = getFlag(args, 'key-id');
+    if (!instanceName || !keyId) {
+        throw new Error('Missing --instance <name> or --key-id <id>. Usage: iranti auth revoke-key --instance <name> --key-id <id>');
+    }
+
+    const scope = normalizeScope(getFlag(args, 'scope'));
+    const root = resolveInstallRoot(args, scope);
+    const { envFile, env } = await loadInstanceEnv(root, instanceName);
+    if (detectPlaceholder(env.DATABASE_URL)) {
+        throw new Error(`Instance '${instanceName}' still has a placeholder DATABASE_URL. Update ${envFile} first.`);
+    }
+
+    initDb(env.DATABASE_URL);
+    const revoked = await revokeApiKey(keyId);
+    if (!revoked) {
+        throw new Error(`API key not found: ${keyId}`);
+    }
+
+    if (hasFlag(args, 'json')) {
+        console.log(JSON.stringify({ instance: instanceName, keyId, revoked: true }, null, 2));
+        process.exit(0);
+    }
+
+    console.log(`Revoked API key '${keyId}' for instance '${instanceName}'.`);
+    process.exit(0);
 }
 
 function printHelp(): void {
@@ -701,10 +1166,19 @@ Machine-level:
   iranti install [--scope user|system] [--root <path>]
 
 Instance-level:
-  iranti instance create <name> [--port 3001] [--db-url <url>] [--api-key <token>] [--scope user|system]
+  iranti instance create <name> [--port 3001] [--db-url <url>] [--api-key <token>] [--provider <name>] [--provider-key <token>] [--scope user|system]
   iranti instance list [--scope user|system]
   iranti instance show <name> [--scope user|system]
   iranti run --instance <name> [--scope user|system]
+
+Configuration:
+  iranti configure instance <name> [--interactive] [--db-url <url>] [--port <n>] [--api-key <token>] [--provider <name>] [--provider-key <token>] [--clear-provider-key]
+  iranti configure project [path] [--interactive] [--instance <name>] [--url <http://host:port>] [--api-key <token>] [--agent-id <id>] [--memory-entity <entity>]
+
+Auth:
+  iranti auth create-key --instance <name> --key-id <id> --owner <owner> [--scopes read,write] [--description <text>] [--write-instance] [--project <path>] [--agent-id <id>]
+  iranti auth list-keys --instance <name>
+  iranti auth revoke-key --instance <name> --key-id <id>
 
 Project-level:
   iranti project init [path] --instance <name> [--api-key <token>] [--agent-id <id>] [--force]
@@ -747,6 +1221,34 @@ async function main(): Promise<void> {
     if (args.command === 'run') {
         await runInstanceCommand(args);
         return;
+    }
+
+    if (args.command === 'configure') {
+        if (args.subcommand === 'instance') {
+            await configureInstanceCommand(args);
+            return;
+        }
+        if (args.subcommand === 'project') {
+            await configureProjectCommand(args);
+            return;
+        }
+        throw new Error(`Unknown configure subcommand '${args.subcommand ?? ''}'.`);
+    }
+
+    if (args.command === 'auth') {
+        if (args.subcommand === 'create-key') {
+            await authCreateKeyCommand(args);
+            return;
+        }
+        if (args.subcommand === 'list-keys') {
+            await authListKeysCommand(args);
+            return;
+        }
+        if (args.subcommand === 'revoke-key') {
+            await authRevokeKeyCommand(args);
+            return;
+        }
+        throw new Error(`Unknown auth subcommand '${args.subcommand ?? ''}'.`);
     }
 
     if (args.command === 'project' && args.subcommand === 'init') {

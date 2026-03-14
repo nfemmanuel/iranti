@@ -232,13 +232,22 @@ Defaults:
 ### 3) Create a named instance
 
 ```bash
-iranti instance create local --port 3001 --db-url "postgresql://postgres:yourpassword@localhost:5432/iranti_local"
+iranti instance create local --port 3001 --db-url "postgresql://postgres:yourpassword@localhost:5432/iranti_local" --provider mock
 iranti instance show local
 ```
 
-Then edit the printed instance `.env` file and set:
-- `DATABASE_URL` (real value)
-- `IRANTI_API_KEY` (real token)
+Finish onboarding or change settings later with:
+
+```bash
+# Provider/db updates
+iranti configure instance local --provider openai --provider-key sk-... --db-url "postgresql://postgres:realpassword@localhost:5432/iranti_local"
+iranti configure instance local --interactive
+
+# Create a registry-backed API key and sync it into the instance env
+iranti auth create-key --instance local --key-id local_admin --owner "Local Admin" --scopes "kb:read,kb:write,memory:read,memory:write,agents:read,agents:write" --write-instance
+```
+
+You can rerun `iranti configure instance ...` later to rotate provider keys or replace the instance API token.
 
 ### 4) Run Iranti from that instance
 
@@ -254,6 +263,14 @@ iranti project init . --instance local --agent-id chatbot_main
 ```
 
 This writes `.env.iranti` in the project with the correct `IRANTI_URL`, `IRANTI_API_KEY`, and default agent identity.
+
+Later changes use the same surface:
+
+```bash
+iranti configure project . --instance local --agent-id chatbot_worker
+iranti configure project . --interactive
+iranti auth create-key --instance local --key-id chatbot_worker --owner "Chatbot Worker" --scopes "kb:read,memory:read,memory:write" --project .
+```
 
 For multi-agent systems, bind once per project and set unique agent IDs per worker (for example `planner_agent`, `research_agent`, `critic_agent`).
 
@@ -271,6 +288,8 @@ iranti upgrade
 This validates the active env file, database URL, API key presence, provider selection, and provider-specific credentials.
 `iranti status` shows the current runtime root, known instances, and local binding files.
 `iranti upgrade` prints the supported upgrade commands for npm and Python installs.
+`iranti configure ...` updates instance/project credentials without manual env editing.
+`iranti auth ...` manages registry-backed API keys and can sync them into instance or project bindings.
 
 ---
 

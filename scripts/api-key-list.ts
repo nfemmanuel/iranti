@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { initDb, getDb } from '../src/library/client';
+import { initDb } from '../src/library/client';
 import { listApiKeys } from '../src/security/apiKeys';
 
 async function main(): Promise<void> {
@@ -28,15 +28,10 @@ async function main(): Promise<void> {
         }
     }
 
-    await getDb().$disconnect();
+    process.exit(0);
 }
 
 main().catch(async (err) => {
     console.error('Failed to list API keys:', err instanceof Error ? err.message : String(err));
-    try {
-        await getDb().$disconnect();
-    } catch {
-        // ignore
-    }
     process.exit(1);
 });

@@ -108,11 +108,20 @@ npm install -g .
 
 ```bash
 iranti install --scope user
-iranti instance create local --port 3001 --db-url "postgresql://postgres:yourpassword@localhost:5432/iranti_local"
+iranti instance create local --port 3001 --db-url "postgresql://postgres:yourpassword@localhost:5432/iranti_local" --provider mock
 iranti instance show local
 ```
 
-Edit the printed instance `.env` and set real `DATABASE_URL` and `IRANTI_API_KEY`.
+Finish setup without hand-editing the env file:
+
+```bash
+# Switch to a real provider later if needed
+iranti configure instance local --provider openai --provider-key sk-... --db-url "postgresql://postgres:realpassword@localhost:5432/iranti_local"
+iranti configure instance local --interactive
+
+# Create a real Iranti API key and sync it into the instance env
+iranti auth create-key --instance local --key-id local_admin --owner "Local Admin" --scopes "kb:read,kb:write,memory:read,memory:write,agents:read,agents:write" --write-instance
+```
 
 ### Run instance
 
@@ -128,6 +137,8 @@ iranti status
 iranti upgrade
 ```
 
+Use `iranti configure instance ...` later to rotate provider credentials or replace the instance API key reference.
+
 ### Bind a project
 
 ```bash
@@ -136,6 +147,19 @@ iranti project init . --instance local --agent-id chatbot_main
 ```
 
 This writes `.env.iranti` with `IRANTI_URL`, `IRANTI_API_KEY`, and `IRANTI_AGENT_ID`.
+
+To rotate a bound project key later:
+
+```bash
+iranti auth create-key --instance local --key-id chatbot_main --owner "Chatbot Main" --scopes "kb:read,memory:read,memory:write" --project .
+```
+
+To change the project agent identity or rebind to another instance:
+
+```bash
+iranti configure project . --instance local --agent-id chatbot_worker
+iranti configure project . --interactive
+```
 
 ---
 
@@ -171,7 +195,7 @@ iranti upgrade
 Create a per-user API key token (recommended):
 
 ```bash
-npm run api-key:create -- --key-id demo_user --owner "Demo User" --scopes "kb:read,kb:write,memory:read,memory:write,agents:read,agents:write"
+iranti auth create-key --instance local --key-id demo_user --owner "Demo User" --scopes "kb:read,kb:write,memory:read,memory:write,agents:read,agents:write"
 ```
 
 Use the printed `keyId.secret` token in `X-Iranti-Key`.

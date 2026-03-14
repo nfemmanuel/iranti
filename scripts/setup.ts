@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { getDb, initDb } from '../src/library/client';
+import { getDb, initDb, disconnectDb } from '../src/library/client';
 import { ensureEscalationFolders } from '../src/lib/escalationPaths';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -87,7 +87,7 @@ async function setup() {
     console.log('  npm run dev                — start development\n');
 
     try {
-        await getDb().$disconnect();
+        await disconnectDb();
     } catch {
         // Setup can complete without an initialized in-process DB client.
     }

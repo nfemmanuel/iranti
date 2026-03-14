@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { initDb, getDb } from '../src/library/client';
+import { initDb } from '../src/library/client';
 import { revokeApiKey } from '../src/security/apiKeys';
 
 function parseArg(flag: string): string | undefined {
@@ -29,15 +29,10 @@ async function main(): Promise<void> {
     }
 
     console.log(`Revoked API key: ${keyId}`);
-    await getDb().$disconnect();
+    process.exit(0);
 }
 
 main().catch(async (err) => {
     console.error('Failed to revoke API key:', err instanceof Error ? err.message : String(err));
-    try {
-        await getDb().$disconnect();
-    } catch {
-        // ignore
-    }
     process.exit(1);
 });

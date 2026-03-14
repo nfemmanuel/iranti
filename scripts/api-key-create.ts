@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { initDb, getDb } from '../src/library/client';
+import { initDb } from '../src/library/client';
 import { createOrRotateApiKey } from '../src/security/apiKeys';
 
 function parseArg(flag: string): string | undefined {
@@ -47,15 +47,10 @@ async function main(): Promise<void> {
     console.log(created.token);
     console.log('\nUse it as: X-Iranti-Key: <token>\n');
 
-    await getDb().$disconnect();
+    process.exit(0);
 }
 
 main().catch(async (err) => {
     console.error('Failed to create API key:', err instanceof Error ? err.message : String(err));
-    try {
-        await getDb().$disconnect();
-    } catch {
-        // ignore
-    }
     process.exit(1);
 });
