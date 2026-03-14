@@ -265,6 +265,10 @@ iranti/
 │       ├── README.md           — Python client documentation
 │       ├── pyproject.toml      — Python package metadata for PyPI
 │       └── LICENSE             — AGPL metadata for Python package
+├── tests/
+│   └── conflict/
+│       ├── run_conflict_benchmark.ts — Benchmark runner for adversarial conflict scenarios
+│       └── *.ts                — Direct contradiction, temporal, cascading, and multi-hop conflict cases
 ├── AGENTS.md                   — This file
 ├── docker-compose.yml          — PostgreSQL for local dev
 └── .env                        — Local environment (never committed)
@@ -471,6 +475,7 @@ Entity format: `"entityType/entityId"` e.g. `"researcher/jane_smith"`
 | Architectural decision | Create `docs/decisions/NNN-title.md` |
 | Schema change | Update AGENTS.md schema section, update `docs/features/` spec if relevant |
 | Breaking API change | Update README.md, `docs/guides/quickstart.md`, `clients/python/iranti.py` docstrings, bump version in `package.json` |
+| New benchmark suite | Update AGENTS.md file structure and add methodology under `docs/internal/` |
 
 ### ADR Format
 

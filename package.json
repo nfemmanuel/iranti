@@ -62,6 +62,7 @@
     "test:connection-string": "ts-node scripts/test_connection_string.ts",
     "test:router": "ts-node scripts/test_router_enforcement.ts",
     "test:verify-authoritative": "ts-node scripts/verify_authoritative_resolution_parsing.ts",
+    "test:conflict-benchmark": "ts-node tests/conflict/run_conflict_benchmark.ts",
     "release:check": "ts-node scripts/check-release-version.ts",
     "release:bump": "ts-node scripts/bump-version.ts",
     "seed:policy": "ts-node scripts/seed_policy.ts",
