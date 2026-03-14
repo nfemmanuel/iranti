@@ -7,7 +7,8 @@ This guide gets you from zero to your first working Iranti deployment.
 ## Prerequisites
 
 - **Node.js 18+** — [Download here](https://nodejs.org/)
-- **Docker** — [Download here](https://www.docker.com/products/docker-desktop/)
+- **PostgreSQL** — local or managed
+- **Docker** — optional, only if you want local PostgreSQL via containers
 - **Git** — [Download here](https://git-scm.com/)
 
 ---
@@ -117,11 +118,18 @@ iranti setup --config ./iranti.setup.json
 `iranti setup` is the preferred onboarding path for new users. It keeps prompting until the runtime, instance, provider credentials, Iranti client key, and optional project bindings are configured. It also lets you choose between:
 - a shared machine-level runtime
 - an isolated runtime folder for one project or sandbox
+- existing or managed PostgreSQL
+- optional Docker-hosted PostgreSQL when Docker is installed
+
+The setup wizard also checks whether the default API port (`3001`) is already occupied and suggests the next free port instead of failing late.
 
 Automation notes:
 - `--defaults` skips prompts and uses defaults plus environment/flag input. It still requires a real `DATABASE_URL`.
 - `--config` accepts a JSON setup plan for repeatable bootstrap in CI or managed installs.
-- Example config: [`iranti.setup.example.json`](C:\Users\NF\Documents\Projects\iranti\docs\guides\iranti.setup.example.json)
+- `--bootstrap-db` runs migrations and seeding during automated setup when the target database is reachable and suitable for Prisma bootstrap.
+- Example config: [`iranti.setup.example.json`](./iranti.setup.example.json)
+
+`--bootstrap-db` is for a fresh or already-compatible pgvector-enabled PostgreSQL database. If your target database is already populated but not Prisma-baselined, or the server does not have `pgvector` installed, run setup without `--bootstrap-db` and bootstrap the database separately.
 
 Manual commands are still available below when you want full low-level control.
 
@@ -203,6 +211,13 @@ npm run test:integration
 You should see all tests pass:
 
 ```
+✓ Agent registration
+✓ Write and query
+✓ Conflict resolution
+✓ Working memory handshake
+✓ Relationships
+✓ Maintenance cycle
+```
 
 For a quick environment check before that, run:
 
@@ -210,13 +225,6 @@ For a quick environment check before that, run:
 iranti doctor
 iranti status
 iranti upgrade
-```
-✓ Agent registration
-✓ Write and query
-✓ Conflict resolution
-✓ Working memory handshake
-✓ Relationships
-✓ Maintenance cycle
 ```
 
 ---

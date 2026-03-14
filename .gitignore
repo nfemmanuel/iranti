@@ -48,3 +48,6 @@ experiments/*.json
 
 # Local planning notes (never commit)
 /docs/BACKLOG.local.md
+
+iranti_roadmap.html
+tests/consistency/.runtime/

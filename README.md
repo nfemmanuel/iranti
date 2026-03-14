@@ -70,6 +70,34 @@ Validated with multiple agent frameworks:
 
 Full validation report: [`docs/internal/validation_results.md`](docs/internal/validation_results.md) | Multi-framework details: [`docs/internal/MULTI_FRAMEWORK_VALIDATION.md`](docs/internal/MULTI_FRAMEWORK_VALIDATION.md)
 
+### Conflict Benchmark Baseline
+
+Iranti now also has an adversarial conflict benchmark that measures contradiction handling rather than basic retrieval.
+
+| Suite | Score | Notes |
+|---|---|---|
+| **Direct contradiction** | `4/4` | Same entity+key conflicts are explicitly resolved or escalated |
+| **Temporal conflict** | `3/4` | One known-failing edge remains |
+| **Cascading conflict** | `0/4` | Cross-key contradiction detection not implemented yet |
+| **Multi-hop conflict** | `0/4` | Graph-aware conflict reasoning not implemented yet |
+| **Total** | `7/16 (44%)` | Honest baseline for the current Librarian |
+
+Conflict benchmark methodology: [`docs/internal/conflict_benchmark.md`](docs/internal/conflict_benchmark.md)
+
+### Consistency Validation
+
+Iranti also now documents and validates its consistency model empirically:
+
+| Check | Result |
+|---|---|
+| Concurrent write serialization | `PASS` |
+| Read-after-write visibility | `PASS` |
+| Escalation state integrity | `PASS` |
+| Observe isolation from uncommitted writes | `PASS` |
+| **Total** | `4/4` |
+
+Consistency model and validation: [`docs/internal/consistency_model.md`](docs/internal/consistency_model.md)
+
 ### Goal 1: Easy Integration
 
 - **Entity**: `project/quantum_bridge`
@@ -176,7 +204,19 @@ The current landscape splits into three buckets:
 
 ### Current Position
 
-Iranti is strongest today as infrastructure for developers building multi-agent systems who need shared, structured, queryable memory rather than pure semantic recall. The biggest leverage now is not adding more abstract claims. It is making setup, operations, and day-to-day inspection simple enough that real users will keep it in the loop.
+Iranti is strongest today as infrastructure for developers building multi-agent systems who need shared, structured, queryable memory rather than pure semantic recall. The current evidence base is now more concrete than a positioning claim alone:
+
+- `16/16` fictional-fact transfer in retrieval validation
+- `7/16 (44%)` on an adversarial conflict benchmark
+- `4/4` on empirical consistency validation for serialized writes and read visibility
+
+That is not a claim that multi-agent memory is solved. It is a claim that Iranti now has reproducible evidence for three things at once:
+
+- exact cross-agent fact transfer works
+- same-key conflicting writes are serialized and observable
+- conflict handling quality is measurable, including clearly documented failure modes
+
+The next leverage is still product simplicity: setup, operations, and day-to-day inspection need to be simple enough that real users keep Iranti in the loop.
 
 ## Quickstart
 

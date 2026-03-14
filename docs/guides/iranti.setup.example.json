@@ -6,6 +6,7 @@
   "port": 3001,
   "databaseUrl": "postgresql://postgres:YOUR_PASSWORD@localhost:5432/iranti_local",
   "provider": "openai",
+  "bootstrapDatabase": true,
   "providerKeys": {
     "openai": "sk-your-openai-key",
     "claude": "sk-ant-your-claude-key"

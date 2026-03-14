@@ -6,6 +6,7 @@ import path from 'path';
 import { spawn, spawnSync } from 'child_process';
 import readline from 'readline/promises';
 import { Writable } from 'stream';
+import net from 'net';
 import { initDb } from '../src/library/client';
 import { createOrRotateApiKey, formatApiKeyToken, generateApiKeySecret, listApiKeys, revokeApiKey } from '../src/security/apiKeys';
 
@@ -188,27 +189,45 @@ function resolveInstallRoot(args: ParsedArgs, scope: Scope): string {
 }
 
 function getPackageVersion(): string {
+    const pkgPath = path.join(packageRoot(), 'package.json');
+    if (fs.existsSync(pkgPath)) {
+        try {
+            const raw = fs.readFileSync(pkgPath, 'utf-8');
+            const pkg = JSON.parse(raw);
+            return String(pkg.version ?? '0.0.0');
+        } catch {
+            return '0.0.0';
+        }
+    }
+    return '0.0.0';
+}
+
+function packageRoot(): string {
     let dir = __dirname;
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 6; i++) {
         const pkgPath = path.join(dir, 'package.json');
         if (fs.existsSync(pkgPath)) {
-            try {
-                const raw = fs.readFileSync(pkgPath, 'utf-8');
-                const pkg = JSON.parse(raw);
-                return String(pkg.version ?? '0.0.0');
-            } catch {
-                return '0.0.0';
-            }
+            return dir;
         }
         const parent = path.dirname(dir);
         if (parent === dir) break;
         dir = parent;
     }
-    return '0.0.0';
+    return process.cwd();
 }
 
 function builtScriptPath(scriptName: string): string {
     return path.resolve(__dirname, `${scriptName}.js`);
+}
+
+function formatSetupBootstrapFailure(error: unknown): Error {
+    const reason = error instanceof Error ? error.message : String(error);
+    return new Error(
+        `Database bootstrap failed after instance configuration. ` +
+        `Common causes are a non-empty database that Prisma has not baselined yet, or a PostgreSQL server without the pgvector extension installed. ` +
+        `Re-run setup without --bootstrap-db, or point Iranti at a fresh pgvector-capable database. ` +
+        `Underlying error: ${reason}`
+    );
 }
 
 async function handoffToScript(scriptName: string, rawArgs: string[]): Promise<void> {
@@ -253,6 +272,36 @@ async function handoffToScript(scriptName: string, rawArgs: string[]): Promise<v
             }
             if ((code ?? 0) !== 0) {
                 process.exit(code ?? 1);
+            }
+            resolve();
+        });
+    });
+}
+
+async function runBundledScript(scriptName: string, rawArgs: string[], extraEnv?: Record<string, string | undefined>): Promise<void> {
+    const builtPath = builtScriptPath(scriptName);
+    if (!fs.existsSync(builtPath)) {
+        throw new Error(`Unable to locate bundled script: ${scriptName}`);
+    }
+
+    await new Promise<void>((resolve, reject) => {
+        const child = spawn(process.execPath, [builtPath, ...rawArgs], {
+            stdio: 'inherit',
+            env: {
+                ...process.env,
+                ...extraEnv,
+            },
+            cwd: packageRoot(),
+        });
+        child.on('error', reject);
+        child.on('exit', (code, signal) => {
+            if (signal) {
+                reject(new Error(`${scriptName} terminated with signal ${signal}`));
+                return;
+            }
+            if ((code ?? 0) !== 0) {
+                reject(new Error(`${scriptName} exited with code ${code ?? 1}`));
+                return;
             }
             resolve();
         });
@@ -556,6 +605,7 @@ type SetupExecutionPlan = {
     projects: SetupProjectPlan[];
     codexAgent?: string;
     codex?: boolean;
+    bootstrapDatabase?: boolean;
 };
 
 type SetupExecutionResult = {
@@ -775,6 +825,128 @@ function hasCodexInstalled(): boolean {
     }
 }
 
+function hasDockerInstalled(): boolean {
+    try {
+        const proc = process.platform === 'win32'
+            ? spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/c', 'docker --version'], { stdio: 'ignore' })
+            : spawnSync('docker', ['--version'], { stdio: 'ignore' });
+        return proc.status === 0;
+    } catch {
+        return false;
+    }
+}
+
+async function isPortAvailable(port: number, host: string = '127.0.0.1'): Promise<boolean> {
+    return await new Promise<boolean>((resolve) => {
+        const server = net.createServer();
+        server.unref();
+        server.on('error', () => resolve(false));
+        server.listen(port, host, () => {
+            server.close(() => resolve(true));
+        });
+    });
+}
+
+async function findNextAvailablePort(start: number, host: string = '127.0.0.1', maxSteps: number = 50): Promise<number> {
+    for (let port = start; port < start + maxSteps; port += 1) {
+        if (await isPortAvailable(port, host)) {
+            return port;
+        }
+    }
+    throw new Error(`No available port found in range ${start}-${start + maxSteps - 1}.`);
+}
+
+async function chooseAvailablePort(session: PromptSession, promptText: string, preferredPort: number, allowOccupiedCurrent: boolean = false): Promise<number> {
+    let suggested = preferredPort;
+    if (!allowOccupiedCurrent && !(await isPortAvailable(preferredPort))) {
+        suggested = await findNextAvailablePort(preferredPort + 1);
+        console.log(`${warnLabel()} Port ${preferredPort} is already in use. Suggested port: ${suggested}`);
+    }
+
+    while (true) {
+        const raw = await promptNonEmpty(session, promptText, String(suggested));
+        const parsed = Number.parseInt(raw, 10);
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+            console.log(`${warnLabel()} Port must be a positive integer.`);
+            continue;
+        }
+        if (allowOccupiedCurrent && parsed === preferredPort) {
+            return parsed;
+        }
+        if (await isPortAvailable(parsed)) {
+            return parsed;
+        }
+        const next = await findNextAvailablePort(parsed + 1);
+        console.log(`${warnLabel()} Port ${parsed} is already in use. Try ${next} instead.`);
+        suggested = next;
+    }
+}
+
+async function waitForTcpPort(host: string, port: number, timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        const ready = await new Promise<boolean>((resolve) => {
+            const socket = net.connect({ host, port });
+            socket.once('connect', () => {
+                socket.destroy();
+                resolve(true);
+            });
+            socket.once('error', () => {
+                socket.destroy();
+                resolve(false);
+            });
+        });
+        if (ready) return;
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    throw new Error(`Timed out waiting for ${host}:${port} to accept TCP connections.`);
+}
+
+async function runDockerPostgresContainer(options: {
+    containerName: string;
+    hostPort: number;
+    password: string;
+    database: string;
+}): Promise<void> {
+    const inspect = process.platform === 'win32'
+        ? spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/c', `docker ps -a --format "{{.Names}}"`], { encoding: 'utf8' })
+        : spawnSync('docker', ['ps', '-a', '--format', '{{.Names}}'], { encoding: 'utf8' });
+    const names = (inspect.stdout ?? '').split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+
+    if (names.includes(options.containerName)) {
+        const start = process.platform === 'win32'
+            ? spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/c', `docker start ${options.containerName}`], { stdio: 'inherit' })
+            : spawnSync('docker', ['start', options.containerName], { stdio: 'inherit' });
+        if (start.status !== 0) {
+            throw new Error(`Failed to start existing Docker container '${options.containerName}'.`);
+        }
+    } else {
+        const args = [
+            'run',
+            '-d',
+            '--name',
+            options.containerName,
+            '-e',
+            `POSTGRES_USER=postgres`,
+            '-e',
+            `POSTGRES_PASSWORD=${options.password}`,
+            '-e',
+            `POSTGRES_DB=${options.database}`,
+            '-p',
+            `${options.hostPort}:5432`,
+            'pgvector/pgvector:pg16',
+        ];
+        const result = process.platform === 'win32'
+            ? spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/c', ['docker', ...args].join(' ')], { stdio: 'inherit' })
+            : spawnSync('docker', args, { stdio: 'inherit' });
+        if (result.status !== 0) {
+            throw new Error(`Failed to start Docker PostgreSQL container '${options.containerName}'.`);
+        }
+    }
+
+    await waitForTcpPort('127.0.0.1', options.hostPort, 30000);
+}
+
 async function executeSetupPlan(plan: SetupExecutionPlan): Promise<SetupExecutionResult> {
     await ensureRuntimeInstalled(plan.root, plan.scope);
 
@@ -785,6 +957,17 @@ async function executeSetupPlan(plan: SetupExecutionPlan): Promise<SetupExecutio
         providerKeys: plan.providerKeys,
         apiKey: plan.apiKey,
     });
+
+    if (plan.bootstrapDatabase) {
+        try {
+            await runBundledScript('setup', [], {
+                DATABASE_URL: plan.databaseUrl,
+                IRANTI_ESCALATION_DIR: path.join(configured.instanceDir, 'escalation'),
+            });
+        } catch (error) {
+            throw formatSetupBootstrapFailure(error);
+        }
+    }
 
     const bindings: SetupProjectBinding[] = [];
     for (const project of plan.projects) {
@@ -885,6 +1068,7 @@ function parseSetupConfig(filePath: string): SetupExecutionPlan {
         projects,
         codex: Boolean(raw?.codex),
         codexAgent: raw?.codexAgent ? sanitizeIdentifier(String(raw.codexAgent), 'codex_code') : undefined,
+        bootstrapDatabase: Boolean(raw?.bootstrapDatabase),
     };
 }
 
@@ -945,6 +1129,7 @@ function defaultsSetupPlan(args: ParsedArgs): SetupExecutionPlan {
         projects,
         codex: hasFlag(args, 'codex'),
         codexAgent: sanitizeIdentifier(getFlag(args, 'codex-agent') ?? 'codex_code', 'codex_code'),
+        bootstrapDatabase: hasFlag(args, 'bootstrap-db'),
     };
 }
 
@@ -1243,26 +1428,64 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
             console.log(`${infoLabel()} Creating new instance '${instanceName}'.`);
         }
 
-        let port = 3001;
+        const existingPort = Number.parseInt(existingInstance?.env.IRANTI_PORT ?? '3001', 10);
+        const port = await chooseAvailablePort(prompt, 'Iranti API port', existingPort, Boolean(existingInstance));
+
+        const dockerAvailable = hasDockerInstalled();
+        let dbUrl = '';
+        let bootstrapDatabase = false;
         while (true) {
-            const raw = await promptNonEmpty(prompt, 'Port', existingInstance?.env.IRANTI_PORT ?? '3001');
-            const parsed = Number.parseInt(raw, 10);
-            if (Number.isFinite(parsed) && parsed > 0) {
-                port = parsed;
+            const defaultMode = dockerAvailable ? 'docker' : 'existing';
+            const dbMode = (await prompt.line(
+                'Database setup mode: existing, managed, or docker',
+                defaultMode
+            ) ?? defaultMode).trim().toLowerCase();
+
+            if (dbMode === 'existing' || dbMode === 'managed') {
+                while (true) {
+                    dbUrl = await promptNonEmpty(
+                        prompt,
+                        'DATABASE_URL',
+                        existingInstance?.env.DATABASE_URL ?? `postgresql://postgres:yourpassword@localhost:5432/iranti_${instanceName}`
+                    );
+                    if (!detectPlaceholder(dbUrl)) break;
+                    console.log(`${warnLabel()} DATABASE_URL still looks like a placeholder. Enter a real connection string before finishing setup.`);
+                }
+                bootstrapDatabase = await promptYesNo(prompt, 'Run migrations and seed the database now?', true);
                 break;
             }
-            console.log(`${warnLabel()} Port must be a positive integer.`);
-        }
 
-        let dbUrl = '';
-        while (true) {
-            dbUrl = await promptNonEmpty(
-                prompt,
-                'DATABASE_URL',
-                existingInstance?.env.DATABASE_URL ?? `postgresql://postgres:yourpassword@localhost:5432/iranti_${instanceName}`
-            );
-            if (!detectPlaceholder(dbUrl)) break;
-            console.log(`${warnLabel()} DATABASE_URL still looks like a placeholder. Enter a real connection string before finishing setup.`);
+            if (dbMode === 'docker') {
+                if (!dockerAvailable) {
+                    console.log(`${warnLabel()} Docker is not installed or not on PATH. Choose existing or managed instead.`);
+                    continue;
+                }
+                const dbHostPort = await chooseAvailablePort(prompt, 'Docker PostgreSQL host port', 5432, false);
+                const dbName = sanitizeIdentifier(await promptNonEmpty(prompt, 'Docker PostgreSQL database name', `iranti_${instanceName}`), `iranti_${instanceName}`);
+                const dbPassword = await promptRequiredSecret(prompt, 'Docker PostgreSQL password');
+                const containerName = sanitizeIdentifier(
+                    await promptNonEmpty(prompt, 'Docker container name', `iranti_${instanceName}_db`),
+                    `iranti_${instanceName}_db`
+                );
+                dbUrl = `postgresql://postgres:${dbPassword}@localhost:${dbHostPort}/${dbName}`;
+
+                console.log(`${infoLabel()} Docker will be used only for PostgreSQL. Iranti itself does not require Docker once a PostgreSQL database is available.`);
+                if (await promptYesNo(prompt, `Start or reuse Docker container '${containerName}' now?`, true)) {
+                    await runDockerPostgresContainer({
+                        containerName,
+                        hostPort: dbHostPort,
+                        password: dbPassword,
+                        database: dbName,
+                    });
+                    console.log(`${okLabel()} Docker PostgreSQL ready at localhost:${dbHostPort}`);
+                    bootstrapDatabase = true;
+                } else {
+                    bootstrapDatabase = await promptYesNo(prompt, 'Will you start PostgreSQL separately before first run?', false);
+                }
+                break;
+            }
+
+            console.log(`${warnLabel()} Choose one of: existing, managed, docker.`);
         }
 
         let provider = normalizeProvider(existingInstance?.env.LLM_PROVIDER ?? 'openai') ?? 'openai';
@@ -1364,6 +1587,7 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
             projects,
             codex,
             codexAgent: projects[0]?.agentId,
+            bootstrapDatabase,
         });
     });
 
@@ -2148,7 +2372,7 @@ function printHelp(): void {
 
 Machine-level:
   iranti install [--scope user|system] [--root <path>]
-  iranti setup [--scope user|system] [--root <path>] [--config <file> | --defaults]
+  iranti setup [--scope user|system] [--root <path>] [--config <file> | --defaults] [--db-url <url>] [--bootstrap-db]
 
 Instance-level:
   iranti instance create <name> [--port 3001] [--db-url <url>] [--api-key <token>] [--provider <name>] [--provider-key <token>] [--scope user|system]
