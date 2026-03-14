@@ -16,7 +16,7 @@ const STAFF_ENTRIES = [
         entityId: 'librarian',
         key: 'operating_rules',
         valueRaw: {
-            version: '0.1.4',
+            version: '0.2.0',
             rules: [
                 'All writes from external agents go through the Librarian — never directly to the database',
                 'Check for existing entries before every write',
@@ -40,7 +40,7 @@ const STAFF_ENTRIES = [
         entityId: 'attendant',
         key: 'operating_rules',
         valueRaw: {
-            version: '0.1.4',
+            version: '0.2.0',
             rules: [
                 'Assigned one-per-external-agent — serve the agent, not the user',
                 'On handshake: read AGENTS.md and MCP config, query Librarian for relevant rules and task context',
@@ -62,7 +62,7 @@ const STAFF_ENTRIES = [
         entityId: 'archivist',
         key: 'operating_rules',
         valueRaw: {
-            version: '0.1.4',
+            version: '0.2.0',
             rules: [
                 'Run on schedule or when conflict flags exceed threshold — not on every write',
                 'Scan for expired, low-confidence, flagged, and duplicate entries',
@@ -83,7 +83,7 @@ const STAFF_ENTRIES = [
         entityType: 'system',
         entityId: 'library',
         key: 'schema_version',
-        valueRaw: { version: '0.1.4' },
+        valueRaw: { version: '0.2.0' },
         valueSummary: 'Current Library schema version.',
         confidence: 100,
         source: 'seed',
@@ -96,7 +96,7 @@ const STAFF_ENTRIES = [
         key: 'initialization_log',
         valueRaw: {
             initializedAt: new Date().toISOString(),
-            seedVersion: '0.1.4',
+            seedVersion: '0.2.0',
         },
         valueSummary: 'Record of when and how this Library was initialized.',
         confidence: 100,
@@ -109,7 +109,7 @@ const STAFF_ENTRIES = [
         entityId: 'ontology',
         key: 'core_schema',
         valueRaw: {
-            version: '0.1.4',
+            version: '0.2.0',
             states: ['candidate', 'provisional', 'canonical'],
             coreEntityTypes: [
                 'person',
@@ -157,7 +157,7 @@ const STAFF_ENTRIES = [
         entityId: 'ontology',
         key: 'extension_registry',
         valueRaw: {
-            version: '0.1.4',
+            version: '0.2.0',
             namespaces: {
                 education: {
                     status: 'provisional',
@@ -188,7 +188,7 @@ const STAFF_ENTRIES = [
         entityId: 'ontology',
         key: 'candidate_terms',
         valueRaw: {
-            version: '0.1.4',
+            version: '0.2.0',
             terms: [],
         },
         valueSummary: 'Staging area for ontology terms detected repeatedly but not yet promoted.',
@@ -202,7 +202,7 @@ const STAFF_ENTRIES = [
         entityId: 'ontology',
         key: 'promotion_policy',
         valueRaw: {
-            version: '0.1.4',
+            version: '0.2.0',
             candidateToProvisional: {
                 minSeenCount: 3,
                 minDistinctAgents: 2,
@@ -238,7 +238,7 @@ const STAFF_ENTRIES = [
         entityId: 'ontology',
         key: 'change_log',
         valueRaw: {
-            version: '0.1.4',
+            version: '0.2.0',
             events: [
                 {
                     at: new Date().toISOString(),

@@ -2,6 +2,24 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.0 - Unreleased
+
+### Added
+
+- Temporal versioning with `asOf` query support and ordered fact history.
+- External TypeScript HTTP client package under `clients/typescript` for `@iranti/sdk`.
+- Conflict-resolution benchmark suite with documented `7/16 (44%)` baseline.
+- Consistency-model documentation and empirical validation suite with `4/4` baseline.
+- Ebbinghaus-style opt-in memory decay with Archivist maintenance coverage.
+- Hardened MCP tool descriptions and stdio smoke testing.
+- Refined single-entity ingest pipeline with per-fact extraction confidence and clearer provenance.
+- Expanded setup wizard flow for port checks, PostgreSQL mode selection, optional Docker bootstrap, and project scaffolding.
+
+### Changed
+
+- README and launch-facing docs now cite measured retrieval, conflict, and consistency results instead of generic claims.
+- TypeScript, Python, MCP, seed, and API version surfaces aligned to `0.2.0`.
+
 ## 0.1.4 - 2026-03-14
 
 ### Added
