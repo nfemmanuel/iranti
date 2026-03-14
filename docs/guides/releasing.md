@@ -2,6 +2,7 @@
 
 Iranti now has a release pipeline for:
 - the Node package on npm
+- the TypeScript client on npm
 - the Python client on PyPI
 
 This does **not** mean already-installed copies auto-update themselves. It means:
@@ -23,6 +24,7 @@ It runs on:
 Before a publish can happen, the workflow enforces version alignment across:
 
 - `package.json`
+- `clients/typescript/package.json`
 - `clients/python/pyproject.toml`
 - `clients/python/iranti.py`
 - the release tag, such as `v0.1.2`
@@ -34,12 +36,15 @@ If those do not match, publishing stops.
 1. Verifies all versions match.
 2. Builds the Node package.
 3. Runs contract tests.
-4. Packs the npm tarball and smoke-installs the CLI.
-5. Builds the Python package.
-6. Runs `twine check`.
-7. Smoke-installs the wheel.
-8. If the trigger is a real GitHub Release:
+4. Packs the root npm tarball and smoke-installs the CLI.
+5. Builds the TypeScript client package.
+6. Packs the TypeScript client tarball and smoke-installs it.
+7. Builds the Python package.
+8. Runs `twine check`.
+9. Smoke-installs the wheel.
+10. If the trigger is a real GitHub Release:
    - publishes Node to npm
+   - publishes `@iranti/sdk` to npm
    - publishes Python to PyPI
 
 ## One-Time Setup
@@ -51,6 +56,7 @@ Create a repository secret:
 - `NPM_TOKEN`
 
 This token must have permission to publish the `iranti` package on npm.
+It must also be allowed to publish the `@iranti/sdk` package.
 
 GitHub’s npm publishing guidance:
 - https://docs.github.com/actions/publishing-packages/publishing-nodejs-packages
@@ -80,6 +86,7 @@ npm run release:bump -- 0.1.5
 
 This updates:
 - `package.json`
+- `clients/typescript/package.json`
 - `package-lock.json`
 - `clients/python/pyproject.toml`
 - `clients/python/iranti.py`
@@ -90,9 +97,11 @@ This updates:
 iranti status
 iranti doctor
 npm run build
+npm --prefix clients/typescript run build
 npm run test:contracts
 npm run release:check -- v0.1.5
 npm pack
+npm pack ./clients/typescript
 python -m build clients/python --outdir clients/python/dist
 python -m twine check clients/python/dist/*
 ```
@@ -100,7 +109,7 @@ python -m twine check clients/python/dist/*
 3. Commit and push:
 
 ```bash
-git add package.json clients/python/pyproject.toml clients/python/iranti.py CHANGELOG.md
+git add package.json clients/typescript/package.json clients/python/pyproject.toml clients/python/iranti.py CHANGELOG.md
 git commit -m "Release v0.1.5"
 git push origin main
 ```

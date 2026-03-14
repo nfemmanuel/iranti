@@ -39,6 +39,20 @@ jobs:
           npm install ../iranti-*.tgz
           ./node_modules/.bin/iranti help
 
+      - name: Build TypeScript client
+        run: npm --prefix clients/typescript run build
+
+      - name: Pack TypeScript client
+        run: npm pack ./clients/typescript
+
+      - name: Smoke install TypeScript client tarball
+        run: |
+          mkdir smoke-ts-client
+          cd smoke-ts-client
+          npm init -y
+          npm install ../iranti-sdk-*.tgz
+          node -e "const { IrantiClient } = require('@iranti/sdk'); const client = new IrantiClient({ baseUrl: 'http://localhost:3001', apiKey: 'smoke-key' }); console.log(typeof client.query);"
+
   python_package:
     runs-on: ubuntu-latest
     steps:

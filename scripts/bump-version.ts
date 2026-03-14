@@ -40,6 +40,7 @@ function main(): void {
 
     const packageJsonPath = path.join(repoRoot, 'package.json');
     const packageLockPath = path.join(repoRoot, 'package-lock.json');
+    const tsClientPackagePath = path.join(repoRoot, 'clients', 'typescript', 'package.json');
     const pyProjectPath = path.join(repoRoot, 'clients', 'python', 'pyproject.toml');
     const pyClientPath = path.join(repoRoot, 'clients', 'python', 'iranti.py');
     const apiServerPath = path.join(repoRoot, 'src', 'api', 'server.ts');
@@ -54,6 +55,10 @@ function main(): void {
 
     packageJson.version = targetVersion;
     writeText(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
+
+    const tsClientPackage = JSON.parse(readText(tsClientPackagePath)) as { version: string };
+    tsClientPackage.version = targetVersion;
+    writeText(tsClientPackagePath, `${JSON.stringify(tsClientPackage, null, 2)}\n`);
 
     const packageLock = JSON.parse(readText(packageLockPath)) as {
         version?: string;

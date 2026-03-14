@@ -3,6 +3,7 @@ import path from 'path';
 
 type VersionSnapshot = {
     nodePackage: string;
+    typescriptClient: string;
     pythonProject: string;
     pythonClient: string;
 };
@@ -33,11 +34,13 @@ function extractTomlVersion(source: string): string {
 
 function loadVersions(rootDir: string): VersionSnapshot {
     const packageJson = readJson(path.join(rootDir, 'package.json'));
+    const tsClientPackageJson = readJson(path.join(rootDir, 'clients', 'typescript', 'package.json'));
     const pyproject = readText(path.join(rootDir, 'clients', 'python', 'pyproject.toml'));
     const pythonClient = readText(path.join(rootDir, 'clients', 'python', 'iranti.py'));
 
     return {
         nodePackage: String(packageJson.version),
+        typescriptClient: String(tsClientPackageJson.version),
         pythonProject: extractTomlVersion(pyproject),
         pythonClient: extractPythonClientVersion(pythonClient),
     };
@@ -55,6 +58,7 @@ function assertVersionsMatch(versions: VersionSnapshot): void {
     if (unique.size !== 1) {
         throw new Error(
             `Version mismatch detected: package.json=${versions.nodePackage}, `
+            + `clients/typescript/package.json=${versions.typescriptClient}, `
             + `clients/python/pyproject.toml=${versions.pythonProject}, `
             + `clients/python/iranti.py=${versions.pythonClient}`
         );
