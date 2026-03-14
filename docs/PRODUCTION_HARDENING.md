@@ -176,4 +176,7 @@ Iranti is now structurally sound for production. Consider:
 2. **Cost optimization** - Fine-tune LLM routing
 3. **Pre-launch checklist** - Security audit, load testing
 4. **Architecture stress-test** - Edge case validation
-5. **Go-to-market positioning** - Case studies, benchmarks
+5. **Go-to-market positioning** - Use the current measured evidence, not generic claims:
+   - retrieval validation: `16/16`
+   - conflict benchmark baseline: `7/16 (44%)`
+   - consistency validation baseline: `4/4`

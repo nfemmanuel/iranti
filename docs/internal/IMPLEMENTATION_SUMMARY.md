@@ -226,8 +226,10 @@ docker push nfemmanuel/iranti:latest
 ### Code Quality ⚠️ PARTIAL
 - ✅ Integration tests
 - ✅ Validation experiments
-- ⚠️ Need more unit tests
-- ⚠️ Need TypeScript type definitions
+- ✅ External TypeScript HTTP client published in-repo under `clients/typescript`
+- ✅ Conflict benchmark suite
+- ✅ Consistency-model validation suite
+- ⚠️ Need broader unit and load coverage
 
 ---
 
@@ -235,25 +237,23 @@ docker push nfemmanuel/iranti:latest
 
 ### Immediate (Can launch now)
 - Core functionality works
-- Documentation complete
-- Security infrastructure ready
-- Packaging ready
+- Documentation is materially stronger than before
+- Security infrastructure is in place
+- Packaging is wired for root npm package, `@iranti/sdk`, and Python client
+- Retrieval validation: `16/16` facts transferred
+- Conflict benchmark baseline: `7/16 (44%)`
+- Consistency validation baseline: `4/4`
 
-### Before Public Launch (4-6 hours)
-1. Integrate security middleware (30 min)
-2. Test security features (30 min)
-3. Run npm audit fix (15 min)
-4. Build Python package (30 min)
-5. Test PyPI package (30 min)
-6. Publish to PyPI (15 min)
-7. Build Docker image (30 min)
-8. Test Docker image (30 min)
-9. Publish to Docker Hub (15 min)
-10. Update README with install instructions (30 min)
+### Before Public Launch
+1. Publish the package surfaces you actually want public first
+2. Decide whether Docker Hub is still a real distribution priority
+3. Run a clean release dry-run from a fresh environment
+4. Validate CLI setup against a documented pgvector-capable local path
+5. Add a short case-study style walkthrough using the current benchmark numbers
 
 ### After Launch (Nice to have)
 - Add more unit tests
-- TypeScript type definitions
+- Load / soak testing under concurrent writes
 - Helm chart for Kubernetes
 - Monitoring dashboard
 - Admin UI
@@ -288,14 +288,11 @@ npm run api
 
 ## Next Steps
 
-1. **Review security middleware** - Check if implementation meets your needs
-2. **Integrate middleware** - Add to server.ts (30 min)
-3. **Test locally** - Verify rate limiting and validation work
-4. **Build packages** - Python and Docker
-5. **Test packages** - Install and verify
-6. **Publish** - PyPI and Docker Hub
-7. **Update README** - Add pip install and docker pull instructions
-8. **Launch** - Share with community!
+1. **Package publish pass** - npm root package, `@iranti/sdk`, and Python client
+2. **Launch copy** - reuse the measured results now in README
+3. **Operator experience** - keep reducing setup and runtime friction
+4. **Benchmark follow-up** - improve beyond `7/16 (44%)` on conflict handling
+5. **Stress testing** - push concurrency and long-running memory behavior harder
 
 ---
 
