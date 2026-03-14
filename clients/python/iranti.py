@@ -468,10 +468,18 @@ class IrantiClient:
         entity_type, entity_id = entity.split('/', 1)
         return self._get(f'/kb/related/{entity_type}/{entity_id}')
 
+    def related(self, entity: str) -> list[dict]:
+        """Alias for get_related()."""
+        return self.get_related(entity)
+
     def get_related_deep(self, entity: str, depth: int = 2) -> list[dict]:
         """Get related entities up to N hops deep."""
         entity_type, entity_id = entity.split('/', 1)
         return self._get(f'/kb/related/{entity_type}/{entity_id}/deep?depth={depth}')
+
+    def related_deep(self, entity: str, depth: int = 2) -> list[dict]:
+        """Alias for get_related_deep()."""
+        return self.get_related_deep(entity, depth=depth)
 
     # ── Working Memory ────────────────────────────────────────────────────────
 

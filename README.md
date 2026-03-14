@@ -108,9 +108,81 @@ Full validation report: [`docs/internal/validation_results.md`](docs/internal/va
 
 Full validation report: [`docs/internal/validation_results.md`](docs/internal/validation_results.md)
 
+## Gap Analysis
+
+Iranti targets a specific gap in the agent infrastructure stack: most competing systems give you semantic retrieval, framework-specific memory, or raw vector storage, but not the same combination of structured fact storage, cross-agent sharing, identity-based lookup, explicit confidence, and developer-visible conflict handling in one self-hostable package.
+
+The current competitive case for Iranti is strongest when a team needs memory that behaves more like shared infrastructure than a chat transcript: facts are attached to entities, retrieved deterministically by `entityType/entityId + key`, versioned over time, and made available across agents without framework lock-in.
+
+### Where Iranti Is Differentiated
+
+- Identity-first fact retrieval through `entityType/entityId + key`
+- Cross-agent fact sharing as a first-class model
+- Conflict-aware writes through the Librarian
+- Explicit per-fact confidence scores
+- Per-agent memory injection through the Attendant
+- Temporal exact lookup with `asOf` and ordered `history()`
+- Relationship primitives through `relate()`, `getRelated()`, and `getRelatedDeep()`
+- Hybrid retrieval when exact keys are unknown
+- Local install + project binding flow for Claude Code and Codex
+- Published npm / PyPI surfaces with machine-level CLI setup
+
+### Why That Gap Exists
+
+The current landscape splits into three buckets:
+
+1. **Memory libraries**
+   - Systems like Mem0, Zep, Letta, and framework-native memory layers solve parts of the problem.
+   - They usually optimize for semantic retrieval, agent-local memory, or framework integration.
+   - They rarely expose deterministic `entity + key` lookup, explicit confidence surfaces, and developer-controlled conflict handling together.
+
+2. **Vector databases**
+   - Pinecone, Weaviate, Qdrant, Chroma, Milvus, LanceDB, and `pgvector` solve storage and retrieval infrastructure.
+   - They do not, by themselves, solve memory semantics such as conflict resolution, context injection, fact lifecycle, or shared agent-facing state.
+
+3. **Multi-agent frameworks**
+   - CrewAI, LangGraph, AutoGen, CAMEL, MetaGPT, and similar frameworks often include some memory support.
+   - In practice, that memory is usually framework-coupled, shallow on conflict semantics, and difficult to reuse outside the framework that created it.
+
+### Main Gaps
+
+1. **Operational maturity**
+   - Local PostgreSQL setup is still a real source of friction.
+   - The product needs stronger diagnostics, connection recovery, and less dependence on users debugging local database state by hand.
+
+2. **Onboarding still has sharp edges**
+   - `iranti setup` is materially better than before, but first-run still assumes too much infrastructure literacy.
+   - Managed Postgres paths, cleaner bootstrap verification, and fewer environment-level surprises are still needed.
+
+3. **No operator UI yet**
+   - Iranti is still CLI-first.
+   - There is no control plane yet for provider keys, project bindings, integrations, memory inspection, and escalation review.
+
+4. **Adoption proof is still early**
+   - The repo has validation experiments and real local end-to-end usage, but broad production adoption is still limited.
+   - The next product truth has to come from external users and real workloads, not more speculative architecture alone.
+
+5. **Hosted product is not built**
+   - Open-source/local infrastructure is the active surface today.
+   - Hosted deployment, multi-tenant operations, billing, and cloud onboarding remain future work.
+
+6. **Graph-native reasoning is still limited**
+   - Iranti supports explicit entity relationships today.
+   - It does not yet compete with graph-first systems on temporal graph traversal or graph-native reasoning depth.
+
+7. **Memory extraction is not the main model**
+   - Iranti supports structured writes and ingest/chunking, but it is not primarily a "dump arbitrary conversations in and auto-magically derive perfect memory" system.
+   - That is a deliberate tradeoff in favor of explicit, inspectable facts, but it increases integration work.
+
+### Current Position
+
+Iranti is strongest today as infrastructure for developers building multi-agent systems who need shared, structured, queryable memory rather than pure semantic recall. The biggest leverage now is not adding more abstract claims. It is making setup, operations, and day-to-day inspection simple enough that real users will keep it in the loop.
+
 ## Quickstart
 
-**Requirements**: Node.js 18+, Docker, Python 3.8+
+**Requirements**: Node.js 18+, PostgreSQL, Python 3.8+
+
+Docker is optional. It is one local way to run PostgreSQL if you do not already have a database.
 
 ```bash
 # 1. Clone and configure
@@ -233,7 +305,11 @@ iranti install --scope user
 `iranti setup` is the recommended first-run path. It walks through:
 - shared vs isolated runtime setup
 - instance creation or update
-- database URL entry
+- API port selection with conflict detection and next-free suggestions
+- database onboarding:
+  - existing Postgres
+  - managed Postgres
+  - optional Docker-hosted Postgres for local development
 - provider API keys
 - Iranti client API key generation
 - one or more project bindings
@@ -242,7 +318,10 @@ iranti install --scope user
 For automation:
 - `iranti setup --defaults` uses sensible defaults plus environment/flag input, but still requires a real `DATABASE_URL`.
 - `iranti setup --config <file>` reads a JSON setup plan for repeatable bootstrap.
+- `--bootstrap-db` runs migrations and seeding during automated setup when the database is reachable.
 - Example config: [docs/guides/iranti.setup.example.json](docs/guides/iranti.setup.example.json)
+
+Default API port remains `3001`. The setup wizard now warns when that port is already in use and suggests the next free port instead of forcing users to debug the collision manually.
 
 Defaults:
 - Windows user scope: `%USERPROFILE%\\.iranti`
@@ -366,6 +445,51 @@ facts = client.query_all("researcher/jane_smith")
 for fact in facts:
     print(f"[{fact['key']}] {fact['summary']} (confidence: {fact['confidence']})")
 ```
+
+### Graph Traversal
+
+```python
+from clients.python.iranti import IrantiClient
+
+client = IrantiClient(base_url="http://localhost:3001", api_key="your_api_key_here")
+
+# Agent 1 writes facts and links them into a graph.
+client.write("researcher/jane_smith", "affiliation", {"lab": "CSAIL"}, "Jane Smith is affiliated with CSAIL", 90, "OpenAlex", "research_agent")
+client.write("project/quantum_bridge", "status", {"phase": "active"}, "Quantum Bridge is active", 88, "project_brief", "research_agent")
+
+client.relate("researcher/jane_smith", "MEMBER_OF", "lab/csail", created_by="research_agent")
+client.relate("lab/csail", "LEADS", "project/quantum_bridge", created_by="research_agent")
+
+# Agent 2 starts cold and traverses outward from Jane Smith.
+one_hop = client.related("researcher/jane_smith")
+labs = [f"{r['toType']}/{r['toId']}" for r in one_hop if r["relationshipType"] == "MEMBER_OF"]
+
+projects = []
+for lab in labs:
+    for rel in client.related(lab):
+        if rel["relationshipType"] == "LEADS":
+            project = f"{rel['toType']}/{rel['toId']}"
+            status = client.query(project, "status")
+            projects.append((project, status.value["phase"]))
+
+print(projects)
+# Agent 2 learned which project Jane Smith is connected to without being told the project directly.
+```
+
+### Relationship Types
+
+Relationship types are caller-defined strings. Common conventions:
+
+| Relationship Type | Meaning |
+|---|---|
+| `MEMBER_OF` | Entity belongs to a team, lab, org, or group |
+| `PART_OF` | Entity is a component or sub-unit of another entity |
+| `AUTHORED` | Person or agent created a document, paper, or artifact |
+| `LEADS` | Person, team, or org leads a project or effort |
+| `DEPENDS_ON` | Project, service, or task depends on another entity |
+| `REPORTS_TO` | Directed reporting relationship between people or agents |
+
+Use uppercase snake case for consistency. Iranti does not enforce a fixed ontology here; the calling application owns the relationship vocabulary.
 
 ### Hybrid Search
 
@@ -519,7 +643,7 @@ Iranti has four internal components:
 
 | Component | Role |
 |---|---|
-| **Library** | PostgreSQL knowledge base. Active truth in `knowledge_base` with full provenance in `archive`; archived rows are retained and marked `[ARCHIVED]` in active storage. |
+| **Library** | PostgreSQL knowledge base. Current truth lives in `knowledge_base`; closed and contested intervals live in `archive`. |
 | **Librarian** | Manages all writes. Detects conflicts, reasons about resolution, escalates when uncertain. |
 | **Attendant** | Per-agent working memory manager. Implements `attend()`, `observe()`, and `handshake()` APIs. |
 | **Archivist** | Periodic cleanup. Archives expired and low-confidence entries. Processes human-resolved conflicts. |
@@ -549,8 +673,8 @@ All endpoints require `X-Iranti-Key` header for authentication.
 Six PostgreSQL tables:
 
 ```
-knowledge_base          - active truth (archived rows retained with confidence=0)
-archive                 - full provenance history, never deleted
+knowledge_base          - current truth (one live row per entity/key)
+archive                 - temporal and provenance history for superseded, contradicted, escalated, and expired rows
 entity_relationships    - directional graph: MEMBER_OF, PART_OF, AUTHORED, etc.
 entities                - canonical entity identity registry
 entity_aliases          - normalized aliases mapped to canonical entities
@@ -559,7 +683,7 @@ write_receipts          - idempotency receipts for requestId replay safety
 
 New entity types, relationship types, and fact keys do not require migrations; they are caller-defined strings.
 
-**Archive semantics**: When an entry is archived, it remains in knowledge_base with confidence set to 0 and summary marked as `[ARCHIVED]`. A full copy is written to the archive table for traceability. Nothing is ever truly deleted.
+**Archive semantics**: When a current fact is superseded or contested, the current row is removed from `knowledge_base` and a closed historical interval is written to `archive`. Temporal queries use `validFrom` / `validUntil` plus archive metadata to answer point-in-time reads.
 
 ---
 

@@ -104,7 +104,7 @@ print(result.reason)   # 'New entry created.'
 - `confidence` (int): 0-100
 - `source` (str): Data source name
 - `agent` (str): Agent ID writing this fact
-- `valid_until` (str, optional): ISO datetime string for expiry
+- `valid_from` (str, optional): ISO datetime string for when the fact became true/current
 
 **Returns:** `WriteResult` with `action`, `key`, `reason`
 
@@ -155,7 +155,8 @@ else:
 - `summary` (str): One-sentence summary
 - `confidence` (int): 0-100
 - `source` (str): Data source
-- `valid_until` (str): Expiry datetime (if set)
+- `valid_from` (str): Start of the current or historical interval
+- `valid_until` (str | None): End of the interval (`None` for current rows)
 
 ### Query All Facts for an Entity
 
@@ -295,6 +296,8 @@ for r in related:
     print(f"{r['relationshipType']}: {r['toType']}/{r['toId']}")
 ```
 
+`client.related(...)` is an alias for `client.get_related(...)`.
+
 ### Get Related Entities (Deep Traversal)
 
 ```python
@@ -302,6 +305,8 @@ related = client.get_related_deep("researcher/jane_smith", depth=3)
 
 # Returns entities up to 3 hops away
 ```
+
+`client.related_deep(...)` is an alias for `client.get_related_deep(...)`.
 
 ---
 
