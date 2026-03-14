@@ -17,10 +17,13 @@ export interface EntryInput {
     source: string;
     validFrom?: Date;
     validUntil?: Date | null;
+    lastAccessedAt?: Date;
+    stability?: number;
     createdBy: string;
     isProtected?: boolean;
     conflictLog?: ConflictLogEntry[];
     requestId?: string;
+    properties?: Record<string, unknown>;
 }
 
 export interface ConflictLogEntry {

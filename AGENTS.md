@@ -89,6 +89,8 @@ A periodic cleanup agent. Does not run on every write. Runs on a schedule or
 when conflict flags exceed a threshold. Responsibilities:
 - Archives expired entries (validUntil has passed)
 - Archives low confidence entries (below threshold)
+- Applies opt-in Ebbinghaus-style confidence decay using `lastAccessedAt`
+  and `stability`, then archives facts that decay below threshold
 - Resolves pending escalation intervals by closing the contested archive row and reopening current truth in `knowledge_base`
 - Reads Escalation Folder for RESOLVED files, parses `AUTHORITATIVE_JSON`,
   writes to KB as authoritative (confidence = 100, source = HumanReview)
@@ -278,6 +280,12 @@ iranti/
 
 ## Database Schema — Quick Reference
 
+Decay extension note:
+- `knowledge_base` now also stores `lastAccessedAt` and `stability`
+- decay helpers live in `src/lib/decay.ts`
+- targeted decay tests live in `tests/decay/`
+- the internal design note is `docs/internal/decay.md`
+
 ### knowledge_base
 | Column | Type | Notes |
 |---|---|---|
@@ -291,6 +299,8 @@ iranti/
 | source | String | Data source |
 | validFrom | DateTime | When this row became the active truth interval |
 | validUntil | DateTime? | Expiry for time-sensitive facts |
+| lastAccessedAt | DateTime | Last time this fact was returned to an agent |
+| stability | Float | Decay resistance for the forgetting pass |
 | createdBy | String | Agent or system that wrote it |
 | isProtected | Boolean | True for Staff Namespace entries |
 | conflictLog | Json | History of contradictions |

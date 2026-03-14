@@ -4,7 +4,7 @@ import { librarianWrite, librarianIngest } from '../librarian';
 import type { WorkingMemoryBrief, AttendResult } from '../attendant';
 import { getAttendant, AttendantInstance } from '../attendant/registry';
 import { runArchivist } from '../archivist';
-import { findArchiveAsOf, findArchiveHistory, findEntriesByEntity, findEntry, searchEntriesHybrid } from '../library/queries';
+import { findArchiveAsOf, findArchiveHistory, findEntriesByEntity, findEntry, recordKnowledgeEntryAccess, searchEntriesHybrid } from '../library/queries';
 import { createRelationship, getRelated, getRelatedDeep, RelatedEntity } from '../library/relationships';
 import { registerAgent, getAgent, whoKnows, listAgents, assignToTeam, AgentProfile, AgentRecord } from '../library/agent-registry';
 import { resolveEntity } from '../library/entity-resolution';
@@ -351,6 +351,7 @@ export class Iranti {
             const currentMatches = current && !current.isProtected && current.validFrom <= options.asOf;
 
             if (currentMatches) {
+                await recordKnowledgeEntryAccess([current.id]);
                 return {
                     found: true,
                     value: current.valueRaw,
@@ -395,6 +396,7 @@ export class Iranti {
             return { found: false, resolvedEntity: resolved.canonicalEntity, inputEntity: entity };
         }
 
+        await recordKnowledgeEntryAccess([entry.id]);
         return {
             found: true,
             value: entry.valueRaw,
@@ -471,9 +473,10 @@ export class Iranti {
         const resolved = await resolveQueryEntity(entity);
 
         const entries = await findEntriesByEntity(resolved.entityType, resolved.entityId);
+        const visibleEntries = entries.filter((e) => !e.isProtected);
+        await recordKnowledgeEntryAccess(visibleEntries.map((entry) => entry.id));
 
-        return entries
-            .filter((e) => !e.isProtected)
+        return visibleEntries
             .map((e) => ({
             key: e.key,
             value: e.valueRaw,

@@ -16,6 +16,8 @@ import {
     ResolutionState,
 } from '../generated/prisma/client';
 import { buildEmbeddingText, generateEmbedding, toPgVectorLiteral } from './embeddings';
+import { getScore, getReliabilityScores } from '../librarian/source-reliability';
+import { getDecayConfig, initialStabilityFromReliability, readOriginalConfidence } from '../lib/decay';
 
 type DbClient = PrismaClient | Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
 
@@ -458,6 +460,12 @@ export async function searchEntriesHybrid(input: HybridSearchInput, db?: DbClien
 // Write
 export async function createEntry(input: EntryInput, db?: DbClient): Promise<KnowledgeEntry> {
     const client = db ?? getDb();
+    const reliabilityScores = await getReliabilityScores().catch(() => ({}));
+    const originalConfidence = readOriginalConfidence(input.properties, input.confidence);
+    const mergedProperties = {
+        ...(input.properties ?? {}),
+        originalConfidence,
+    };
     const entry = await client.knowledgeEntry.create({
         data: {
             entityType: input.entityType,
@@ -469,9 +477,15 @@ export async function createEntry(input: EntryInput, db?: DbClient): Promise<Kno
             source: input.source,
             validFrom: input.validFrom ?? new Date(),
             validUntil: input.validUntil ?? null,
+            lastAccessedAt: input.lastAccessedAt ?? new Date(),
+            stability: input.stability ?? initialStabilityFromReliability(
+                getScore(reliabilityScores, input.source),
+                getDecayConfig()
+            ),
             createdBy: input.createdBy,
             isProtected: input.isProtected ?? false,
             conflictLog: (input.conflictLog ?? []) as unknown as Prisma.InputJsonValue,
+            properties: mergedProperties as Prisma.InputJsonValue,
         },
     });
 
@@ -489,7 +503,7 @@ export async function updateEntry(
     updates: Partial<EntryInput>,
     db?: DbClient
 ): Promise<KnowledgeEntry> {
-    const { valueRaw, conflictLog, ...rest } = updates;
+    const { valueRaw, conflictLog, properties, ...rest } = updates;
     const client = db ?? getDb();
 
     const entry = await client.knowledgeEntry.update({
@@ -507,6 +521,9 @@ export async function updateEntry(
             }),
             ...(conflictLog !== undefined && {
                 conflictLog: conflictLog as unknown as Prisma.InputJsonValue,
+            }),
+            ...(properties !== undefined && {
+                properties: properties as Prisma.InputJsonValue,
             }),
             updatedAt: new Date(),
         },
@@ -588,6 +605,31 @@ export async function updateArchiveEntry(
         where: { id },
         data: updates,
     });
+}
+
+export async function recordKnowledgeEntryAccess(
+    entryIds: number[],
+    db?: DbClient
+): Promise<void> {
+    const ids = Array.from(new Set(entryIds.filter((id) => Number.isInteger(id) && id > 0)));
+    if (ids.length === 0) {
+        return;
+    }
+
+    const client = db ?? getDb();
+    const decayConfig = getDecayConfig();
+    const now = new Date();
+
+    await client.$executeRaw(Prisma.sql`
+        UPDATE "knowledge_base"
+        SET
+            "lastAccessedAt" = ${now},
+            "stability" = LEAST(
+                COALESCE("stability", ${decayConfig.stabilityBase}) + ${decayConfig.stabilityIncrement},
+                ${decayConfig.stabilityMax}
+            )
+        WHERE "id" IN (${Prisma.join(ids)})
+    `);
 }
 
 // Guards

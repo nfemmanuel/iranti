@@ -5,6 +5,7 @@ import { archiveEntry, createEntry, findPendingEscalation } from '../library/que
 import { complete } from '../lib/llm';
 import { ensureEscalationFolders } from '../lib/escalationPaths';
 import { ArchivedReason, ResolutionOutcome, ResolutionState } from '../generated/prisma/client';
+import { calculateDecayedConfidence, getDecayConfig, readOriginalConfidence } from '../lib/decay';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -80,6 +81,7 @@ export async function runArchivist(): Promise<ArchivistReport> {
     await ensureEscalationFolders();
     await archiveExpired(report);
     await archiveLowConfidence(report);
+    await applyMemoryDecay(report);
     await processEscalations(report);
 
     return report;
@@ -122,6 +124,52 @@ async function archiveLowConfidence(report: ArchivistReport): Promise<void> {
             report.lowConfidenceArchived++;
         } catch (err) {
             report.errors.push(`Failed to archive low confidence entry ${entry.id}: ${err}`);
+        }
+    }
+}
+
+async function applyMemoryDecay(report: ArchivistReport): Promise<void> {
+    const decayConfig = getDecayConfig();
+    if (!decayConfig.enabled) {
+        return;
+    }
+
+    const now = new Date();
+    const candidates = await getDb().knowledgeEntry.findMany({
+        where: {
+            isProtected: false,
+            confidence: { gt: 0 },
+        },
+    });
+
+    for (const entry of candidates) {
+        if (entry.valueSummary === '[ARCHIVED]') {
+            continue;
+        }
+
+        const lastAccessedAt = entry.lastAccessedAt ?? entry.updatedAt ?? entry.createdAt;
+        const timeSinceAccessDays = Math.max(0, (now.getTime() - lastAccessedAt.getTime()) / 86_400_000);
+        const newConfidence = calculateDecayedConfidence(
+            readOriginalConfidence(entry.properties, entry.confidence),
+            timeSinceAccessDays,
+            entry.stability
+        );
+
+        try {
+            if (newConfidence < decayConfig.threshold) {
+                await archiveEntry(entry, ArchivedReason.expired);
+                report.lowConfidenceArchived++;
+                continue;
+            }
+
+            if (newConfidence !== entry.confidence) {
+                await getDb().knowledgeEntry.update({
+                    where: { id: entry.id },
+                    data: { confidence: newConfidence },
+                });
+            }
+        } catch (err) {
+            report.errors.push(`Failed to apply decay to entry ${entry.id}: ${err}`);
         }
     }
 }

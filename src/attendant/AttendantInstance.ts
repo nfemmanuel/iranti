@@ -1,5 +1,5 @@
 import { route } from '../lib/router';
-import { queryEntry, findEntriesByEntity } from '../library/queries';
+import { queryEntry, findEntriesByEntity, recordKnowledgeEntryAccess } from '../library/queries';
 import { getRelatedDeep } from '../library/relationships';
 import { parseEntityString, resolveEntity } from '../library/entity-resolution';
 import { getDb } from '../library/client';
@@ -76,6 +76,8 @@ export interface FactInjection {
     confidence: number;
     source: string;
 }
+
+type RetrievedFact = FactInjection & { entryId: number };
 
 export interface ObserveResult {
     facts: FactInjection[];           // inject these into context
@@ -628,7 +630,7 @@ ${detectionWindow}`,
         const policy = await getConflictPolicy();
         const maxEntities = policy.maxEntitiesPerObserve ?? 5;
         const maxKeysPerEntity = policy.maxKeysPerEntity ?? 5;
-        const allFacts: FactInjection[] = [];
+        const allFacts: RetrievedFact[] = [];
         const entitiesResolved: ObserveResult['entitiesResolved'] = [];
         const entitiesDetected = new Set<string>();
         const resolvedEntities = new Map<string, {
@@ -734,6 +736,7 @@ ${detectionWindow}`,
                     value: entry.valueRaw,
                     confidence: entry.confidence,
                     source: entry.source,
+                    entryId: entry.id,
                 });
             }
         }
@@ -741,7 +744,7 @@ ${detectionWindow}`,
         // Step 3 — filter out facts already present in context
         const contextLower = currentContext.toLowerCase();
         let alreadyPresent = 0;
-        const newFacts: FactInjection[] = [];
+        const newFacts: RetrievedFact[] = [];
 
         for (const fact of allFacts) {
             // Check if summary key words appear in context
@@ -761,9 +764,17 @@ ${detectionWindow}`,
             .sort((a, b) => b.confidence - a.confidence)
             .slice(0, maxFacts);
 
+        await recordKnowledgeEntryAccess(topFacts.map((fact) => fact.entryId));
+
         timeEnd('attendant.observe_ms', t0);
         return {
-            facts: topFacts,
+            facts: topFacts.map(({ entityKey, summary, value, confidence, source }) => ({
+                entityKey,
+                summary,
+                value,
+                confidence,
+                source,
+            })),
             entitiesDetected: Array.from(entitiesDetected),
             alreadyPresent,
             totalFound: allFacts.length,
@@ -922,6 +933,7 @@ Be specific and concrete.`,
         if (allEntries.length === 0) return [];
 
         const entryInputs = allEntries.map((e) => ({
+            id: e.id,
             key: `${e.entityType}/${e.entityId}/${e.key}`,
             valueSummary: e.valueSummary,
             confidence: e.confidence,
@@ -952,11 +964,14 @@ If nothing is relevant, return: none`,
             .map((s) => parseInt(s.trim()) - 1)
             .filter((i) => i >= 0 && i < entryInputs.length);
 
-        return indices.map((i) => ({
-            entityKey: entryInputs[i].key,
-            summary: entryInputs[i].valueSummary,
-            confidence: entryInputs[i].confidence,
-            source: entryInputs[i].source,
+        const selectedEntries = indices.map((i) => entryInputs[i]);
+        await recordKnowledgeEntryAccess(selectedEntries.map((entry) => entry.id));
+
+        return selectedEntries.map((entry) => ({
+            entityKey: entry.key,
+            summary: entry.valueSummary,
+            confidence: entry.confidence,
+            source: entry.source,
             lastUpdated: new Date().toISOString(),
         }));
     }
