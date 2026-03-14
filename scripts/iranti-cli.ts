@@ -3,6 +3,7 @@ import fs from 'fs';
 import fsp from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import { spawn } from 'child_process';
 import readline from 'readline/promises';
 import { Writable } from 'stream';
 import { initDb } from '../src/library/client';
@@ -151,6 +152,58 @@ function getPackageVersion(): string {
         dir = parent;
     }
     return '0.0.0';
+}
+
+function builtScriptPath(scriptName: string): string {
+    return path.resolve(__dirname, `${scriptName}.js`);
+}
+
+async function handoffToScript(scriptName: string, rawArgs: string[]): Promise<void> {
+    const builtPath = builtScriptPath(scriptName);
+    if (fs.existsSync(builtPath)) {
+        await new Promise<void>((resolve, reject) => {
+            const child = spawn(process.execPath, [builtPath, ...rawArgs], {
+                stdio: 'inherit',
+                env: process.env,
+            });
+            child.on('error', reject);
+            child.on('exit', (code, signal) => {
+                if (signal) {
+                    reject(new Error(`${scriptName} terminated with signal ${signal}`));
+                    return;
+                }
+                if ((code ?? 0) !== 0) {
+                    process.exit(code ?? 1);
+                }
+                resolve();
+            });
+        });
+        return;
+    }
+
+    const sourcePath = path.resolve(process.cwd(), 'scripts', `${scriptName}.ts`);
+    if (!fs.existsSync(sourcePath)) {
+        throw new Error(`Unable to locate ${scriptName} implementation.`);
+    }
+
+    await new Promise<void>((resolve, reject) => {
+        const child = spawn('npx', ['ts-node', sourcePath, ...rawArgs], {
+            stdio: 'inherit',
+            env: process.env,
+            shell: process.platform === 'win32',
+        });
+        child.on('error', reject);
+        child.on('exit', (code, signal) => {
+            if (signal) {
+                reject(new Error(`${scriptName} terminated with signal ${signal}`));
+                return;
+            }
+            if ((code ?? 0) !== 0) {
+                process.exit(code ?? 1);
+            }
+            resolve();
+        });
+    });
 }
 
 async function ensureDir(dir: string): Promise<void> {
@@ -1202,6 +1255,10 @@ Diagnostics:
   iranti doctor [--instance <name>] [--scope user|system] [--env <file>] [--json]
   iranti status [--scope user|system] [--json]
   iranti upgrade [--json]
+
+Integrations:
+  iranti mcp [--help]
+  iranti claude-hook --event SessionStart|UserPromptSubmit [--project-env <path>] [--instance-env <path>] [--env-file <path>]
 `);
 }
 
@@ -1283,6 +1340,16 @@ async function main(): Promise<void> {
 
     if (args.command === 'upgrade') {
         await upgradeCommand(args);
+        return;
+    }
+
+    if (args.command === 'mcp') {
+        await handoffToScript('iranti-mcp', process.argv.slice(3));
+        return;
+    }
+
+    if (args.command === 'claude-hook') {
+        await handoffToScript('claude-code-memory-hook', process.argv.slice(3));
         return;
     }
 

@@ -1,34 +1,13 @@
-import fs from 'node:fs';
 import path from 'node:path';
-import dotenv from 'dotenv';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import * as z from 'zod/v4';
 import { Iranti } from '../src/sdk';
+import { loadRuntimeEnv } from '../src/lib/runtimeEnv';
 
 type JsonRecord = Record<string, unknown>;
 
-function loadEnv(): void {
-    const explicitPath = process.env.IRANTI_ENV_FILE?.trim();
-    const candidates = explicitPath
-        ? [explicitPath]
-        : [
-            path.resolve(process.cwd(), '.env'),
-            path.resolve(__dirname, '..', '.env'),
-            path.resolve(__dirname, '..', '..', '.env'),
-        ];
-
-    for (const candidate of candidates) {
-        if (candidate && fs.existsSync(candidate)) {
-            dotenv.config({ path: candidate });
-            return;
-        }
-    }
-
-    dotenv.config();
-}
-
-loadEnv();
+loadRuntimeEnv();
 
 function printHelp(): void {
     console.log([
@@ -41,6 +20,8 @@ function printHelp(): void {
         'Environment:',
         '  DATABASE_URL                  PostgreSQL connection string (required)',
         '  LLM_PROVIDER                  Optional Iranti provider override',
+        '  IRANTI_PROJECT_ENV            Optional project binding path (.env.iranti)',
+        '  IRANTI_INSTANCE_ENV           Optional instance env path',
         '  IRANTI_MCP_DEFAULT_AGENT      Default agent id (default: claude_code)',
         '  IRANTI_MCP_AGENT_NAME         Default agent display name',
         '  IRANTI_MCP_AGENT_DESCRIPTION  Default agent description',
@@ -60,7 +41,9 @@ function requireConnectionString(): string {
 }
 
 function defaultAgentId(): string {
-    return process.env.IRANTI_MCP_DEFAULT_AGENT?.trim() || 'claude_code';
+    return process.env.IRANTI_MCP_DEFAULT_AGENT?.trim()
+        || process.env.IRANTI_AGENT_ID?.trim()
+        || 'claude_code';
 }
 
 function defaultWriteSource(): string {
@@ -142,7 +125,7 @@ async function main(): Promise<void> {
 
     const server = new McpServer({
         name: 'iranti-mcp',
-        version: '0.1.1',
+        version: '0.1.2',
     });
 
     server.registerTool('iranti_handshake', {

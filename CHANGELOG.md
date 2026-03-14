@@ -2,7 +2,31 @@
 
 All notable changes to this project are documented in this file.
 
-## 0.1.1 - Unreleased
+## 0.1.2 - Unreleased
+
+### Added
+
+- Pending release notes.
+
+## 0.1.2 - 2026-03-14
+
+### Added
+
+- Installed-package integration commands:
+  - `iranti mcp`
+  - `iranti claude-hook`
+
+### Changed
+
+- Claude Code MCP and hook commands now auto-resolve runtime configuration from project `.env.iranti` plus the linked instance env.
+- Claude-facing defaults now honor project binding values such as `IRANTI_AGENT_ID` and `IRANTI_MEMORY_ENTITY`.
+
+### Fixed
+
+- Installed-package Claude Code setup no longer requires direct JS file paths for MCP or hook commands.
+- Installed-package Claude Code hooks no longer require hardcoded `DATABASE_URL` when the project binding is present.
+
+## 0.1.1 - 2026-03-14
 
 ### Added
 

@@ -178,11 +178,10 @@ Release guide: [`docs/guides/releasing.md`](docs/guides/releasing.md)
 Iranti ships a local stdio MCP server for Claude Code and other MCP clients:
 
 ```bash
-npm run build
-node dist/scripts/iranti-mcp.js
+iranti mcp
 ```
 
-Use it with a project-local `.mcp.json`, and optionally add the Claude Code hook helper for `SessionStart` and `UserPromptSubmit`.
+Use it with a project-local `.mcp.json`, and optionally add `iranti claude-hook` for `SessionStart` and `UserPromptSubmit`.
 
 Guide: [`docs/guides/claude-code.md`](docs/guides/claude-code.md)
 

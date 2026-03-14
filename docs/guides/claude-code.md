@@ -1,58 +1,59 @@
 # Claude Code Guide
 
-Use Iranti with Claude Code through two layers:
-- a local **MCP server** for explicit memory tools
-- optional **hooks** for automatic working-memory injection
+Use Iranti with Claude Code through:
+- `iranti mcp` for explicit memory tools
+- `iranti claude-hook` for automatic working-memory injection
 
-This is the right integration shape because Claude Code supports both MCP and hook-based context injection.
+This guide is written for the installed-package path, not for running Iranti out of a source checkout.
 
 ## Prerequisites
 
-- Node.js 18+
-- A working Iranti database (`DATABASE_URL`)
-- `npm install`
-- `npm run build`
+- `npm install -g iranti`
+- a running Iranti instance, for example `iranti run --instance local`
+- a project binding created with `iranti project init`
 
-## 1. Start the Iranti MCP Server
-
-Run the stdio MCP server:
+Example project binding:
 
 ```bash
-node dist/scripts/iranti-mcp.js
+cd /path/to/your/project
+iranti project init . --instance local --agent-id claude_code_main
 ```
 
-Useful environment variables:
+That writes `.env.iranti` with:
+- `IRANTI_URL`
+- `IRANTI_API_KEY`
+- `IRANTI_AGENT_ID`
+- `IRANTI_INSTANCE_ENV`
 
-```env
-DATABASE_URL=postgresql://postgres:yourpassword@localhost:5432/iranti
-LLM_PROVIDER=gemini
-IRANTI_MCP_DEFAULT_AGENT=claude_code
-IRANTI_MCP_DEFAULT_SOURCE=ClaudeCode
+`iranti mcp` and `iranti claude-hook` automatically load `.env.iranti` from the current project directory and then load the linked instance env to recover:
+- `DATABASE_URL`
+- `LLM_PROVIDER`
+- upstream provider API keys
+
+## 1. Start the Iranti API instance
+
+In one terminal:
+
+```bash
+iranti run --instance local
 ```
 
-## 2. Project-Scoped Claude Code MCP Config
+## 2. Add project-local MCP config
 
-Create a project-local `.mcp.json` next to your codebase.
-
-Example:
+Create `.mcp.json` in the project root:
 
 ```json
 {
   "mcpServers": {
     "iranti": {
-      "command": "node",
-      "args": ["dist/scripts/iranti-mcp.js"],
-      "env": {
-        "DATABASE_URL": "postgresql://postgres:yourpassword@localhost:5432/iranti",
-        "LLM_PROVIDER": "gemini",
-        "IRANTI_MCP_DEFAULT_AGENT": "claude_code_project"
-      }
+      "command": "iranti",
+      "args": ["mcp"]
     }
   }
 }
 ```
 
-This gives Claude Code explicit tools:
+This exposes these tools to Claude Code:
 - `iranti_handshake`
 - `iranti_attend`
 - `iranti_observe`
@@ -63,40 +64,45 @@ This gives Claude Code explicit tools:
 - `iranti_relate`
 - `iranti_who_knows`
 
-## 3. Optional Hook Helper
+## 3. Add Claude Code hooks
 
-The hook helper is for automatic memory reads, not automatic storage.
-
-Supported events:
-- `SessionStart`
-- `UserPromptSubmit`
-
-The helper reads Claude Code hook JSON from stdin and returns `hookSpecificOutput.additionalContext`.
-
-### POSIX-style example
-
-Add a project-local `.claude/settings.local.json`:
+Create `.claude/settings.local.json` in the same project:
 
 ```json
 {
   "hooks": {
     "SessionStart": [
       {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "DATABASE_URL='postgresql://postgres:yourpassword@localhost:5432/iranti' node dist/scripts/claude-code-memory-hook.js --event SessionStart"
-          }
-        ]
+        "command": "iranti",
+        "args": ["claude-hook", "--event", "SessionStart"]
       }
     ],
     "UserPromptSubmit": [
       {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "DATABASE_URL='postgresql://postgres:yourpassword@localhost:5432/iranti' node dist/scripts/claude-code-memory-hook.js --event UserPromptSubmit"
-          }
+        "command": "iranti",
+        "args": ["claude-hook", "--event", "UserPromptSubmit"]
+      }
+    ]
+  }
+}
+```
+
+The hook uses `.env.iranti` in the current project automatically. You do not need to hardcode `DATABASE_URL` into the hook command.
+
+Optional explicit overrides:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "command": "iranti",
+        "args": [
+          "claude-hook",
+          "--event",
+          "SessionStart",
+          "--project-env",
+          "C:/path/to/project/.env.iranti"
         ]
       }
     ]
@@ -104,36 +110,7 @@ Add a project-local `.claude/settings.local.json`:
 }
 ```
 
-### Windows PowerShell-style example
-
-```json
-{
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$env:DATABASE_URL='postgresql://postgres:yourpassword@localhost:5432/iranti'; node dist/scripts/claude-code-memory-hook.js --event SessionStart"
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$env:DATABASE_URL='postgresql://postgres:yourpassword@localhost:5432/iranti'; node dist/scripts/claude-code-memory-hook.js --event UserPromptSubmit"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-## 4. Recommended Usage Policy
+## 4. Recommended usage policy
 
 Use the integration like this:
 
@@ -143,11 +120,9 @@ Use the integration like this:
 - `iranti_write` only for durable facts
 - `iranti_ingest` for larger stable text blocks worth chunking
 
-Do **not** auto-save every Claude turn. That will pollute the Library and reduce retrieval quality over time.
+Do not auto-save every Claude turn. That will pollute the Library and reduce retrieval quality over time.
 
-## 5. Suggested Claude Behavior
-
-If you want Claude Code to use Iranti consistently, give it a short standing instruction such as:
+## 5. Suggested Claude standing instruction
 
 ```text
 Use Iranti for durable memory. Prefer iranti_query for exact lookup, iranti_search for discovery, and iranti_write only for stable facts such as preferences, decisions, constraints, task state, and repository knowledge.
@@ -155,15 +130,59 @@ Use Iranti for durable memory. Prefer iranti_query for exact lookup, iranti_sear
 
 ## 6. Verification
 
-After building, verify both scripts exist:
+From the project root:
 
 ```bash
-node dist/scripts/iranti-mcp.js --help
-node dist/scripts/claude-code-memory-hook.js --help
+iranti mcp --help
+iranti claude-hook --help
+iranti doctor
 ```
+
+Inside Claude Code, verify:
+
+1. Ask: `What MCP tools are available?`
+2. Ask: `Use Iranti to search for initialization log`
+3. Ask: `Tell me whether memory context was injected at session start`
+
+Important:
+- Protected Staff Namespace entries such as `system/library/schema_version` are intentionally hidden from regular agent queries.
+- If you want to test retrieval, use a non-protected project/user/entity fact instead.
+
+## 7. Troubleshooting
+
+If Claude Code does not surface Iranti tools:
+
+1. Confirm the CLI subcommands exist:
+
+```bash
+iranti mcp --help
+iranti claude-hook --help
+```
+
+2. Confirm the project binding exists:
+
+```bash
+type .env.iranti
+```
+
+3. Confirm the linked instance is healthy:
+
+```bash
+iranti doctor --instance local
+```
+
+4. Confirm the hook can resolve env automatically:
+
+```bash
+echo {} | iranti claude-hook --event SessionStart
+```
+
+If the hook says `DATABASE_URL is required`, the current project is missing `.env.iranti` or `IRANTI_INSTANCE_ENV`.
 
 ## Related
 
+- `scripts/iranti-cli.ts`
 - `scripts/iranti-mcp.ts`
 - `scripts/claude-code-memory-hook.ts`
+- `src/lib/runtimeEnv.ts`
 - `docs/features/claude-code-mcp/spec.md`

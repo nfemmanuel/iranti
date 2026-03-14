@@ -186,6 +186,7 @@ iranti/
 │   ├── lib/
 │   │   ├── llm.ts              — LLMProvider interface, completeWithFallback(), fallback chain
 │   │   ├── router.ts           — route() by TaskType, model profiles
+│   │   ├── runtimeEnv.ts       — Runtime env resolution for CLI/MCP/hook integrations
 │   │   ├── escalationPaths.ts  — Escalation runtime path resolution + folder bootstrap
 │   │   └── providers/
 │   │       ├── mock.ts         — Local dev provider
@@ -217,7 +218,7 @@ iranti/
 │   ├── api-key-revoke.ts       — Revokes API key tokens
 │   ├── bump-version.ts         — Bumps coordinated Node/Python/runtime version surfaces for releases
 │   ├── check-release-version.ts — Verifies Node/Python/package tag version alignment before publish
-│   ├── iranti-cli.ts           — Machine install, configure/auth/status/diagnostics/upgrade, instance + project binding CLI
+│   ├── iranti-cli.ts           — Machine install, configure/auth/status/diagnostics/upgrade, instance/project binding, MCP and Claude hook CLI
 │   ├── iranti-mcp.ts           — Stdio MCP server for Claude Code, Codex, and other MCP clients
 │   ├── codex-setup.ts          — Registers Iranti MCP with Codex global config
 │   ├── claude-code-memory-hook.ts — Claude Code hook helper for SessionStart/UserPromptSubmit
