@@ -1,9 +1,10 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { getDb } from '../library/client';
-import { archiveEntry } from '../library/queries';
+import { archiveEntry, createEntry, findPendingEscalation } from '../library/queries';
 import { complete } from '../lib/llm';
 import { ensureEscalationFolders } from '../lib/escalationPaths';
+import { ArchivedReason, ResolutionOutcome, ResolutionState } from '../generated/prisma/client';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -25,7 +26,6 @@ type AuthoritativeResolution = {
     key: string;
     value: any;
     summary: string;
-    validUntil?: string | null;
     notes?: string;
 };
 
@@ -93,13 +93,12 @@ async function archiveExpired(report: ArchivistReport): Promise<void> {
             validUntil: { lt: new Date() },
             isProtected: false,
             confidence: { gt: 0 },
-            valueSummary: { not: '[ARCHIVED]' },
         },
     });
 
     for (const entry of expired) {
         try {
-            await archiveEntry(entry, 'expired');
+            await archiveEntry(entry, ArchivedReason.expired);
             report.expiredArchived++;
         } catch (err) {
             report.errors.push(`Failed to archive expired entry ${entry.id}: ${err}`);
@@ -114,13 +113,12 @@ async function archiveLowConfidence(report: ArchivistReport): Promise<void> {
         where: {
             confidence: { lt: LOW_CONFIDENCE_THRESHOLD },
             isProtected: false,
-            valueSummary: { not: '[ARCHIVED]' },
         },
     });
 
     for (const entry of lowConfidence) {
         try {
-            await archiveEntry(entry, 'superseded');
+            await archiveEntry(entry, ArchivedReason.expired);
             report.lowConfidenceArchived++;
         } catch (err) {
             report.errors.push(`Failed to archive low confidence entry ${entry.id}: ${err}`);
@@ -173,26 +171,70 @@ async function processEscalationFile(
         return;
     }
 
-    const { librarianWrite } = await import('../librarian/index');
-    const result = await librarianWrite({
+    const pending = await findPendingEscalation({
         entityType: auth.entityType,
         entityId: auth.entityId,
         key: auth.key,
-        valueRaw: auth.value,
-        valueSummary: auth.summary,
-        confidence: 100,
-        source: 'HumanReview',
-        createdBy: 'archivist',
-        validUntil: auth.validUntil ? new Date(auth.validUntil) : undefined,
-        conflictLog: [{
-            detectedAt: new Date().toISOString(),
-            incomingSource: 'HumanReview',
-            incomingConfidence: 100,
-            existingConfidence: 0,
-            resolution: 'human_resolved',
-            resolvedBy: 'archivist',
-            notes: `Applied from escalation file: ${filename}`,
-        }] as unknown as never,
+    });
+
+    if (!pending) {
+        throw new Error(`No pending escalated archive row found for ${auth.entityType}/${auth.entityId}/${auth.key}.`);
+    }
+
+    const resolutionTs = new Date();
+    const originalRetained =
+        JSON.stringify(pending.valueRaw) === JSON.stringify(auth.value) &&
+        pending.valueSummary === auth.summary;
+
+    await getDb().$transaction(async (tx) => {
+        await tx.archive.update({
+            where: { id: pending.id },
+            data: {
+                validUntil: resolutionTs,
+                resolutionState: ResolutionState.resolved,
+                resolutionOutcome: originalRetained
+                    ? ResolutionOutcome.original_retained
+                    : ResolutionOutcome.challenger_won,
+            },
+        });
+
+        if (originalRetained) {
+            await createEntry({
+                entityType: pending.entityType,
+                entityId: pending.entityId,
+                key: pending.key,
+                valueRaw: pending.valueRaw,
+                valueSummary: pending.valueSummary,
+                confidence: pending.confidence,
+                source: pending.source,
+                createdBy: pending.createdBy,
+                validFrom: resolutionTs,
+                validUntil: null,
+                conflictLog: (pending.conflictLog as unknown as never[]) ?? [],
+            }, tx);
+        } else {
+            await createEntry({
+                entityType: auth.entityType,
+                entityId: auth.entityId,
+                key: auth.key,
+                valueRaw: auth.value,
+                valueSummary: auth.summary,
+                confidence: 100,
+                source: 'HumanReview',
+                createdBy: 'archivist',
+                validFrom: resolutionTs,
+                validUntil: null,
+                conflictLog: [{
+                    detectedAt: new Date().toISOString(),
+                    incomingSource: 'HumanReview',
+                    incomingConfidence: 100,
+                    existingConfidence: pending.confidence,
+                    resolution: 'human_resolved',
+                    resolvedBy: 'archivist',
+                    notes: `Applied from escalation file: ${filename}`,
+                }] as unknown as never[],
+            }, tx);
+        }
     });
 
     // LLM enrichment (non-authoritative)

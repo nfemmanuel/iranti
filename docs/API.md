@@ -53,6 +53,7 @@ Response:
 - `POST /kb/alias`
 - `GET /kb/entity/:entityType/:entityId/aliases`
 - `GET /kb/query/:entityType/:entityId/:key`
+- `GET /kb/history/:entityType/:entityId/:key`
 - `GET /kb/query/:entityType/:entityId`
 - `GET /kb/search`
 - `POST /kb/relate`
@@ -95,10 +96,42 @@ Query response (`GET /kb/query/:entityType/:entityId/:key`):
   "summary": "Deadline is June 18, 2028",
   "confidence": 95,
   "source": "project_manager",
+  "validFrom": "2028-01-10T00:00:00.000Z",
   "validUntil": null,
+  "contested": false,
+  "fromArchive": false,
+  "archivedReason": null,
+  "resolutionState": null,
+  "resolutionOutcome": null,
   "resolvedEntity": "project/nexus_prime",
   "inputEntity": "project/nexus_prime"
 }
+```
+
+Temporal query variant:
+
+```
+GET /kb/query/:entityType/:entityId/:key?asOf=2028-03-01T00:00:00.000Z&includeContested=true&includeExpired=false
+```
+
+History response (`GET /kb/history/:entityType/:entityId/:key`):
+
+```json
+[
+  {
+    "value": {"date": "2028-06-18"},
+    "summary": "Deadline was initially June 18, 2028",
+    "confidence": 95,
+    "source": "project_manager",
+    "validFrom": "2028-01-10T00:00:00.000Z",
+    "validUntil": "2028-02-15T00:00:00.000Z",
+    "isCurrent": false,
+    "contested": false,
+    "archivedReason": "superseded",
+    "resolutionState": "not_applicable",
+    "resolutionOutcome": "not_applicable"
+  }
+]
 ```
 
 Hybrid search request (`GET /kb/search`):

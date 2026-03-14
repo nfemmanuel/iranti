@@ -78,11 +78,11 @@ function textResult(data: unknown): { content: Array<{ type: 'text'; text: strin
     };
 }
 
-function parseValidUntil(raw?: string): Date | undefined {
+function parseIsoDate(raw?: string): Date | undefined {
     if (!raw) return undefined;
     const parsed = new Date(raw);
     if (Number.isNaN(parsed.getTime())) {
-        throw new Error(`Invalid validUntil timestamp: "${raw}"`);
+        throw new Error(`Invalid ISO timestamp: "${raw}"`);
     }
     return parsed;
 }
@@ -228,11 +228,11 @@ async function main(): Promise<void> {
             summary: z.string().min(1).describe('Short retrieval-safe summary.'),
             confidence: z.number().int().min(0).max(100).optional().describe('Raw confidence score.'),
             source: z.string().optional().describe('Source label for provenance.'),
-            validUntil: z.string().optional().describe('Optional ISO timestamp for expiry.'),
+            validFrom: z.string().optional().describe('Optional ISO timestamp for when the fact became true/current.'),
             requestId: z.string().optional().describe('Optional idempotency key.'),
             agent: z.string().optional().describe('Override the default agent id.'),
         },
-    }, async ({ entity, key, valueJson, summary, confidence, source, validUntil, requestId, agent }) => {
+    }, async ({ entity, key, valueJson, summary, confidence, source, validFrom, requestId, agent }) => {
         const result = await iranti.write({
             entity,
             key,
@@ -241,7 +241,7 @@ async function main(): Promise<void> {
             confidence: confidence ?? 85,
             source: source?.trim() || defaultWriteSource(),
             agent: withDefaultAgent(agent),
-            validUntil: parseValidUntil(validUntil),
+            validFrom: parseIsoDate(validFrom),
             requestId,
         });
         return textResult(result);

@@ -6,7 +6,15 @@ import {
     HybridSearchResult,
     QueryResult,
 } from '../types';
-import { KnowledgeEntry, Prisma, PrismaClient } from '../generated/prisma/client';
+import {
+    Archive,
+    ArchivedReason,
+    KnowledgeEntry,
+    Prisma,
+    PrismaClient,
+    ResolutionOutcome,
+    ResolutionState,
+} from '../generated/prisma/client';
 import { buildEmbeddingText, generateEmbedding, toPgVectorLiteral } from './embeddings';
 
 type DbClient = PrismaClient | Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
@@ -24,6 +32,23 @@ type HybridSearchRow = {
     lexicalScore: number | string | null;
     vectorScore: number | string | null;
     score: number | string;
+};
+
+export type ArchiveHistoryEntry = Archive;
+
+type SupersededByPointer = {
+    entityType: string;
+    entityId: string;
+    key: string;
+};
+
+export type TemporalArchiveOptions = {
+    reason: ArchivedReason;
+    validFrom?: Date;
+    validUntil?: Date | null;
+    resolutionState?: ResolutionState;
+    resolutionOutcome?: ResolutionOutcome;
+    supersededBy?: SupersededByPointer;
 };
 
 const DEFAULT_SEARCH_LIMIT = 10;
@@ -97,6 +122,14 @@ async function saveEmbedding(entryId: number, text: string, db: DbClient): Promi
     }
 }
 
+function defaultResolutionState(reason: ArchivedReason): ResolutionState {
+    return reason === ArchivedReason.escalated ? ResolutionState.pending : ResolutionState.not_applicable;
+}
+
+function defaultResolutionOutcome(reason: ArchivedReason): ResolutionOutcome {
+    return reason === ArchivedReason.escalated ? ResolutionOutcome.not_applicable : ResolutionOutcome.not_applicable;
+}
+
 // Read
 export async function findEntry(query: EntryQuery, db?: DbClient): Promise<KnowledgeEntry | null> {
     const client = db ?? getDb();
@@ -125,6 +158,7 @@ export async function queryEntry(query: EntryQuery, db?: DbClient): Promise<Quer
             valueSummary: entry.valueSummary,
             confidence: entry.confidence,
             source: entry.source,
+            validFrom: entry.validFrom,
             validUntil: entry.validUntil,
         },
     };
@@ -138,6 +172,95 @@ export async function findEntriesByEntity(
     const client = db ?? getDb();
     return client.knowledgeEntry.findMany({
         where: { entityType, entityId },
+        orderBy: { key: 'asc' },
+    });
+}
+
+export async function findArchiveAsOf(
+    query: EntryQuery,
+    asOf: Date,
+    options?: { includeExpired?: boolean; includeContested?: boolean },
+    db?: DbClient
+): Promise<Archive | null> {
+    const client = db ?? getDb();
+    const reasons: ArchivedReason[] = [];
+
+    if (options?.includeContested !== false) {
+        reasons.push(
+            ArchivedReason.segment_closed,
+            ArchivedReason.superseded,
+            ArchivedReason.contradicted,
+            ArchivedReason.escalated
+        );
+    } else {
+        reasons.push(ArchivedReason.segment_closed, ArchivedReason.superseded);
+    }
+
+    if (options?.includeExpired) {
+        reasons.push(ArchivedReason.expired);
+    }
+
+    return client.archive.findFirst({
+        where: {
+            entityType: query.entityType,
+            entityId: query.entityId,
+            key: query.key,
+            validFrom: { lte: asOf },
+            OR: [
+                { validUntil: null },
+                { validUntil: { gt: asOf } },
+            ],
+            archivedReason: { in: reasons },
+        },
+        orderBy: [
+            { validFrom: 'desc' },
+            { archivedAt: 'desc' },
+        ],
+    });
+}
+
+export async function findArchiveHistory(
+    query: EntryQuery,
+    options?: { includeExpired?: boolean; includeContested?: boolean },
+    db?: DbClient
+): Promise<Archive[]> {
+    const client = db ?? getDb();
+    const reasons: ArchivedReason[] = options?.includeContested === false
+        ? [ArchivedReason.segment_closed, ArchivedReason.superseded]
+        : [ArchivedReason.segment_closed, ArchivedReason.superseded, ArchivedReason.contradicted, ArchivedReason.escalated];
+
+    if (options?.includeExpired) {
+        reasons.push(ArchivedReason.expired);
+    }
+
+    return client.archive.findMany({
+        where: {
+            entityType: query.entityType,
+            entityId: query.entityId,
+            key: query.key,
+            archivedReason: { in: reasons },
+        },
+        orderBy: [
+            { validFrom: 'asc' },
+            { archivedAt: 'asc' },
+        ],
+    });
+}
+
+export async function findPendingEscalation(
+    query: EntryQuery,
+    db?: DbClient
+): Promise<Archive | null> {
+    const client = db ?? getDb();
+    return client.archive.findFirst({
+        where: {
+            entityType: query.entityType,
+            entityId: query.entityId,
+            key: query.key,
+            archivedReason: ArchivedReason.escalated,
+            resolutionState: ResolutionState.pending,
+        },
+        orderBy: { archivedAt: 'desc' },
     });
 }
 
@@ -344,7 +467,8 @@ export async function createEntry(input: EntryInput, db?: DbClient): Promise<Kno
             valueSummary: input.valueSummary,
             confidence: input.confidence,
             source: input.source,
-            validUntil: input.validUntil,
+            validFrom: input.validFrom ?? new Date(),
+            validUntil: input.validUntil ?? null,
             createdBy: input.createdBy,
             isProtected: input.isProtected ?? false,
             conflictLog: (input.conflictLog ?? []) as unknown as Prisma.InputJsonValue,
@@ -397,49 +521,73 @@ export async function updateEntry(
     return entry;
 }
 
-// Archive
-type SupersededByPointer = {
-    entityType: string;
-    entityId: string;
-    key: string;
-};
+export async function deleteEntryById(entryId: number, db?: DbClient): Promise<void> {
+    const client = db ?? getDb();
+    await client.knowledgeEntry.delete({
+        where: { id: entryId },
+    });
+}
+
+export async function insertArchiveFromCurrent(
+    entry: KnowledgeEntry,
+    options: TemporalArchiveOptions,
+    db?: DbClient
+): Promise<Archive> {
+    const client = db ?? getDb();
+    return client.archive.create({
+        data: {
+            entityType: entry.entityType,
+            entityId: entry.entityId,
+            key: entry.key,
+            valueRaw: entry.valueRaw as Prisma.InputJsonValue,
+            valueSummary: entry.valueSummary,
+            confidence: entry.confidence,
+            source: entry.source,
+            validFrom: options.validFrom ?? entry.validFrom,
+            validUntil: options.validUntil ?? entry.validUntil,
+            createdBy: entry.createdBy,
+            createdAt: entry.createdAt,
+            conflictLog: entry.conflictLog as Prisma.InputJsonValue,
+            properties: entry.properties as Prisma.InputJsonValue,
+            archivedReason: options.reason,
+            resolutionState: options.resolutionState ?? defaultResolutionState(options.reason),
+            resolutionOutcome: options.resolutionOutcome ?? defaultResolutionOutcome(options.reason),
+            supersededByEntityType: options.supersededBy?.entityType ?? null,
+            supersededByEntityId: options.supersededBy?.entityId ?? null,
+            supersededByKey: options.supersededBy?.key ?? null,
+        },
+    });
+}
 
 export async function archiveEntry(
     entry: KnowledgeEntry,
-    reason: 'superseded' | 'contradicted' | 'expired' | 'duplicate',
+    reason: ArchivedReason,
     supersededBy?: SupersededByPointer,
     db?: DbClient
 ): Promise<void> {
+    await insertArchiveFromCurrent(entry, {
+        reason,
+        supersededBy,
+        validFrom: entry.validFrom,
+        validUntil: entry.validUntil ?? new Date(),
+    }, db);
+    await deleteEntryById(entry.id, db);
+}
+
+export async function updateArchiveEntry(
+    id: number,
+    updates: {
+        validUntil?: Date | null;
+        resolutionState?: ResolutionState;
+        resolutionOutcome?: ResolutionOutcome;
+    },
+    db?: DbClient
+): Promise<Archive> {
     const client = db ?? getDb();
-    await Promise.all([
-        client.archive.create({
-            data: {
-                entityType: entry.entityType,
-                entityId: entry.entityId,
-                key: entry.key,
-                valueRaw: entry.valueRaw as Prisma.InputJsonValue,
-                valueSummary: entry.valueSummary,
-                confidence: entry.confidence,
-                source: entry.source,
-                validUntil: entry.validUntil,
-                createdBy: entry.createdBy,
-                createdAt: entry.createdAt,
-                conflictLog: entry.conflictLog as Prisma.InputJsonValue,
-                archivedReason: reason,
-                supersededByEntityType: supersededBy?.entityType ?? null,
-                supersededByEntityId: supersededBy?.entityId ?? null,
-                supersededByKey: supersededBy?.key ?? null,
-            },
-        }),
-        client.knowledgeEntry.update({
-            where: { id: entry.id },
-            data: {
-                valueSummary: '[ARCHIVED]',
-                confidence: 0,
-                updatedAt: new Date(),
-            },
-        }),
-    ]);
+    return client.archive.update({
+        where: { id },
+        data: updates,
+    });
 }
 
 // Guards

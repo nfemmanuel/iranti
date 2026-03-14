@@ -134,7 +134,35 @@ export function knowledgeRoutes(iranti: Iranti): Router {
             const entityType = Array.isArray(req.params.entityType) ? req.params.entityType[0] : req.params.entityType;
             const entityId = Array.isArray(req.params.entityId) ? req.params.entityId[0] : req.params.entityId;
             const key = Array.isArray(req.params.key) ? req.params.key[0] : req.params.key;
-            const result = await iranti.query(`${entityType}/${entityId}`, key);
+            const asOf = req.query.asOf ? new Date(String(req.query.asOf)) : undefined;
+            if (asOf && Number.isNaN(asOf.getTime())) {
+                return res.status(400).json({ error: 'asOf must be a valid ISO-8601 timestamp.' });
+            }
+            const includeExpired = req.query.includeExpired === 'true';
+            const includeContested = req.query.includeContested !== 'false';
+            const result = await iranti.query(`${entityType}/${entityId}`, key, {
+                asOf,
+                includeExpired,
+                includeContested,
+            });
+            res.json(result);
+        } catch (err) {
+            res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+    });
+
+    // GET /history/:entityType/:entityId/:key
+    router.get('/history/:entityType/:entityId/:key', async (req: Request, res: Response) => {
+        try {
+            const entityType = Array.isArray(req.params.entityType) ? req.params.entityType[0] : req.params.entityType;
+            const entityId = Array.isArray(req.params.entityId) ? req.params.entityId[0] : req.params.entityId;
+            const key = Array.isArray(req.params.key) ? req.params.key[0] : req.params.key;
+            const includeExpired = req.query.includeExpired === 'true';
+            const includeContested = req.query.includeContested !== 'false';
+            const result = await iranti.history(`${entityType}/${entityId}`, key, {
+                includeExpired,
+                includeContested,
+            });
             res.json(result);
         } catch (err) {
             res.status(400).json({ error: err instanceof Error ? err.message : String(err) });

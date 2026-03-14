@@ -4,12 +4,13 @@ import { librarianWrite, librarianIngest } from '../librarian';
 import type { WorkingMemoryBrief, AttendResult } from '../attendant';
 import { getAttendant, AttendantInstance } from '../attendant/registry';
 import { runArchivist } from '../archivist';
-import { findEntriesByEntity, findEntry, searchEntriesHybrid } from '../library/queries';
+import { findArchiveAsOf, findArchiveHistory, findEntriesByEntity, findEntry, searchEntriesHybrid } from '../library/queries';
 import { createRelationship, getRelated, getRelatedDeep, RelatedEntity } from '../library/relationships';
 import { registerAgent, getAgent, whoKnows, listAgents, assignToTeam, AgentProfile, AgentRecord } from '../library/agent-registry';
 import { resolveEntity } from '../library/entity-resolution';
 import { configureMock, MockConfig } from '../lib/providers/mock';
 import { EntityType } from '../types';
+import { ArchivedReason, ResolutionOutcome, ResolutionState } from '../generated/prisma/client';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -26,7 +27,8 @@ export interface WriteInput {
     confidence: number;
     source: string;
     agent: string;
-    validUntil?: Date;
+    validFrom?: Date;
+    validUntil?: Date | null;
     requestId?: string;
 }
 
@@ -44,15 +46,41 @@ export interface HandshakeInput {
     recentMessages: string[];
 }
 
+export interface TemporalQueryOptions {
+    asOf?: Date;
+    includeExpired?: boolean;
+    includeContested?: boolean;
+}
+
 export interface QueryResult {
     found: boolean;
     value?: unknown;
     summary?: string;
     confidence?: number;
     source?: string;
+    validFrom?: Date | null;
     validUntil?: Date | null;
+    contested?: boolean;
+    fromArchive?: boolean;
+    archivedReason?: ArchivedReason | null;
+    resolutionState?: ResolutionState | null;
+    resolutionOutcome?: ResolutionOutcome | null;
     resolvedEntity?: string;
     inputEntity?: string;
+}
+
+export interface HistoryEntry {
+    value: unknown;
+    summary: string;
+    confidence: number;
+    source: string;
+    validFrom: Date;
+    validUntil: Date | null;
+    isCurrent: boolean;
+    contested: boolean;
+    archivedReason: ArchivedReason | null;
+    resolutionState: ResolutionState | null;
+    resolutionOutcome: ResolutionOutcome | null;
 }
 
 export interface HybridSearchInput {
@@ -146,6 +174,60 @@ function parseEntity(entity: string): { entityType: EntityType; entityId: string
     return { entityType, entityId };
 }
 
+async function resolveQueryEntity(entity: string): Promise<{
+    entityType: EntityType;
+    entityId: string;
+    canonicalEntity: string;
+}> {
+    const parsed = parseEntity(entity);
+    const resolved = await resolveEntity({
+        entityType: parsed.entityType,
+        entityId: parsed.entityId,
+        rawName: entity,
+        aliases: [entity],
+        source: 'query',
+        createIfMissing: false,
+    }).catch(() => ({
+        entityType: parsed.entityType,
+        entityId: parsed.entityId,
+        canonicalEntity: `${parsed.entityType}/${parsed.entityId}`,
+        matchedBy: 'exact' as const,
+        addedAliases: [] as string[],
+    }));
+
+    return {
+        entityType: resolved.entityType,
+        entityId: resolved.entityId,
+        canonicalEntity: resolved.canonicalEntity,
+    };
+}
+
+function mapArchiveResult(result: {
+    valueRaw: unknown;
+    valueSummary: string;
+    confidence: number;
+    source: string;
+    validFrom: Date;
+    validUntil: Date | null;
+    archivedReason: ArchivedReason;
+    resolutionState: ResolutionState;
+    resolutionOutcome: ResolutionOutcome;
+}): Omit<QueryResult, 'found' | 'resolvedEntity' | 'inputEntity'> {
+    return {
+        value: result.valueRaw,
+        summary: result.valueSummary,
+        confidence: result.confidence,
+        source: result.source,
+        validFrom: result.validFrom,
+        validUntil: result.validUntil,
+        contested: result.archivedReason === ArchivedReason.contradicted || result.archivedReason === ArchivedReason.escalated,
+        fromArchive: true,
+        archivedReason: result.archivedReason,
+        resolutionState: result.resolutionState,
+        resolutionOutcome: result.resolutionOutcome,
+    };
+}
+
 // ─── Iranti Class ────────────────────────────────────────────────────────────
 
 export class Iranti {
@@ -192,7 +274,8 @@ export class Iranti {
             confidence: input.confidence,
             source: input.source,
             createdBy: input.agent,
-            validUntil: input.validUntil,
+            validFrom: input.validFrom,
+            validUntil: input.validUntil ?? undefined,
             requestId: input.requestId,
         });
 
@@ -260,57 +343,56 @@ export class Iranti {
 
     // ── Query ───────────────────────────────────────────────────────────────
 
-    async query(entity: string, key: string): Promise<QueryResult> {
-        const parsed = parseEntity(entity);
-        const resolved = await resolveEntity({
-            entityType: parsed.entityType,
-            entityId: parsed.entityId,
-            rawName: entity,
-            aliases: [entity],
-            source: 'query',
-            createIfMissing: false,
-        }).catch(() => ({
-            entityType: parsed.entityType,
-            entityId: parsed.entityId,
-            canonicalEntity: `${parsed.entityType}/${parsed.entityId}`,
-            matchedBy: 'exact' as const,
-            addedAliases: [] as string[],
-        }));
+    async query(entity: string, key: string, options: TemporalQueryOptions = {}): Promise<QueryResult> {
+        const resolved = await resolveQueryEntity(entity);
+
+        if (options.asOf) {
+            const current = await findEntry({ entityType: resolved.entityType, entityId: resolved.entityId, key });
+            const currentMatches = current && !current.isProtected && current.validFrom <= options.asOf;
+
+            if (currentMatches) {
+                return {
+                    found: true,
+                    value: current.valueRaw,
+                    summary: current.valueSummary,
+                    confidence: current.confidence,
+                    source: current.source,
+                    validFrom: current.validFrom,
+                    validUntil: current.validUntil,
+                    contested: false,
+                    fromArchive: false,
+                    archivedReason: null,
+                    resolutionState: null,
+                    resolutionOutcome: null,
+                    resolvedEntity: resolved.canonicalEntity,
+                    inputEntity: entity,
+                };
+            }
+
+            const historical = await findArchiveAsOf(
+                { entityType: resolved.entityType, entityId: resolved.entityId, key },
+                options.asOf,
+                {
+                    includeExpired: options.includeExpired,
+                    includeContested: options.includeContested,
+                }
+            );
+
+            if (historical) {
+                return {
+                    found: true,
+                    ...mapArchiveResult(historical),
+                    resolvedEntity: resolved.canonicalEntity,
+                    inputEntity: entity,
+                };
+            }
+
+            return { found: false, resolvedEntity: resolved.canonicalEntity, inputEntity: entity };
+        }
 
         const entry = await findEntry({ entityType: resolved.entityType, entityId: resolved.entityId, key });
-
-        if (!entry) {
+        if (!entry || entry.isProtected) {
             return { found: false, resolvedEntity: resolved.canonicalEntity, inputEntity: entity };
-        }
-        if (entry.isProtected) {
-            return { found: false, resolvedEntity: resolved.canonicalEntity, inputEntity: entity };
-        }
-
-        // Treat as hidden only when the latest relevant conflict event is an unresolved escalation.
-        // A historical escalation followed by replacement/update should still be queryable.
-        if (entry.conflictLog) {
-            const log = Array.isArray(entry.conflictLog) ? entry.conflictLog : [];
-            const latestEscalationIndex = log.reduce((acc: number, event: any, idx: number) => {
-                return event?.type === 'CONFLICT_ESCALATED' ? idx : acc;
-            }, -1);
-
-            if (latestEscalationIndex >= 0) {
-                const resolutionTypes = new Set([
-                    'CONFLICT_REPLACED',
-                    'CONFLICT_UPDATED',
-                    'CONFLICT_REJECTED',
-                    'CONFLICT_RESOLVED',
-                    'CONFLICT_HUMAN_RESOLVED',
-                    'HUMAN_RESOLVED',
-                ]);
-                const resolvedAfterEscalation = log
-                    .slice(latestEscalationIndex + 1)
-                    .some((event: any) => resolutionTypes.has(event?.type));
-
-                if (!resolvedAfterEscalation) {
-                return { found: false, resolvedEntity: resolved.canonicalEntity, inputEntity: entity }; // Treat escalated entries as not found
-                }
-            }
         }
 
         return {
@@ -319,10 +401,62 @@ export class Iranti {
             summary: entry.valueSummary,
             confidence: entry.confidence,
             source: entry.source,
+            validFrom: entry.validFrom,
             validUntil: entry.validUntil,
+            contested: false,
+            fromArchive: false,
+            archivedReason: null,
+            resolutionState: null,
+            resolutionOutcome: null,
             resolvedEntity: resolved.canonicalEntity,
             inputEntity: entity,
         };
+    }
+
+    async history(entity: string, key: string, options: Omit<TemporalQueryOptions, 'asOf'> = {}): Promise<HistoryEntry[]> {
+        const resolved = await resolveQueryEntity(entity);
+        const [archiveRows, current] = await Promise.all([
+            findArchiveHistory(
+                { entityType: resolved.entityType, entityId: resolved.entityId, key },
+                {
+                    includeExpired: options.includeExpired,
+                    includeContested: options.includeContested,
+                }
+            ),
+            findEntry({ entityType: resolved.entityType, entityId: resolved.entityId, key }),
+        ]);
+
+        const history: HistoryEntry[] = archiveRows.map((row) => ({
+            value: row.valueRaw,
+            summary: row.valueSummary,
+            confidence: row.confidence,
+            source: row.source,
+            validFrom: row.validFrom,
+            validUntil: row.validUntil,
+            isCurrent: false,
+            contested: row.archivedReason === ArchivedReason.contradicted || row.archivedReason === ArchivedReason.escalated,
+            archivedReason: row.archivedReason,
+            resolutionState: row.resolutionState,
+            resolutionOutcome: row.resolutionOutcome,
+        }));
+
+        if (current && !current.isProtected) {
+            history.push({
+                value: current.valueRaw,
+                summary: current.valueSummary,
+                confidence: current.confidence,
+                source: current.source,
+                validFrom: current.validFrom,
+                validUntil: current.validUntil,
+                isCurrent: true,
+                contested: false,
+                archivedReason: null,
+                resolutionState: null,
+                resolutionOutcome: null,
+            });
+        }
+
+        return history.sort((a, b) => a.validFrom.getTime() - b.validFrom.getTime());
     }
 
     // ── Query All ───────────────────────────────────────────────────────────
@@ -334,21 +468,7 @@ export class Iranti {
         confidence: number;
         source: string;
     }>> {
-        const parsed = parseEntity(entity);
-        const resolved = await resolveEntity({
-            entityType: parsed.entityType,
-            entityId: parsed.entityId,
-            rawName: entity,
-            aliases: [entity],
-            source: 'query',
-            createIfMissing: false,
-        }).catch(() => ({
-            entityType: parsed.entityType,
-            entityId: parsed.entityId,
-            canonicalEntity: `${parsed.entityType}/${parsed.entityId}`,
-            matchedBy: 'exact' as const,
-            addedAliases: [] as string[],
-        }));
+        const resolved = await resolveQueryEntity(entity);
 
         const entries = await findEntriesByEntity(resolved.entityType, resolved.entityId);
 

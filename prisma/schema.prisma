@@ -10,6 +10,27 @@ datasource db {
     provider = "postgresql"
 }
 
+enum ArchivedReason {
+    segment_closed
+    superseded
+    contradicted
+    escalated
+    expired
+    duplicate
+}
+
+enum ResolutionState {
+    not_applicable
+    pending
+    resolved
+}
+
+enum ResolutionOutcome {
+    not_applicable
+    challenger_won
+    original_retained
+}
+
 model KnowledgeEntry {
     id           Int       @id @default(autoincrement())
     entityType   String
@@ -19,6 +40,7 @@ model KnowledgeEntry {
     valueSummary String
     confidence   Int       @default(50)
     source       String
+    validFrom    DateTime  @default(now())
     validUntil   DateTime?
     createdBy    String
     createdAt    DateTime  @default(now())
@@ -34,27 +56,32 @@ model KnowledgeEntry {
 }
 
 model Archive {
-    id                     Int       @id @default(autoincrement())
-    entityType             String
-    entityId               String
-    key                    String
-    valueRaw               Json
-    valueSummary           String
-    confidence             Int
-    source                 String
-    validUntil             DateTime?
-    createdBy              String
-    createdAt              DateTime
-    conflictLog            Json      @default("[]")
-    properties             Json      @default("{}")
-    archivedAt             DateTime  @default(now())
-    archivedReason         String
-    supersededBy           Int?
+    id                Int               @id @default(autoincrement())
+    entityType        String
+    entityId          String
+    key               String
+    valueRaw          Json
+    valueSummary      String
+    confidence        Int
+    source            String
+    validFrom         DateTime
+    validUntil        DateTime?
+    createdBy         String
+    createdAt         DateTime
+    conflictLog       Json              @default("[]")
+    properties        Json              @default("{}")
+    archivedAt        DateTime          @default(now())
+    archivedReason    ArchivedReason
+    resolutionState   ResolutionState   @default(not_applicable)
+    resolutionOutcome ResolutionOutcome @default(not_applicable)
+    supersededBy      Int?
     supersededByEntityType String?
     supersededByEntityId   String?
     supersededByKey        String?
 
     @@index([entityType, entityId, key])
+    @@index([entityType, entityId, key, validFrom])
+    @@index([entityType, entityId, key, validFrom, validUntil])
     @@map("archive")
 }
 

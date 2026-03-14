@@ -15,7 +15,8 @@ export interface EntryInput {
     valueSummary: string;
     confidence: number;
     source: string;
-    validUntil?: Date;
+    validFrom?: Date;
+    validUntil?: Date | null;
     createdBy: string;
     isProtected?: boolean;
     conflictLog?: ConflictLogEntry[];
@@ -65,6 +66,7 @@ export interface QueryResult {
         valueSummary: string;
         confidence: number;
         source: string;
+        validFrom: Date;
         validUntil?: Date | null;
     };
 }

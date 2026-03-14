@@ -131,7 +131,8 @@ function assertPythonClientContract(): void {
     expectIncludes(filePath, content, "'http://localhost:3001'", 'Python client default URL is localhost:3001');
     expectIncludes(filePath, content, "self._post('/kb/write'", 'Python client writes to /kb/write');
     expectIncludes(filePath, content, "self._post('/kb/ingest'", 'Python client ingests to /kb/ingest');
-    expectIncludes(filePath, content, "self._get(f'/kb/query/{entity_type}/{entity_id}/{key}')", 'Python client queries /kb/query/:type/:id/:key');
+    expectIncludes(filePath, content, "f'/kb/query/{entity_type}/{entity_id}/{key}'", 'Python client queries /kb/query/:type/:id/:key');
+    expectIncludes(filePath, content, "f'/kb/history/{entity_type}/{entity_id}/{key}'", 'Python client queries /kb/history/:type/:id/:key');
     expectIncludes(filePath, content, "self._get(f'/kb/query/{entity_type}/{entity_id}')", 'Python client queries /kb/query/:type/:id');
     expectIncludes(filePath, content, "self._post('/kb/relate'", 'Python client relates via /kb/relate');
     expectIncludes(filePath, content, "self._get(f'/kb/related/{entity_type}/{entity_id}')", 'Python client reads /kb/related/:type/:id');
@@ -160,6 +161,7 @@ function assertTypeScriptSdkSurface(): void {
         'async reconvene(',
         'async attend(',
         'async query(',
+        'async history(',
         'async queryAll(',
         'async runMaintenance(',
         'async relate(',

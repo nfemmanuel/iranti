@@ -89,6 +89,7 @@ A periodic cleanup agent. Does not run on every write. Runs on a schedule or
 when conflict flags exceed a threshold. Responsibilities:
 - Archives expired entries (validUntil has passed)
 - Archives low confidence entries (below threshold)
+- Resolves pending escalation intervals by closing the contested archive row and reopening current truth in `knowledge_base`
 - Reads Escalation Folder for RESOLVED files, parses `AUTHORITATIVE_JSON`,
   writes to KB as authoritative (confidence = 100, source = HumanReview)
 - Optionally appends non-authoritative LLM enrichment notes for human audit
@@ -284,6 +285,7 @@ iranti/
 | valueSummary | String | Compressed for working memory loading |
 | confidence | Int | 0–100 raw. Weighted by source reliability at resolution |
 | source | String | Data source |
+| validFrom | DateTime | When this row became the active truth interval |
 | validUntil | DateTime? | Expiry for time-sensitive facts |
 | createdBy | String | Agent or system that wrote it |
 | isProtected | Boolean | True for Staff Namespace entries |
@@ -297,8 +299,12 @@ Primary index: `(entityType, entityId, key)` — unique constraint enforced.
 Same as knowledge_base, plus:
 | Column | Type | Notes |
 |---|---|---|
+| validFrom | DateTime | When this archived interval began |
+| validUntil | DateTime? | When this archived interval stopped governing truth; NULL while escalation is pending |
 | archivedAt | DateTime | When moved to Archive |
-| archivedReason | String | superseded / contradicted / expired / duplicate |
+| archivedReason | Enum | `segment_closed` / `superseded` / `contradicted` / `escalated` / `expired` / `duplicate` |
+| resolutionState | Enum | `not_applicable` / `pending` / `resolved` |
+| resolutionOutcome | Enum | `not_applicable` / `challenger_won` / `original_retained` |
 | supersededBy | Int? | ID of KB entry that replaced this |
 | properties | Json | Caller-defined metadata |
 
@@ -370,7 +376,7 @@ Indexed on `(canonicalEntityType, canonicalEntityId)`.
 const iranti = new Iranti({ connectionString, llmProvider });
 
 // Write atomic fact
-await iranti.write({ entity, key, value, summary, confidence, source, agent });
+await iranti.write({ entity, key, value, summary, confidence, source, agent, validFrom });
 
 // Ingest raw content blob (auto-chunks into atomic facts)
 await iranti.ingest({ entity, content, source, confidence, agent });
@@ -383,6 +389,8 @@ const attendant = iranti.getAttendant(agentId);
 
 // Query
 const result = await iranti.query(entity, key);
+const asOf = await iranti.query(entity, key, { asOf: new Date('2026-03-14T00:00:00Z') });
+const history = await iranti.history(entity, key);
 const all = await iranti.queryAll(entity);
 const matches = await iranti.search({ query, entityType, limit });
 

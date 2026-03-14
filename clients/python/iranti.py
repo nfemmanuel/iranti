@@ -58,10 +58,31 @@ class QueryResult:
     summary: Optional[str] = None
     confidence: Optional[int] = None
     source: Optional[str] = None
+    valid_from: Optional[str] = None
     valid_until: Optional[str] = None
+    contested: Optional[bool] = None
+    from_archive: Optional[bool] = None
+    archived_reason: Optional[str] = None
+    resolution_state: Optional[str] = None
+    resolution_outcome: Optional[str] = None
     resolved_entity: Optional[str] = None
     input_entity: Optional[str] = None
     http_status: Optional[int] = None
+
+
+@dataclass
+class HistoryEntry:
+    value: Any
+    summary: str
+    confidence: int
+    source: str
+    valid_from: str
+    valid_until: Optional[str]
+    is_current: bool
+    contested: bool
+    archived_reason: Optional[str] = None
+    resolution_state: Optional[str] = None
+    resolution_outcome: Optional[str] = None
 
 
 @dataclass
@@ -242,6 +263,7 @@ class IrantiClient:
         confidence: int,
         source: str,
         agent: str,
+        valid_from: Optional[str] = None,
         valid_until: Optional[str] = None,
         request_id: Optional[str] = None,
     ) -> WriteResult:
@@ -256,7 +278,8 @@ class IrantiClient:
             confidence:  0-100
             source:      Data source name
             agent:       Agent ID writing this fact
-            valid_until: ISO datetime string for expiry (optional)
+            valid_from: ISO datetime string for when the fact became true/current
+            valid_until: Deprecated. Not accepted by the temporal-versioning MVP.
             request_id:  Optional idempotency key for safe retries
         """
         payload = {
@@ -268,8 +291,10 @@ class IrantiClient:
             'source': source,
             'agent': agent,
         }
+        if valid_from:
+            payload['validFrom'] = valid_from
         if valid_until:
-            payload['validUntil'] = valid_until
+            raise IrantiValidationError('valid_until is not accepted by the temporal-versioning MVP.')
         if request_id:
             payload['requestId'] = request_id
 
@@ -319,21 +344,74 @@ class IrantiClient:
 
     # ── Query ─────────────────────────────────────────────────────────────────
 
-    def query(self, entity: str, key: str) -> QueryResult:
+    def query(
+        self,
+        entity: str,
+        key: str,
+        as_of: Optional[str] = None,
+        include_expired: bool = False,
+        include_contested: bool = True,
+    ) -> QueryResult:
         """Query a specific fact about an entity."""
         entity_type, entity_id = entity.split('/', 1)
-        data = self._get(f'/kb/query/{entity_type}/{entity_id}/{key}')
+        params: dict[str, Any] = {
+            'includeExpired': str(include_expired).lower(),
+            'includeContested': str(include_contested).lower(),
+        }
+        if as_of:
+            params['asOf'] = as_of
+        data = self._request('GET', f'/kb/query/{entity_type}/{entity_id}/{key}', params=params)
         return QueryResult(
             found=data['found'],
             value=data.get('value'),
             summary=data.get('summary'),
             confidence=data.get('confidence'),
             source=data.get('source'),
+            valid_from=data.get('validFrom'),
             valid_until=data.get('validUntil'),
+            contested=data.get('contested'),
+            from_archive=data.get('fromArchive'),
+            archived_reason=data.get('archivedReason'),
+            resolution_state=data.get('resolutionState'),
+            resolution_outcome=data.get('resolutionOutcome'),
             resolved_entity=data.get('resolvedEntity'),
             input_entity=data.get('inputEntity'),
             http_status=self.last_http_status,
         )
+
+    def history(
+        self,
+        entity: str,
+        key: str,
+        include_expired: bool = False,
+        include_contested: bool = True,
+    ) -> list[HistoryEntry]:
+        """Return the temporal history for a specific fact."""
+        entity_type, entity_id = entity.split('/', 1)
+        data = self._request(
+            'GET',
+            f'/kb/history/{entity_type}/{entity_id}/{key}',
+            params={
+                'includeExpired': str(include_expired).lower(),
+                'includeContested': str(include_contested).lower(),
+            }
+        )
+        return [
+            HistoryEntry(
+                value=row['value'],
+                summary=row['summary'],
+                confidence=row['confidence'],
+                source=row['source'],
+                valid_from=row['validFrom'],
+                valid_until=row.get('validUntil'),
+                is_current=row['isCurrent'],
+                contested=row['contested'],
+                archived_reason=row.get('archivedReason'),
+                resolution_state=row.get('resolutionState'),
+                resolution_outcome=row.get('resolutionOutcome'),
+            )
+            for row in data
+        ]
 
     def query_all(self, entity: str) -> list[dict]:
         """Query all facts about an entity."""
