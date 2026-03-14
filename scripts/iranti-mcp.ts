@@ -129,7 +129,10 @@ async function main(): Promise<void> {
     });
 
     server.registerTool('iranti_handshake', {
-        description: 'Initialize or refresh Claude working memory for the current task.',
+        description: `Initialize or refresh an agent's working-memory brief for the current task.
+Call this at session start or when a new task begins, passing the task and
+recent messages. Returns operating rules plus prioritized relevant memory
+for that task. Do not use this as a per-turn retrieval tool; use iranti_attend.`,
         inputSchema: {
             task: z.string().min(1).describe('The current task or objective.'),
             recentMessages: z.array(z.string()).optional().describe('Recent conversation messages.'),
@@ -145,7 +148,12 @@ async function main(): Promise<void> {
     });
 
     server.registerTool('iranti_attend', {
-        description: 'Ask Iranti whether memory should be injected for the next Claude turn.',
+        description: `Ask Iranti whether memory should be injected before the next LLM turn.
+Call this before each turn, passing the latest message and the current
+visible context window. Returns an injection decision plus any facts
+that should be added to context if relevant memory is missing.
+Omitting currentContext falls back to latestMessage only — pass the
+full visible context when available.`,
         inputSchema: {
             latestMessage: z.string().min(1).describe('The latest user or assistant message.'),
             currentContext: z.string().optional().describe('Current visible context window.'),
@@ -185,7 +193,11 @@ async function main(): Promise<void> {
     });
 
     server.registerTool('iranti_query', {
-        description: 'Query an exact fact by entity and key.',
+        description: `Retrieve the current fact for an exact entity+key lookup.
+Use this when you already know both the entity and the key.
+Returns the current value, summary, confidence, source, and
+temporal metadata when available. Prefer this over iranti_search
+when the target fact is already known.`,
         inputSchema: {
             entity: z.string().min(1).describe('Entity in entityType/entityId format.'),
             key: z.string().min(1).describe('Fact key to retrieve.'),
@@ -196,7 +208,9 @@ async function main(): Promise<void> {
     });
 
     server.registerTool('iranti_search', {
-        description: 'Run hybrid lexical/vector search when the exact key is unknown.',
+        description: `Search shared memory with natural language when the exact entity
+or key is unknown. Uses hybrid lexical and vector search across
+stored facts. Use this for discovery and recall, not exact lookup.`,
         inputSchema: {
             query: z.string().min(1).describe('Natural language search phrase.'),
             entityType: z.string().optional().describe('Optional entity type filter.'),
@@ -220,7 +234,12 @@ async function main(): Promise<void> {
     });
 
     server.registerTool('iranti_write', {
-        description: 'Write one durable fact to Iranti. Use only for stable facts, decisions, preferences, or constraints.',
+        description: `Write one durable fact to shared memory for a specific entity.
+Use this when you learned something concrete that future turns,
+agents, or sessions should retain. Requires: entity ("type/id"),
+key, value JSON, and summary. Confidence is optional and defaults
+to 85. Conflicts on the same entity+key are detected automatically
+and may be resolved or escalated.`,
         inputSchema: {
             entity: z.string().min(1).describe('Entity in entityType/entityId format.'),
             key: z.string().min(1).describe('Fact key.'),

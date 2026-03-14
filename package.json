@@ -62,6 +62,7 @@
     "test:connection-string": "ts-node scripts/test_connection_string.ts",
     "test:router": "ts-node scripts/test_router_enforcement.ts",
     "test:verify-authoritative": "ts-node scripts/verify_authoritative_resolution_parsing.ts",
+    "test:mcp-smoke": "ts-node tests/mcp/smoke_test.ts",
     "test:conflict-benchmark": "ts-node tests/conflict/run_conflict_benchmark.ts",
     "test:decay": "ts-node tests/decay/run_decay_tests.ts",
     "release:check": "ts-node scripts/check-release-version.ts",

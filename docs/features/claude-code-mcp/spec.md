@@ -49,6 +49,7 @@ This feature exposes Iranti to Claude Code through the installed CLI surface: `i
 ## Test Results
 - TypeScript build passes with the MCP and hook scripts included.
 - `iranti mcp --help` works through the installed CLI handoff path.
+- `npm run test:mcp-smoke` starts the stdio MCP server, lists tools, and successfully calls `iranti_handshake`, `iranti_write`, `iranti_query`, `iranti_search`, and `iranti_attend`.
 - `iranti claude-hook --help` works through the installed CLI handoff path.
 - Installed-package Claude Code integration no longer requires hardcoded `DATABASE_URL` in hook commands when `.env.iranti` points to a valid instance env.
 
