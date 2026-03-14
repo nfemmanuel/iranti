@@ -208,6 +208,9 @@ npm run api                   # Runs on port 3001
 
 # 5. Install Python client
 pip install iranti
+
+# Optional: install the TypeScript client
+npm install @iranti/sdk
 ```
 
 ### Archivist Scheduling Knobs

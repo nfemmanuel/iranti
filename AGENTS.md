@@ -267,6 +267,14 @@ iranti/
 │       ├── README.md           — Python client documentation
 │       ├── pyproject.toml      — Python package metadata for PyPI
 │       └── LICENSE             — AGPL metadata for Python package
+│   └── typescript/
+│       ├── src/
+│       │   ├── client.ts       — External TypeScript HTTP client for REST API
+│       │   ├── types.ts        — Request/response and error types for npm client
+│       │   └── index.ts        — Re-exports for package consumers
+│       ├── package.json        — npm package metadata for @iranti/sdk
+│       ├── tsconfig.json       — Package-local TypeScript build config
+│       └── README.md           — TypeScript client documentation
 ├── tests/
 │   └── conflict/
 │       ├── run_conflict_benchmark.ts — Benchmark runner for adversarial conflict scenarios
