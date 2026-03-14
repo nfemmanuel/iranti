@@ -36,6 +36,11 @@ type DoctorCheck = {
     detail: string;
 };
 
+type StatusRow = {
+    label: string;
+    value: string;
+};
+
 function parseArgs(argv: string[]): ParsedArgs {
     const flags = new Map<string, string | boolean>();
     const positionals: string[] = [];
@@ -399,6 +404,76 @@ async function doctorCommand(args: ParsedArgs): Promise<void> {
     }
 }
 
+async function statusCommand(args: ParsedArgs): Promise<void> {
+    const scope = normalizeScope(getFlag(args, 'scope'));
+    const root = resolveInstallRoot(args, scope);
+    const json = hasFlag(args, 'json');
+    const cwd = process.cwd();
+    const repoEnv = path.join(cwd, '.env');
+    const projectEnv = path.join(cwd, '.env.iranti');
+    const installMetaPath = path.join(root, 'install.json');
+    const instancesDir = path.join(root, 'instances');
+
+    const rows: StatusRow[] = [];
+    rows.push({ label: 'version', value: getPackageVersion() });
+    rows.push({ label: 'scope', value: scope });
+    rows.push({ label: 'runtime_root', value: root });
+    rows.push({ label: 'repo_env', value: fs.existsSync(repoEnv) ? repoEnv : '(missing)' });
+    rows.push({ label: 'project_binding', value: fs.existsSync(projectEnv) ? projectEnv : '(missing)' });
+    rows.push({ label: 'install_meta', value: fs.existsSync(installMetaPath) ? installMetaPath : '(not initialized)' });
+
+    const instances: Array<{ name: string; port: string; envFile: string }> = [];
+    if (fs.existsSync(instancesDir)) {
+        const entries = await fsp.readdir(instancesDir, { withFileTypes: true });
+        for (const entry of entries.filter((value) => value.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
+            const envFile = path.join(instancesDir, entry.name, '.env');
+            let port = '(unknown)';
+            if (fs.existsSync(envFile)) {
+                try {
+                    const env = await readEnvFile(envFile);
+                    port = env.IRANTI_PORT ?? '(unknown)';
+                } catch {
+                    port = '(unreadable)';
+                }
+            }
+            instances.push({
+                name: entry.name,
+                port,
+                envFile: fs.existsSync(envFile) ? envFile : '(missing)',
+            });
+        }
+    }
+
+    if (json) {
+        console.log(JSON.stringify({
+            version: getPackageVersion(),
+            scope,
+            runtimeRoot: root,
+            repoEnv: fs.existsSync(repoEnv) ? repoEnv : null,
+            projectBinding: fs.existsSync(projectEnv) ? projectEnv : null,
+            installMeta: fs.existsSync(installMetaPath) ? installMetaPath : null,
+            instances,
+        }, null, 2));
+        return;
+    }
+
+    console.log('Iranti status');
+    for (const row of rows) {
+        console.log(`  ${row.label.padEnd(15)} ${row.value}`);
+    }
+
+    console.log('');
+    if (instances.length === 0) {
+        console.log('Instances: none');
+    } else {
+        console.log('Instances:');
+        for (const instance of instances) {
+            console.log(`  - ${instance.name} (port ${instance.port})`);
+            console.log(`    env: ${instance.envFile}`);
+        }
+    }
+}
+
 async function installCommand(args: ParsedArgs): Promise<void> {
     const scope = normalizeScope(getFlag(args, 'scope'));
     const root = resolveInstallRoot(args, scope);
@@ -609,6 +684,7 @@ Project-level:
 
 Diagnostics:
   iranti doctor [--instance <name>] [--scope user|system] [--env <file>] [--json]
+  iranti status [--scope user|system] [--json]
 `);
 }
 
@@ -652,6 +728,11 @@ async function main(): Promise<void> {
 
     if (args.command === 'doctor') {
         await doctorCommand(args);
+        return;
+    }
+
+    if (args.command === 'status') {
+        await statusCommand(args);
         return;
     }
 

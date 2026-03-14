@@ -264,9 +264,11 @@ Use the CLI doctor command before first run or before a release check:
 ```bash
 iranti doctor
 iranti doctor --instance local
+iranti status
 ```
 
 This validates the active env file, database URL, API key presence, provider selection, and provider-specific credentials.
+`iranti status` shows the current runtime root, known instances, and local binding files.
 
 ---
 

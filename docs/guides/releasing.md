@@ -70,20 +70,42 @@ GitHub and PyPI trusted publishing guidance:
 
 ## Release Procedure
 
+Current repo version is `0.1.0`. If the next release is `0.1.1`, use the following exact sequence.
+
 1. Update versions in:
    - `package.json`
    - `clients/python/pyproject.toml`
    - `clients/python/iranti.py`
-2. Run local diagnostics and release checks:
-   - `iranti doctor`
-   - `npm run build`
-   - `npm run test:contracts`
-   - `npm pack`
-3. Commit the version bump.
-4. Push to `main`.
-5. Create a GitHub Release with matching tag:
-   - example: `v0.1.1`
-6. The publish workflow will run automatically.
+2. Run the exact local checks:
+
+```bash
+iranti status
+iranti doctor
+npm run build
+npm run test:contracts
+npm run release:check -- v0.1.1
+npm pack
+python -m build clients/python --outdir clients/python/dist
+python -m twine check clients/python/dist/*
+```
+
+3. Commit and push:
+
+```bash
+git add package.json clients/python/pyproject.toml clients/python/iranti.py CHANGELOG.md
+git commit -m "Release v0.1.1"
+git push origin main
+```
+
+4. Create the tag and GitHub release:
+
+```bash
+git tag v0.1.1
+git push origin v0.1.1
+gh release create v0.1.1 --title "v0.1.1" --notes "Release notes here"
+```
+
+5. The publish workflow will run automatically on that release.
 
 ## Verification Only
 
