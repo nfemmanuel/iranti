@@ -59,6 +59,7 @@
     "test:connection-string": "ts-node scripts/test_connection_string.ts",
     "test:router": "ts-node scripts/test_router_enforcement.ts",
     "test:verify-authoritative": "ts-node scripts/verify_authoritative_resolution_parsing.ts",
+    "release:check": "ts-node scripts/check-release-version.ts",
     "seed:policy": "ts-node scripts/seed_policy.ts",
     "api-key:create": "ts-node scripts/api-key-create.ts",
     "api-key:list": "ts-node scripts/api-key-list.ts",

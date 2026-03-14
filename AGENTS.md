@@ -215,6 +215,7 @@ iranti/
 │   ├── api-key-create.ts       — Creates/rotates per-user API key tokens
 │   ├── api-key-list.ts         — Lists API key registry entries
 │   ├── api-key-revoke.ts       — Revokes API key tokens
+│   ├── check-release-version.ts — Verifies Node/Python/package tag version alignment before publish
 │   ├── iranti-cli.ts           — Machine install + instance + project binding CLI
 │   ├── iranti-mcp.ts           — Stdio MCP server for Claude Code and other MCP clients
 │   ├── claude-code-memory-hook.ts — Claude Code hook helper for SessionStart/UserPromptSubmit
@@ -411,6 +412,7 @@ Entity format: `"entityType/entityId"` e.g. `"researcher/jane_smith"`
   Status to RESOLVED when done
 - The Staff Namespace (entityType = system) is only modified by seed.ts
   or explicit system operations (including API key registry scripts) — never by external agents
+- Package publishing is driven by `.github/workflows/publish-packages.yml`; release tags and package versions must match
 
 ---
 

@@ -170,6 +170,7 @@ Scopes use `resource:action` format (for example `kb:read`, `memory:write`, `met
 
 Security quickstart: [`docs/guides/security-quickstart.md`](docs/guides/security-quickstart.md)
 Claude Code guide: [`docs/guides/claude-code.md`](docs/guides/claude-code.md)
+Release guide: [`docs/guides/releasing.md`](docs/guides/releasing.md)
 
 ### Claude Code via MCP
 
