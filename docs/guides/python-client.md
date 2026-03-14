@@ -121,14 +121,19 @@ result = client.ingest(
     agent="my_agent"
 )
 
+print(f"Extracted: {result.extracted_candidates}")
 print(f"Written: {result.written}, Rejected: {result.rejected}")
+print(f"Skipped malformed: {result.skipped_malformed}")
 print(f"Facts: {result.facts}")
 ```
 
 **Returns:** `IngestResult` with:
+- `extracted_candidates` (int): Number of extracted JSON items before validation
 - `written` (int): Number of facts successfully written
 - `rejected` (int): Number of facts rejected
 - `escalated` (int): Number of facts escalated
+- `skipped_malformed` (int): Number of malformed extracted items discarded
+- `reason` (str | None): Explanation when no usable facts are written
 - `facts` (list): List of `WriteResult` objects
 
 ---

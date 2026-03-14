@@ -60,9 +60,9 @@ const CONFLICT_RESOLUTIONS = {
 };
 
 const EXTRACTION_RESPONSES: Record<string, string> = {
-    default: '[{"key":"affiliation","value":{"institution":"Carnegie Mellon University"},"summary":"Affiliated with Carnegie Mellon University"},{"key":"publication_count","value":{"count":31},"summary":"Has published 31 papers"},{"key":"previous_employer","value":{"institution":"Google DeepMind","from":2019,"to":2022},"summary":"Previously worked at Google DeepMind from 2019 to 2022"},{"key":"research_focus","value":{"primary":"reinforcement learning","secondary":"robotics"},"summary":"Primary research focus is reinforcement learning with secondary interest in robotics"}]',
-    disagreement: '[{"key":"affiliation","value":{"institution":"MIT"},"summary":"Affiliated with MIT"},{"key":"publication_count","value":{"count":28},"summary":"Has published 28 papers"}]',
-    collaborative: '[{"key":"h_index","value":{"score":12},"summary":"H-index of 12"},{"key":"cited_by","value":{"count":450},"summary":"Cited by 450 papers"}]',
+    default: '[{"key":"affiliation","value":{"institution":"Carnegie Mellon University"},"summary":"Affiliated with Carnegie Mellon University.","confidence":95},{"key":"publication_count","value":{"count":31},"summary":"Has published 31 papers.","confidence":93},{"key":"previous_employer","value":{"institution":"Google DeepMind","from":2019,"to":2022},"summary":"Previously worked at Google DeepMind from 2019 to 2022.","confidence":91},{"key":"research_focus","value":{"primary":"reinforcement learning","secondary":"robotics"},"summary":"Primary research focus is reinforcement learning with secondary interest in robotics.","confidence":88}]',
+    disagreement: '[{"key":"affiliation","value":{"institution":"MIT"},"summary":"Affiliated with MIT.","confidence":86},{"key":"publication_count","value":{"count":28},"summary":"Has published 28 papers.","confidence":82}]',
+    collaborative: '[{"key":"h_index","value":{"score":12},"summary":"H-index of 12.","confidence":84},{"key":"cited_by","value":{"count":450},"summary":"Cited by 450 papers.","confidence":83}]',
 };
 
 // ─── Mock Provider ────────────────────────────────────────────────────────────
@@ -124,7 +124,45 @@ class MockProvider implements LLMProvider {
         }
 
         // Extraction / chunking
-        if (lastMessage.includes('atomic facts') || lastMessage.includes('extract every distinct')) {
+        if (
+            lastMessage.includes('extract only distinct facts')
+            || lastMessage.includes('extract every distinct')
+            || lastMessage.includes('extracting structured facts')
+            || lastMessage.includes('atomic facts')
+        ) {
+            if (lastMessage.includes('avalon spectrum currently operates in lisbon')) {
+                return this.respond(
+                    '[{"key":"hq_city","value":{"city":"Lisbon"},"summary":"Headquartered in Lisbon.","confidence":96},{"key":"team_size","value":{"count":42},"summary":"Team size is 42.","confidence":95},{"key":"runway_months","value":{"months":18},"summary":"Runway is 18 months.","confidence":93}]',
+                    model
+                );
+            }
+            if (lastMessage.includes('might be preparing for a beta launch') || lastMessage.includes('possibly exploring a seed extension')) {
+                return this.respond(
+                    '[{"key":"launch_phase","value":{"phase":"beta"},"summary":"Possibly preparing for a beta launch.","confidence":42},{"key":"fundraising_plan","value":{"type":"seed_extension"},"summary":"May be exploring a seed extension.","confidence":34}]',
+                    model
+                );
+            }
+            if (lastMessage.includes('helios array has 12 pilots') || lastMessage.includes('could be expanding into ocean freight')) {
+                return this.respond(
+                    '[{"key":"pilot_count","value":{"count":12},"summary":"Pilot count is 12.","confidence":95},{"key":"expansion_target","value":{"market":"ocean_freight"},"summary":"May expand into ocean freight.","confidence":38}]',
+                    model
+                );
+            }
+            if (lastMessage.includes('rain over the harbor looked dramatic') || lastMessage.includes('no durable facts')) {
+                return this.respond('[]', model);
+            }
+            if (lastMessage.includes('northwind lattice has a budget of 50000')) {
+                return this.respond(
+                    '[{"key":"budget","value":{"amount":50000,"currency":"USD"},"summary":"Budget is 50,000 USD.","confidence":95}]',
+                    model
+                );
+            }
+            if (lastMessage.includes('northwind lattice has a budget of 75000')) {
+                return this.respond(
+                    '[{"key":"budget","value":{"amount":75000,"currency":"USD"},"summary":"Budget is 75,000 USD.","confidence":91}]',
+                    model
+                );
+            }
             const response = EXTRACTION_RESPONSES[scenario] ?? EXTRACTION_RESPONSES.default;
             return this.respond(response, model);
         }

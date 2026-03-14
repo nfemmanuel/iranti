@@ -601,20 +601,26 @@ function buildEscalationUpdateBlock(existing: KnowledgeEntry, incoming: EntryInp
 }
 
 export async function librarianIngest(input: ChunkInput): Promise<{
+    extractedCandidates: number;
     written: number;
     rejected: number;
     escalated: number;
+    skippedMalformed: number;
+    reason?: string;
     results: Array<{ key: string; action: string; reason: string }>;
 }> {
     const { chunkContent } = await import('./chunker');
 
-    const { chunks, reason } = await chunkContent(input);
+    const { chunks, extractedCandidates, skipped, reason } = await chunkContent(input);
 
     if (chunks.length === 0) {
         return {
+            extractedCandidates,
             written: 0,
             rejected: 0,
             escalated: 0,
+            skippedMalformed: skipped,
+            reason,
             results: [{ key: 'chunker', action: 'failed', reason: reason ?? 'No chunks produced' }],
         };
     }
@@ -633,5 +639,13 @@ export async function librarianIngest(input: ChunkInput): Promise<{
         else rejected++;
     }
 
-    return { written, rejected, escalated, results };
+    return {
+        extractedCandidates,
+        written,
+        rejected,
+        escalated,
+        skippedMalformed: skipped,
+        reason,
+        results,
+    };
 }

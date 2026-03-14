@@ -45,9 +45,12 @@ class WriteResult:
 
 @dataclass
 class IngestResult:
+    extracted_candidates: int
     written: int
     rejected: int
     escalated: int
+    skipped_malformed: int
+    reason: Optional[str]
     facts: list[dict]
 
 
@@ -325,7 +328,7 @@ class IrantiClient:
             entity:     Entity in format "entityType/entityId"
             content:    Raw text content to extract facts from
             source:     Data source name
-            confidence: 0-100 applied to all extracted facts
+            confidence: 0-100 caller confidence blended with per-fact extraction confidence
             agent:      Agent ID ingesting this content
         """
         data = self._post('/kb/ingest', {
@@ -336,9 +339,12 @@ class IrantiClient:
             'agent': agent,
         })
         return IngestResult(
+            extracted_candidates=data.get('extractedCandidates', 0),
             written=data['written'],
             rejected=data['rejected'],
             escalated=data['escalated'],
+            skipped_malformed=data.get('skippedMalformed', 0),
+            reason=data.get('reason'),
             facts=data['facts'],
         )
 

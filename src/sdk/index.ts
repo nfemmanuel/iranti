@@ -115,11 +115,20 @@ export interface WriteResult {
     inputEntity?: string;
 }
 
+export interface IngestFactResult {
+    action: WriteResult['action'] | 'failed';
+    key: string;
+    reason: string;
+}
+
 export interface IngestResult {
+    extractedCandidates: number;
     written: number;
     rejected: number;
     escalated: number;
-    facts: WriteResult[];
+    skippedMalformed: number;
+    reason?: string;
+    facts: IngestFactResult[];
 }
 
 export interface ObserveInput {
@@ -303,11 +312,14 @@ export class Iranti {
         });
 
         return {
+            extractedCandidates: result.extractedCandidates,
             written: result.written,
             rejected: result.rejected,
             escalated: result.escalated,
+            skippedMalformed: result.skippedMalformed,
+            reason: result.reason,
             facts: result.results.map((r) => ({
-                action: r.action as WriteResult['action'],
+                action: r.action as IngestFactResult['action'],
                 key: r.key,
                 reason: r.reason,
             })),

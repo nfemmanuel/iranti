@@ -62,7 +62,11 @@ result = client.ingest(
     confidence=80,
     agent="my_agent"
 )
-print(f"Written: {result.written}, Rejected: {result.rejected}")
+print(
+    f"Extracted: {result.extracted_candidates}, "
+    f"Written: {result.written}, "
+    f"Skipped malformed: {result.skipped_malformed}"
+)
 
 # Get working memory before a task
 brief = client.handshake(

@@ -65,6 +65,7 @@
     "test:mcp-smoke": "ts-node tests/mcp/smoke_test.ts",
     "test:conflict-benchmark": "ts-node tests/conflict/run_conflict_benchmark.ts",
     "test:decay": "ts-node tests/decay/run_decay_tests.ts",
+    "test:ingest": "ts-node tests/ingest/run_ingest_tests.ts",
     "release:check": "ts-node scripts/check-release-version.ts",
     "release:bump": "ts-node scripts/bump-version.ts",
     "seed:policy": "ts-node scripts/seed_policy.ts",

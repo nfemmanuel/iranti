@@ -653,7 +653,7 @@ Iranti has four internal components:
 Express server on port 3001 with endpoints:
 
 - `POST /kb/write` - Write atomic fact
-- `POST /kb/ingest` - Ingest raw text, auto-chunk into facts
+- `POST /kb/ingest` - Ingest raw text for one entity, auto-chunk into facts with per-fact confidence and per-fact write outcomes
 - `GET /kb/query/:entityType/:entityId/:key` - Query specific fact
 - `GET /kb/query/:entityType/:entityId` - Query all facts for entity
 - `GET /kb/search` - Hybrid search across facts
