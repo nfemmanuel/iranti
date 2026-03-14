@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.1 - Unreleased
+
+### Added
+
+- Namespace-aware API key authorization for entity-bound KB routes.
+- Access-control test suite with `8/8` baseline covering wildcard allow, explicit deny, and dual-entity relationship checks.
+- Access-control feature spec and expanded security guidance for namespaced scopes.
+
+### Changed
+
+- KB authorization now supports scopes such as `kb:read:project/acme`, `kb:write:project/*`, and `kb:deny:project/rival`.
+- Existing global scopes remain backward-compatible.
+- `GET /kb/search`, `POST /kb/batchQuery`, and `/memory/*` remain coarse global-scope endpoints in this release.
+
 ## 0.2.0 - 2026-03-14
 
 ### Added
