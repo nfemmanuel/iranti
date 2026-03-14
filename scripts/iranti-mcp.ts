@@ -1,10 +1,34 @@
-import 'dotenv/config';
+import fs from 'node:fs';
+import path from 'node:path';
+import dotenv from 'dotenv';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import * as z from 'zod/v4';
 import { Iranti } from '../src/sdk';
 
 type JsonRecord = Record<string, unknown>;
+
+function loadEnv(): void {
+    const explicitPath = process.env.IRANTI_ENV_FILE?.trim();
+    const candidates = explicitPath
+        ? [explicitPath]
+        : [
+            path.resolve(process.cwd(), '.env'),
+            path.resolve(__dirname, '..', '.env'),
+            path.resolve(__dirname, '..', '..', '.env'),
+        ];
+
+    for (const candidate of candidates) {
+        if (candidate && fs.existsSync(candidate)) {
+            dotenv.config({ path: candidate });
+            return;
+        }
+    }
+
+    dotenv.config();
+}
+
+loadEnv();
 
 function printHelp(): void {
     console.log([

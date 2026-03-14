@@ -43,7 +43,7 @@ Current status for maintaining Iranti after the 0.1.0 public release.
 
 ## Recommended Next Polishing Steps
 
-1. Add `iranti doctor` CLI command for environment and config diagnostics.
+1. Add `iranti doctor` CLI command for environment and config diagnostics. Completed in repo; keep expanding checks as hosted/runtime surface grows.
 2. Add compatibility aliasing for legacy scope labels where needed.
 3. Add release automation workflows for npm and PyPI (tag-driven).
 4. Add integration tests for multi-agent long-run scenarios.

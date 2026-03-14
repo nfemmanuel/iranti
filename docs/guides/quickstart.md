@@ -120,6 +120,12 @@ Edit the printed instance `.env` and set real `DATABASE_URL` and `IRANTI_API_KEY
 iranti run --instance local
 ```
 
+### Check configuration before run
+
+```bash
+iranti doctor --instance local
+```
+
 ### Bind a project
 
 ```bash
@@ -141,6 +147,12 @@ npm run test:integration
 
 You should see all tests pass:
 
+```
+
+For a quick environment check before that, run:
+
+```bash
+iranti doctor
 ```
 ✓ Agent registration
 ✓ Write and query

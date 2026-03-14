@@ -216,8 +216,9 @@ iranti/
 │   ├── api-key-list.ts         — Lists API key registry entries
 │   ├── api-key-revoke.ts       — Revokes API key tokens
 │   ├── check-release-version.ts — Verifies Node/Python/package tag version alignment before publish
-│   ├── iranti-cli.ts           — Machine install + instance + project binding CLI
-│   ├── iranti-mcp.ts           — Stdio MCP server for Claude Code and other MCP clients
+│   ├── iranti-cli.ts           — Machine install, diagnostics, instance + project binding CLI
+│   ├── iranti-mcp.ts           — Stdio MCP server for Claude Code, Codex, and other MCP clients
+│   ├── codex-setup.ts          — Registers Iranti MCP with Codex global config
 │   ├── claude-code-memory-hook.ts — Claude Code hook helper for SessionStart/UserPromptSubmit
 │   ├── demo.ts                 — Full system demo with two agents
 │   ├── test-librarian.ts       — Librarian smoke tests
@@ -421,7 +422,7 @@ Entity format: `"entityType/entityId"` e.g. `"researcher/jane_smith"`
 ### Doc Types and Where They Live
 
 - **docs/guides/** — How-to guides for developers using Iranti. One file per
-  topic, including Claude Code / MCP integration. Written for external developers, not internal contributors.
+  topic, including Claude Code / MCP integration and Codex setup. Written for external developers, not internal contributors.
 - **docs/decisions/** — Architectural decision records (ADRs). One file per
   decision. Named `NNN-short-title.md` e.g. `001-agpl-license.md`. Never
   deleted or edited after the fact — add a new ADR if a decision changes.

@@ -28,6 +28,14 @@ type InstanceMeta = {
     instanceDir: string;
 };
 
+type DoctorStatus = 'pass' | 'warn' | 'fail';
+
+type DoctorCheck = {
+    name: string;
+    status: DoctorStatus;
+    detail: string;
+};
+
 function parseArgs(argv: string[]): ParsedArgs {
     const flags = new Map<string, string | boolean>();
     const positionals: string[] = [];
@@ -174,6 +182,221 @@ function makeInstanceEnv(name: string, port: number, dbUrl: string, apiKey: stri
         '',
     ];
     return lines.join('\n');
+}
+
+function detectPlaceholder(value: string | undefined): boolean {
+    if (!value) return true;
+    const normalized = value.trim().toLowerCase();
+    return normalized.length === 0
+        || normalized.includes('yourpassword')
+        || normalized.includes('replace_me')
+        || normalized.includes('your_secret')
+        || normalized.includes('your_key_here')
+        || normalized.includes('your_api_key')
+        || normalized === 'changeme';
+}
+
+function detectProviderKey(provider: string | undefined, env: Record<string, string>): DoctorCheck {
+    const normalized = (provider ?? 'mock').trim().toLowerCase();
+    if (normalized === 'mock' || normalized === 'ollama') {
+        return {
+            name: 'provider credentials',
+            status: 'pass',
+            detail: `${normalized} does not require a remote API key for local diagnostics.`,
+        };
+    }
+
+    const keyMap: Record<string, string> = {
+        gemini: 'GEMINI_API_KEY',
+        claude: 'ANTHROPIC_API_KEY',
+        openai: 'OPENAI_API_KEY',
+        groq: 'GROQ_API_KEY',
+        mistral: 'MISTRAL_API_KEY',
+    };
+
+    const envKey = keyMap[normalized];
+    if (!envKey) {
+        return {
+            name: 'provider credentials',
+            status: 'warn',
+            detail: `Unknown provider '${normalized}'. Doctor cannot verify its API key requirement.`,
+        };
+    }
+
+    return detectPlaceholder(env[envKey])
+        ? {
+            name: 'provider credentials',
+            status: 'fail',
+            detail: `${envKey} is missing or still uses a placeholder value for provider '${normalized}'.`,
+        }
+        : {
+            name: 'provider credentials',
+            status: 'pass',
+            detail: `${envKey} is set for provider '${normalized}'.`,
+        };
+}
+
+function summarizeStatus(checks: DoctorCheck[]): DoctorStatus {
+    if (checks.some((check) => check.status === 'fail')) return 'fail';
+    if (checks.some((check) => check.status === 'warn')) return 'warn';
+    return 'pass';
+}
+
+async function doctorCommand(args: ParsedArgs): Promise<void> {
+    const scope = normalizeScope(getFlag(args, 'scope'));
+    const instanceName = getFlag(args, 'instance');
+    const explicitEnv = getFlag(args, 'env');
+    const json = hasFlag(args, 'json');
+    const cwd = process.cwd();
+
+    let envFile: string | null = null;
+    let envSource = 'repo';
+
+    if (explicitEnv) {
+        envFile = path.resolve(explicitEnv);
+        envSource = 'explicit-env';
+    } else if (instanceName) {
+        const root = resolveInstallRoot(args, scope);
+        envFile = path.join(root, 'instances', instanceName, '.env');
+        envSource = `instance:${instanceName}`;
+    } else {
+        const repoEnv = path.join(cwd, '.env');
+        const projectEnv = path.join(cwd, '.env.iranti');
+        if (fs.existsSync(repoEnv)) {
+            envFile = repoEnv;
+            envSource = 'repo';
+        } else if (fs.existsSync(projectEnv)) {
+            envFile = projectEnv;
+            envSource = 'project-binding';
+        }
+    }
+
+    const checks: DoctorCheck[] = [];
+    const version = getPackageVersion();
+
+    checks.push({
+        name: 'node version',
+        status: Number.parseInt(process.versions.node.split('.')[0] ?? '0', 10) >= 18 ? 'pass' : 'fail',
+        detail: `Node ${process.versions.node}`,
+    });
+
+    const distCli = path.resolve(__dirname, 'iranti-cli.js');
+    checks.push({
+        name: 'cli build artifact',
+        status: fs.existsSync(distCli) ? 'pass' : 'warn',
+        detail: fs.existsSync(distCli)
+            ? `Found built CLI at ${distCli}`
+            : 'Built CLI artifact not found. This is acceptable in ts-node/dev mode but packaged installs should include dist.',
+    });
+
+    if (!envFile) {
+        checks.push({
+            name: 'environment file',
+            status: 'fail',
+            detail: 'No .env, .env.iranti, or --env/--instance target found from the current working directory.',
+        });
+    } else if (!fs.existsSync(envFile)) {
+        checks.push({
+            name: 'environment file',
+            status: 'fail',
+            detail: `Expected env file not found: ${envFile}`,
+        });
+    } else {
+        const env = await readEnvFile(envFile);
+        checks.push({
+            name: 'environment file',
+            status: 'pass',
+            detail: `${envSource} env loaded from ${envFile}`,
+        });
+
+        const databaseUrl = env.DATABASE_URL;
+        checks.push(detectPlaceholder(databaseUrl)
+            ? {
+                name: 'database configuration',
+                status: 'fail',
+                detail: 'DATABASE_URL is missing or still uses a placeholder value.',
+            }
+            : {
+                name: 'database configuration',
+                status: 'pass',
+                detail: 'DATABASE_URL is present and non-placeholder.',
+            });
+
+        if (envSource === 'project-binding') {
+            checks.push(detectPlaceholder(env.IRANTI_URL)
+                ? {
+                    name: 'project binding url',
+                    status: 'fail',
+                    detail: 'IRANTI_URL is missing or placeholder in .env.iranti.',
+                }
+                : {
+                    name: 'project binding url',
+                    status: 'pass',
+                    detail: `IRANTI_URL=${env.IRANTI_URL}`,
+                });
+        }
+
+        if (envSource === 'project-binding') {
+            checks.push(detectPlaceholder(env.IRANTI_API_KEY)
+                ? {
+                    name: 'project api key',
+                    status: 'fail',
+                    detail: 'IRANTI_API_KEY is missing or placeholder in .env.iranti.',
+                }
+                : {
+                    name: 'project api key',
+                    status: 'pass',
+                    detail: 'IRANTI_API_KEY is present in .env.iranti.',
+                });
+        } else {
+            checks.push(detectPlaceholder(env.IRANTI_API_KEY)
+                ? {
+                    name: 'api key',
+                    status: 'warn',
+                    detail: 'IRANTI_API_KEY is missing or placeholder. Public health works, but protected routes and project bindings will fail.',
+                }
+                : {
+                    name: 'api key',
+                    status: 'pass',
+                    detail: 'IRANTI_API_KEY is present.',
+                });
+        }
+
+        const provider = env.LLM_PROVIDER ?? 'mock';
+        checks.push({
+            name: 'llm provider',
+            status: 'pass',
+            detail: `LLM_PROVIDER=${provider}`,
+        });
+        checks.push(detectProviderKey(provider, env));
+    }
+
+    const result = {
+        version,
+        envSource,
+        envFile,
+        status: summarizeStatus(checks),
+        checks,
+    };
+
+    if (json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+    }
+
+    console.log(`Iranti doctor`);
+    console.log(`  version : ${version}`);
+    console.log(`  status  : ${result.status.toUpperCase()}`);
+    if (envFile) console.log(`  env     : ${envFile}`);
+    console.log('');
+    for (const check of checks) {
+        const marker = check.status === 'pass' ? '[PASS]' : check.status === 'warn' ? '[WARN]' : '[FAIL]';
+        console.log(`${marker} ${check.name} — ${check.detail}`);
+    }
+
+    if (result.status !== 'pass') {
+        process.exitCode = 1;
+    }
 }
 
 async function installCommand(args: ParsedArgs): Promise<void> {
@@ -383,6 +606,9 @@ Instance-level:
 
 Project-level:
   iranti project init [path] --instance <name> [--api-key <token>] [--agent-id <id>] [--force]
+
+Diagnostics:
+  iranti doctor [--instance <name>] [--scope user|system] [--env <file>] [--json]
 `);
 }
 
@@ -421,6 +647,11 @@ async function main(): Promise<void> {
 
     if (args.command === 'project' && args.subcommand === 'init') {
         await projectInitCommand(args);
+        return;
+    }
+
+    if (args.command === 'doctor') {
+        await doctorCommand(args);
         return;
     }
 

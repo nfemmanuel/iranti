@@ -170,6 +170,7 @@ Scopes use `resource:action` format (for example `kb:read`, `memory:write`, `met
 
 Security quickstart: [`docs/guides/security-quickstart.md`](docs/guides/security-quickstart.md)
 Claude Code guide: [`docs/guides/claude-code.md`](docs/guides/claude-code.md)
+Codex guide: [`docs/guides/codex.md`](docs/guides/codex.md)
 Release guide: [`docs/guides/releasing.md`](docs/guides/releasing.md)
 
 ### Claude Code via MCP
@@ -184,6 +185,18 @@ node dist/scripts/iranti-mcp.js
 Use it with a project-local `.mcp.json`, and optionally add the Claude Code hook helper for `SessionStart` and `UserPromptSubmit`.
 
 Guide: [`docs/guides/claude-code.md`](docs/guides/claude-code.md)
+
+### Codex via MCP
+
+Codex uses a global MCP registry rather than a project-local `.mcp.json`. Register Iranti once, then launch Codex in this repo so `AGENTS.md` applies:
+
+```bash
+npm run build
+npm run codex:setup
+npm run codex:run
+```
+
+Guide: [`docs/guides/codex.md`](docs/guides/codex.md)
 
 ---
 
@@ -243,6 +256,17 @@ iranti project init . --instance local --agent-id chatbot_main
 This writes `.env.iranti` in the project with the correct `IRANTI_URL`, `IRANTI_API_KEY`, and default agent identity.
 
 For multi-agent systems, bind once per project and set unique agent IDs per worker (for example `planner_agent`, `research_agent`, `critic_agent`).
+
+### Installation Diagnostics
+
+Use the CLI doctor command before first run or before a release check:
+
+```bash
+iranti doctor
+iranti doctor --instance local
+```
+
+This validates the active env file, database URL, API key presence, provider selection, and provider-specific credentials.
 
 ---
 

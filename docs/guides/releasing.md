@@ -74,11 +74,16 @@ GitHub and PyPI trusted publishing guidance:
    - `package.json`
    - `clients/python/pyproject.toml`
    - `clients/python/iranti.py`
-2. Commit the version bump.
-3. Push to `main`.
-4. Create a GitHub Release with matching tag:
+2. Run local diagnostics and release checks:
+   - `iranti doctor`
+   - `npm run build`
+   - `npm run test:contracts`
+   - `npm pack`
+3. Commit the version bump.
+4. Push to `main`.
+5. Create a GitHub Release with matching tag:
    - example: `v0.1.1`
-5. The publish workflow will run automatically.
+6. The publish workflow will run automatically.
 
 ## Verification Only
 
