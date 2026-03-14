@@ -53,7 +53,7 @@
 - `configure instance` fails if the named instance does not exist.
 - `--provider-key` fails for providers that do not use remote API keys (`mock`, `ollama`).
 - `--interactive` requires a real terminal session and is not intended for piped/non-TTY automation.
-- Interactive secret entry is plain terminal input today; it is useful for local onboarding but not masked.
+- Interactive secret entry is masked in the terminal, but it is still intended for local onboarding rather than non-interactive automation.
 - `configure project` can create a new `.env.iranti`, but it requires either an existing instance or an explicit `--url` plus `--api-key`.
 - Existing project bindings retain their current agent identity and memory entity unless new values are provided.
 

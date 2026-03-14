@@ -4,6 +4,7 @@ import fsp from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import readline from 'readline/promises';
+import { Writable } from 'stream';
 import { initDb } from '../src/library/client';
 import { createOrRotateApiKey, listApiKeys, revokeApiKey } from '../src/security/apiKeys';
 
@@ -333,9 +334,19 @@ async function withPromptSession<T>(run: (session: PromptSession) => Promise<T>)
         throw new Error('--interactive requires a real terminal session.');
     }
 
+    let muted = false;
+    const maskedOutput = new Writable({
+        write(chunk, encoding, callback) {
+            if (!muted) {
+                process.stdout.write(chunk, encoding as BufferEncoding);
+            }
+            callback();
+        },
+    });
+
     const rl = readline.createInterface({
         input: process.stdin,
-        output: process.stdout,
+        output: maskedOutput,
     });
     const session: PromptSession = {
         line: async (prompt: string, currentValue?: string) => {
@@ -345,7 +356,11 @@ async function withPromptSession<T>(run: (session: PromptSession) => Promise<T>)
         },
         secret: async (prompt: string, currentValue?: string) => {
             const placeholder = currentValue ? `${redactSecret(currentValue)} (enter new value to replace)` : 'leave blank to skip';
-            const answer = await session.line(prompt, placeholder);
+            const suffix = placeholder ? ` [${placeholder}]` : '';
+            muted = true;
+            const answer = (await rl.question(`${prompt}${suffix}: `)).trim();
+            muted = false;
+            process.stdout.write('\n');
             if (!answer || answer === placeholder) return currentValue;
             if (answer === '__clear__') return undefined;
             return answer;

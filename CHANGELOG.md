@@ -6,16 +6,37 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
-- `iranti doctor` for env and credential diagnostics.
-- `iranti status` for runtime root, binding, and instance visibility.
-- `iranti upgrade` for canonical npm/Python upgrade guidance.
-- `npm run release:bump -- <version>` to update version-bearing files consistently.
-- Codex MCP setup flow and guide.
+- Claude Code MCP integration:
+  - `scripts/iranti-mcp.ts`
+  - `scripts/claude-code-memory-hook.ts`
+  - `docs/guides/claude-code.md`
+- Codex MCP integration and setup flow:
+  - `npm run codex:setup`
+  - `npm run codex:run`
+  - `docs/guides/codex.md`
+- New CLI diagnostics and runtime commands:
+  - `iranti doctor`
+  - `iranti status`
+  - `iranti upgrade`
+- New CLI onboarding and credential-management commands:
+  - `iranti configure instance`
+  - `iranti configure project`
+  - `iranti auth create-key|list-keys|revoke-key`
+- `npm run release:bump -- <version>` to update coordinated Node/Python/runtime version surfaces for a release.
 
 ### Changed
 
-- Release guide now includes exact command sequences for version bumping and tagging.
-- Iranti MCP server now resolves `.env` more reliably for Codex and other MCP clients.
+- Release guide now includes exact command sequences for version bumping, local validation, tagging, and GitHub release creation.
+- Iranti MCP startup now resolves repository `.env` files more reliably for Codex and other MCP clients.
+- Package publishing workflow is now wired for npm and PyPI release publication from GitHub Releases.
+- CLI onboarding docs now include machine/runtime status checks and upgrade guidance.
+- Interactive CLI configure flows now support terminal-based prompting with masked secret entry for API keys.
+
+### Fixed
+
+- Removed an accidental local tarball dependency (`file:iranti-0.1.0.tgz`) that broke GitHub Actions package installs.
+- Release-quality and contract-check workflows now pass again on `main`.
+- Short-lived API key commands now exit cleanly after registry operations instead of hanging on open DB handles.
 
 ## 0.1.0 - 2026-03-04
 
