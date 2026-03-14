@@ -1,4 +1,4 @@
-import { LLMProvider, LLMMessage, LLMResponse, CompleteOptions } from '../llm';
+import { LLMProvider, LLMMessage, LLMResponse, CompleteOptions, normalizeProviderApiError } from '../llm';
 
 interface OpenAIChatResponse {
     choices: Array<{
@@ -61,8 +61,7 @@ class OpenAIProvider implements LLMProvider {
 
     private async parseErrorResponse(response: Response): Promise<never> {
         const raw = await response.text();
-        const body = raw && raw.length > 0 ? ` - ${raw.slice(0, 600)}` : '';
-        throw new Error(`OpenAI API error: ${response.status} ${response.statusText}${body}`);
+        throw normalizeProviderApiError('openai', response.status, response.statusText, raw);
     }
 
     async complete(messages: LLMMessage[], options?: CompleteOptions): Promise<LLMResponse> {

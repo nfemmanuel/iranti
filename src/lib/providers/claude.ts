@@ -1,4 +1,4 @@
-import { LLMProvider, LLMMessage, LLMResponse, CompleteOptions } from '../llm';
+import { LLMProvider, LLMMessage, LLMResponse, CompleteOptions, normalizeProviderCaughtError } from '../llm';
 import Anthropic from '@anthropic-ai/sdk';
 
 class ClaudeProvider implements LLMProvider {
@@ -27,11 +27,16 @@ class ClaudeProvider implements LLMProvider {
             content: message.content,
         }));
 
-        const response = await this.client.messages.create({
-            model,
-            max_tokens: maxTokens,
-            messages: claudeMessages,
-        });
+        let response;
+        try {
+            response = await this.client.messages.create({
+                model,
+                max_tokens: maxTokens,
+                messages: claudeMessages,
+            });
+        } catch (error) {
+            throw normalizeProviderCaughtError('claude', error);
+        }
 
         const text = response.content
             .filter((part) => part.type === 'text')

@@ -123,9 +123,22 @@ Providers live in `src/lib/providers/`. Current implementations:
 - `mock.ts` — hardcoded responses for local dev and testing (default)
 - `gemini.ts` — Google Gemini via REST API
 - `claude.ts` — Anthropic Claude via Anthropic SDK API
+- `openai.ts` — OpenAI chat/responses API
+- `groq.ts` — Groq chat completions API
+- `mistral.ts` — Mistral chat completions API
+- `ollama.ts` — local Ollama runtime
 
 Switch provider by setting `LLM_PROVIDER` in `.env`. Swap is a one-line
 config change — no code changes required.
+
+Provider API-key management is exposed through the CLI:
+- `iranti list api-keys`
+- `iranti add api-key`
+- `iranti update api-key`
+- `iranti remove api-key`
+
+These commands update stored upstream provider credentials in the target
+instance env without requiring users to edit `.env` files manually.
 
 ---
 
@@ -218,7 +231,7 @@ iranti/
 │   ├── api-key-revoke.ts       — Revokes API key tokens
 │   ├── bump-version.ts         — Bumps coordinated Node/Python/runtime version surfaces for releases
 │   ├── check-release-version.ts — Verifies Node/Python/package tag version alignment before publish
-│   ├── iranti-cli.ts           — Machine install, configure/auth/status/diagnostics/upgrade, instance/project binding, MCP and Claude hook CLI
+│   ├── iranti-cli.ts           — Machine install, configure/auth/status/diagnostics/upgrade, instance/project binding, provider-key management, MCP and Claude hook CLI
 │   ├── iranti-mcp.ts           — Stdio MCP server for Claude Code, Codex, and other MCP clients
 │   ├── codex-setup.ts          — Registers Iranti MCP with Codex global config, preferring the installed CLI path
 │   ├── claude-code-memory-hook.ts — Claude Code hook helper for SessionStart/UserPromptSubmit
@@ -528,6 +541,29 @@ Rules:
 - Never edit past entries — add corrections as new entries
 - The Living Document is generated programmatically from `iranti_living_doc.js`
   — do not edit the `.docx` directly
+
+---
+
+## CLI Surface
+
+Installed-package user flows are expected to work through the CLI without
+manual env-file editing. Current CLI coverage includes:
+- `iranti setup`
+- `iranti install`
+- `iranti instance create|list|show`
+- `iranti run`
+- `iranti configure instance|project`
+- `iranti auth create-key|list-keys|revoke-key`
+- `iranti list api-keys`
+- `iranti add api-key`
+- `iranti update api-key`
+- `iranti remove api-key`
+- `iranti doctor`
+- `iranti status`
+- `iranti upgrade`
+- `iranti mcp`
+- `iranti claude-hook`
+- `iranti codex-setup`
 
 ---
 

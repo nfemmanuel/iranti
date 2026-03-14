@@ -36,6 +36,75 @@ export interface LLMProvider {
     complete(messages: LLMMessage[], options?: CompleteOptions): Promise<LLMResponse>;
 }
 
+function titleCaseProvider(provider: string): string {
+    return provider === 'openai'
+        ? 'OpenAI'
+        : provider === 'claude'
+            ? 'Claude'
+            : provider === 'gemini'
+                ? 'Gemini'
+                : provider === 'groq'
+                    ? 'Groq'
+                    : provider === 'mistral'
+                        ? 'Mistral'
+                        : provider === 'ollama'
+                            ? 'Ollama'
+                            : provider === 'mock'
+                                ? 'Mock'
+                                : provider;
+}
+
+export function normalizeProviderApiError(
+    provider: string,
+    status: number | undefined,
+    statusText: string | undefined,
+    rawBody?: string
+): Error {
+    const title = titleCaseProvider(provider);
+    const body = (rawBody ?? '').trim();
+    const haystack = `${statusText ?? ''} ${body}`.toLowerCase();
+
+    const quotaExhausted = haystack.includes('insufficient_quota')
+        || haystack.includes('quota')
+        || haystack.includes('billing')
+        || haystack.includes('credit')
+        || haystack.includes('resource has been exhausted')
+        || haystack.includes('exceeded your current quota');
+
+    if (quotaExhausted) {
+        return new Error(`${title} quota or billing limit reached. Add credits, update the API key, or switch providers.`);
+    }
+
+    if (status === 429 || haystack.includes('rate limit')) {
+        return new Error(`${title} rate limit reached. Retry later or reduce request volume.`);
+    }
+
+    const detail = body ? ` - ${body.slice(0, 600)}` : '';
+    return new Error(`${title} API error: ${status ?? 'unknown'} ${statusText ?? ''}${detail}`.trim());
+}
+
+export function normalizeProviderCaughtError(provider: string, error: unknown): Error {
+    if (error instanceof Error) {
+        const raw = error.message ?? '';
+        const haystack = raw.toLowerCase();
+        if (
+            haystack.includes('insufficient_quota')
+            || haystack.includes('quota')
+            || haystack.includes('billing')
+            || haystack.includes('credit')
+            || haystack.includes('resource has been exhausted')
+            || haystack.includes('exceeded your current quota')
+        ) {
+            return new Error(`${titleCaseProvider(provider)} quota or billing limit reached. Add credits, update the API key, or switch providers.`);
+        }
+        if (haystack.includes('rate limit') || haystack.includes('429')) {
+            return new Error(`${titleCaseProvider(provider)} rate limit reached. Retry later or reduce request volume.`);
+        }
+        return error;
+    }
+    return new Error(`${titleCaseProvider(provider)} provider request failed: ${String(error)}`);
+}
+
 // ─── Provider Registry ───────────────────────────────────────────────────────
 
 const PROVIDERS: Record<string, () => Promise<LLMProvider>> = {

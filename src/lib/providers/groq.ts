@@ -1,4 +1,4 @@
-import { LLMProvider, LLMMessage, LLMResponse, CompleteOptions } from '../llm';
+import { LLMProvider, LLMMessage, LLMResponse, CompleteOptions, normalizeProviderApiError } from '../llm';
 
 interface GroqResponse {
     choices: Array<{
@@ -39,7 +39,8 @@ class GroqProvider implements LLMProvider {
         });
 
         if (!response.ok) {
-            throw new Error(`Groq API error: ${response.status} ${response.statusText}`);
+            const raw = await response.text();
+            throw normalizeProviderApiError('groq', response.status, response.statusText, raw);
         }
 
         const data = await response.json() as GroqResponse;

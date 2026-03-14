@@ -220,8 +220,28 @@ npm install -g .
 ### 2) Initialize machine runtime root
 
 ```bash
+iranti setup
+
+# non-interactive automation
+iranti setup --defaults --db-url "postgresql://postgres:realpassword@localhost:5432/iranti_local"
+iranti setup --config ./iranti.setup.json
+
+# or, if you want the lower-level manual path:
 iranti install --scope user
 ```
+
+`iranti setup` is the recommended first-run path. It walks through:
+- shared vs isolated runtime setup
+- instance creation or update
+- database URL entry
+- provider API keys
+- Iranti client API key generation
+- one or more project bindings
+- optional Claude Code / Codex integration scaffolding
+
+For automation:
+- `iranti setup --defaults` uses sensible defaults plus environment/flag input, but still requires a real `DATABASE_URL`.
+- `iranti setup --config <file>` reads a JSON setup plan for repeatable bootstrap.
 
 Defaults:
 - Windows user scope: `%USERPROFILE%\\.iranti`
@@ -243,17 +263,25 @@ Finish onboarding or change settings later with:
 iranti configure instance local --provider openai --provider-key sk-... --db-url "postgresql://postgres:realpassword@localhost:5432/iranti_local"
 iranti configure instance local --interactive
 
+# Provider key shortcuts
+iranti list api-keys --instance local
+iranti add api-key openai --instance local
+iranti update api-key claude --instance local
+iranti remove api-key gemini --instance local
+
 # Create a registry-backed API key and sync it into the instance env
 iranti auth create-key --instance local --key-id local_admin --owner "Local Admin" --scopes "kb:read,kb:write,memory:read,memory:write,agents:read,agents:write" --write-instance
 ```
 
-You can rerun `iranti configure instance ...` later to rotate provider keys or replace the instance API token.
+`iranti add|update|remove api-key` updates the stored upstream provider credentials in the instance env without hand-editing `.env` files. `iranti list api-keys` shows which provider keys are currently stored. Supported remote providers are OpenAI, Claude, Gemini, Groq, and Mistral. `mock` and `ollama` do not require remote API keys, and Perplexity is not yet supported.
 
 ### 4) Run Iranti from that instance
 
 ```bash
 iranti run --instance local
 ```
+
+If a provider rejects requests because credits are exhausted, billing is disabled, or the account is quota-limited, Iranti now surfaces a direct message such as `OpenAI quota or billing limit reached. Add credits, update the API key, or switch providers.`
 
 ### 5) Bind any chatbot/app project to that instance
 

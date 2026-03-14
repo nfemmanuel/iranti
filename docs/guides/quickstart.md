@@ -104,6 +104,26 @@ npm install -g iranti
 npm install -g .
 ```
 
+### Recommended first-run setup
+
+```bash
+iranti setup
+
+# automation-friendly variants
+iranti setup --defaults --db-url "postgresql://postgres:realpassword@localhost:5432/iranti_local"
+iranti setup --config ./iranti.setup.json
+```
+
+`iranti setup` is the preferred onboarding path for new users. It keeps prompting until the runtime, instance, provider credentials, Iranti client key, and optional project bindings are configured. It also lets you choose between:
+- a shared machine-level runtime
+- an isolated runtime folder for one project or sandbox
+
+Automation notes:
+- `--defaults` skips prompts and uses defaults plus environment/flag input. It still requires a real `DATABASE_URL`.
+- `--config` accepts a JSON setup plan for repeatable bootstrap in CI or managed installs.
+
+Manual commands are still available below when you want full low-level control.
+
 ### Initialize runtime root + create an instance
 
 ```bash
@@ -118,6 +138,12 @@ Finish setup without hand-editing the env file:
 # Switch to a real provider later if needed
 iranti configure instance local --provider openai --provider-key sk-... --db-url "postgresql://postgres:realpassword@localhost:5432/iranti_local"
 iranti configure instance local --interactive
+
+# Manage provider keys directly
+iranti list api-keys --instance local
+iranti add api-key openai --instance local
+iranti update api-key claude --instance local
+iranti remove api-key gemini --instance local
 
 # Create a real Iranti API key and sync it into the instance env
 iranti auth create-key --instance local --key-id local_admin --owner "Local Admin" --scopes "kb:read,kb:write,memory:read,memory:write,agents:read,agents:write" --write-instance
@@ -137,7 +163,9 @@ iranti status
 iranti upgrade
 ```
 
-Use `iranti configure instance ...` later to rotate provider credentials or replace the instance API key reference.
+Use `iranti configure instance ...` when you want to edit several instance fields together. Use `iranti add|update|remove api-key` when you only want to manage upstream provider credentials without opening the env file manually. Supported remote providers are OpenAI, Claude, Gemini, Groq, and Mistral. `mock` and `ollama` do not require remote API keys, and Perplexity is not yet supported.
+
+If a remote provider runs out of credits or hits a billing quota, Iranti surfaces a direct provider warning instead of a generic failure. Example: `Claude quota or billing limit reached. Add credits, update the API key, or switch providers.`
 
 ### Bind a project
 

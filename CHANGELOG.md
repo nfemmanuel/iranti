@@ -2,7 +2,35 @@
 
 All notable changes to this project are documented in this file.
 
-## 0.1.3 - Unreleased
+## 0.1.4 - Unreleased
+
+### Added
+
+- Interactive `iranti setup` wizard for first-run onboarding:
+  - shared or isolated runtime selection
+  - instance creation/update
+  - provider-key capture
+  - usable Iranti client API key generation
+  - optional multi-project bindings
+  - optional Claude Code / Codex integration scaffolding
+- Installed CLI commands for upstream provider credential management:
+  - `iranti list api-keys`
+  - `iranti add api-key`
+  - `iranti update api-key`
+  - `iranti remove api-key`
+- Provider-key prompts now support hidden terminal entry and target either a named instance or a project-bound instance via `.env.iranti`.
+
+### Changed
+
+- CLI success, warning, and error output now uses colored status labels when running in a TTY.
+- Provider-key listings now show which remote providers are configured and which one is the current default.
+- CLI help and onboarding docs now point users to direct provider-key commands instead of manual env-file editing.
+
+### Fixed
+
+- OpenAI, Claude, Gemini, Groq, and Mistral provider failures now normalize quota, billing, credit-exhaustion, and rate-limit errors into direct operator-facing messages.
+
+## 0.1.3 - 2026-03-14
 
 ### Added
 

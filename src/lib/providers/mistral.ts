@@ -1,4 +1,4 @@
-import { LLMProvider, LLMMessage, LLMResponse, CompleteOptions } from '../llm';
+import { LLMProvider, LLMMessage, LLMResponse, CompleteOptions, normalizeProviderApiError } from '../llm';
 
 interface MistralResponse {
     choices: Array<{
@@ -39,7 +39,8 @@ class MistralProvider implements LLMProvider {
         });
 
         if (!response.ok) {
-            throw new Error(`Mistral API error: ${response.status} ${response.statusText}`);
+            const raw = await response.text();
+            throw normalizeProviderApiError('mistral', response.status, response.statusText, raw);
         }
 
         const data = await response.json() as MistralResponse;

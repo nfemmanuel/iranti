@@ -3,11 +3,11 @@ import fs from 'fs';
 import fsp from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import readline from 'readline/promises';
 import { Writable } from 'stream';
 import { initDb } from '../src/library/client';
-import { createOrRotateApiKey, listApiKeys, revokeApiKey } from '../src/security/apiKeys';
+import { createOrRotateApiKey, formatApiKeyToken, generateApiKeySecret, listApiKeys, revokeApiKey } from '../src/security/apiKeys';
 
 type Scope = 'user' | 'system';
 
@@ -46,6 +46,15 @@ type StatusRow = {
     value: string;
 };
 
+type ProviderKeyTarget = {
+    instanceName?: string;
+    envFile: string;
+    env: Record<string, string>;
+    source: 'instance' | 'project-binding';
+    bindingFile?: string;
+    projectPath?: string;
+};
+
 const PROVIDER_ENV_KEYS: Record<string, string | null> = {
     mock: null,
     ollama: null,
@@ -55,6 +64,50 @@ const PROVIDER_ENV_KEYS: Record<string, string | null> = {
     groq: 'GROQ_API_KEY',
     mistral: 'MISTRAL_API_KEY',
 };
+
+const REMOTE_PROVIDER_ORDER = ['openai', 'claude', 'gemini', 'groq', 'mistral'] as const;
+const LOCAL_PROVIDER_ORDER = ['mock', 'ollama'] as const;
+
+const ANSI = {
+    reset: '\x1b[0m',
+    bold: '\x1b[1m',
+    dim: '\x1b[2m',
+    red: '\x1b[31m',
+    green: '\x1b[32m',
+    yellow: '\x1b[33m',
+    blue: '\x1b[34m',
+    cyan: '\x1b[36m',
+    gray: '\x1b[90m',
+} as const;
+
+function useColor(): boolean {
+    return Boolean(process.stdout.isTTY && !process.env.NO_COLOR);
+}
+
+function paint(text: string, color: keyof typeof ANSI): string {
+    if (!useColor()) return text;
+    return `${ANSI[color]}${text}${ANSI.reset}`;
+}
+
+function bold(text: string): string {
+    return useColor() ? `${ANSI.bold}${text}${ANSI.reset}` : text;
+}
+
+function okLabel(text = 'SUCCESS'): string {
+    return paint(`[${text}]`, 'green');
+}
+
+function warnLabel(text = 'WARN'): string {
+    return paint(`[${text}]`, 'yellow');
+}
+
+function failLabel(text = 'FAIL'): string {
+    return paint(`[${text}]`, 'red');
+}
+
+function infoLabel(text = 'INFO'): string {
+    return paint(`[${text}]`, 'cyan');
+}
 
 function parseArgs(argv: string[]): ParsedArgs {
     const flags = new Map<string, string | boolean>();
@@ -351,6 +404,101 @@ async function loadInstanceEnv(root: string, name: string): Promise<{ instanceDi
     };
 }
 
+async function resolveProviderKeyTarget(args: ParsedArgs): Promise<ProviderKeyTarget> {
+    const scope = normalizeScope(getFlag(args, 'scope'));
+    const explicitInstance = getFlag(args, 'instance');
+    if (explicitInstance) {
+        const root = resolveInstallRoot(args, scope);
+        const loaded = await loadInstanceEnv(root, explicitInstance);
+        return {
+            instanceName: explicitInstance,
+            envFile: loaded.envFile,
+            env: loaded.env,
+            source: 'instance',
+        };
+    }
+
+    const projectPath = path.resolve(getFlag(args, 'project') ?? process.cwd());
+    const bindingFile = path.join(projectPath, '.env.iranti');
+    if (!fs.existsSync(bindingFile)) {
+        throw new Error('No --instance provided and no .env.iranti found in the current project. Run from a bound project or pass --instance <name>.');
+    }
+
+    const binding = await readEnvFile(bindingFile);
+    const envFile = binding.IRANTI_INSTANCE_ENV?.trim();
+    if (!envFile) {
+        throw new Error(`Project binding is missing IRANTI_INSTANCE_ENV: ${bindingFile}`);
+    }
+    if (!fs.existsSync(envFile)) {
+        throw new Error(`Instance env referenced by project binding was not found: ${envFile}`);
+    }
+
+    return {
+        instanceName: binding.IRANTI_INSTANCE?.trim() || undefined,
+        envFile,
+        env: await readEnvFile(envFile),
+        source: 'project-binding',
+        bindingFile,
+        projectPath,
+    };
+}
+
+function providerDisplayName(provider: string): string {
+    return provider === 'claude'
+        ? 'Claude'
+        : provider === 'gemini'
+            ? 'Gemini'
+            : provider === 'groq'
+                ? 'Groq'
+                : provider === 'mistral'
+                    ? 'Mistral'
+                    : provider === 'openai'
+                        ? 'OpenAI'
+                        : provider === 'ollama'
+                            ? 'Ollama'
+                            : provider === 'mock'
+                                ? 'Mock'
+                                : provider;
+}
+
+function listProviderChoices(currentProvider: string | undefined, env: Record<string, string>): void {
+    console.log(infoLabel('INFO'), 'Available provider API keys:');
+    for (const provider of REMOTE_PROVIDER_ORDER) {
+        const envKey = providerKeyEnv(provider)!;
+        const stored = detectPlaceholder(env[envKey]) ? paint('missing', 'gray') : paint('stored', 'green');
+        const current = currentProvider === provider ? paint(' current', 'cyan') : '';
+        console.log(`  - ${provider.padEnd(8)} ${stored}${current}`);
+    }
+    for (const provider of LOCAL_PROVIDER_ORDER) {
+        const current = currentProvider === provider ? paint(' current', 'cyan') : '';
+        console.log(`  - ${provider.padEnd(8)} ${paint('no remote key required', 'gray')}${current}`);
+    }
+    console.log(`  - perplexity ${paint('not yet supported', 'gray')}`);
+}
+
+async function chooseProvider(args: ParsedArgs, target: ProviderKeyTarget, promptLabel: string): Promise<string> {
+    const currentProvider = normalizeProvider(target.env.LLM_PROVIDER ?? 'mock');
+    const provided = normalizeProvider(args.positionals[0] ?? getFlag(args, 'provider'));
+    if (provided) {
+        return provided;
+    }
+
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+        throw new Error(`Missing provider. Supported providers: ${REMOTE_PROVIDER_ORDER.join(', ')}.`);
+    }
+
+    let selected: string | undefined;
+    await withPromptSession(async (prompt) => {
+        listProviderChoices(currentProvider, target.env);
+        selected = normalizeProvider(await prompt.line(promptLabel, currentProvider ?? 'openai'));
+    });
+
+    if (!selected) {
+        throw new Error('Provider selection is required.');
+    }
+    return selected;
+}
+
 async function ensureProjectGitignore(projectPath: string): Promise<void> {
     const gitignorePath = path.join(projectPath, '.gitignore');
     const requiredLines = ['.env.iranti', '.env.iranti.local'];
@@ -380,6 +528,43 @@ async function writeProjectBinding(projectPath: string, updates: Record<string, 
 type PromptSession = {
     line: (prompt: string, currentValue?: string) => Promise<string | undefined>;
     secret: (prompt: string, currentValue?: string) => Promise<string | undefined>;
+};
+
+type SetupProjectBinding = {
+    projectPath: string;
+    envFile: string;
+    agentId: string;
+};
+
+type SetupProjectPlan = {
+    path: string;
+    agentId: string;
+    memoryEntity: string;
+    claudeCode?: boolean;
+};
+
+type SetupExecutionPlan = {
+    mode: 'shared' | 'isolated';
+    scope: Scope;
+    root: string;
+    instanceName: string;
+    port: number;
+    databaseUrl: string;
+    provider: string;
+    providerKeys: Record<string, string>;
+    apiKey: string;
+    projects: SetupProjectPlan[];
+    codexAgent?: string;
+    codex?: boolean;
+};
+
+type SetupExecutionResult = {
+    root: string;
+    scope: Scope;
+    instanceName: string;
+    instanceEnvFile: string;
+    port: number;
+    bindings: SetupProjectBinding[];
 };
 
 async function withPromptSession<T>(run: (session: PromptSession) => Promise<T>): Promise<T> {
@@ -439,6 +624,330 @@ function detectPlaceholder(value: string | undefined): boolean {
         || normalized === 'changeme';
 }
 
+function sanitizeIdentifier(input: string, fallback: string): string {
+    const value = input.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
+    return value || fallback;
+}
+
+function projectAgentDefault(projectPath: string): string {
+    return `${sanitizeIdentifier(path.basename(projectPath), 'project')}_main`;
+}
+
+function isSupportedProvider(provider: string | undefined): boolean {
+    const normalized = normalizeProvider(provider);
+    if (!normalized) return false;
+    return Object.prototype.hasOwnProperty.call(PROVIDER_ENV_KEYS, normalized);
+}
+
+async function promptYesNo(session: PromptSession, prompt: string, defaultValue: boolean): Promise<boolean> {
+    const defaultToken = defaultValue ? 'Y/n' : 'y/N';
+    while (true) {
+        const answer = (await session.line(`${prompt} (${defaultToken})`, '') ?? '').trim().toLowerCase();
+        if (!answer) return defaultValue;
+        if (['y', 'yes'].includes(answer)) return true;
+        if (['n', 'no'].includes(answer)) return false;
+        console.log(`${warnLabel()} Please answer yes or no.`);
+    }
+}
+
+async function promptNonEmpty(session: PromptSession, prompt: string, currentValue?: string): Promise<string> {
+    while (true) {
+        const value = (await session.line(prompt, currentValue) ?? '').trim();
+        if (value.length > 0) return value;
+        console.log(`${warnLabel()} ${prompt} is required.`);
+    }
+}
+
+async function promptRequiredSecret(session: PromptSession, prompt: string, currentValue?: string): Promise<string> {
+    while (true) {
+        const value = (await session.secret(prompt, currentValue) ?? '').trim();
+        if (value.length > 0 && !detectPlaceholder(value)) return value;
+        console.log(`${warnLabel()} A real secret is required.`);
+    }
+}
+
+function makeLegacyInstanceApiKey(instanceName: string): string {
+    const keyId = sanitizeIdentifier(`${instanceName}_${os.userInfo().username}`, 'iranti');
+    return formatApiKeyToken(keyId, generateApiKeySecret());
+}
+
+async function ensureRuntimeInstalled(root: string, scope: Scope): Promise<void> {
+    await ensureDir(root);
+    await ensureDir(path.join(root, 'instances'));
+    await ensureDir(path.join(root, 'logs'));
+    await ensureDir(path.join(root, 'tmp'));
+
+    const meta: InstallMeta = {
+        version: getPackageVersion(),
+        scope,
+        root,
+        installedAt: new Date().toISOString(),
+    };
+    await writeJson(path.join(root, 'install.json'), meta);
+}
+
+async function ensureInstanceConfigured(
+    root: string,
+    name: string,
+    config: {
+        port: number;
+        dbUrl: string;
+        provider: string;
+        providerKeys: Record<string, string>;
+        apiKey: string;
+    }
+): Promise<{ envFile: string; instanceDir: string; created: boolean }> {
+    const { instanceDir, envFile, metaFile } = instancePaths(root, name);
+    const created = !fs.existsSync(envFile);
+
+    if (created) {
+        await ensureDir(instanceDir);
+        await ensureDir(path.join(instanceDir, 'logs'));
+        await ensureDir(path.join(instanceDir, 'escalation', 'active'));
+        await ensureDir(path.join(instanceDir, 'escalation', 'resolved'));
+        await ensureDir(path.join(instanceDir, 'escalation', 'archived'));
+        await writeText(envFile, makeInstanceEnv(name, config.port, config.dbUrl, config.apiKey, instanceDir));
+        const meta: InstanceMeta = {
+            name,
+            createdAt: new Date().toISOString(),
+            port: config.port,
+            envFile,
+            instanceDir,
+        };
+        await writeJson(metaFile, meta);
+    }
+
+    await upsertEnvFile(envFile, {
+        IRANTI_PORT: String(config.port),
+        DATABASE_URL: config.dbUrl,
+        IRANTI_API_KEY: config.apiKey,
+        LLM_PROVIDER: config.provider,
+        ...config.providerKeys,
+    });
+
+    return { envFile, instanceDir, created };
+}
+
+async function writeClaudeCodeProjectFiles(projectPath: string): Promise<void> {
+    const mcpFile = path.join(projectPath, '.mcp.json');
+    if (!fs.existsSync(mcpFile)) {
+        await writeText(mcpFile, `${JSON.stringify({
+            mcpServers: {
+                iranti: {
+                    command: 'iranti',
+                    args: ['mcp'],
+                },
+            },
+        }, null, 2)}\n`);
+    }
+
+    const claudeDir = path.join(projectPath, '.claude');
+    await ensureDir(claudeDir);
+    const settingsFile = path.join(claudeDir, 'settings.local.json');
+    if (!fs.existsSync(settingsFile)) {
+        await writeText(settingsFile, `${JSON.stringify({
+            hooks: {
+                SessionStart: [
+                    {
+                        command: 'iranti',
+                        args: ['claude-hook', '--event', 'SessionStart'],
+                    },
+                ],
+                UserPromptSubmit: [
+                    {
+                        command: 'iranti',
+                        args: ['claude-hook', '--event', 'UserPromptSubmit'],
+                    },
+                ],
+            },
+        }, null, 2)}\n`);
+    }
+}
+
+function hasCodexInstalled(): boolean {
+    try {
+        const proc = process.platform === 'win32'
+            ? spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/c', 'codex --version'], { stdio: 'ignore' })
+            : spawnSync('codex', ['--version'], { stdio: 'ignore' });
+        return proc.status === 0;
+    } catch {
+        return false;
+    }
+}
+
+async function executeSetupPlan(plan: SetupExecutionPlan): Promise<SetupExecutionResult> {
+    await ensureRuntimeInstalled(plan.root, plan.scope);
+
+    const configured = await ensureInstanceConfigured(plan.root, plan.instanceName, {
+        port: plan.port,
+        dbUrl: plan.databaseUrl,
+        provider: plan.provider,
+        providerKeys: plan.providerKeys,
+        apiKey: plan.apiKey,
+    });
+
+    const bindings: SetupProjectBinding[] = [];
+    for (const project of plan.projects) {
+        const projectPath = path.resolve(project.path);
+        const written = await writeProjectBinding(projectPath, {
+            IRANTI_URL: `http://localhost:${plan.port}`,
+            IRANTI_API_KEY: plan.apiKey,
+            IRANTI_AGENT_ID: project.agentId,
+            IRANTI_MEMORY_ENTITY: project.memoryEntity,
+            IRANTI_INSTANCE: plan.instanceName,
+            IRANTI_INSTANCE_ENV: configured.envFile,
+        });
+        bindings.push({ projectPath, envFile: written, agentId: project.agentId });
+        if (project.claudeCode) {
+            await writeClaudeCodeProjectFiles(projectPath);
+        }
+    }
+
+    if (plan.codex && bindings.length > 0) {
+        if (!hasCodexInstalled()) {
+            throw new Error('Codex is not installed, so codex registration could not be completed.');
+        }
+        await handoffToScript('codex-setup', [
+            '--agent',
+            plan.codexAgent ?? bindings[0].agentId,
+            '--project-env',
+            bindings[0].envFile,
+        ]);
+    }
+
+    return {
+        root: plan.root,
+        scope: plan.scope,
+        instanceName: plan.instanceName,
+        instanceEnvFile: configured.envFile,
+        port: plan.port,
+        bindings,
+    };
+}
+
+function parseSetupConfig(filePath: string): SetupExecutionPlan {
+    const resolved = path.resolve(filePath);
+    if (!fs.existsSync(resolved)) {
+        throw new Error(`Setup config file not found: ${resolved}`);
+    }
+    const raw = JSON.parse(fs.readFileSync(resolved, 'utf-8')) as any;
+    const mode = raw?.mode === 'isolated' ? 'isolated' : 'shared';
+    const scope: Scope = raw?.scope === 'system' ? 'system' : 'user';
+    const root = path.resolve(String(raw?.root ?? defaultInstallRoot(scope)));
+    const instanceName = sanitizeIdentifier(String(raw?.instanceName ?? raw?.instance ?? 'local'), 'local');
+    const port = Number.parseInt(String(raw?.port ?? 3001), 10);
+    if (!Number.isFinite(port) || port <= 0) {
+        throw new Error(`Invalid setup config port: ${raw?.port}`);
+    }
+    const databaseUrl = String(raw?.databaseUrl ?? raw?.dbUrl ?? '').trim();
+    if (!databaseUrl || detectPlaceholder(databaseUrl)) {
+        throw new Error('Setup config requires a non-placeholder databaseUrl.');
+    }
+    const provider = normalizeProvider(String(raw?.provider ?? 'mock')) ?? 'mock';
+    if (!isSupportedProvider(provider)) {
+        throw new Error(`Unsupported provider in setup config: ${provider}`);
+    }
+
+    const providerKeysInput = raw?.providerKeys && typeof raw.providerKeys === 'object' ? raw.providerKeys : {};
+    const providerKeys: Record<string, string> = {};
+    for (const [providerName, value] of Object.entries(providerKeysInput)) {
+        const normalized = normalizeProvider(providerName);
+        const envKey = providerKeyEnv(normalized);
+        if (!normalized || !envKey) continue;
+        const secret = String(value ?? '').trim();
+        if (!secret || detectPlaceholder(secret)) continue;
+        providerKeys[envKey] = secret;
+    }
+
+    const apiKeyRaw = String(raw?.apiKey ?? '').trim();
+    const apiKey = apiKeyRaw && !detectPlaceholder(apiKeyRaw)
+        ? apiKeyRaw
+        : makeLegacyInstanceApiKey(instanceName);
+
+    const projectsInput = Array.isArray(raw?.projects) ? raw.projects : [];
+    const projects: SetupProjectPlan[] = projectsInput.map((item: any) => ({
+        path: path.resolve(String(item?.path ?? process.cwd())),
+        agentId: sanitizeIdentifier(String(item?.agentId ?? projectAgentDefault(String(item?.path ?? process.cwd()))), 'project_main'),
+        memoryEntity: String(item?.memoryEntity ?? 'user/main'),
+        claudeCode: item?.claudeCode !== false,
+    }));
+
+    return {
+        mode,
+        scope,
+        root,
+        instanceName,
+        port,
+        databaseUrl,
+        provider,
+        providerKeys,
+        apiKey,
+        projects,
+        codex: Boolean(raw?.codex),
+        codexAgent: raw?.codexAgent ? sanitizeIdentifier(String(raw.codexAgent), 'codex_code') : undefined,
+    };
+}
+
+function defaultsSetupPlan(args: ParsedArgs): SetupExecutionPlan {
+    const scope = normalizeScope(getFlag(args, 'scope'));
+    const root = path.resolve(getFlag(args, 'root') ?? resolveInstallRoot(args, scope));
+    const instanceName = sanitizeIdentifier(getFlag(args, 'instance') ?? 'local', 'local');
+    const port = Number.parseInt(getFlag(args, 'port') ?? '3001', 10);
+    if (!Number.isFinite(port) || port <= 0) {
+        throw new Error(`Invalid --port '${getFlag(args, 'port')}'.`);
+    }
+
+    const databaseUrl = (getFlag(args, 'db-url') ?? process.env.DATABASE_URL ?? '').trim();
+    if (!databaseUrl || detectPlaceholder(databaseUrl)) {
+        throw new Error('--defaults requires a real DATABASE_URL via --db-url or the DATABASE_URL environment variable.');
+    }
+
+    const provider = normalizeProvider(getFlag(args, 'provider') ?? process.env.LLM_PROVIDER ?? 'mock') ?? 'mock';
+    if (!isSupportedProvider(provider)) {
+        throw new Error(`Unsupported provider '${provider}' for --defaults.`);
+    }
+
+    const providerKeys: Record<string, string> = {};
+    for (const candidate of REMOTE_PROVIDER_ORDER) {
+        const envKey = providerKeyEnv(candidate);
+        if (!envKey) continue;
+        const secret = (process.env[envKey] ?? '').trim();
+        if (secret && !detectPlaceholder(secret)) {
+            providerKeys[envKey] = secret;
+        }
+    }
+
+    const apiKeyRaw = (getFlag(args, 'api-key') ?? process.env.IRANTI_API_KEY ?? '').trim();
+    const apiKey = apiKeyRaw && !detectPlaceholder(apiKeyRaw)
+        ? apiKeyRaw
+        : makeLegacyInstanceApiKey(instanceName);
+
+    const projectsFlag = (getFlag(args, 'projects') ?? '').trim();
+    const projects = projectsFlag
+        ? projectsFlag.split(',').map((item) => item.trim()).filter(Boolean).map((projectPath) => ({
+            path: path.resolve(projectPath),
+            agentId: projectAgentDefault(projectPath),
+            memoryEntity: 'user/main',
+            claudeCode: hasFlag(args, 'claude-code'),
+        }))
+        : [];
+
+    return {
+        mode: 'shared',
+        scope,
+        root,
+        instanceName,
+        port,
+        databaseUrl,
+        provider,
+        providerKeys,
+        apiKey,
+        projects,
+        codex: hasFlag(args, 'codex'),
+        codexAgent: sanitizeIdentifier(getFlag(args, 'codex-agent') ?? 'codex_code', 'codex_code'),
+    };
+}
+
 function detectProviderKey(provider: string | undefined, env: Record<string, string>): DoctorCheck {
     const normalized = (provider ?? 'mock').trim().toLowerCase();
     if (normalized === 'mock' || normalized === 'ollama') {
@@ -483,6 +992,405 @@ function summarizeStatus(checks: DoctorCheck[]): DoctorStatus {
     if (checks.some((check) => check.status === 'fail')) return 'fail';
     if (checks.some((check) => check.status === 'warn')) return 'warn';
     return 'pass';
+}
+
+async function listProviderKeysCommand(args: ParsedArgs): Promise<void> {
+    const target = await resolveProviderKeyTarget(args);
+    const currentProvider = normalizeProvider(target.env.LLM_PROVIDER ?? 'mock');
+
+    if (hasFlag(args, 'json')) {
+        const providers = [
+            ...REMOTE_PROVIDER_ORDER.map((provider) => {
+                const envKey = providerKeyEnv(provider)!;
+                return {
+                    provider,
+                    envKey,
+                    stored: !detectPlaceholder(target.env[envKey]),
+                    current: currentProvider === provider,
+                    supported: true,
+                };
+            }),
+            ...LOCAL_PROVIDER_ORDER.map((provider) => ({
+                provider,
+                envKey: null,
+                stored: true,
+                current: currentProvider === provider,
+                supported: true,
+            })),
+            {
+                provider: 'perplexity',
+                envKey: 'PERPLEXITY_API_KEY',
+                stored: false,
+                current: false,
+                supported: false,
+            },
+        ];
+        console.log(JSON.stringify({
+            target: {
+                instanceName: target.instanceName ?? null,
+                envFile: target.envFile,
+                source: target.source,
+                bindingFile: target.bindingFile ?? null,
+                projectPath: target.projectPath ?? null,
+                currentProvider: currentProvider ?? null,
+            },
+            providers,
+        }, null, 2));
+        return;
+    }
+
+    console.log(bold('Iranti provider keys'));
+    console.log(`  target    ${target.envFile}`);
+    if (target.instanceName) console.log(`  instance  ${target.instanceName}`);
+    if (target.bindingFile) console.log(`  binding   ${target.bindingFile}`);
+    console.log('');
+    listProviderChoices(currentProvider, target.env);
+}
+
+async function upsertProviderKeyCommand(args: ParsedArgs, mode: 'add' | 'update'): Promise<void> {
+    const target = await resolveProviderKeyTarget(args);
+    const provider = await chooseProvider(args, target, 'Which provider would you like to store a key for?');
+    const envKey = providerKeyEnv(provider);
+    if (!envKey) {
+        throw new Error(`Provider '${provider}' does not use a remote API key.`);
+    }
+
+    const existing = target.env[envKey];
+    let key = getFlag(args, 'key') ?? getFlag(args, 'provider-key');
+    const setDefault = hasFlag(args, 'set-default');
+
+    if (!key) {
+        if (!process.stdin.isTTY || !process.stdout.isTTY) {
+            throw new Error(`Missing --key for provider '${provider}'.`);
+        }
+        await withPromptSession(async (prompt) => {
+            key = await prompt.secret(`Enter your ${providerDisplayName(provider)} API key`, existing);
+        });
+    }
+
+    if (!key || detectPlaceholder(key)) {
+        throw new Error(`A valid ${providerDisplayName(provider)} API key is required.`);
+    }
+
+    const updates: Record<string, string | undefined> = {
+        [envKey]: key,
+    };
+    if (setDefault || !target.env.LLM_PROVIDER || target.env.LLM_PROVIDER === 'mock') {
+        updates.LLM_PROVIDER = provider;
+    }
+
+    await upsertEnvFile(target.envFile, updates);
+
+    if (hasFlag(args, 'json')) {
+        console.log(JSON.stringify({
+            action: mode,
+            provider,
+            envKey,
+            envFile: target.envFile,
+            instance: target.instanceName ?? null,
+            wroteDefaultProvider: Boolean(updates.LLM_PROVIDER),
+        }, null, 2));
+        return;
+    }
+
+    console.log(okLabel(), `${providerDisplayName(provider)} API key ${mode === 'add' ? 'stored' : 'updated'}.`);
+    console.log(`  provider  ${provider}`);
+    console.log(`  env key   ${envKey}`);
+    console.log(`  value     ${redactSecret(key)}`);
+    console.log(`  target    ${target.envFile}`);
+    if (updates.LLM_PROVIDER) {
+        console.log(`  default   ${paint(provider, 'cyan')}`);
+    }
+}
+
+async function removeProviderKeyCommand(args: ParsedArgs): Promise<void> {
+    const target = await resolveProviderKeyTarget(args);
+    const provider = await chooseProvider(args, target, 'Which provider key would you like to remove?');
+    const envKey = providerKeyEnv(provider);
+    if (!envKey) {
+        throw new Error(`Provider '${provider}' does not use a remote API key.`);
+    }
+    if (detectPlaceholder(target.env[envKey])) {
+        if (hasFlag(args, 'json')) {
+            console.log(JSON.stringify({
+                action: 'remove',
+                provider,
+                envKey,
+                removed: false,
+                reason: 'not_set',
+                envFile: target.envFile,
+            }, null, 2));
+            return;
+        }
+        console.log(warnLabel(), `No stored ${providerDisplayName(provider)} API key was found in ${target.envFile}.`);
+        return;
+    }
+
+    await upsertEnvFile(target.envFile, {
+        [envKey]: undefined,
+    });
+
+    if (hasFlag(args, 'json')) {
+        console.log(JSON.stringify({
+            action: 'remove',
+            provider,
+            envKey,
+            removed: true,
+            envFile: target.envFile,
+        }, null, 2));
+        return;
+    }
+
+    console.log(okLabel(), `${providerDisplayName(provider)} API key removed.`);
+    console.log(`  provider  ${provider}`);
+    console.log(`  env key   ${envKey}`);
+    console.log(`  target    ${target.envFile}`);
+}
+
+async function setupCommand(args: ParsedArgs): Promise<void> {
+    const configPath = getFlag(args, 'config');
+    const useDefaults = hasFlag(args, 'defaults');
+
+    if (configPath && useDefaults) {
+        throw new Error('Use either --config <file> or --defaults, not both.');
+    }
+
+    if (configPath || useDefaults) {
+        const plan = configPath ? parseSetupConfig(configPath) : defaultsSetupPlan(args);
+        const result = await executeSetupPlan(plan);
+
+        console.log(bold('Setup complete'));
+        console.log(`  runtime root   ${result.root}`);
+        console.log(`  scope          ${result.scope}`);
+        console.log(`  instance       ${result.instanceName}`);
+        console.log(`  instance env   ${result.instanceEnvFile}`);
+        console.log(`  instance url   http://localhost:${result.port}`);
+        if (result.bindings.length === 0) {
+            console.log(`  projects       ${paint('none bound yet', 'yellow')}`);
+        } else {
+            console.log('  projects');
+            for (const binding of result.bindings) {
+                console.log(`    - ${binding.projectPath} (${binding.agentId})`);
+            }
+        }
+        console.log('');
+        console.log(`${infoLabel()} Next steps:`);
+        console.log(`  1. iranti run --instance ${result.instanceName} --root "${result.root}"`);
+        console.log(`  2. iranti doctor --instance ${result.instanceName} --root "${result.root}"`);
+        return;
+    }
+
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+        throw new Error('iranti setup requires a real terminal session unless you provide --config <file> or --defaults.');
+    }
+
+    const explicitScope = getFlag(args, 'scope');
+    const explicitRoot = getFlag(args, 'root');
+
+    console.log(bold('Iranti setup'));
+    console.log('This wizard will install a runtime, create or update an instance, configure provider keys, create a usable Iranti API key, and optionally bind one or more project folders.');
+    console.log('');
+
+    let result: SetupExecutionResult | null = null;
+
+    await withPromptSession(async (prompt) => {
+        let setupMode: 'shared' | 'isolated' = 'shared';
+        while (true) {
+            const chosen = (await prompt.line('Setup mode: shared runtime or isolated runtime folder', 'shared') ?? 'shared').trim().toLowerCase();
+            if (chosen === 'shared' || chosen === 'isolated') {
+                setupMode = chosen;
+                break;
+            }
+            console.log(`${warnLabel()} Choose either "shared" or "isolated".`);
+        }
+
+        let finalScope: Scope = 'user';
+        let finalRoot = '';
+        if (setupMode === 'isolated') {
+            finalRoot = path.resolve(await promptNonEmpty(
+                prompt,
+                'Runtime root folder',
+                explicitRoot ?? path.join(process.cwd(), '.iranti-runtime')
+            ));
+            finalScope = 'user';
+        } else {
+            while (true) {
+                const chosenScope = (await prompt.line('Install scope', explicitScope ?? 'user') ?? 'user').trim().toLowerCase();
+                if (chosenScope === 'user' || chosenScope === 'system') {
+                    finalScope = chosenScope;
+                    break;
+                }
+                console.log(`${warnLabel()} Install scope must be user or system.`);
+            }
+            finalRoot = explicitRoot ? path.resolve(explicitRoot) : resolveInstallRoot(args, finalScope);
+        }
+
+        await ensureRuntimeInstalled(finalRoot, finalScope);
+        console.log(`${okLabel()} Runtime ready at ${finalRoot}`);
+
+        const instanceName = sanitizeIdentifier(
+            await promptNonEmpty(prompt, 'Instance name', setupMode === 'isolated' ? sanitizeIdentifier(path.basename(process.cwd()), 'local') : 'local'),
+            'local'
+        );
+
+        const existingInstance = fs.existsSync(instancePaths(finalRoot, instanceName).envFile)
+            ? await loadInstanceEnv(finalRoot, instanceName)
+            : null;
+
+        if (existingInstance) {
+            console.log(`${infoLabel()} Updating existing instance '${instanceName}'.`);
+        } else {
+            console.log(`${infoLabel()} Creating new instance '${instanceName}'.`);
+        }
+
+        let port = 3001;
+        while (true) {
+            const raw = await promptNonEmpty(prompt, 'Port', existingInstance?.env.IRANTI_PORT ?? '3001');
+            const parsed = Number.parseInt(raw, 10);
+            if (Number.isFinite(parsed) && parsed > 0) {
+                port = parsed;
+                break;
+            }
+            console.log(`${warnLabel()} Port must be a positive integer.`);
+        }
+
+        let dbUrl = '';
+        while (true) {
+            dbUrl = await promptNonEmpty(
+                prompt,
+                'DATABASE_URL',
+                existingInstance?.env.DATABASE_URL ?? `postgresql://postgres:yourpassword@localhost:5432/iranti_${instanceName}`
+            );
+            if (!detectPlaceholder(dbUrl)) break;
+            console.log(`${warnLabel()} DATABASE_URL still looks like a placeholder. Enter a real connection string before finishing setup.`);
+        }
+
+        let provider = normalizeProvider(existingInstance?.env.LLM_PROVIDER ?? 'openai') ?? 'openai';
+        while (true) {
+            listProviderChoices(provider, existingInstance?.env ?? {});
+            const chosen = normalizeProvider(await promptNonEmpty(prompt, 'Default LLM provider', provider));
+            if (chosen && isSupportedProvider(chosen)) {
+                provider = chosen;
+                break;
+            }
+            console.log(`${warnLabel()} Unsupported provider. Choose one of: ${Object.keys(PROVIDER_ENV_KEYS).join(', ')}.`);
+        }
+
+        const providerKeys: Record<string, string> = {};
+        const seedEnv = existingInstance?.env ?? {};
+        const maybeCollectProviderKey = async (providerName: string): Promise<void> => {
+            const envKey = providerKeyEnv(providerName);
+            if (!envKey) return;
+            const secret = await promptRequiredSecret(prompt, `Enter your ${providerDisplayName(providerName)} API key`, seedEnv[envKey] ?? providerKeys[envKey]);
+            providerKeys[envKey] = secret;
+        };
+
+        if (providerKeyEnv(provider)) {
+            await maybeCollectProviderKey(provider);
+        }
+
+        while (await promptYesNo(prompt, 'Add another provider API key now?', false)) {
+            let extraProvider = provider;
+            while (true) {
+                listProviderChoices(provider, { ...seedEnv, ...providerKeys });
+                const chosen = normalizeProvider(await promptNonEmpty(prompt, 'Provider to add', 'claude'));
+                if (!chosen) {
+                    console.log(`${warnLabel()} Provider is required.`);
+                    continue;
+                }
+                if (chosen === 'perplexity') {
+                    console.log(`${warnLabel()} Perplexity is not yet supported by Iranti.`);
+                    continue;
+                }
+                if (!isSupportedProvider(chosen)) {
+                    console.log(`${warnLabel()} Unsupported provider '${chosen}'.`);
+                    continue;
+                }
+                if (!providerKeyEnv(chosen)) {
+                    console.log(`${warnLabel()} ${providerDisplayName(chosen)} does not use a remote API key.`);
+                    continue;
+                }
+                extraProvider = chosen;
+                break;
+            }
+            await maybeCollectProviderKey(extraProvider);
+        }
+
+        let defaultApiKey = existingInstance?.env.IRANTI_API_KEY && !detectPlaceholder(existingInstance.env.IRANTI_API_KEY)
+            ? existingInstance.env.IRANTI_API_KEY
+            : makeLegacyInstanceApiKey(instanceName);
+
+        const rotateApiKey = detectPlaceholder(existingInstance?.env.IRANTI_API_KEY)
+            ? true
+            : await promptYesNo(prompt, 'Generate a fresh Iranti client API key for this instance?', false);
+        if (rotateApiKey) {
+            defaultApiKey = makeLegacyInstanceApiKey(instanceName);
+        }
+
+        const projects: SetupProjectPlan[] = [];
+        const defaultProjectPath = process.cwd();
+        let shouldBindProject = await promptYesNo(prompt, 'Bind a project folder to this instance now?', true);
+        while (shouldBindProject) {
+            const projectPath = path.resolve(await promptNonEmpty(prompt, 'Project path', projects.length === 0 ? defaultProjectPath : process.cwd()));
+            const agentId = sanitizeIdentifier(
+                await promptNonEmpty(prompt, 'Agent id for this project', projectAgentDefault(projectPath)),
+                'project_main'
+            );
+            const memoryEntity = await promptNonEmpty(prompt, 'Memory entity for this project', 'user/main');
+            const claudeCode = await promptYesNo(prompt, 'Create Claude Code project files here?', true);
+            projects.push({
+                path: projectPath,
+                agentId,
+                memoryEntity,
+                claudeCode,
+            });
+            shouldBindProject = await promptYesNo(prompt, 'Bind another project folder?', false);
+        }
+
+        const codex = projects.length > 0 && hasCodexInstalled()
+            ? await promptYesNo(prompt, 'Register Codex globally for the first bound project now?', false)
+            : false;
+
+        result = await executeSetupPlan({
+            mode: setupMode,
+            scope: finalScope,
+            root: finalRoot,
+            instanceName,
+            port,
+            databaseUrl: dbUrl,
+            provider,
+            providerKeys,
+            apiKey: defaultApiKey,
+            projects,
+            codex,
+            codexAgent: projects[0]?.agentId,
+        });
+    });
+
+    if (!result) {
+        throw new Error('Setup did not produce a result.');
+    }
+    const finalResult: SetupExecutionResult = result;
+
+    console.log('');
+    console.log(bold('Setup complete'));
+    console.log(`  runtime root   ${finalResult.root}`);
+    console.log(`  scope          ${finalResult.scope}`);
+    console.log(`  instance       ${finalResult.instanceName}`);
+    console.log(`  instance env   ${finalResult.instanceEnvFile}`);
+    console.log(`  instance url   http://localhost:${finalResult.port}`);
+    if (finalResult.bindings.length === 0) {
+            console.log(`  projects       ${paint('none bound yet', 'yellow')}`);
+    } else {
+        console.log('  projects');
+        for (const binding of finalResult.bindings) {
+            console.log(`    - ${binding.projectPath} (${binding.agentId})`);
+        }
+    }
+    console.log('');
+    console.log(`${infoLabel()} Next steps:`);
+    console.log(`  1. iranti run --instance ${finalResult.instanceName} --root "${finalResult.root}"`);
+    console.log(`  2. iranti doctor --instance ${finalResult.instanceName} --root "${finalResult.root}"`);
 }
 
 async function doctorCommand(args: ParsedArgs): Promise<void> {
@@ -627,13 +1535,21 @@ async function doctorCommand(args: ParsedArgs): Promise<void> {
         return;
     }
 
-    console.log(`Iranti doctor`);
+    console.log(bold('Iranti doctor'));
     console.log(`  version : ${version}`);
-    console.log(`  status  : ${result.status.toUpperCase()}`);
+    console.log(`  status  : ${result.status === 'pass'
+        ? paint(result.status.toUpperCase(), 'green')
+        : result.status === 'warn'
+            ? paint(result.status.toUpperCase(), 'yellow')
+            : paint(result.status.toUpperCase(), 'red')}`);
     if (envFile) console.log(`  env     : ${envFile}`);
     console.log('');
     for (const check of checks) {
-        const marker = check.status === 'pass' ? '[PASS]' : check.status === 'warn' ? '[WARN]' : '[FAIL]';
+        const marker = check.status === 'pass'
+            ? okLabel('PASS')
+            : check.status === 'warn'
+                ? warnLabel('WARN')
+                : failLabel('FAIL');
         console.log(`${marker} ${check.name} — ${check.detail}`);
     }
 
@@ -695,7 +1611,7 @@ async function statusCommand(args: ParsedArgs): Promise<void> {
         return;
     }
 
-    console.log('Iranti status');
+    console.log(bold('Iranti status'));
     for (const row of rows) {
         console.log(`  ${row.label.padEnd(15)} ${row.value}`);
     }
@@ -730,7 +1646,7 @@ async function upgradeCommand(args: ParsedArgs): Promise<void> {
         return;
     }
 
-    console.log('Iranti upgrade');
+    console.log(bold('Iranti upgrade'));
     console.log(`  current_version  ${version}`);
     console.log('  note             This command does not self-update yet. Use the appropriate package-manager path below.');
     console.log('');
@@ -756,7 +1672,7 @@ async function installCommand(args: ParsedArgs): Promise<void> {
     };
     await writeJson(path.join(root, 'install.json'), meta);
 
-    console.log(`Iranti runtime initialized`);
+    console.log(`${okLabel()} Iranti runtime initialized`);
     console.log(`  scope: ${scope}`);
     console.log(`  root : ${root}`);
     console.log(`Next: iranti instance create local --port 3001`);
@@ -809,7 +1725,7 @@ async function createInstanceCommand(args: ParsedArgs): Promise<void> {
     };
     await writeJson(metaFile, meta);
 
-    console.log(`Instance created: ${name}`);
+    console.log(`${okLabel()} Instance created: ${name}`);
     console.log(`  dir : ${instanceDir}`);
     console.log(`  env : ${envFile}`);
     console.log(`  port: ${port}`);
@@ -825,16 +1741,16 @@ async function listInstancesCommand(args: ParsedArgs): Promise<void> {
     const root = resolveInstallRoot(args, scope);
     const instancesDir = path.join(root, 'instances');
     if (!fs.existsSync(instancesDir)) {
-        console.log(`No install found at ${root}. Run: iranti install`);
+        console.log(`${warnLabel()} No install found at ${root}. Run: iranti install`);
         return;
     }
     const entries = await fsp.readdir(instancesDir, { withFileTypes: true });
     const dirs = entries.filter((e) => e.isDirectory()).map((e) => e.name).sort();
     if (dirs.length === 0) {
-        console.log(`No instances found under ${instancesDir}`);
+        console.log(`${warnLabel()} No instances found under ${instancesDir}`);
         return;
     }
-    console.log(`Instances (${instancesDir}):`);
+    console.log(bold(`Instances (${instancesDir}):`));
     for (const name of dirs) {
         const metaPath = path.join(instancesDir, name, 'instance.json');
         if (fs.existsSync(metaPath)) {
@@ -861,13 +1777,13 @@ async function showInstanceCommand(args: ParsedArgs): Promise<void> {
     if (!fs.existsSync(envFile)) throw new Error(`Instance '${name}' not found at ${instanceDir}`);
 
     const env = await readEnvFile(envFile);
-    console.log(`Instance: ${name}`);
+    console.log(bold(`Instance: ${name}`));
     console.log(`  dir : ${instanceDir}`);
     console.log(`  env : ${envFile}`);
     console.log(`  port: ${env.IRANTI_PORT ?? '3001'}`);
     console.log(`  db  : ${env.DATABASE_URL ?? '(missing)'}`);
     console.log(`  esc : ${env.IRANTI_ESCALATION_DIR ?? '(missing)'}`);
-    console.log(`Run with: iranti run --instance ${name}`);
+    console.log(`${infoLabel()} Run with: iranti run --instance ${name}`);
 }
 
 async function runInstanceCommand(args: ParsedArgs): Promise<void> {
@@ -887,7 +1803,7 @@ async function runInstanceCommand(args: ParsedArgs): Promise<void> {
         throw new Error(`Instance '${name}' has placeholder DATABASE_URL. Edit ${envFile} first.`);
     }
 
-    console.log(`Starting Iranti instance '${name}' on port ${process.env.IRANTI_PORT ?? '3001'}...`);
+    console.log(`${infoLabel()} Starting Iranti instance '${name}' on port ${process.env.IRANTI_PORT ?? '3001'}...`);
     const serverEntry = path.resolve(__dirname, '..', 'src', 'api', 'server');
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     require(serverEntry);
@@ -920,7 +1836,7 @@ async function projectInitCommand(args: ParsedArgs): Promise<void> {
         IRANTI_INSTANCE_ENV: envFile,
     });
 
-    console.log(`Project initialized at ${projectPath}`);
+    console.log(`${okLabel()} Project initialized at ${projectPath}`);
     console.log(`  wrote ${outFile}`);
     console.log(`Use with Python client/middleware by loading .env.iranti`);
 }
@@ -1007,7 +1923,7 @@ async function configureInstanceCommand(args: ParsedArgs): Promise<void> {
         return;
     }
 
-    console.log(`Instance updated: ${name}`);
+    console.log(`${okLabel()} Instance updated: ${name}`);
     console.log(`  env      ${envFile}`);
     console.log(`  keys     ${result.updatedKeys.join(', ')}`);
     if (apiKey) {
@@ -1083,7 +1999,7 @@ async function configureProjectCommand(args: ParsedArgs): Promise<void> {
         return;
     }
 
-    console.log(`Project binding updated`);
+    console.log(`${okLabel()} Project binding updated`);
     console.log(`  path     ${projectPath}`);
     console.log(`  env      ${written}`);
     console.log(`  url      ${updates.IRANTI_URL}`);
@@ -1154,7 +2070,7 @@ async function authCreateKeyCommand(args: ParsedArgs): Promise<void> {
         process.exit(0);
     }
 
-    console.log('API key created (or rotated):');
+    console.log(`${okLabel()} API key created (or rotated):`);
     console.log(`  keyId   ${created.record.keyId}`);
     console.log(`  owner   ${created.record.owner}`);
     console.log(`  scopes  ${created.record.scopes.join(',') || '(none)'}`);
@@ -1187,11 +2103,11 @@ async function authListKeysCommand(args: ParsedArgs): Promise<void> {
     }
 
     if (keys.length === 0) {
-        console.log('No registry API keys found.');
+        console.log(`${warnLabel()} No registry API keys found.`);
         process.exit(0);
     }
 
-    console.log(`Registry API keys for ${instanceName}:`);
+    console.log(bold(`Registry API keys for ${instanceName}:`));
     for (const key of keys) {
         console.log(`  - ${key.keyId} owner=${key.owner} active=${key.isActive} scopes=${key.scopes.join(',') || '(none)'}`);
     }
@@ -1223,7 +2139,7 @@ async function authRevokeKeyCommand(args: ParsedArgs): Promise<void> {
         process.exit(0);
     }
 
-    console.log(`Revoked API key '${keyId}' for instance '${instanceName}'.`);
+    console.log(`${okLabel()} Revoked API key '${keyId}' for instance '${instanceName}'.`);
     process.exit(0);
 }
 
@@ -1232,6 +2148,7 @@ function printHelp(): void {
 
 Machine-level:
   iranti install [--scope user|system] [--root <path>]
+  iranti setup [--scope user|system] [--root <path>] [--config <file> | --defaults]
 
 Instance-level:
   iranti instance create <name> [--port 3001] [--db-url <url>] [--api-key <token>] [--provider <name>] [--provider-key <token>] [--scope user|system]
@@ -1243,10 +2160,16 @@ Configuration:
   iranti configure instance <name> [--interactive] [--db-url <url>] [--port <n>] [--api-key <token>] [--provider <name>] [--provider-key <token>] [--clear-provider-key]
   iranti configure project [path] [--interactive] [--instance <name>] [--url <http://host:port>] [--api-key <token>] [--agent-id <id>] [--memory-entity <entity>]
 
-Auth:
-  iranti auth create-key --instance <name> --key-id <id> --owner <owner> [--scopes read,write] [--description <text>] [--write-instance] [--project <path>] [--agent-id <id>]
-  iranti auth list-keys --instance <name>
-  iranti auth revoke-key --instance <name> --key-id <id>
+  Auth:
+    iranti auth create-key --instance <name> --key-id <id> --owner <owner> [--scopes read,write] [--description <text>] [--write-instance] [--project <path>] [--agent-id <id>]
+    iranti auth list-keys --instance <name>
+    iranti auth revoke-key --instance <name> --key-id <id>
+
+  Provider Keys:
+    iranti list api-keys [--instance <name>] [--project <path>] [--json]
+    iranti add api-key [provider] [--instance <name>] [--project <path>] [--key <token>] [--set-default]
+    iranti update api-key [provider] [--instance <name>] [--project <path>] [--key <token>] [--set-default]
+    iranti remove api-key [provider] [--instance <name>] [--project <path>]
 
 Project-level:
   iranti project init [path] --instance <name> [--api-key <token>] [--agent-id <id>] [--force]
@@ -1272,6 +2195,11 @@ async function main(): Promise<void> {
 
     if (args.command === 'install') {
         await installCommand(args);
+        return;
+    }
+
+    if (args.command === 'setup') {
+        await setupCommand(args);
         return;
     }
 
@@ -1324,6 +2252,26 @@ async function main(): Promise<void> {
         throw new Error(`Unknown auth subcommand '${args.subcommand ?? ''}'.`);
     }
 
+    if (args.command === 'list' && args.subcommand === 'api-keys') {
+        await listProviderKeysCommand(args);
+        return;
+    }
+
+    if (args.command === 'add' && args.subcommand === 'api-key') {
+        await upsertProviderKeyCommand(args, 'add');
+        return;
+    }
+
+    if (args.command === 'update' && args.subcommand === 'api-key') {
+        await upsertProviderKeyCommand(args, 'update');
+        return;
+    }
+
+    if (args.command === 'remove' && args.subcommand === 'api-key') {
+        await removeProviderKeyCommand(args);
+        return;
+    }
+
     if (args.command === 'project' && args.subcommand === 'init') {
         await projectInitCommand(args);
         return;
@@ -1364,6 +2312,6 @@ async function main(): Promise<void> {
 
 main().catch((err) => {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(`Error: ${message}`);
+    console.error(`${failLabel('ERROR')} ${message}`);
     process.exit(1);
 });

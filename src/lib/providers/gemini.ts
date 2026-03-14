@@ -1,4 +1,4 @@
-import { LLMProvider, LLMMessage, LLMResponse, CompleteOptions } from '../llm';
+import { LLMProvider, LLMMessage, LLMResponse, CompleteOptions, normalizeProviderApiError } from '../llm';
 
 interface GeminiResponse {
     candidates?: Array<{
@@ -43,7 +43,8 @@ class GeminiProvider implements LLMProvider {
         );
 
         if (!response.ok) {
-            throw new Error(`Gemini API error: ${response.status} ${response.statusText}`);
+            const raw = await response.text();
+            throw normalizeProviderApiError('gemini', response.status, response.statusText, raw);
         }
 
         const data = await response.json() as GeminiResponse;
