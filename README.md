@@ -242,6 +242,7 @@ iranti install --scope user
 For automation:
 - `iranti setup --defaults` uses sensible defaults plus environment/flag input, but still requires a real `DATABASE_URL`.
 - `iranti setup --config <file>` reads a JSON setup plan for repeatable bootstrap.
+- Example config: [docs/guides/iranti.setup.example.json](docs/guides/iranti.setup.example.json)
 
 Defaults:
 - Windows user scope: `%USERPROFILE%\\.iranti`

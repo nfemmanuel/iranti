@@ -121,6 +121,7 @@ iranti setup --config ./iranti.setup.json
 Automation notes:
 - `--defaults` skips prompts and uses defaults plus environment/flag input. It still requires a real `DATABASE_URL`.
 - `--config` accepts a JSON setup plan for repeatable bootstrap in CI or managed installs.
+- Example config: [`iranti.setup.example.json`](C:\Users\NF\Documents\Projects\iranti\docs\guides\iranti.setup.example.json)
 
 Manual commands are still available below when you want full low-level control.
 

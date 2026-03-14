@@ -63,6 +63,7 @@ Non-interactive variants:
 ## Related
 - [`scripts/iranti-cli.ts`](C:\Users\NF\Documents\Projects\iranti\scripts\iranti-cli.ts)
 - [`docs/guides/quickstart.md`](C:\Users\NF\Documents\Projects\iranti\docs\guides\quickstart.md)
+- [`iranti.setup.example.json`](C:\Users\NF\Documents\Projects\iranti\docs\guides\iranti.setup.example.json)
 - [`README.md`](C:\Users\NF\Documents\Projects\iranti\README.md)
 - [`docs/guides/claude-code.md`](C:\Users\NF\Documents\Projects\iranti\docs\guides\claude-code.md)
 - [`docs/guides/codex.md`](C:\Users\NF\Documents\Projects\iranti\docs\guides\codex.md)

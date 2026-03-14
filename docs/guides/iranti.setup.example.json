@@ -1,0 +1,23 @@
+{
+  "mode": "shared",
+  "scope": "user",
+  "root": "C:/Users/YOUR_USER/.iranti",
+  "instanceName": "local",
+  "port": 3001,
+  "databaseUrl": "postgresql://postgres:YOUR_PASSWORD@localhost:5432/iranti_local",
+  "provider": "openai",
+  "providerKeys": {
+    "openai": "sk-your-openai-key",
+    "claude": "sk-ant-your-claude-key"
+  },
+  "projects": [
+    {
+      "path": "C:/Users/YOUR_USER/Documents/Projects/my-app",
+      "agentId": "my_app_main",
+      "memoryEntity": "user/main",
+      "claudeCode": true
+    }
+  ],
+  "codex": false,
+  "codexAgent": "codex_code"
+}

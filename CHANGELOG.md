@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## 0.1.4 - Unreleased
+## 0.1.4 - 2026-03-14
 
 ### Added
 
@@ -19,6 +19,7 @@ All notable changes to this project are documented in this file.
   - `iranti update api-key`
   - `iranti remove api-key`
 - Provider-key prompts now support hidden terminal entry and target either a named instance or a project-bound instance via `.env.iranti`.
+- Added a reusable `iranti.setup.example.json` template for non-interactive setup automation.
 
 ### Changed
 
