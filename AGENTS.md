@@ -279,6 +279,8 @@ iranti/
 │   └── conflict/
 │       ├── run_conflict_benchmark.ts — Benchmark runner for adversarial conflict scenarios
 │       └── *.ts                — Direct contradiction, temporal, cascading, and multi-hop conflict cases
+│   └── consistency/
+│       └── run_consistency_tests.ts — Empirical validation for write serialization, read-after-write, escalation visibility, and observe isolation
 ├── AGENTS.md                   — This file
 ├── docker-compose.yml          — PostgreSQL for local dev
 └── .env                        — Local environment (never committed)
@@ -293,6 +295,8 @@ Decay extension note:
 - decay helpers live in `src/lib/decay.ts`
 - targeted decay tests live in `tests/decay/`
 - the internal design note is `docs/internal/decay.md`
+- consistency model documentation lives in `docs/internal/consistency_model.md`
+- empirical consistency validation lives in `tests/consistency/`
 
 ### knowledge_base
 | Column | Type | Notes |
