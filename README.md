@@ -169,6 +169,20 @@ Scopes use `resource:action` format (for example `kb:read`, `memory:write`, `met
 - Use TLS/reverse proxy for non-local deployments.
 
 Security quickstart: [`docs/guides/security-quickstart.md`](docs/guides/security-quickstart.md)
+Claude Code guide: [`docs/guides/claude-code.md`](docs/guides/claude-code.md)
+
+### Claude Code via MCP
+
+Iranti ships a local stdio MCP server for Claude Code and other MCP clients:
+
+```bash
+npm run build
+node dist/scripts/iranti-mcp.js
+```
+
+Use it with a project-local `.mcp.json`, and optionally add the Claude Code hook helper for `SessionStart` and `UserPromptSubmit`.
+
+Guide: [`docs/guides/claude-code.md`](docs/guides/claude-code.md)
 
 ---
 
