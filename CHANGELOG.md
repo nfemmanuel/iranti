@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.1.1 - Unreleased
+
+### Added
+
+- `iranti doctor` for env and credential diagnostics.
+- `iranti status` for runtime root, binding, and instance visibility.
+- `iranti upgrade` for canonical npm/Python upgrade guidance.
+- `npm run release:bump -- <version>` to update version-bearing files consistently.
+- Codex MCP setup flow and guide.
+
+### Changed
+
+- Release guide now includes exact command sequences for version bumping and tagging.
+- Iranti MCP server now resolves `.env` more reliably for Codex and other MCP clients.
+
 ## 0.1.0 - 2026-03-04
 
 Initial public release.

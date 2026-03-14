@@ -1,6 +1,6 @@
 {
   "name": "iranti",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Memory infrastructure for multi-agent AI systems",
   "main": "dist/src/sdk/index.js",
   "files": [
@@ -63,6 +63,7 @@
     "test:router": "ts-node scripts/test_router_enforcement.ts",
     "test:verify-authoritative": "ts-node scripts/verify_authoritative_resolution_parsing.ts",
     "release:check": "ts-node scripts/check-release-version.ts",
+    "release:bump": "ts-node scripts/bump-version.ts",
     "seed:policy": "ts-node scripts/seed_policy.ts",
     "api-key:create": "ts-node scripts/api-key-create.ts",
     "api-key:list": "ts-node scripts/api-key-list.ts",
@@ -89,7 +90,6 @@
     "@prisma/client": "^7.4.2",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
-    "iranti": "file:iranti-0.1.0.tgz",
     "pg": "^8.19.0",
     "prisma": "^7.4.2",
     "zod": "^4.3.6"

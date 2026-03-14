@@ -474,6 +474,33 @@ async function statusCommand(args: ParsedArgs): Promise<void> {
     }
 }
 
+async function upgradeCommand(args: ParsedArgs): Promise<void> {
+    const json = hasFlag(args, 'json');
+    const version = getPackageVersion();
+    const commands = {
+        npmGlobal: 'npm install -g iranti@latest',
+        npmRepo: 'git pull && npm install && npm run build',
+        python: 'pip install --upgrade iranti',
+    };
+
+    if (json) {
+        console.log(JSON.stringify({
+            version,
+            note: 'iranti upgrade currently prints recommended upgrade commands. It does not self-update in place yet.',
+            commands,
+        }, null, 2));
+        return;
+    }
+
+    console.log('Iranti upgrade');
+    console.log(`  current_version  ${version}`);
+    console.log('  note             This command does not self-update yet. Use the appropriate package-manager path below.');
+    console.log('');
+    console.log(`  npm global       ${commands.npmGlobal}`);
+    console.log(`  npm repo         ${commands.npmRepo}`);
+    console.log(`  python client    ${commands.python}`);
+}
+
 async function installCommand(args: ParsedArgs): Promise<void> {
     const scope = normalizeScope(getFlag(args, 'scope'));
     const root = resolveInstallRoot(args, scope);
@@ -685,6 +712,7 @@ Project-level:
 Diagnostics:
   iranti doctor [--instance <name>] [--scope user|system] [--env <file>] [--json]
   iranti status [--scope user|system] [--json]
+  iranti upgrade [--json]
 `);
 }
 
@@ -733,6 +761,11 @@ async function main(): Promise<void> {
 
     if (args.command === 'status') {
         await statusCommand(args);
+        return;
+    }
+
+    if (args.command === 'upgrade') {
+        await upgradeCommand(args);
         return;
     }
 

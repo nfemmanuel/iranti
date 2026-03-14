@@ -125,6 +125,7 @@ iranti run --instance local
 ```bash
 iranti doctor --instance local
 iranti status
+iranti upgrade
 ```
 
 ### Bind a project
@@ -155,6 +156,7 @@ For a quick environment check before that, run:
 ```bash
 iranti doctor
 iranti status
+iranti upgrade
 ```
 ✓ Agent registration
 ✓ Write and query

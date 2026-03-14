@@ -25,7 +25,7 @@ Before a publish can happen, the workflow enforces version alignment across:
 - `package.json`
 - `clients/python/pyproject.toml`
 - `clients/python/iranti.py`
-- the release tag, such as `v0.1.1`
+- the release tag, such as `v0.1.2`
 
 If those do not match, publishing stops.
 
@@ -70,12 +70,20 @@ GitHub and PyPI trusted publishing guidance:
 
 ## Release Procedure
 
-Current repo version is `0.1.0`. If the next release is `0.1.1`, use the following exact sequence.
+Current repo version is `0.1.1`. If the next release is `0.1.2`, use the following exact sequence.
 
-1. Update versions in:
-   - `package.json`
-   - `clients/python/pyproject.toml`
-   - `clients/python/iranti.py`
+1. Bump versions in one step:
+
+```bash
+npm run release:bump -- 0.1.2
+```
+
+This updates:
+- `package.json`
+- `package-lock.json`
+- `clients/python/pyproject.toml`
+- `clients/python/iranti.py`
+- current runtime version surfaces in source files
 2. Run the exact local checks:
 
 ```bash
@@ -83,7 +91,7 @@ iranti status
 iranti doctor
 npm run build
 npm run test:contracts
-npm run release:check -- v0.1.1
+npm run release:check -- v0.1.2
 npm pack
 python -m build clients/python --outdir clients/python/dist
 python -m twine check clients/python/dist/*
@@ -93,16 +101,16 @@ python -m twine check clients/python/dist/*
 
 ```bash
 git add package.json clients/python/pyproject.toml clients/python/iranti.py CHANGELOG.md
-git commit -m "Release v0.1.1"
+git commit -m "Release v0.1.2"
 git push origin main
 ```
 
 4. Create the tag and GitHub release:
 
 ```bash
-git tag v0.1.1
-git push origin v0.1.1
-gh release create v0.1.1 --title "v0.1.1" --notes "Release notes here"
+git tag v0.1.2
+git push origin v0.1.2
+gh release create v0.1.2 --title "v0.1.2" --notes "Release notes here"
 ```
 
 5. The publish workflow will run automatically on that release.
