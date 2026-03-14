@@ -187,13 +187,14 @@ Guide: [`docs/guides/claude-code.md`](docs/guides/claude-code.md)
 
 ### Codex via MCP
 
-Codex uses a global MCP registry rather than a project-local `.mcp.json`. Register Iranti once, then launch Codex in this repo so `AGENTS.md` applies:
+Codex uses a global MCP registry rather than a project-local `.mcp.json`. Register Iranti once, then launch Codex in the bound project so `.env.iranti` is in scope:
 
 ```bash
-npm run build
-npm run codex:setup
-npm run codex:run
+iranti codex-setup
+codex -C /path/to/your/project
 ```
+
+When `iranti codex-setup` is run from a project directory, it automatically captures that project's `.env.iranti` as `IRANTI_PROJECT_ENV` so Codex resolves the correct Iranti instance consistently.
 
 Guide: [`docs/guides/codex.md`](docs/guides/codex.md)
 

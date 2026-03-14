@@ -2,11 +2,19 @@
 
 All notable changes to this project are documented in this file.
 
-## 0.1.2 - Unreleased
+## 0.1.3 - Unreleased
 
 ### Added
 
-- Pending release notes.
+- Codex setup now auto-detects `.env.iranti` from the current working directory and stores it in the MCP registration as `IRANTI_PROJECT_ENV`.
+
+### Changed
+
+- Installed-package Codex setup now binds MCP sessions to the intended project more deterministically.
+
+### Fixed
+
+- Windows `iranti codex-setup` no longer relies on the deprecated `shell=true` child-process path.
 
 ## 0.1.2 - 2026-03-14
 

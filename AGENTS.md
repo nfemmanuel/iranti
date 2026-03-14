@@ -220,7 +220,7 @@ iranti/
 │   ├── check-release-version.ts — Verifies Node/Python/package tag version alignment before publish
 │   ├── iranti-cli.ts           — Machine install, configure/auth/status/diagnostics/upgrade, instance/project binding, MCP and Claude hook CLI
 │   ├── iranti-mcp.ts           — Stdio MCP server for Claude Code, Codex, and other MCP clients
-│   ├── codex-setup.ts          — Registers Iranti MCP with Codex global config
+│   ├── codex-setup.ts          — Registers Iranti MCP with Codex global config, preferring the installed CLI path
 │   ├── claude-code-memory-hook.ts — Claude Code hook helper for SessionStart/UserPromptSubmit
 │   ├── demo.ts                 — Full system demo with two agents
 │   ├── test-librarian.ts       — Librarian smoke tests

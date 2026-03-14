@@ -7,6 +7,8 @@ type SetupOptions = {
     agent: string;
     source: string;
     provider?: string;
+    projectEnv?: string;
+    useLocalScript: boolean;
 };
 
 function parseArgs(argv: string[]): SetupOptions {
@@ -14,6 +16,7 @@ function parseArgs(argv: string[]): SetupOptions {
         name: 'iranti',
         agent: 'codex_code',
         source: 'Codex',
+        useLocalScript: false,
     };
 
     for (let index = 0; index < argv.length; index += 1) {
@@ -40,6 +43,14 @@ function parseArgs(argv: string[]): SetupOptions {
                 options.provider = next.trim();
                 index += 1;
                 break;
+            case '--project-env':
+                if (!next) throw new Error('--project-env requires a value.');
+                options.projectEnv = next.trim();
+                index += 1;
+                break;
+            case '--local-script':
+                options.useLocalScript = true;
+                break;
             case '--help':
             case '-h':
                 printHelp();
@@ -58,21 +69,40 @@ function printHelp(): void {
         'Configure Codex to use the local Iranti MCP server.',
         '',
         'Usage:',
-        '  ts-node scripts/codex-setup.ts [--name iranti] [--agent codex_code] [--source Codex] [--provider openai]',
+        '  ts-node scripts/codex-setup.ts [--name iranti] [--agent codex_code] [--source Codex] [--provider openai] [--project-env path] [--local-script]',
         '',
         'Notes:',
         '  - Registers a global Codex MCP entry using `codex mcp add`.',
-        '  - Does not store DATABASE_URL in Codex config; iranti-mcp loads .env from this repo at runtime.',
+        '  - Prefers the installed CLI path: `iranti mcp`.',
+        '  - Auto-detects .env.iranti from the current working directory and stores it as IRANTI_PROJECT_ENV.',
+        '  - Use --local-script only if you need to point Codex at this repo build directly.',
+        '  - Does not store DATABASE_URL in Codex config; iranti-mcp loads project/instance env at runtime.',
         '  - Replaces any existing MCP entry with the same name.',
     ].join('\n'));
 }
 
+function quoteForCmd(arg: string): string {
+    if (arg.length === 0) return '""';
+    if (!/[ \t"&()<>|^]/.test(arg)) return arg;
+    return `"${arg.replace(/"/g, '\\"')}"`;
+}
+
 function run(command: string, args: string[], cwd: string): string {
-    const result = spawnSync(command, args, {
-        cwd,
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    const result = process.platform === 'win32'
+        ? spawnSync(process.env.ComSpec ?? 'cmd.exe', [
+            '/d',
+            '/c',
+            [command, ...args].map(quoteForCmd).join(' '),
+        ], {
+            cwd,
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+        })
+        : spawnSync(command, args, {
+            cwd,
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+        });
 
     if (result.error) {
         throw result.error;
@@ -95,16 +125,54 @@ function tryRun(command: string, args: string[], cwd: string): string | null {
     }
 }
 
-function main(): void {
-    const options = parseArgs(process.argv.slice(2));
-    const repoRoot = path.resolve(__dirname, '..');
-    const mcpScript = path.join(repoRoot, 'dist', 'scripts', 'iranti-mcp.js');
+function findPackageRoot(startDir: string): string {
+    let dir = startDir;
+    for (let i = 0; i < 6; i += 1) {
+        const pkgPath = path.join(dir, 'package.json');
+        if (fs.existsSync(pkgPath)) {
+            return dir;
+        }
+        const parent = path.dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
+    }
+    return path.resolve(startDir, '..');
+}
 
-    if (!fs.existsSync(mcpScript)) {
-        throw new Error(`Missing build artifact: ${mcpScript}. Run "npm run build" first.`);
+function resolveProjectEnv(options: SetupOptions): string | undefined {
+    const explicit = options.projectEnv?.trim();
+    if (explicit) {
+        const resolved = path.resolve(explicit);
+        if (!fs.existsSync(resolved)) {
+            throw new Error(`Project env file not found: ${resolved}`);
+        }
+        return resolved;
     }
 
+    const candidate = path.resolve(process.cwd(), '.env.iranti');
+    return fs.existsSync(candidate) ? candidate : undefined;
+}
+
+function canUseInstalledIranti(repoRoot: string): boolean {
+    try {
+        run('iranti', ['mcp', '--help'], repoRoot);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function main(): void {
+    const options = parseArgs(process.argv.slice(2));
+    const repoRoot = findPackageRoot(__dirname);
+    const mcpScript = path.join(repoRoot, 'dist', 'scripts', 'iranti-mcp.js');
+
     run('codex', ['--version'], repoRoot);
+
+    const useInstalled = !options.useLocalScript && canUseInstalledIranti(repoRoot);
+    if (!useInstalled && !fs.existsSync(mcpScript)) {
+        throw new Error(`Missing build artifact: ${mcpScript}. Run "npm run build" first, or install iranti globally and rerun without --local-script.`);
+    }
 
     const existing = tryRun('codex', ['mcp', 'get', options.name, '--json'], repoRoot);
     if (existing !== null) {
@@ -121,18 +189,40 @@ function main(): void {
         `IRANTI_MCP_DEFAULT_SOURCE=${options.source}`,
     ];
 
+    const projectEnv = resolveProjectEnv(options);
+    if (projectEnv) {
+        addArgs.push('--env', `IRANTI_PROJECT_ENV=${projectEnv}`);
+    }
+
     if (options.provider) {
         addArgs.push('--env', `LLM_PROVIDER=${options.provider}`);
     }
 
-    addArgs.push('--', 'node', mcpScript);
+    if (useInstalled) {
+        addArgs.push('--', 'iranti', 'mcp');
+    } else {
+        addArgs.push('--', 'node', mcpScript);
+    }
     run('codex', addArgs, repoRoot);
 
     const registered = run('codex', ['mcp', 'get', options.name], repoRoot);
     console.log(registered);
     console.log('');
     console.log('Codex is now configured to use Iranti through MCP.');
-    console.log(`Launch with: codex -C "${repoRoot}"`);
+    if (useInstalled) {
+        console.log('Registration target: installed CLI (`iranti mcp`)');
+        if (projectEnv) {
+            console.log(`Project binding: ${projectEnv}`);
+        }
+        console.log('Launch Codex in the project you want to bind to Iranti, for example:');
+        console.log('  codex -C C:\\path\\to\\your\\project');
+    } else {
+        console.log(`Registration target: repo build (${mcpScript})`);
+        if (projectEnv) {
+            console.log(`Project binding: ${projectEnv}`);
+        }
+        console.log(`Launch with: codex -C "${repoRoot}"`);
+    }
 }
 
 main();

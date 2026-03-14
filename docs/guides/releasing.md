@@ -70,12 +70,12 @@ GitHub and PyPI trusted publishing guidance:
 
 ## Release Procedure
 
-Current repo version is `0.1.2`. If the next release is `0.1.3`, use the following exact sequence.
+Current repo version is `0.1.3`. If the next release is `0.1.4`, use the following exact sequence.
 
 1. Bump versions in one step:
 
 ```bash
-npm run release:bump -- 0.1.3
+npm run release:bump -- 0.1.4
 ```
 
 This updates:
@@ -91,7 +91,7 @@ iranti status
 iranti doctor
 npm run build
 npm run test:contracts
-npm run release:check -- v0.1.3
+npm run release:check -- v0.1.4
 npm pack
 python -m build clients/python --outdir clients/python/dist
 python -m twine check clients/python/dist/*
@@ -101,16 +101,16 @@ python -m twine check clients/python/dist/*
 
 ```bash
 git add package.json clients/python/pyproject.toml clients/python/iranti.py CHANGELOG.md
-git commit -m "Release v0.1.3"
+git commit -m "Release v0.1.4"
 git push origin main
 ```
 
 4. Create the tag and GitHub release:
 
 ```bash
-git tag v0.1.3
-git push origin v0.1.3
-gh release create v0.1.3 --title "v0.1.3" --notes "Release notes here"
+git tag v0.1.4
+git push origin v0.1.4
+gh release create v0.1.4 --title "v0.1.4" --notes "Release notes here"
 ```
 
 5. The publish workflow will run automatically on that release.

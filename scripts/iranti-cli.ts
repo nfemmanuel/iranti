@@ -1259,7 +1259,8 @@ Diagnostics:
 Integrations:
   iranti mcp [--help]
   iranti claude-hook --event SessionStart|UserPromptSubmit [--project-env <path>] [--instance-env <path>] [--env-file <path>]
-`);
+  iranti codex-setup [--name iranti] [--agent codex_code] [--source Codex] [--provider openai] [--project-env <path>] [--local-script]
+  `);
 }
 
 async function main(): Promise<void> {
@@ -1350,6 +1351,11 @@ async function main(): Promise<void> {
 
     if (args.command === 'claude-hook') {
         await handoffToScript('claude-code-memory-hook', process.argv.slice(3));
+        return;
+    }
+
+    if (args.command === 'codex-setup') {
+        await handoffToScript('codex-setup', process.argv.slice(3));
         return;
     }
 
