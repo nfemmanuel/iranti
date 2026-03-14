@@ -12,7 +12,7 @@
 | `--instance` | string | Named instance whose `DATABASE_URL` should be used for the registry operation. |
 | `--key-id` | string | Stable key identifier. Reusing it rotates the key. |
 | `--owner` | string | Human-readable owner label stored in the registry. |
-| `--scopes` | string | Comma-separated scope list such as `kb:read,memory:write`. |
+| `--scopes` | string | Comma-separated scope list such as `kb:read,memory:write` or `kb:write:project/*`. |
 | `--description` | string | Optional metadata attached to the registry record. |
 | `--write-instance` | boolean | Writes the generated token into the instance env as `IRANTI_API_KEY`. |
 | `--project` | string | Optional project path whose `.env.iranti` should be updated with the generated token. |
@@ -49,6 +49,7 @@
 
 - Commands fail fast when the instance does not exist or still uses a placeholder `DATABASE_URL`.
 - `create-key` is idempotent for `keyId` in the sense that rerunning it rotates the secret and replaces the prior registry record.
+- Malformed namespaced scopes such as `kb:read:` or `kb:read:*/acme` are rejected at key-creation time.
 - Project sync preserves an existing project binding's current `IRANTI_AGENT_ID` and `IRANTI_MEMORY_ENTITY` unless the user overrides them.
 - Revoking a non-existent key returns a clear error.
 
@@ -56,6 +57,7 @@
 
 - TypeScript build passes with the new CLI auth commands included.
 - The command flow reuses the same registry APIs as the existing standalone helper scripts, keeping validation behavior aligned with the server auth middleware.
+- Namespace-aware scope validation now runs through the same registry helper used by both the CLI and the standalone helper script.
 
 ## Related
 

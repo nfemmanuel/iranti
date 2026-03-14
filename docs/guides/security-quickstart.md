@@ -25,6 +25,33 @@ Prefer minimum scopes required:
 - compatibility proxy usage: `proxy:chat`
 - internal admin only: `system:admin`
 
+Namespace scoping is also supported for entity-bound KB routes:
+
+- exact entity allow: `kb:read:project/acme`
+- wildcard entity allow: `kb:write:project/*`
+- explicit deny: `kb:deny:project/rival`
+
+Rules:
+
+- scope format is `resource:action` or `resource:action:entityType/entityId`
+- wildcard is allowed only as `entityType/*`
+- `*/entityId` is rejected
+- deny beats allow
+- exact namespace beats wildcard namespace
+- global scope (`kb:read`) is still the broadest allow and remains backward-compatible
+
+Examples:
+
+- read only one entity: `kb:read:project/acme`
+- write any project except one rival project:
+  - `kb:write:project/*`
+  - `kb:deny:project/rival`
+
+Current limitation:
+
+- `GET /kb/search`, batch query, and `/memory/*` flows still use coarse global scopes in this pass
+- use global `kb:read` / `memory:read` for those endpoints
+
 ## 3) Rotate keys on exposure
 
 If a token appears in logs, screenshots, terminals, or chat:

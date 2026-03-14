@@ -236,7 +236,7 @@ iranti auth create-key --instance local --key-id demo_user --owner "Demo User" -
 ```
 
 Use the printed `keyId.secret` token in `X-Iranti-Key`.
-Scope format is `resource:action` (for example `kb:read`, `memory:write`, `metrics:read`).
+Scope format is `resource:action` or `resource:action:entityType/entityId` (for example `kb:read`, `memory:write`, `kb:write:project/*`).
 
 ## Your First Write
 

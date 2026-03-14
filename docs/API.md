@@ -29,6 +29,18 @@ Scope model:
 - `/v1/chat/completions` and `/chat/completions`: `proxy:chat`
 - `/dev/*`: `system:admin`
 
+Namespace-aware scopes are supported for entity-bound KB routes:
+- `kb:read:project/acme`
+- `kb:write:project/*`
+- `kb:deny:project/rival`
+
+Rules:
+- scope format is `resource:action` or `resource:action:entityType/entityId`
+- wildcard is allowed only as `entityType/*`
+- deny beats allow
+- exact namespace beats wildcard namespace
+- `GET /kb/search`, `POST /kb/batchQuery`, and `/memory/*` still require coarse global scopes in the current implementation
+
 ## Core Endpoints
 
 ### Health
@@ -40,7 +52,7 @@ Response:
 ```json
 {
   "status": "ok",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "provider": "mock"
 }
 ```

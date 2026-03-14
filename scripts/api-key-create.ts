@@ -19,7 +19,7 @@ async function main(): Promise<void> {
         .filter(Boolean);
 
     if (!keyId || !owner) {
-        console.error('Usage: npm run api-key:create -- --key-id <id> --owner <owner> [--scopes read,write] [--description "text"]');
+        console.error('Usage: npm run api-key:create -- --key-id <id> --owner <owner> [--scopes kb:read,kb:write:project/*] [--description "text"]');
         process.exit(1);
     }
 

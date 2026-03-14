@@ -62,7 +62,7 @@ function assertServerRouteMounts(): void {
     expectRegex(
         filePath,
         content,
-        /app\.use\(ROUTES\.kb,\s*authenticate,\s*rateLimitMiddleware,\s*requireScopeByMethod\('kb:read',\s*'kb:write'\),\s*knowledgeRoutes\(iranti\)\);/,
+        /app\.use\(ROUTES\.kb,\s*authenticate,\s*rateLimitMiddleware,\s*requireScopeFamilyByMethod\('kb:read',\s*'kb:write'\),\s*knowledgeRoutes\(iranti\)\);/,
         'Server mounts /kb with auth + rate limit'
     );
     expectRegex(
@@ -74,7 +74,7 @@ function assertServerRouteMounts(): void {
     expectRegex(
         filePath,
         content,
-        /app\.use\('\/kb',\s*authenticate,\s*rateLimitMiddleware,\s*requireAnyScope\(\['kb:read'\]\),\s*batchRouter\);/,
+        /app\.use\('\/kb\/batchQuery',\s*authenticate,\s*rateLimitMiddleware,\s*requireAnyScope\(\['kb:read'\]\),\s*batchRouter\);/,
         'Server mounts /kb batch router with rate limit'
     );
 }
@@ -121,7 +121,7 @@ function assertBatchRoute(): void {
     const filePath = 'src/api/routes/batch.ts';
     const content = readFile(filePath);
 
-    expectIncludes(filePath, content, 'batchRouter.post("/batchQuery"', 'Batch route: POST /kb/batchQuery');
+    expectRegex(filePath, content, /batchRouter\.post\((["'])\/\1/, 'Batch route: POST /kb/batchQuery');
 }
 
 function assertPythonClientContract(): void {

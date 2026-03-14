@@ -177,6 +177,26 @@ a fact about a given entity.
 
 ---
 
+## API Key Authorization
+
+Registry-backed API keys support both global scopes and namespace-aware scopes.
+
+- Global scopes remain unchanged: `kb:read`, `kb:write`, `memory:read`
+- Entity-bound KB routes may also use namespaced scopes:
+  - `kb:read:project/acme`
+  - `kb:write:project/*`
+  - `kb:deny:project/rival`
+
+Rules:
+- scope format is `resource:action` or `resource:action:entityType/entityId`
+- wildcard is allowed only as `entityType/*`
+- deny beats allow
+- exact namespace beats wildcard namespace
+- entity-bound KB routes enforce namespace ACLs at the API layer
+- `GET /kb/search`, `POST /kb/batchQuery`, and `/memory/*` still use coarse global scopes in the current implementation
+
+---
+
 ## File Structure
 
 ```
@@ -285,6 +305,14 @@ iranti/
 ├── docker-compose.yml          — PostgreSQL for local dev
 └── .env                        — Local environment (never committed)
 ```
+
+---
+
+Additional current paths not called out explicitly above:
+- `src/security/apiKeys.ts` — registry-backed API key storage and validation
+- `src/security/scopes.ts` — scope parsing and namespace ACL evaluation
+- `src/api/middleware/authorization.ts` — global and namespace-aware scope enforcement
+- `tests/access-control/run_access_control_tests.ts` — namespace-aware authorization coverage
 
 ---
 

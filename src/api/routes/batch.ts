@@ -6,7 +6,7 @@ export const batchRouter = Router();
 /**
  * Batch query endpoint: fetch multiple KB entries in one request
  */
-batchRouter.post("/batchQuery", async (req: Request, res: Response) => {
+batchRouter.post("/", async (req: Request, res: Response) => {
   try {
     const { items } = req.body as { items?: { entity: string; key: string }[] };
 

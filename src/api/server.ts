@@ -11,7 +11,7 @@ import { agentRoutes } from './routes/agents';
 import { devRouter } from './routes/dev';
 import { batchRouter } from './routes/batch';
 import { authenticate } from './middleware/auth';
-import { requireAnyScope, requireScopeByMethod } from './middleware/authorization';
+import { requireAnyScope, requireScopeByMethod, requireScopeFamilyByMethod } from './middleware/authorization';
 import { rateLimitMiddleware } from './middleware/rateLimit';
 import { snapshot, reset } from '../lib/metrics';
 import { requestContext } from '../lib/requestContext';
@@ -101,8 +101,8 @@ void startArchivistScheduler(iranti)
 
 // Mount protected routes
 app.use(ROUTES.agents, authenticate, rateLimitMiddleware, requireScopeByMethod('agents:read', 'agents:write'), agentRoutes(iranti));
-app.use('/kb', authenticate, rateLimitMiddleware, requireAnyScope(['kb:read']), batchRouter);
-app.use(ROUTES.kb, authenticate, rateLimitMiddleware, requireScopeByMethod('kb:read', 'kb:write'), knowledgeRoutes(iranti));
+app.use('/kb/batchQuery', authenticate, rateLimitMiddleware, requireAnyScope(['kb:read']), batchRouter);
+app.use(ROUTES.kb, authenticate, rateLimitMiddleware, requireScopeFamilyByMethod('kb:read', 'kb:write'), knowledgeRoutes(iranti));
 app.use(ROUTES.memory, authenticate, rateLimitMiddleware, requireScopeByMethod('memory:read', 'memory:write'), memoryRoutes(iranti));
 app.use('/dev', authenticate, rateLimitMiddleware, requireAnyScope(['system:admin']), devRouter);
 

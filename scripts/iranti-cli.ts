@@ -2385,7 +2385,7 @@ Configuration:
   iranti configure project [path] [--interactive] [--instance <name>] [--url <http://host:port>] [--api-key <token>] [--agent-id <id>] [--memory-entity <entity>]
 
   Auth:
-    iranti auth create-key --instance <name> --key-id <id> --owner <owner> [--scopes read,write] [--description <text>] [--write-instance] [--project <path>] [--agent-id <id>]
+    iranti auth create-key --instance <name> --key-id <id> --owner <owner> [--scopes kb:read,kb:write:project/*] [--description <text>] [--write-instance] [--project <path>] [--agent-id <id>]
     iranti auth list-keys --instance <name>
     iranti auth revoke-key --instance <name> --key-id <id>
 

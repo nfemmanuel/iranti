@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { Iranti } from '../../sdk';
 import { addAlias, listAliases, parseEntityString, resolveEntity } from '../../library/entity-resolution';
 import { validateInput } from '../middleware/validation';
+import { EntityTarget, requireAnyScope, requireEntityScopeByMethod } from '../middleware/authorization';
 
 function heuristicEntityId(name: string): string {
     return name
@@ -43,11 +44,32 @@ function parseResolveTarget(entity: unknown): { entityType: string; entityId: st
     };
 }
 
+function parseEntityTarget(entity: unknown): EntityTarget {
+    if (typeof entity !== 'string' || entity.trim().length === 0) {
+        throw new Error('entity must be a non-empty string.');
+    }
+
+    const parsed = parseEntityString(entity.trim());
+    return {
+        entityType: parsed.entityType,
+        entityId: parsed.entityId,
+    };
+}
+
+function fromParams(req: Request): EntityTarget {
+    const entityType = Array.isArray(req.params.entityType) ? req.params.entityType[0] : req.params.entityType;
+    const entityId = Array.isArray(req.params.entityId) ? req.params.entityId[0] : req.params.entityId;
+    if (!entityType || !entityId) {
+        throw new Error('entityType and entityId are required.');
+    }
+    return { entityType, entityId };
+}
+
 export function knowledgeRoutes(iranti: Iranti): Router {
     const router = Router();
 
     // POST /write
-    router.post('/write', validateInput('write'), async (req: Request, res: Response) => {
+    router.post('/write', validateInput('write'), requireEntityScopeByMethod('kb:read', 'kb:write', (req) => parseEntityTarget(req.body.entity)), async (req: Request, res: Response) => {
         try {
             const result = await iranti.write(req.body);
             res.json(result);
@@ -57,7 +79,7 @@ export function knowledgeRoutes(iranti: Iranti): Router {
     });
 
     // POST /ingest
-    router.post('/ingest', async (req: Request, res: Response) => {
+    router.post('/ingest', requireEntityScopeByMethod('kb:read', 'kb:write', (req) => parseEntityTarget(req.body.entity)), async (req: Request, res: Response) => {
         try {
             const result = await iranti.ingest(req.body);
             res.json(result);
@@ -67,7 +89,10 @@ export function knowledgeRoutes(iranti: Iranti): Router {
     });
 
     // POST /resolve
-    router.post('/resolve', async (req: Request, res: Response) => {
+    router.post('/resolve', requireEntityScopeByMethod('kb:read', 'kb:write', (req) => {
+        const parsed = parseResolveTarget(req.body?.entity);
+        return { entityType: parsed.entityType, entityId: parsed.entityId };
+    }), async (req: Request, res: Response) => {
         try {
             const { entity, createIfMissing, aliases, source, confidence, agent } = req.body ?? {};
             const parsed = parseResolveTarget(entity);
@@ -95,7 +120,7 @@ export function knowledgeRoutes(iranti: Iranti): Router {
     });
 
     // POST /alias
-    router.post('/alias', async (req: Request, res: Response) => {
+    router.post('/alias', requireEntityScopeByMethod('kb:read', 'kb:write', (req) => parseEntityTarget(req.body?.canonicalEntity)), async (req: Request, res: Response) => {
         try {
             const { canonicalEntity, alias, source, confidence, force } = req.body ?? {};
             const result = await addAlias({
@@ -118,7 +143,7 @@ export function knowledgeRoutes(iranti: Iranti): Router {
     });
 
     // GET /entity/:entityType/:entityId/aliases
-    router.get('/entity/:entityType/:entityId/aliases', async (req: Request, res: Response) => {
+    router.get('/entity/:entityType/:entityId/aliases', requireEntityScopeByMethod('kb:read', 'kb:write', fromParams), async (req: Request, res: Response) => {
         try {
             const { entityType, entityId } = req.params;
             const result = await listAliases(`${entityType}/${entityId}`);
@@ -129,7 +154,7 @@ export function knowledgeRoutes(iranti: Iranti): Router {
     });
 
     // GET /query/:entityType/:entityId/:key
-    router.get('/query/:entityType/:entityId/:key', async (req: Request, res: Response) => {
+    router.get('/query/:entityType/:entityId/:key', requireEntityScopeByMethod('kb:read', 'kb:write', fromParams), async (req: Request, res: Response) => {
         try {
             const entityType = Array.isArray(req.params.entityType) ? req.params.entityType[0] : req.params.entityType;
             const entityId = Array.isArray(req.params.entityId) ? req.params.entityId[0] : req.params.entityId;
@@ -152,7 +177,7 @@ export function knowledgeRoutes(iranti: Iranti): Router {
     });
 
     // GET /history/:entityType/:entityId/:key
-    router.get('/history/:entityType/:entityId/:key', async (req: Request, res: Response) => {
+    router.get('/history/:entityType/:entityId/:key', requireEntityScopeByMethod('kb:read', 'kb:write', fromParams), async (req: Request, res: Response) => {
         try {
             const entityType = Array.isArray(req.params.entityType) ? req.params.entityType[0] : req.params.entityType;
             const entityId = Array.isArray(req.params.entityId) ? req.params.entityId[0] : req.params.entityId;
@@ -170,7 +195,7 @@ export function knowledgeRoutes(iranti: Iranti): Router {
     });
 
     // GET /query/:entityType/:entityId
-    router.get('/query/:entityType/:entityId', async (req: Request, res: Response) => {
+    router.get('/query/:entityType/:entityId', requireEntityScopeByMethod('kb:read', 'kb:write', fromParams), async (req: Request, res: Response) => {
         try {
             const { entityType, entityId } = req.params;
             const result = await iranti.queryAll(`${entityType}/${entityId}`);
@@ -181,7 +206,7 @@ export function knowledgeRoutes(iranti: Iranti): Router {
     });
 
     // GET /search
-    router.get('/search', async (req: Request, res: Response) => {
+    router.get('/search', requireAnyScope(['kb:read']), async (req: Request, res: Response) => {
         try {
             const query = String(req.query.query ?? '').trim();
             if (!query) {
@@ -231,7 +256,10 @@ export function knowledgeRoutes(iranti: Iranti): Router {
     });
 
     // POST /relate
-    router.post('/relate', validateInput('relate'), async (req: Request, res: Response) => {
+    router.post('/relate', validateInput('relate'), requireEntityScopeByMethod('kb:read', 'kb:write', (req) => [
+        parseEntityTarget(req.body.fromEntity),
+        parseEntityTarget(req.body.toEntity),
+    ]), async (req: Request, res: Response) => {
         try {
             const { fromEntity, relationshipType, toEntity, createdBy, properties } = req.body;
             await iranti.relate(fromEntity, relationshipType, toEntity, { createdBy, properties });
@@ -242,7 +270,7 @@ export function knowledgeRoutes(iranti: Iranti): Router {
     });
 
     // GET /related/:entityType/:entityId
-    router.get('/related/:entityType/:entityId', async (req: Request, res: Response) => {
+    router.get('/related/:entityType/:entityId', requireEntityScopeByMethod('kb:read', 'kb:write', fromParams), async (req: Request, res: Response) => {
         try {
             const { entityType, entityId } = req.params;
             const result = await iranti.getRelated(`${entityType}/${entityId}`);
@@ -253,7 +281,7 @@ export function knowledgeRoutes(iranti: Iranti): Router {
     });
 
     // GET /related/:entityType/:entityId/deep
-    router.get('/related/:entityType/:entityId/deep', async (req: Request, res: Response) => {
+    router.get('/related/:entityType/:entityId/deep', requireEntityScopeByMethod('kb:read', 'kb:write', fromParams), async (req: Request, res: Response) => {
         try {
             const { entityType, entityId } = req.params;
             const depth = parseInt(req.query.depth as string ?? '2');

@@ -1,6 +1,7 @@
 import { randomBytes, createHash, timingSafeEqual } from 'crypto';
 import { getDb } from '../library/client';
 import { Prisma } from '../generated/prisma/client';
+import { validateScopeList } from './scopes';
 
 const REGISTRY_ENTITY_TYPE = 'system';
 const REGISTRY_ENTITY_ID = 'auth';
@@ -196,6 +197,7 @@ export async function createOrRotateApiKey(input: {
     }
 
     const scopes = Array.isArray(input.scopes) ? input.scopes.map((s) => s.trim()).filter(Boolean) : [];
+    validateScopeList(scopes);
     const secret = generateApiKeySecret();
     const secretHash = hashApiKeySecret(secret);
     const now = new Date().toISOString();
