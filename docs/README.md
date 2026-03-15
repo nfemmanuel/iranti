@@ -8,9 +8,11 @@
 
 ## User Guides
 
+- [Chat Guide](guides/chat.md) - Built-in `iranti chat` session flow and slash commands
 - [Conflict Resolution](guides/conflict-resolution.md) - How Iranti handles conflicting facts
 - [LLM Providers](guides/providers.md) - Configuring Gemini, OpenAI, Claude, etc.
 - [Security Quickstart](guides/security-quickstart.md) - Key scopes, rotation, and deployment baseline
+- [Vector Backends](guides/vector-backends.md) - Switching hybrid search vector storage between pgvector, Qdrant, and ChromaDB
 
 ## Operations
 
@@ -46,9 +48,12 @@
 
 ### Features
 
+- [Chat](features/chat/) - Native CLI chat session
 - [Chunking](features/chunking/) - Auto-chunking raw content into facts
 - [Conflict Resolution](features/conflict-resolution/) - Librarian conflict handling
+- [Resolutionist](features/resolutionist/) - Human escalation review workflow
 - [Source Reliability](features/source-reliability/) - Dynamic source scoring
+- [Vector Backends](features/vector-backends/) - Pluggable vector similarity backends
 
 ### Engineering
 
