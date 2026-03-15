@@ -2,7 +2,24 @@
 
 All notable changes to this project are documented in this file.
 
-## 0.2.2 - Unreleased
+## 0.2.3 - Unreleased
+
+### Added
+
+- New `iranti chat` slash commands:
+  - `/history`
+  - `/relate`
+  - `/related`
+  - `/resolve`
+  - `/confidence`
+- Expanded chat guide/spec coverage for the full slash-command surface.
+
+### Changed
+
+- `iranti upgrade` now detects install context, checks latest npm/PyPI versions, supports `--check`, `--dry-run`, `--yes`, and `--target`, and verifies the selected upgrade path after execution.
+- README and quickstart diagnostics now describe the executable upgrade flow instead of the old advisory-only command.
+
+## 0.2.2 - 2026-03-14
 
 ### Fixed
 

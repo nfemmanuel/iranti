@@ -24,9 +24,23 @@ On startup the chat command:
 
 ## Slash Commands
 
-### `/help`
+`/help` prints the current command list:
 
-Show the available commands.
+```text
+/memory                          show all memory facts for this session
+/search <query>                  search facts by keyword or concept
+/inject <entity> <key>           inject a specific fact into the next turn
+/write <key> <value> [conf]      write a fact to session memory
+/observe                         manually pull memory from conversation history
+/history <entity> <key>          show temporal history for a fact
+/relate <from> <to> <type>       create a relationship between two entities
+/related <entity>                show all relationships for an entity
+/resolve                         walk through pending conflict escalations
+/confidence <entity> <key> <n>   update confidence score for a fact (0-100)
+/clear                           clear conversation history
+/provider <name> [model]         switch LLM provider for this session
+/exit                            quit
+```
 
 ### `/memory`
 
@@ -61,6 +75,42 @@ Write a fact to `session/<agent-id>`. Values are treated as strings unless they 
 
 Run `observe()` against the current conversation history and queue any returned facts for the next turn.
 
+### `/history <entity> <key>`
+
+Show temporal intervals for a fact, oldest to newest.
+
+```bash
+/history project/acme budget
+```
+
+### `/relate <from> <to> <type>`
+
+Create a relationship between two entities:
+
+```bash
+/relate person/jane project/acme LEADS
+```
+
+### `/related <entity>`
+
+List inbound and outbound relationships for an entity:
+
+```bash
+/related project/acme
+```
+
+### `/resolve`
+
+Pause chat, launch the Resolutionist against the active escalation folder, then return to the chat loop when review is complete.
+
+### `/confidence <entity> <key> <n>`
+
+Read the current fact, then re-write it with the updated confidence score:
+
+```bash
+/confidence project/acme budget 95
+```
+
 ### `/clear`
 
 Clear local conversation history and queued memory injections. Persisted KB facts are not deleted.
@@ -84,6 +134,8 @@ Leave the chat session cleanly.
 - `attend()` decides whether memory should be injected for each user turn
 - `/observe` exposes the current `observe()` behavior, which is retrieval/injection, not fact persistence
 - `/write` is the explicit persistence path for session facts
+- `/confidence` reuses the normal write path rather than mutating a row in place
+- `/resolve` hands off to the Resolutionist and then resumes the chat loop
 
 Facts written with `/write` persist in the KB under `session/<agent-id>`, so using the same `--agent` value on later sessions gives you continuity.
 

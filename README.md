@@ -338,7 +338,9 @@ Start a CLI chat session against the configured Iranti instance:
 iranti chat
 ```
 
-Use `--agent`, `--provider`, and `--model` to pin the session identity and model routing. Guide: [`docs/guides/chat.md`](docs/guides/chat.md)
+Use `--agent`, `--provider`, and `--model` to pin the session identity and model routing.
+The chat surface now includes slash commands for fact history, relationships, conflict-resolution handoff, and confidence updates in addition to memory search/write operations.
+Guide: [`docs/guides/chat.md`](docs/guides/chat.md)
 
 ---
 
