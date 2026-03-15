@@ -460,12 +460,14 @@ Use the CLI doctor command before first run or before a release check:
 iranti doctor
 iranti doctor --instance local
 iranti status
-iranti upgrade
+iranti upgrade --check
+iranti upgrade --dry-run
+iranti upgrade --yes
 ```
 
 This validates the active env file, database URL, API key presence, provider selection, and provider-specific credentials.
 `iranti status` shows the current runtime root, known instances, and local binding files.
-`iranti upgrade` prints the supported upgrade commands for npm and Python installs.
+`iranti upgrade` detects repo/global/Python install paths, compares current vs latest published versions, prints the exact plan, and executes the selected upgrade path when you pass `--yes`.
 `iranti configure ...` updates instance/project credentials without manual env editing.
 `iranti auth ...` manages registry-backed API keys and can sync them into instance or project bindings.
 

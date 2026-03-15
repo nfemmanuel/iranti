@@ -167,10 +167,10 @@ iranti run --instance local
 ### Check configuration before run
 
 ```bash
-iranti doctor --instance local
-iranti status
-iranti upgrade
-```
+  iranti doctor --instance local
+  iranti status
+  iranti upgrade --check
+  ```
 
 Use `iranti configure instance ...` when you want to edit several instance fields together. Use `iranti add|update|remove api-key` when you only want to manage upstream provider credentials without opening the env file manually. Supported remote providers are OpenAI, Claude, Gemini, Groq, and Mistral. `mock` and `ollama` do not require remote API keys, and Perplexity is not yet supported.
 
@@ -222,10 +222,10 @@ You should see all tests pass:
 For a quick environment check before that, run:
 
 ```bash
-iranti doctor
-iranti status
-iranti upgrade
-```
+  iranti doctor
+  iranti status
+  iranti upgrade --check
+  ```
 
 ---
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from 'fs';
 import fsp from 'fs/promises';
+import https from 'https';
 import os from 'os';
 import path from 'path';
 import { spawn, spawnSync } from 'child_process';
@@ -49,6 +50,30 @@ type DoctorCheck = {
 type StatusRow = {
     label: string;
     value: string;
+};
+
+type DoctorEnvTarget = {
+    envFile: string | null;
+    envSource: string;
+};
+
+type UpgradeTarget = 'auto' | 'npm-global' | 'npm-repo' | 'python';
+
+type UpgradeCommand = {
+    label: string;
+    display: string;
+    executable: string;
+    args: string[];
+    cwd?: string;
+};
+
+type UpgradeExecutionResult = {
+    target: Exclude<UpgradeTarget, 'auto'>;
+    steps: Array<{ label: string; command: string }>;
+    verification: {
+        status: 'pass' | 'warn' | 'fail';
+        detail: string;
+    };
 };
 
 type ProviderKeyTarget = {
@@ -1189,6 +1214,366 @@ function summarizeStatus(checks: DoctorCheck[]): DoctorStatus {
     return 'pass';
 }
 
+function resolveDoctorEnvTarget(args: ParsedArgs): DoctorEnvTarget {
+    const scope = normalizeScope(getFlag(args, 'scope'));
+    const instanceName = getFlag(args, 'instance');
+    const explicitEnv = getFlag(args, 'env');
+    const cwd = process.cwd();
+
+    if (explicitEnv) {
+        return {
+            envFile: path.resolve(explicitEnv),
+            envSource: 'explicit-env',
+        };
+    }
+
+    if (instanceName) {
+        const root = resolveInstallRoot(args, scope);
+        return {
+            envFile: path.join(root, 'instances', instanceName, '.env'),
+            envSource: `instance:${instanceName}`,
+        };
+    }
+
+    const repoEnv = path.join(cwd, '.env');
+    const projectEnv = path.join(cwd, '.env.iranti');
+    if (fs.existsSync(repoEnv)) {
+        return { envFile: repoEnv, envSource: 'repo' };
+    }
+    if (fs.existsSync(projectEnv)) {
+        return { envFile: projectEnv, envSource: 'project-binding' };
+    }
+
+    return { envFile: null, envSource: 'repo' };
+}
+
+function resolveUpgradeTarget(raw: string | undefined): UpgradeTarget {
+    if (!raw) return 'auto';
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === 'auto' || normalized === 'npm-global' || normalized === 'npm-repo' || normalized === 'python') {
+        return normalized;
+    }
+    throw new Error(`Invalid --target '${raw}'. Use auto, npm-global, npm-repo, or python.`);
+}
+
+function parseVersion(value: string | null | undefined): number[] {
+    if (!value) return [0];
+    const match = value.trim().match(/^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?/);
+    if (!match) return [0];
+    return [
+        Number.parseInt(match[1] ?? '0', 10),
+        Number.parseInt(match[2] ?? '0', 10),
+        Number.parseInt(match[3] ?? '0', 10),
+    ];
+}
+
+function compareVersions(left: string | null | undefined, right: string | null | undefined): number {
+    const a = parseVersion(left);
+    const b = parseVersion(right);
+    const limit = Math.max(a.length, b.length, 3);
+    for (let i = 0; i < limit; i++) {
+        const av = a[i] ?? 0;
+        const bv = b[i] ?? 0;
+        if (av > bv) return 1;
+        if (av < bv) return -1;
+    }
+    return 0;
+}
+
+function normalizePathForCompare(value: string): string {
+    return path.resolve(value).replace(/\\/g, '/').toLowerCase();
+}
+
+function isPathInside(parentDir: string, childDir: string): boolean {
+    const parent = normalizePathForCompare(parentDir);
+    const child = normalizePathForCompare(childDir);
+    return child === parent || child.startsWith(`${parent}/`);
+}
+
+function resolveSpawnExecutable(executable: string): string {
+    if (process.platform !== 'win32') return executable;
+    if (executable === 'npm') return 'npm.cmd';
+    if (executable === 'npx') return 'npx.cmd';
+    return executable;
+}
+
+function runCommandCapture(executable: string, args: string[], cwd?: string): { status: number | null; stdout: string; stderr: string } {
+    const proc = spawnSync(resolveSpawnExecutable(executable), args, {
+        cwd,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return {
+        status: proc.status,
+        stdout: proc.stdout ?? '',
+        stderr: proc.stderr ?? '',
+    };
+}
+
+function runCommandInteractive(step: UpgradeCommand): number | null {
+    const proc = spawnSync(resolveSpawnExecutable(step.executable), step.args, {
+        cwd: step.cwd,
+        stdio: 'inherit',
+    });
+    return proc.status;
+}
+
+function detectPythonLauncher(): UpgradeCommand | null {
+    const candidates: UpgradeCommand[] = process.platform === 'win32'
+        ? [
+            { label: 'python', display: 'python -m pip install --upgrade iranti', executable: 'python', args: ['-m', 'pip', 'install', '--upgrade', 'iranti'] },
+            { label: 'py', display: 'py -3 -m pip install --upgrade iranti', executable: 'py', args: ['-3', '-m', 'pip', 'install', '--upgrade', 'iranti'] },
+        ]
+        : [
+            { label: 'python3', display: 'python3 -m pip install --upgrade iranti', executable: 'python3', args: ['-m', 'pip', 'install', '--upgrade', 'iranti'] },
+            { label: 'python', display: 'python -m pip install --upgrade iranti', executable: 'python', args: ['-m', 'pip', 'install', '--upgrade', 'iranti'] },
+        ];
+
+    for (const candidate of candidates) {
+        const probeArgs = candidate.args[0] === '-3' ? ['-3', '--version'] : ['--version'];
+        const probe = runCommandCapture(candidate.executable, probeArgs);
+        if (probe.status === 0) return candidate;
+    }
+    return null;
+}
+
+function detectGlobalNpmRoot(): string | null {
+    const proc = runCommandCapture('npm', ['root', '-g']);
+    if (proc.status !== 0) return null;
+    const value = proc.stdout.trim();
+    return value ? path.resolve(value) : null;
+}
+
+function readJsonFile<T>(filePath: string): T | null {
+    if (!fs.existsSync(filePath)) return null;
+    try {
+        return JSON.parse(fs.readFileSync(filePath, 'utf8')) as T;
+    } catch {
+        return null;
+    }
+}
+
+function httpsJson(url: string, headers: Record<string, string> = {}): Promise<any> {
+    return new Promise((resolve, reject) => {
+        const request = https.get(url, { headers }, (response) => {
+            const statusCode = response.statusCode ?? 0;
+            if (statusCode >= 300 && statusCode < 400 && response.headers.location) {
+                response.resume();
+                const redirect = new URL(response.headers.location, url).toString();
+                httpsJson(redirect, headers).then(resolve).catch(reject);
+                return;
+            }
+            if (statusCode < 200 || statusCode >= 300) {
+                response.resume();
+                reject(new Error(`HTTP ${statusCode} from ${url}`));
+                return;
+            }
+            let raw = '';
+            response.setEncoding('utf8');
+            response.on('data', (chunk) => {
+                raw += chunk;
+            });
+            response.on('end', () => {
+                try {
+                    resolve(JSON.parse(raw));
+                } catch (error) {
+                    reject(error);
+                }
+            });
+        });
+        request.setTimeout(5000, () => {
+            request.destroy(new Error(`Timed out fetching ${url}`));
+        });
+        request.on('error', reject);
+    });
+}
+
+async function fetchLatestNpmVersion(): Promise<string | null> {
+    try {
+        const payload = await httpsJson('https://registry.npmjs.org/iranti/latest');
+        return typeof payload?.version === 'string' ? payload.version : null;
+    } catch {
+        return null;
+    }
+}
+
+async function fetchLatestPypiVersion(): Promise<string | null> {
+    try {
+        const payload = await httpsJson('https://pypi.org/pypi/iranti/json');
+        return typeof payload?.info?.version === 'string' ? payload.info.version : null;
+    } catch {
+        return null;
+    }
+}
+
+function repoUpgradeCommands(root: string): UpgradeCommand[] {
+    return [
+        { label: 'git pull', display: 'git pull --ff-only', executable: 'git', args: ['pull', '--ff-only'], cwd: root },
+        { label: 'npm install', display: 'npm install', executable: 'npm', args: ['install'], cwd: root },
+        { label: 'npm build', display: 'npm run build', executable: 'npm', args: ['run', 'build'], cwd: root },
+    ];
+}
+
+function repoIsDirty(root: string): boolean {
+    const proc = runCommandCapture('git', ['status', '--porcelain'], root);
+    return proc.status === 0 && proc.stdout.trim().length > 0;
+}
+
+function detectUpgradeContext(args: ParsedArgs): {
+    packageRootPath: string;
+    currentVersion: string;
+    runtimeRoot: string;
+    runtimeInstalled: boolean;
+    repoCheckout: boolean;
+    globalNpmInstall: boolean;
+    globalNpmRoot: string | null;
+    python: UpgradeCommand | null;
+    availableTargets: Exclude<UpgradeTarget, 'auto'>[];
+} {
+    const scope = normalizeScope(getFlag(args, 'scope'));
+    const packageRootPath = packageRoot();
+    const runtimeRoot = resolveInstallRoot(args, scope);
+    const runtimeInstalled = fs.existsSync(path.join(runtimeRoot, 'install.json'));
+    const repoCheckout = fs.existsSync(path.join(packageRootPath, '.git'));
+    const globalNpmRoot = detectGlobalNpmRoot();
+    const globalNpmInstall = globalNpmRoot !== null && isPathInside(globalNpmRoot, packageRootPath);
+    const python = detectPythonLauncher();
+    const availableTargets: Exclude<UpgradeTarget, 'auto'>[] = [];
+    if (globalNpmInstall) availableTargets.push('npm-global');
+    if (repoCheckout) availableTargets.push('npm-repo');
+    if (python) availableTargets.push('python');
+    return {
+        packageRootPath,
+        currentVersion: getPackageVersion(),
+        runtimeRoot,
+        runtimeInstalled,
+        repoCheckout,
+        globalNpmInstall,
+        globalNpmRoot,
+        python,
+        availableTargets,
+    };
+}
+
+function chooseUpgradeTarget(
+    requested: UpgradeTarget,
+    context: ReturnType<typeof detectUpgradeContext>
+): Exclude<UpgradeTarget, 'auto'> | null {
+    if (requested !== 'auto') {
+        if (!context.availableTargets.includes(requested)) {
+            throw new Error(`Requested target '${requested}' is not available in this environment.`);
+        }
+        return requested;
+    }
+    if (context.repoCheckout) return 'npm-repo';
+    if (context.globalNpmInstall) return 'npm-global';
+    if (context.python) return 'python';
+    return null;
+}
+
+function commandListForTarget(
+    target: Exclude<UpgradeTarget, 'auto'>,
+    context: ReturnType<typeof detectUpgradeContext>
+): UpgradeCommand[] {
+    if (target === 'npm-repo') {
+        return repoUpgradeCommands(context.packageRootPath);
+    }
+    if (target === 'npm-global') {
+        return [{
+            label: 'npm global',
+            display: 'npm install -g iranti@latest',
+            executable: 'npm',
+            args: ['install', '-g', 'iranti@latest'],
+            cwd: context.packageRootPath,
+        }];
+    }
+    if (!context.python) {
+        throw new Error('Python launcher not found for python upgrade target.');
+    }
+    return [context.python];
+}
+
+async function refreshInstallMetaVersion(runtimeRoot: string, version: string): Promise<void> {
+    const installMetaPath = path.join(runtimeRoot, 'install.json');
+    const meta = readJsonFile<InstallMeta>(installMetaPath);
+    if (!meta) return;
+    await writeJson(installMetaPath, {
+        ...meta,
+        version,
+        upgradedAt: new Date().toISOString(),
+    });
+}
+
+function verifyGlobalNpmInstall(): { status: 'pass' | 'warn' | 'fail'; detail: string } {
+    const proc = runCommandCapture('npm', ['list', '-g', 'iranti', '--depth=0', '--json']);
+    if (proc.status !== 0) {
+        return {
+            status: 'warn',
+            detail: 'npm global upgrade finished, but `npm list -g iranti` did not return cleanly.',
+        };
+    }
+    try {
+        const payload = JSON.parse(proc.stdout);
+        const version = payload?.dependencies?.iranti?.version;
+        return typeof version === 'string'
+            ? { status: 'pass', detail: `npm global install reports iranti@${version}.` }
+            : { status: 'warn', detail: 'npm global upgrade finished, but installed version could not be confirmed.' };
+    } catch {
+        return {
+            status: 'warn',
+            detail: 'npm global upgrade finished, but version verification output was unreadable.',
+        };
+    }
+}
+
+function verifyPythonInstall(command: UpgradeCommand): { status: 'pass' | 'warn' | 'fail'; detail: string } {
+    const args = command.executable === 'py' ? ['-3', '-m', 'pip', 'show', 'iranti'] : ['-m', 'pip', 'show', 'iranti'];
+    const proc = runCommandCapture(command.executable, args);
+    if (proc.status !== 0) {
+        return {
+            status: 'warn',
+            detail: 'Python upgrade finished, but `pip show iranti` did not confirm the installed version.',
+        };
+    }
+    const versionLine = proc.stdout.split(/\r?\n/).find((line) => line.toLowerCase().startsWith('version:'));
+    return versionLine
+        ? { status: 'pass', detail: `Python client ${versionLine.trim()}.` }
+        : { status: 'warn', detail: 'Python upgrade finished, but installed version could not be confirmed.' };
+}
+
+async function executeUpgradeTarget(
+    target: Exclude<UpgradeTarget, 'auto'>,
+    context: ReturnType<typeof detectUpgradeContext>
+): Promise<UpgradeExecutionResult> {
+    if (target === 'npm-repo' && repoIsDirty(context.packageRootPath)) {
+        throw new Error('Repository worktree is dirty. Commit or stash changes before running `iranti upgrade --target npm-repo --yes`.');
+    }
+
+    const commands = commandListForTarget(target, context);
+    const steps: Array<{ label: string; command: string }> = [];
+    for (const command of commands) {
+        console.log(`${infoLabel()} ${command.display}`);
+        const status = runCommandInteractive(command);
+        steps.push({ label: command.label, command: command.display });
+        if (status !== 0) {
+            throw new Error(`Upgrade step failed: ${command.display}`);
+        }
+    }
+
+    const verification = target === 'npm-global'
+        ? verifyGlobalNpmInstall()
+        : target === 'python'
+            ? verifyPythonInstall(commands[0]!)
+            : { status: 'pass' as const, detail: 'Repository refresh completed and build succeeded.' };
+
+    if (context.runtimeInstalled && verification.status !== 'fail') {
+        const nextVersion = target === 'python' ? context.currentVersion : (await fetchLatestNpmVersion()) ?? context.currentVersion;
+        await refreshInstallMetaVersion(context.runtimeRoot, nextVersion);
+    }
+
+    return { target, steps, verification };
+}
+
 async function listProviderKeysCommand(args: ParsedArgs): Promise<void> {
     const target = await resolveProviderKeyTarget(args);
     const currentProvider = normalizeProvider(target.env.LLM_PROVIDER ?? 'mock');
@@ -1628,33 +2013,8 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
 }
 
 async function doctorCommand(args: ParsedArgs): Promise<void> {
-    const scope = normalizeScope(getFlag(args, 'scope'));
-    const instanceName = getFlag(args, 'instance');
-    const explicitEnv = getFlag(args, 'env');
     const json = hasFlag(args, 'json');
-    const cwd = process.cwd();
-
-    let envFile: string | null = null;
-    let envSource = 'repo';
-
-    if (explicitEnv) {
-        envFile = path.resolve(explicitEnv);
-        envSource = 'explicit-env';
-    } else if (instanceName) {
-        const root = resolveInstallRoot(args, scope);
-        envFile = path.join(root, 'instances', instanceName, '.env');
-        envSource = `instance:${instanceName}`;
-    } else {
-        const repoEnv = path.join(cwd, '.env');
-        const projectEnv = path.join(cwd, '.env.iranti');
-        if (fs.existsSync(repoEnv)) {
-            envFile = repoEnv;
-            envSource = 'repo';
-        } else if (fs.existsSync(projectEnv)) {
-            envFile = projectEnv;
-            envSource = 'project-binding';
-        }
-    }
+    const { envFile, envSource } = resolveDoctorEnvTarget(args);
 
     const checks: DoctorCheck[] = [];
     const version = getPackageVersion();
@@ -1903,30 +2263,120 @@ async function statusCommand(args: ParsedArgs): Promise<void> {
 }
 
 async function upgradeCommand(args: ParsedArgs): Promise<void> {
+    const checkOnly = hasFlag(args, 'check');
+    const dryRun = hasFlag(args, 'dry-run');
+    const execute = hasFlag(args, 'yes');
     const json = hasFlag(args, 'json');
-    const version = getPackageVersion();
+    const requestedTarget = resolveUpgradeTarget(getFlag(args, 'target'));
+    const context = detectUpgradeContext(args);
+    const latestNpm = await fetchLatestNpmVersion();
+    const latestPython = await fetchLatestPypiVersion();
+    const chosenTarget = chooseUpgradeTarget(requestedTarget, context);
     const commands = {
         npmGlobal: 'npm install -g iranti@latest',
-        npmRepo: 'git pull && npm install && npm run build',
-        python: 'pip install --upgrade iranti',
+        npmRepo: 'git pull --ff-only && npm install && npm run build',
+        python: context.python?.display ?? 'python -m pip install --upgrade iranti',
     };
+    const updateAvailable = {
+        npm: latestNpm ? compareVersions(latestNpm, context.currentVersion) > 0 : null,
+        python: latestPython ? compareVersions(latestPython, context.currentVersion) > 0 : null,
+    };
+    const plan = chosenTarget ? commandListForTarget(chosenTarget, context) : [];
+
+    let execution: UpgradeExecutionResult | null = null;
+    let note: string | null = null;
+
+    if (execute) {
+        if (!chosenTarget) {
+            throw new Error('No executable upgrade path was detected. Use --target npm-global, --target npm-repo, or --target python.');
+        }
+        if (dryRun || checkOnly) {
+            note = 'Execution skipped because --dry-run or --check was provided.';
+        } else if (chosenTarget === 'npm-global' && updateAvailable.npm === false) {
+            note = 'npm global install is already at the latest published version.';
+        } else if (chosenTarget === 'python' && updateAvailable.python === false) {
+            note = 'Python client is already at the latest published version.';
+        } else {
+            execution = await executeUpgradeTarget(chosenTarget, context);
+        }
+    } else if (!checkOnly && !dryRun) {
+        note = 'Run with --yes to execute the selected upgrade path. Use --check to inspect and --dry-run to print exact commands.';
+    }
 
     if (json) {
         console.log(JSON.stringify({
-            version,
-            note: 'iranti upgrade currently prints recommended upgrade commands. It does not self-update in place yet.',
+            currentVersion: context.currentVersion,
+            latest: {
+                npm: latestNpm,
+                python: latestPython,
+            },
+            install: {
+                packageRoot: context.packageRootPath,
+                runtimeRoot: context.runtimeRoot,
+                runtimeInstalled: context.runtimeInstalled,
+                repoCheckout: context.repoCheckout,
+                globalNpmInstall: context.globalNpmInstall,
+                globalNpmRoot: context.globalNpmRoot,
+                pythonLauncher: context.python?.executable ?? null,
+            },
+            requestedTarget,
+            selectedTarget: chosenTarget,
+            availableTargets: context.availableTargets,
+            updateAvailable,
             commands,
+            plan: plan.map((step) => step.display),
+            action: execute && !dryRun && !checkOnly ? 'upgrade' : checkOnly ? 'check' : dryRun ? 'dry-run' : 'inspect',
+            execution,
+            note,
         }, null, 2));
         return;
     }
 
     console.log(bold('Iranti upgrade'));
-    console.log(`  current_version  ${version}`);
-    console.log('  note             This command does not self-update yet. Use the appropriate package-manager path below.');
+    console.log(`  current_version  ${context.currentVersion}`);
+    console.log(`  latest_npm       ${latestNpm ?? '(unavailable)'}`);
+    console.log(`  latest_python    ${latestPython ?? '(unavailable)'}`);
+    console.log(`  package_root     ${context.packageRootPath}`);
+    console.log(`  runtime_root     ${context.runtimeRoot}`);
+    console.log(`  repo_checkout    ${context.repoCheckout ? paint('yes', 'green') : paint('no', 'gray')}`);
+    console.log(`  npm_global       ${context.globalNpmInstall ? paint('yes', 'green') : paint('no', 'gray')}`);
+    console.log(`  python           ${context.python?.executable ?? paint('not found', 'yellow')}`);
+    console.log('');
+    if (chosenTarget) {
+        console.log(`  selected_target  ${paint(chosenTarget, 'cyan')}${requestedTarget === 'auto' ? paint(' (auto)', 'gray') : ''}`);
+        console.log('  plan');
+        for (const step of plan) {
+            console.log(`    - ${step.display}`);
+        }
+    } else {
+        console.log(`  selected_target  ${paint('none', 'yellow')}`);
+        console.log('  plan             No executable upgrade path detected automatically.');
+    }
     console.log('');
     console.log(`  npm global       ${commands.npmGlobal}`);
     console.log(`  npm repo         ${commands.npmRepo}`);
     console.log(`  python client    ${commands.python}`);
+
+    if (execution) {
+        const marker = execution.verification.status === 'pass'
+            ? okLabel('PASS')
+            : execution.verification.status === 'warn'
+                ? warnLabel('WARN')
+                : failLabel('FAIL');
+        console.log('');
+        console.log(`${okLabel()} Upgrade completed for ${execution.target}.`);
+        console.log(`${marker} ${execution.verification.detail}`);
+        const { envFile } = resolveDoctorEnvTarget(args);
+        if (envFile) {
+            console.log(`${infoLabel()} Run \`iranti doctor\` to verify the active environment after the package upgrade.`);
+        }
+        return;
+    }
+
+    if (note) {
+        console.log('');
+        console.log(`${infoLabel()} ${note}`);
+    }
 }
 
 async function installCommand(args: ParsedArgs): Promise<void> {
@@ -2468,12 +2918,12 @@ Configuration:
 Project-level:
   iranti project init [path] --instance <name> [--api-key <token>] [--agent-id <id>] [--force]
 
-Diagnostics:
-  iranti doctor [--instance <name>] [--scope user|system] [--env <file>] [--json]
-  iranti status [--scope user|system] [--json]
-  iranti upgrade [--json]
-  iranti chat [--agent <agent-id>] [--provider <provider>] [--model <model>]
-  iranti resolve [--dir <escalation-dir>]
+  Diagnostics:
+    iranti doctor [--instance <name>] [--scope user|system] [--env <file>] [--json]
+    iranti status [--scope user|system] [--json]
+    iranti upgrade [--check] [--dry-run] [--yes] [--target auto|npm-global|npm-repo|python] [--json]
+    iranti chat [--agent <agent-id>] [--provider <provider>] [--model <model>]
+    iranti resolve [--dir <escalation-dir>]
 
 Integrations:
   iranti mcp [--help]
