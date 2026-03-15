@@ -28,6 +28,7 @@ import { scoreCandidate } from './scoring';
 import { recordResolution } from './source-reliability';
 import { inc, timeEnd, timeStart } from '../lib/metrics';
 import { ensureEscalationFolders } from '../lib/escalationPaths';
+import { detectContextualConflict } from './contextual-conflicts';
 
 function clampConfidence(input: EntryInput): EntryInput {
     return {
@@ -69,6 +70,21 @@ function buildReliabilityUpdate(winnerSource: string, loserSource: string): Reli
         loserSource,
         humanOverride: winnerSource === 'HumanReview' || loserSource === 'HumanReview',
     };
+}
+
+function compareValidFrom(existing: KnowledgeEntry, incoming: EntryInput): 'existing' | 'incoming' | null {
+    if (!existing.validFrom || !incoming.validFrom) {
+        return null;
+    }
+
+    const existingTs = existing.validFrom.getTime();
+    const incomingTs = incoming.validFrom.getTime();
+
+    if (existingTs === incomingTs) {
+        return null;
+    }
+
+    return incomingTs > existingTs ? 'incoming' : 'existing';
 }
 
 async function saveReceipt(
@@ -209,6 +225,31 @@ export async function librarianWrite(input: EntryInput): Promise<{
             }, tx);
 
             if (!existing) {
+                const contextualConflict = await detectContextualConflict(input, tx);
+                if (contextualConflict) {
+                    for (const matched of contextualConflict.matchedEntries) {
+                        await logDecision(
+                            matched.id,
+                            'CONTEXTUAL_CONFLICT_REJECTED',
+                            input,
+                            matched.confidence,
+                            input.confidence,
+                            contextualConflict.reason,
+                            false,
+                            tx
+                        );
+                    }
+                    await saveReceipt(input, 'rejected', contextualConflict.matchedEntries[0]?.id ?? null, tx);
+                    inc('librarian.rejected');
+                    return {
+                        action: 'rejected',
+                        reason: contextualConflict.reason,
+                        reliabilityUpdate: contextualConflict.matchedEntries[0]
+                            ? buildReliabilityUpdate(contextualConflict.matchedEntries[0].source, input.source)
+                            : undefined,
+                    };
+                }
+
                 const entry = await createEntry({
                     ...input,
                     validFrom: input.validFrom ?? new Date(),
@@ -270,6 +311,49 @@ async function resolveConflict(
             await saveReceipt(candidate, 'updated', entry.id, tx);
             inc('librarian.updated');
             return { action: 'updated', entry, reason: 'Equal confidence same-source update accepted.' };
+        }
+
+        const temporalWinner = compareValidFrom(existing, candidate);
+        if (temporalWinner === 'incoming') {
+            const entry = await replaceEntry(existing, candidate, tx);
+            await logDecision(
+                entry.id,
+                'CONFLICT_REPLACED',
+                candidate,
+                existing.confidence,
+                candidate.confidence,
+                'Equal confidence tie broken by newer validFrom timestamp.',
+                false,
+                tx
+            );
+            await saveReceipt(candidate, 'updated', entry.id, tx);
+            inc('librarian.updated');
+            return {
+                action: 'updated',
+                entry,
+                reason: 'Equal confidence tie broken by newer validFrom.',
+                reliabilityUpdate: buildReliabilityUpdate(candidate.source, existing.source),
+            };
+        }
+
+        if (temporalWinner === 'existing') {
+            await logDecision(
+                existing.id,
+                'CONFLICT_REJECTED',
+                candidate,
+                existing.confidence,
+                candidate.confidence,
+                'Equal confidence tie broken by existing newer validFrom timestamp.',
+                false,
+                tx
+            );
+            await saveReceipt(candidate, 'rejected', existing.id, tx);
+            inc('librarian.rejected');
+            return {
+                action: 'rejected',
+                reason: 'Equal confidence tie broken by existing newer validFrom.',
+                reliabilityUpdate: buildReliabilityUpdate(existing.source, candidate.source),
+            };
         }
 
         await logDecision(existing.id, 'CONFLICT_ESCALATED', candidate, existing.confidence, candidate.confidence, 'Identical confidence requires human judgment', false, tx);

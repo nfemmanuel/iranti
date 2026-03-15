@@ -5,8 +5,7 @@ export const cascadingConflictSuite: BenchmarkSuite = {
     cases: [
         {
             name: 'launched status conflicts with future launch date',
-            expectation: 'xfail',
-            note: 'Cross-key consistency checks are not implemented; Librarian currently reasons one entity+key at a time.',
+            expectation: 'pass',
             async run({ iranti, entity }) {
                 const target = entity('project', 'starfall_nexus');
                 await iranti.write({
@@ -32,8 +31,7 @@ export const cascadingConflictSuite: BenchmarkSuite = {
         },
         {
             name: 'completed status conflicts with unfinished tasks',
-            expectation: 'xfail',
-            note: 'Cross-key semantic consistency is not enforced in current Librarian writes.',
+            expectation: 'pass',
             async run({ iranti, entity }) {
                 const target = entity('project', 'ember_vault');
                 await iranti.write({
@@ -59,8 +57,7 @@ export const cascadingConflictSuite: BenchmarkSuite = {
         },
         {
             name: 'zero headcount conflicts with active hiring plan',
-            expectation: 'xfail',
-            note: 'Current write path does not detect internal contradictions across different keys.',
+            expectation: 'pass',
             async run({ iranti, entity }) {
                 const target = entity('team', 'lattice_ops');
                 await iranti.write({
@@ -86,8 +83,7 @@ export const cascadingConflictSuite: BenchmarkSuite = {
         },
         {
             name: 'budget frozen conflicts with approved procurement',
-            expectation: 'xfail',
-            note: 'Benchmark captures the current absence of cross-key conflict reasoning.',
+            expectation: 'pass',
             async run({ iranti, entity }) {
                 const target = entity('project', 'onyx_flare');
                 await iranti.write({

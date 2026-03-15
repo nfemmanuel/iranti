@@ -178,5 +178,5 @@ Iranti is now structurally sound for production. Consider:
 4. **Architecture stress-test** - Edge case validation
 5. **Go-to-market positioning** - Use the current measured evidence, not generic claims:
    - retrieval validation: `16/16`
-   - conflict benchmark baseline: `7/16 (44%)`
+   - conflict benchmark baseline: `16/16 (100%)`
    - consistency validation baseline: `4/4`

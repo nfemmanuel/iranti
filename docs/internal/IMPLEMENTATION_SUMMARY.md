@@ -241,7 +241,7 @@ docker push nfemmanuel/iranti:latest
 - Security infrastructure is in place
 - Packaging is wired for root npm package, `@iranti/sdk`, and Python client
 - Retrieval validation: `16/16` facts transferred
-- Conflict benchmark baseline: `7/16 (44%)`
+- Conflict benchmark baseline: `16/16 (100%)`
 - Consistency validation baseline: `4/4`
 
 ### Before Public Launch
@@ -291,7 +291,7 @@ npm run api
 1. **Package publish pass** - npm root package, `@iranti/sdk`, and Python client
 2. **Launch copy** - reuse the measured results now in README
 3. **Operator experience** - keep reducing setup and runtime friction
-4. **Benchmark follow-up** - improve beyond `7/16 (44%)` on conflict handling
+4. **Benchmark follow-up** - expand the benchmark beyond the current deterministic rule set and keep measuring new graph/cascade cases
 5. **Stress testing** - push concurrency and long-running memory behavior harder
 
 ---

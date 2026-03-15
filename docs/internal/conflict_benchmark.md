@@ -44,11 +44,17 @@ The total score is `PASS + XPASS` over all cases. This gives one headline number
 
 The current benchmark intentionally does **not** modify Librarian behavior to make scenarios pass. It measures today's system honestly.
 
-Known benchmark limitations:
+Current benchmark coverage now includes:
 
-- Cross-key cascading conflict detection is not implemented yet
-- Multi-hop conflict detection across relationships is not implemented yet
-- Temporal conflict handling does not yet use `validFrom` as a deterministic tie-breaker for same-confidence contradictory writes
+- same-key contradiction handling
+- deterministic `validFrom` tie-breaking for equal-score temporal conflicts
+- deterministic same-entity cross-key contradiction checks
+- narrow relationship-aware contradiction checks for selected graph patterns
+
+Current benchmark limitations:
+
+- contradiction handling is still rule-bounded rather than ontology-complete
+- graph-aware checks are targeted to explicit relationship and key combinations, not arbitrary multi-hop inference
 
 ## How To Run
 
@@ -78,19 +84,19 @@ Validated on March 14, 2026 against a clean local PostgreSQL validation database
 Conflict resolution benchmark
 ------------------------------
 Direct contradiction: 4/4
-Temporal conflict:    3/4  (1 known-failing)
-Cascading conflict:   0/4  (4 known-failing)
-Multi-hop conflict:   0/4  (4 known-failing)
+Temporal conflict:    4/4
+Cascading conflict:   4/4
+Multi-hop conflict:   4/4
 ------------------------------
-Total: 7/16 (44%)
+Total: 16/16 (100%)
 ```
 
 Interpretation:
 
-- Iranti is already strong on direct same-key contradiction handling.
-- Temporal history works once a winner is chosen.
-- Recency is not yet a deterministic tie-breaker for same-confidence contradictory writes.
-- Cascading and multi-hop conflict reasoning are not implemented yet and are intentionally benchmarked as known gaps.
+- Iranti is strong on direct same-key contradiction handling.
+- Temporal history now uses a deterministic recency tie-break for equal-score contradictory writes.
+- Same-entity cross-key contradictions are now rejected deterministically for covered rule pairs.
+- Relationship-aware contradiction checks now catch the benchmark's covered one-hop and narrow multi-hop graph cases.
 
 ## Related
 

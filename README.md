@@ -9,10 +9,10 @@
 
 Iranti gives agents persistent, identity-based memory. Facts written by one agent are retrievable by any other agent through exact entity+key lookup. Iranti also supports hybrid search (lexical + vector) when exact keys are unknown. Memory persists across sessions and survives context window limits.
 
-**Latest release:** [`v0.2.0`](https://github.com/nfemmanuel/iranti/releases/tag/v0.2.0)  
+**Latest release:** [`v0.2.2`](https://github.com/nfemmanuel/iranti/releases/tag/v0.2.2)  
 Published packages:
-- `iranti@0.2.0`
-- `@iranti/sdk@0.2.0`
+- `iranti@0.2.2`
+- `@iranti/sdk@0.2.2`
 
 ---
 
@@ -82,10 +82,10 @@ Iranti now also has an adversarial conflict benchmark that measures contradictio
 | Suite | Score | Notes |
 |---|---|---|
 | **Direct contradiction** | `4/4` | Same entity+key conflicts are explicitly resolved or escalated |
-| **Temporal conflict** | `3/4` | One known-failing edge remains |
-| **Cascading conflict** | `0/4` | Cross-key contradiction detection not implemented yet |
-| **Multi-hop conflict** | `0/4` | Graph-aware conflict reasoning not implemented yet |
-| **Total** | `7/16 (44%)` | Honest baseline for the current Librarian |
+| **Temporal conflict** | `4/4` | Equal-score ties now use deterministic temporal tie-breaks |
+| **Cascading conflict** | `4/4` | Deterministic same-entity cross-key contradiction checks |
+| **Multi-hop conflict** | `4/4` | Narrow relationship-aware contradiction checks across related entities |
+| **Total** | `16/16 (100%)` | Current benchmark coverage for the Librarian |
 
 Conflict benchmark methodology: [`docs/internal/conflict_benchmark.md`](docs/internal/conflict_benchmark.md)
 
@@ -212,7 +212,7 @@ The current landscape splits into three buckets:
 Iranti is strongest today as infrastructure for developers building multi-agent systems who need shared, structured, queryable memory rather than pure semantic recall. The current evidence base is now more concrete than a positioning claim alone:
 
 - `16/16` fictional-fact transfer in retrieval validation
-- `7/16 (44%)` on an adversarial conflict benchmark
+- `16/16 (100%)` on the current adversarial conflict benchmark
 - `4/4` on empirical consistency validation for serialized writes and read visibility
 
 That is not a claim that multi-agent memory is solved. It is a claim that Iranti now has reproducible evidence for three things at once:

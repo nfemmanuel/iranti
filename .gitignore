@@ -51,3 +51,4 @@ experiments/*.json
 
 iranti_roadmap.html
 tests/consistency/.runtime/
+tests/conflict/.runtime/

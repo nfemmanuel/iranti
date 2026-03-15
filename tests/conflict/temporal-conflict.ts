@@ -71,8 +71,7 @@ export const temporalConflictSuite: BenchmarkSuite = {
         },
         {
             name: 'newer tied contradiction should not require manual escalation',
-            expectation: 'xfail',
-            note: 'Current Librarian logic does not use validFrom to break same-confidence, different-source ties.',
+            expectation: 'pass',
             async run({ iranti, entity }) {
                 const target = entity('project', 'mirror_delta');
 

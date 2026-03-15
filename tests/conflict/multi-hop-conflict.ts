@@ -5,8 +5,7 @@ export const multiHopConflictSuite: BenchmarkSuite = {
     cases: [
         {
             name: 'departed person still leads active project',
-            expectation: 'xfail',
-            note: 'Multi-hop conflict reasoning across relationships is not implemented in the Librarian.',
+            expectation: 'pass',
             async run({ iranti, entity }) {
                 const person = entity('person', 'valdris_ohen');
                 const project = entity('project', 'starfall_nexus');
@@ -38,8 +37,7 @@ export const multiHopConflictSuite: BenchmarkSuite = {
         },
         {
             name: 'dissolved org still contains active team',
-            expectation: 'xfail',
-            note: 'Relationship traversal exists, but no cross-entity contradiction detection uses it yet.',
+            expectation: 'pass',
             async run({ iranti, entity }) {
                 const org = entity('org', 'cinder_labs');
                 const team = entity('team', 'ember_ops');
@@ -69,8 +67,7 @@ export const multiHopConflictSuite: BenchmarkSuite = {
         },
         {
             name: 'blacklisted supplier still marked as project dependency',
-            expectation: 'xfail',
-            note: 'Current benchmark case checks a cross-entity dependency conflict that the Librarian does not inspect.',
+            expectation: 'pass',
             async run({ iranti, entity }) {
                 const supplier = entity('vendor', 'auric_supply');
                 const project = entity('project', 'glass_harbor');
@@ -100,8 +97,7 @@ export const multiHopConflictSuite: BenchmarkSuite = {
         },
         {
             name: 'departed researcher still listed as principal investigator through lab graph',
-            expectation: 'xfail',
-            note: 'This case requires multi-hop reasoning across person -> lab -> project links.',
+            expectation: 'pass',
             async run({ iranti, entity }) {
                 const researcher = entity('researcher', 'kaelis_thorne');
                 const lab = entity('lab', 'solstice_lab');
