@@ -2,7 +2,19 @@
 
 All notable changes to this project are documented in this file.
 
-## 0.2.4 - Unreleased
+## 0.2.5 - 2026-03-15
+
+### Added
+
+- `iranti doctor` now prints concrete remediation hints in both text and JSON output.
+- Internal CLI UX backlog tracking under `docs/internal/cli_ux_backlog.md`.
+
+### Changed
+
+- `iranti upgrade` now supports interactive multi-target selection in a TTY, `--all`, comma-separated `--target` values, and a clearer post-upgrade handoff hint after global npm upgrades.
+- Setup, instance configuration, project configuration, and API-key creation prompts are slightly more conversational and now end with clearer next-step guidance.
+
+## 0.2.4 - 2026-03-15
 
 ### Added
 
