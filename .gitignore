@@ -49,7 +49,7 @@ experiments/*.json
 # Local planning notes (never commit)
 /docs/BACKLOG.local.md
 
-iranti_roadmap.html
+*iranti_roadmap*
 tests/consistency/.runtime/
 tests/conflict/.runtime/
 tests/temporal/.runtime/
