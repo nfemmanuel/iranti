@@ -2,7 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
-## 0.2.3 - Unreleased
+## 0.2.4 - Unreleased
+
+### Added
+
+- Setup wizard prompt copy is slightly more conversational while keeping the same install flow and validation behavior.
+
+## 0.2.3 - 2026-03-15
 
 ### Added
 

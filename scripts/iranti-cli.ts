@@ -895,7 +895,7 @@ async function chooseAvailablePort(session: PromptSession, promptText: string, p
     let suggested = preferredPort;
     if (!allowOccupiedCurrent && !(await isPortAvailable(preferredPort))) {
         suggested = await findNextAvailablePort(preferredPort + 1);
-        console.log(`${warnLabel()} Port ${preferredPort} is already in use. Suggested port: ${suggested}`);
+        console.log(`${warnLabel()} Port ${preferredPort} is already in use. A good next option is ${suggested}.`);
     }
 
     while (true) {
@@ -1768,7 +1768,7 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
     const explicitRoot = getFlag(args, 'root');
 
     console.log(bold('Iranti setup'));
-    console.log('This wizard will install a runtime, create or update an instance, configure provider keys, create a usable Iranti API key, and optionally bind one or more project folders.');
+    console.log('This wizard will get Iranti set up: install a runtime, create or update an instance, connect provider keys, create a usable Iranti API key, and optionally bind one or more project folders.');
     console.log('');
 
     let result: SetupExecutionResult | null = null;
@@ -1776,7 +1776,7 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
     await withPromptSession(async (prompt) => {
         let setupMode: 'shared' | 'isolated' = 'shared';
         while (true) {
-            const chosen = (await prompt.line('Setup mode: shared runtime or isolated runtime folder', 'shared') ?? 'shared').trim().toLowerCase();
+            const chosen = (await prompt.line('How should Iranti install the runtime: shared or isolated folder', 'shared') ?? 'shared').trim().toLowerCase();
             if (chosen === 'shared' || chosen === 'isolated') {
                 setupMode = chosen;
                 break;
@@ -1795,12 +1795,12 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
             finalScope = 'user';
         } else {
             while (true) {
-                const chosenScope = (await prompt.line('Install scope', explicitScope ?? 'user') ?? 'user').trim().toLowerCase();
+                const chosenScope = (await prompt.line('Install scope: user or system', explicitScope ?? 'user') ?? 'user').trim().toLowerCase();
                 if (chosenScope === 'user' || chosenScope === 'system') {
                     finalScope = chosenScope;
                     break;
                 }
-                console.log(`${warnLabel()} Install scope must be user or system.`);
+                console.log(`${warnLabel()} Please choose either user or system.`);
             }
             finalRoot = explicitRoot ? path.resolve(explicitRoot) : resolveInstallRoot(args, finalScope);
         }
@@ -1809,7 +1809,7 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
         console.log(`${okLabel()} Runtime ready at ${finalRoot}`);
 
         const instanceName = sanitizeIdentifier(
-            await promptNonEmpty(prompt, 'Instance name', setupMode === 'isolated' ? sanitizeIdentifier(path.basename(process.cwd()), 'local') : 'local'),
+            await promptNonEmpty(prompt, 'What should this instance be called', setupMode === 'isolated' ? sanitizeIdentifier(path.basename(process.cwd()), 'local') : 'local'),
             'local'
         );
 
@@ -1818,13 +1818,13 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
             : null;
 
         if (existingInstance) {
-            console.log(`${infoLabel()} Updating existing instance '${instanceName}'.`);
+            console.log(`${infoLabel()} Found existing instance '${instanceName}'. Updating it.`);
         } else {
             console.log(`${infoLabel()} Creating new instance '${instanceName}'.`);
         }
 
         const existingPort = Number.parseInt(existingInstance?.env.IRANTI_PORT ?? '3001', 10);
-        const port = await chooseAvailablePort(prompt, 'Iranti API port', existingPort, Boolean(existingInstance));
+        const port = await chooseAvailablePort(prompt, 'Which port should the Iranti API use', existingPort, Boolean(existingInstance));
 
         const dockerAvailable = hasDockerInstalled();
         let dbUrl = '';
@@ -1832,7 +1832,7 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
         while (true) {
             const defaultMode = dockerAvailable ? 'docker' : 'existing';
             const dbMode = (await prompt.line(
-                'Database setup mode: existing, managed, or docker',
+                'How should we set up the database: existing, managed, or docker',
                 defaultMode
             ) ?? defaultMode).trim().toLowerCase();
 
@@ -1855,9 +1855,9 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
                     console.log(`${warnLabel()} Docker is not installed or not on PATH. Choose existing or managed instead.`);
                     continue;
                 }
-                const dbHostPort = await chooseAvailablePort(prompt, 'Docker PostgreSQL host port', 5432, false);
-                const dbName = sanitizeIdentifier(await promptNonEmpty(prompt, 'Docker PostgreSQL database name', `iranti_${instanceName}`), `iranti_${instanceName}`);
-                const dbPassword = await promptRequiredSecret(prompt, 'Docker PostgreSQL password');
+                const dbHostPort = await chooseAvailablePort(prompt, 'Which host port should Docker PostgreSQL use', 5432, false);
+                const dbName = sanitizeIdentifier(await promptNonEmpty(prompt, 'What should the Docker PostgreSQL database be called', `iranti_${instanceName}`), `iranti_${instanceName}`);
+                const dbPassword = await promptRequiredSecret(prompt, 'Set a password for Docker PostgreSQL');
                 const containerName = sanitizeIdentifier(
                     await promptNonEmpty(prompt, 'Docker container name', `iranti_${instanceName}_db`),
                     `iranti_${instanceName}_db`
