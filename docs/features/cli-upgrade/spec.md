@@ -11,7 +11,8 @@
 | `--check` | boolean | Inspect install mode and latest versions without executing anything. |
 | `--dry-run` | boolean | Print the exact command plan without executing it. |
 | `--yes` | boolean | Execute the selected upgrade path non-interactively. |
-| `--target` | enum | Force `auto`, `npm-global`, `npm-repo`, or `python`. |
+| `--all` | boolean | Select every detected executable upgrade surface. |
+| `--target` | enum/list | Force `auto`, `npm-global`, `npm-repo`, or `python`, optionally comma-separated. |
 | `--json` | boolean | Output machine-readable upgrade state, plan, and execution result. |
 
 ## Outputs
@@ -29,29 +30,38 @@
 3. Choose an upgrade target:
    - explicit `--target` wins
    - otherwise prefer repo checkout, then npm-global, then Python
-4. Build the exact command plan for that target.
-5. If `--check` or `--dry-run`, print the plan without mutating the environment.
-6. If `--yes`, run the plan:
+4. If no execution flag is provided and a TTY is available, prompt the user target-by-target:
+   - upgrade global npm install?
+   - refresh local repo checkout?
+   - upgrade Python client?
+5. Build the exact command plan for the selected targets.
+6. If `--check` or `--dry-run`, print the plan without mutating the environment.
+7. If `--yes`, run the plan:
    - `npm-repo`: `git pull --ff-only`, `npm install`, `npm run build`
    - `npm-global`: `npm install -g iranti@latest`
    - `python`: `python -m pip install --upgrade iranti` (or `py -3 -m pip ...` on Windows)
-7. Verify the result:
+8. Verify the result:
    - npm-global via `npm list -g iranti`
    - Python via `pip show iranti`
    - repo target by requiring the build to complete successfully
-8. If the repo worktree is dirty, block `npm-repo --yes` rather than risking a destructive pull.
+9. If the repo worktree is dirty, block `npm-repo --yes` rather than risking a destructive pull.
+10. After a successful global npm upgrade, remind the user that an already-running old CLI process may need a fresh shell to pick up the new binary.
 
 ## Edge Cases
 
 - Latest-version lookups are best-effort; unreachable registries degrade to `(unavailable)` rather than failing the command.
 - `npm-repo --yes` refuses to run on a dirty worktree.
+- Interactive mode only runs in a real TTY; otherwise the command stays informational unless `--yes` is supplied.
+- `--all` runs every detected executable target, but unavailable or blocked surfaces are skipped rather than treated as fatal.
 - If no executable target is detected automatically, the command stays informational until the user passes an explicit supported `--target`.
 - `--dry-run` and `--check` always skip mutation even if `--yes` is also present.
+- After `npm install -g`, the already-running old CLI process may still be the binary handling the current command; the command prints a handoff hint instead of pretending that process replaced itself.
 
 ## Test Results
 
 - `npx ts-node scripts/iranti-cli.ts upgrade --check --json`
 - `npx ts-node scripts/iranti-cli.ts upgrade --target npm-repo --dry-run`
+- `npx ts-node scripts/iranti-cli.ts upgrade --all --dry-run`
 - `npx tsc --noEmit`
 
 ## Related
