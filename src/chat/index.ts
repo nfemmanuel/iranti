@@ -1,7 +1,11 @@
+import fs from 'fs/promises';
+import os from 'os';
+import path from 'path';
 import readline from 'readline/promises';
 import { completeWithFallback, getSupportedProviders, LLMMessage } from '../lib/llm';
 import { getAllProfiles } from '../lib/router';
 import { loadRuntimeEnv } from '../lib/runtimeEnv';
+import { resolveInteractive } from '../resolutionist';
 
 type ChatRole = 'user' | 'assistant';
 
@@ -60,6 +64,28 @@ type SearchResult = {
     key: string;
     summary: string;
     score: number;
+};
+
+type HistoryEntry = {
+    value: unknown;
+    summary: string;
+    confidence: number;
+    source: string;
+    validFrom: string;
+    validUntil: string | null;
+    isCurrent: boolean;
+    contested: boolean;
+    archivedReason: 'segment_closed' | 'superseded' | 'contradicted' | 'escalated' | 'expired' | null;
+    resolutionState: 'not_applicable' | 'pending' | 'resolved' | null;
+    resolutionOutcome: 'not_applicable' | 'challenger_won' | 'original_retained' | null;
+};
+
+type RelatedResult = {
+    entityType: string;
+    entityId: string;
+    relationshipType: string;
+    direction: 'outbound' | 'inbound';
+    properties: Record<string, unknown>;
 };
 
 type WriteResult = {
@@ -131,22 +157,42 @@ class ApiClient {
         return this.request('GET', `/kb/query/${entityType}/${entityId}`);
     }
 
+    history(entity: string, key: string): Promise<HistoryEntry[]> {
+        const [entityType, entityId] = splitEntity(entity);
+        return this.request('GET', `/kb/history/${entityType}/${entityId}/${encodeURIComponent(key)}`);
+    }
+
     async search(query: string): Promise<SearchResult[]> {
         const search = new URLSearchParams({ query });
         const payload = await this.request<{ results: SearchResult[] }>('GET', `/kb/search?${search.toString()}`);
         return payload.results;
     }
 
-    write(agentId: string, entity: string, key: string, value: unknown, summary: string, confidence: number): Promise<WriteResult> {
+    write(agentId: string, entity: string, key: string, value: unknown, summary: string, confidence: number, source: string = 'iranti_chat'): Promise<WriteResult> {
         return this.request('POST', '/kb/write', {
             entity,
             key,
             value,
             summary,
             confidence,
-            source: 'iranti_chat',
+            source,
             agent: agentId,
         });
+    }
+
+    relate(params: {
+        fromEntity: string;
+        relationshipType: string;
+        toEntity: string;
+        createdBy: string;
+        properties?: Record<string, unknown>;
+    }): Promise<{ success: boolean }> {
+        return this.request('POST', '/kb/relate', params);
+    }
+
+    related(entity: string): Promise<RelatedResult[]> {
+        const [entityType, entityId] = splitEntity(entity);
+        return this.request('GET', `/kb/related/${entityType}/${entityId}`);
     }
 }
 
@@ -157,6 +203,14 @@ function splitEntity(entity: string): [string, string] {
         throw new Error(`Invalid entity format: "${entity}". Expected entityType/entityId.`);
     }
     return [trimmed.slice(0, separator), trimmed.slice(separator + 1)];
+}
+
+function isStrictEntity(value: string | undefined): value is string {
+    if (!value) return false;
+    const trimmed = value.trim();
+    if (!trimmed) return false;
+    const parts = trimmed.split('/');
+    return parts.length === 2 && parts[0].length > 0 && parts[1].length > 0;
 }
 
 function tokenizeCommand(input: string): string[] {
@@ -222,17 +276,58 @@ function buildSummary(key: string, value: unknown): string {
     return `${key}: ${raw.length > 96 ? `${raw.slice(0, 93)}...` : raw}`;
 }
 
+function formatDate(value: string | null | undefined): string {
+    if (!value) return 'now';
+    return value.slice(0, 10);
+}
+
+function formatHistoryStatus(entry: HistoryEntry): string {
+    if (entry.isCurrent) return 'current';
+    if (entry.archivedReason) return entry.archivedReason;
+    return 'historical';
+}
+
+function line(width: number): string {
+    return '-'.repeat(width);
+}
+
+function resolveEscalationRoot(): string {
+    return path.resolve(process.env.IRANTI_ESCALATION_DIR ?? path.join(os.homedir(), '.iranti', 'escalation'));
+}
+
+async function hasPendingEscalations(root: string): Promise<boolean> {
+    const activeDir = path.join(root, 'active');
+    try {
+        const entries = await fs.readdir(activeDir, { withFileTypes: true });
+        for (const entry of entries) {
+            if (!entry.isFile() || !entry.name.endsWith('.md')) {
+                continue;
+            }
+            const content = await fs.readFile(path.join(activeDir, entry.name), 'utf-8');
+            if (content.includes('**Status:** PENDING')) {
+                return true;
+            }
+        }
+        return false;
+    } catch {
+        return false;
+    }
+}
+
 function printHelp(): void {
-    console.log('/help                     Show available commands');
-    console.log('/memory                   List facts for the current session entity');
-    console.log('/search <query>           Search the knowledge base');
-    console.log('/inject <entity> <key>    Queue a specific fact for the next model turn');
-    console.log('/write <key> <value> [confidence]');
-    console.log('                          Write a fact to session/<agent-id>');
-    console.log('/observe                  Queue facts returned by observe() for the next turn');
-    console.log('/clear                    Clear local conversation history');
-    console.log('/provider <name> [model]  Switch provider, optionally overriding the model');
-    console.log('/exit | /quit             Exit chat');
+    console.log('/memory                          show all memory facts for this session');
+    console.log('/search <query>                  search facts by keyword or concept');
+    console.log('/inject <entity> <key>           inject a specific fact into the next turn');
+    console.log('/write <key> <value> [conf]      write a fact to session memory');
+    console.log('/observe                         manually pull memory from conversation history');
+    console.log('/history <entity> <key>          show temporal history for a fact');
+    console.log('/relate <from> <to> <type>       create a relationship between two entities');
+    console.log('/related <entity>                show all relationships for an entity');
+    console.log('/resolve                         walk through pending conflict escalations');
+    console.log('/confidence <entity> <key> <n>   update confidence score for a fact (0-100)');
+    console.log('/clear                           clear conversation history');
+    console.log('/provider <name> [model]         switch LLM provider for this session');
+    console.log('/exit                            quit');
 }
 
 export async function startChatSession(options: ChatSessionOptions = {}): Promise<void> {
@@ -271,10 +366,11 @@ export async function startChatSession(options: ChatSessionOptions = {}): Promis
         console.log(`Loaded ${brief.workingMemory.length} memory entries.`);
     }
 
-    const rl = readline.createInterface({
+    const createInterface = () => readline.createInterface({
         input: process.stdin,
         output: process.stdout,
     });
+    let rl = createInterface();
 
     let closing = false;
     const closeHandler = () => {
@@ -380,6 +476,165 @@ export async function startChatSession(options: ChatSessionOptions = {}): Promis
                     }
                     manualInjections = [...manualInjections, ...observed.facts];
                     console.log(`Queued ${observed.facts.length} memory facts for the next turn.`);
+                    continue;
+                }
+
+                if (command === '/history') {
+                    if (parts.length < 3) {
+                        console.log('Usage: /history <entity> <key>');
+                        continue;
+                    }
+                    const entity = parts[1];
+                    const key = parts[2];
+                    if (!isStrictEntity(entity)) {
+                        console.log('Invalid entity format. Use entityType/entityId (e.g. project/acme).');
+                        continue;
+                    }
+                    try {
+                        const entries = await client.history(entity, key);
+                        if (entries.length === 0) {
+                            console.log(`No history found for ${entity}/${key}.`);
+                            continue;
+                        }
+                        const ordered = [...entries].sort((left, right) => left.validFrom.localeCompare(right.validFrom));
+                        console.log(`History: ${entity} -> ${key}`);
+                        console.log(line(53));
+                        ordered.forEach((entry, index) => {
+                            console.log(`  ${index + 1}. [${formatDate(entry.validFrom)} -> ${formatDate(entry.validUntil)}] ${formatJson(entry.value)}   conf:${entry.confidence}  source:${entry.source}  ${formatHistoryStatus(entry)}`);
+                        });
+                        console.log(line(53));
+                        console.log(`${ordered.length} interval${ordered.length === 1 ? '' : 's'}`);
+                    } catch (error) {
+                        console.log(error instanceof Error ? error.message : String(error));
+                    }
+                    continue;
+                }
+
+                if (command === '/relate') {
+                    if (parts.length < 4) {
+                        console.log('Usage: /relate <from> <to> <type>');
+                        continue;
+                    }
+                    const fromEntity = parts[1];
+                    const toEntity = parts[2];
+                    const relationshipType = parts.slice(3).join(' ').trim();
+                    if (!isStrictEntity(fromEntity) || !isStrictEntity(toEntity)) {
+                        console.log('Invalid entity format. Use entityType/entityId (e.g. project/acme).');
+                        continue;
+                    }
+                    if (!relationshipType) {
+                        console.log('Usage: /relate <from> <to> <type>');
+                        continue;
+                    }
+                    try {
+                        await client.relate({
+                            fromEntity,
+                            toEntity,
+                            relationshipType,
+                            createdBy: agentId,
+                        });
+                        console.log(`Related: ${fromEntity} -> ${toEntity} [${relationshipType}]`);
+                    } catch (error) {
+                        console.log(error instanceof Error ? error.message : String(error));
+                    }
+                    continue;
+                }
+
+                if (command === '/related') {
+                    if (parts.length < 2) {
+                        console.log('Invalid entity format. Use entityType/entityId (e.g. project/acme).');
+                        continue;
+                    }
+                    const entity = parts[1];
+                    if (!isStrictEntity(entity)) {
+                        console.log('Invalid entity format. Use entityType/entityId (e.g. project/acme).');
+                        continue;
+                    }
+                    try {
+                        const relationships = await client.related(entity);
+                        if (relationships.length === 0) {
+                            console.log(`No relationships found for ${entity}.`);
+                            continue;
+                        }
+                        console.log(`Related entities: ${entity}`);
+                        console.log(line(33));
+                        for (const relationship of relationships) {
+                            const arrow = relationship.direction === 'outbound' ? '->' : '<-';
+                            console.log(`  ${relationship.relationshipType} ${arrow} ${relationship.entityType}/${relationship.entityId}`);
+                        }
+                        console.log(line(33));
+                        console.log(`${relationships.length} relationship${relationships.length === 1 ? '' : 's'}`);
+                    } catch (error) {
+                        console.log(error instanceof Error ? error.message : String(error));
+                    }
+                    continue;
+                }
+
+                if (command === '/resolve') {
+                    try {
+                        const escalationRoot = resolveEscalationRoot();
+                        if (!(await hasPendingEscalations(escalationRoot))) {
+                            console.log('No pending escalations.');
+                            continue;
+                        }
+                        console.log(line(48));
+                        console.log('Resolutionist');
+                        console.log(line(48));
+                        rl.close();
+                        await resolveInteractive(escalationRoot);
+                        if (!closing) {
+                            rl = createInterface();
+                            console.log(line(48));
+                            console.log('Back in chat');
+                            console.log(line(48));
+                        }
+                    } catch (error) {
+                        if (!closing) {
+                            rl = createInterface();
+                        }
+                        console.log(error instanceof Error ? error.message : String(error));
+                    }
+                    continue;
+                }
+
+                if (command === '/confidence') {
+                    if (parts.length < 4) {
+                        console.log('Usage: /confidence <entity> <key> <new_value>');
+                        continue;
+                    }
+                    const entity = parts[1];
+                    const key = parts[2];
+                    const nextConfidence = Number.parseInt(parts[3], 10);
+                    if (!isStrictEntity(entity)) {
+                        console.log('Invalid entity format. Use entityType/entityId (e.g. project/acme).');
+                        continue;
+                    }
+                    if (!Number.isInteger(nextConfidence) || nextConfidence < 0 || nextConfidence > 100) {
+                        console.log('Confidence must be an integer between 0 and 100.');
+                        continue;
+                    }
+                    try {
+                        const current = await client.query(entity, key);
+                        if (!current.found) {
+                            console.log(`No fact found for ${entity}/${key}.`);
+                            continue;
+                        }
+                        const oldConfidence = current.confidence ?? 0;
+                        const value = current.value;
+                        const summary = current.summary ?? buildSummary(key, value);
+                        const result = await client.write(
+                            agentId,
+                            entity,
+                            key,
+                            value,
+                            summary,
+                            nextConfidence,
+                            current.source ?? 'iranti_chat',
+                        );
+                        console.log(`confidence updated: ${oldConfidence} -> ${nextConfidence} | ${result.action}`);
+                    } catch (error) {
+                        console.log(error instanceof Error ? error.message : String(error));
+                    }
                     continue;
                 }
 
