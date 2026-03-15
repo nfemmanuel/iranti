@@ -77,7 +77,7 @@ app.use(express.json({ limit: process.env.IRANTI_MAX_BODY_BYTES ?? '256kb' }));
 app.get(ROUTES.health, (_req, res) => {
     res.json({
         status: 'ok',
-        version: '0.2.1',
+        version: '0.2.2',
         provider: process.env.LLM_PROVIDER ?? 'mock',
     });
 });

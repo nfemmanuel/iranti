@@ -2,7 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
-## 0.2.1 - Unreleased
+## 0.2.2 - Unreleased
+
+### Fixed
+
+- Added repository metadata to `@iranti/sdk` so npm provenance validation accepts the package during publish.
+
+## 0.2.1 - 2026-03-14
 
 ### Added
 
