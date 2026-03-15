@@ -31,6 +31,7 @@ Iranti is a knowledge base for multi-agent systems. The primary read path is ide
 - **Library**: Active truth store (`knowledge_base`) in PostgreSQL.
 - **Archive**: Historical/superseded truth store (`archive`) in PostgreSQL.
 - **Archivist**: Maintenance worker that archives stale/low-confidence facts and processes resolved escalations.
+- **Resolutionist**: Interactive CLI reviewer that guides humans through pending escalation files and writes valid authoritative resolutions.
 
 ---
 
@@ -292,6 +293,7 @@ Security quickstart: [`docs/guides/security-quickstart.md`](docs/guides/security
 Claude Code guide: [`docs/guides/claude-code.md`](docs/guides/claude-code.md)
 Codex guide: [`docs/guides/codex.md`](docs/guides/codex.md)
 Release guide: [`docs/guides/releasing.md`](docs/guides/releasing.md)
+Vector backend guide: [`docs/guides/vector-backends.md`](docs/guides/vector-backends.md)
 
 ### Claude Code via MCP
 
@@ -317,6 +319,26 @@ codex -C /path/to/your/project
 When `iranti codex-setup` is run from a project directory, it automatically captures that project's `.env.iranti` as `IRANTI_PROJECT_ENV` so Codex resolves the correct Iranti instance consistently.
 
 Guide: [`docs/guides/codex.md`](docs/guides/codex.md)
+
+### Resolve Pending Escalations
+
+Review unresolved human-escalation files from the CLI:
+
+```bash
+iranti resolve
+```
+
+Use `--dir` to point at a non-default escalation root. Guide: [`docs/guides/conflict-resolution.md`](docs/guides/conflict-resolution.md)
+
+### Native Chat
+
+Start a CLI chat session against the configured Iranti instance:
+
+```bash
+iranti chat
+```
+
+Use `--agent`, `--provider`, and `--model` to pin the session identity and model routing. Guide: [`docs/guides/chat.md`](docs/guides/chat.md)
 
 ---
 
@@ -687,7 +709,7 @@ middleware.after_receive(
 
 ## Architecture
 
-Iranti has four internal components:
+Iranti has five internal components:
 
 | Component | Role |
 |---|---|
@@ -695,6 +717,7 @@ Iranti has four internal components:
 | **Librarian** | Manages all writes. Detects conflicts, reasons about resolution, escalates when uncertain. |
 | **Attendant** | Per-agent working memory manager. Implements `attend()`, `observe()`, and `handshake()` APIs. |
 | **Archivist** | Periodic cleanup. Archives expired and low-confidence entries. Processes human-resolved conflicts. |
+| **Resolutionist** | Interactive CLI helper that walks pending escalation files, writes `AUTHORITATIVE_JSON`, and marks them resolved for the Archivist. |
 
 ### REST API
 

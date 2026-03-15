@@ -2,9 +2,12 @@ import 'dotenv/config';
 import { librarianWrite } from '../src/librarian';
 import { getReliabilityScores, weightedConfidence } from '../src/librarian/source-reliability';
 import { bootstrapHarness } from './harness';
+import { configureMock } from '../src/lib/providers/mock';
 
 async function test() {
+    process.env.LLM_PROVIDER = 'mock';
     bootstrapHarness();
+    configureMock({});
     console.log('Testing Source Reliability Learning...\n');
 
     const entityType = 'researcher';

@@ -18,7 +18,9 @@ interface ModelProfile {
     reason: string;
 }
 
-const ROUTER_PROVIDER = process.env.LLM_PROVIDER ?? 'mock';
+function getRouterProvider(): string {
+    return process.env.LLM_PROVIDER ?? 'mock';
+}
 
 function defaultModelForProvider(taskType: TaskType, provider: string): string {
     switch (provider) {
@@ -51,56 +53,58 @@ function isLikelyCompatible(provider: string, model: string): boolean {
 }
 
 function modelForTask(taskType: TaskType, envVarName: string): string {
+    const routerProvider = getRouterProvider();
     const override = process.env[envVarName];
     if (override && override.trim().length > 0) {
         const model = override.trim();
-        if (isLikelyCompatible(ROUTER_PROVIDER, model)) {
+        if (isLikelyCompatible(routerProvider, model)) {
             return model;
         }
-        const fallback = defaultModelForProvider(taskType, ROUTER_PROVIDER);
+        const fallback = defaultModelForProvider(taskType, routerProvider);
         console.warn(
-            `[router] Ignoring incompatible ${envVarName}="${model}" for provider "${ROUTER_PROVIDER}". ` +
+            `[router] Ignoring incompatible ${envVarName}="${model}" for provider "${routerProvider}". ` +
             `Using "${fallback}" instead.`
         );
         return fallback;
     }
-    return defaultModelForProvider(taskType, ROUTER_PROVIDER);
+    return defaultModelForProvider(taskType, routerProvider);
 }
 
-// Maps task types to routed models.
-// Override any task model via env (for example CONFLICT_MODEL=...).
-const MODEL_PROFILES: Record<TaskType, ModelProfile> = {
-    classification: {
-        provider: ROUTER_PROVIDER,
+function buildModelProfiles(): Record<TaskType, ModelProfile> {
+    const routerProvider = getRouterProvider();
+    return {
+        classification: {
+            provider: routerProvider,
         model: modelForTask('classification', 'CLASSIFICATION_MODEL'),
         reason: 'Fast and cheap - classification does not need deep reasoning',
-    },
-    relevance_filtering: {
-        provider: ROUTER_PROVIDER,
+        },
+        relevance_filtering: {
+            provider: routerProvider,
         model: modelForTask('relevance_filtering', 'RELEVANCE_MODEL'),
         reason: 'Fast enough for filtering, does not need full reasoning capacity',
-    },
-    conflict_resolution: {
-        provider: ROUTER_PROVIDER,
+        },
+        conflict_resolution: {
+            provider: routerProvider,
         model: modelForTask('conflict_resolution', 'CONFLICT_MODEL'),
         reason: 'Conflict resolution requires careful reasoning about sources and credibility',
-    },
-    summarization: {
-        provider: ROUTER_PROVIDER,
+        },
+        summarization: {
+            provider: routerProvider,
         model: modelForTask('summarization', 'SUMMARIZATION_MODEL'),
         reason: 'Summarization is well within fast model capabilities',
-    },
-    task_inference: {
-        provider: ROUTER_PROVIDER,
+        },
+        task_inference: {
+            provider: routerProvider,
         model: modelForTask('task_inference', 'TASK_INFERENCE_MODEL'),
         reason: 'Task inference is a lightweight classification task',
-    },
-    extraction: {
-        provider: ROUTER_PROVIDER,
+        },
+        extraction: {
+            provider: routerProvider,
         model: modelForTask('extraction', 'EXTRACTION_MODEL'),
         reason: 'Extraction needs structured output capability, fast model is sufficient',
-    },
-};
+        },
+    };
+}
 
 // Router
 
@@ -109,7 +113,7 @@ export async function route(
     messages: LLMMessage[],
     maxTokens?: number
 ): Promise<LLMResponse & { taskType: TaskType; modelProfile: ModelProfile; providerUsed: string }> {
-    const profile = MODEL_PROFILES[taskType];
+    const profile = buildModelProfiles()[taskType];
     const response = await completeWithFallback(messages, {
         preferredProvider: profile.provider,
         model: profile.model,
@@ -127,9 +131,9 @@ export async function route(
 // Profile Inspector
 
 export function getModelProfile(taskType: TaskType): ModelProfile {
-    return MODEL_PROFILES[taskType];
+    return buildModelProfiles()[taskType];
 }
 
 export function getAllProfiles(): Record<TaskType, ModelProfile> {
-    return MODEL_PROFILES;
+    return buildModelProfiles();
 }

@@ -15,9 +15,11 @@ import {
     ResolutionOutcome,
     ResolutionState,
 } from '../generated/prisma/client';
-import { buildEmbeddingText, generateEmbedding, toPgVectorLiteral } from './embeddings';
+import { buildEmbeddingText, generateEmbedding } from './embeddings';
 import { getScore, getReliabilityScores } from '../librarian/source-reliability';
 import { getDecayConfig, initialStabilityFromReliability, readOriginalConfidence } from '../lib/decay';
+import { createVectorBackend } from './backends';
+import { VectorBackend } from './vectorBackend';
 
 type DbClient = PrismaClient | Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
 
@@ -59,16 +61,7 @@ const DEFAULT_LEXICAL_WEIGHT = 0.45;
 const DEFAULT_VECTOR_WEIGHT = 0.55;
 const DEFAULT_MIN_SCORE = 0;
 
-let vectorSupportCache: boolean | null = null;
-
-function isVectorRuntimeError(error: unknown): boolean {
-    const message = error instanceof Error ? error.message.toLowerCase() : '';
-    return (
-        message.includes('type "vector" does not exist') ||
-        message.includes('operator does not exist: vector') ||
-        message.includes('column "embedding" does not exist')
-    );
-}
+let vectorBackend: VectorBackend | null = null;
 
 function coerceScore(value: number | string | null | undefined): number {
     if (value === null || value === undefined) return 0;
@@ -76,52 +69,19 @@ function coerceScore(value: number | string | null | undefined): number {
     return Number.isFinite(parsed) ? parsed : 0;
 }
 
-async function hasVectorSupport(db: DbClient): Promise<boolean> {
-    if (vectorSupportCache !== null) {
-        return vectorSupportCache;
+function getVectorBackendSingleton(): VectorBackend {
+    if (!vectorBackend) {
+        vectorBackend = createVectorBackend();
     }
-
-    try {
-        const rows = await db.$queryRaw<Array<{ has_vector: boolean; has_embedding: boolean }>>(Prisma.sql`
-            SELECT
-                EXISTS (SELECT 1 FROM pg_type WHERE typname = 'vector') AS has_vector,
-                EXISTS (
-                    SELECT 1
-                    FROM information_schema.columns
-                    WHERE table_schema = 'public'
-                      AND table_name = 'knowledge_base'
-                      AND column_name = 'embedding'
-                ) AS has_embedding
-        `);
-        vectorSupportCache = Boolean(rows[0]?.has_vector && rows[0]?.has_embedding);
-    } catch {
-        vectorSupportCache = false;
-    }
-
-    return vectorSupportCache;
+    return vectorBackend;
 }
 
-async function saveEmbedding(entryId: number, text: string, db: DbClient): Promise<void> {
-    if (!(await hasVectorSupport(db))) {
-        return;
-    }
-
-    try {
-        const vector = generateEmbedding(text);
-        const vectorLiteral = toPgVectorLiteral(vector);
-
-        await db.$executeRaw(Prisma.sql`
-            UPDATE "knowledge_base"
-            SET "embedding" = ${vectorLiteral}::vector
-            WHERE "id" = ${entryId}
-        `);
-    } catch (error) {
-        if (isVectorRuntimeError(error)) {
-            vectorSupportCache = false;
-            return;
-        }
-        throw error;
-    }
+async function saveEmbedding(entryId: number, text: string): Promise<void> {
+    await getVectorBackendSingleton().upsert({
+        id: String(entryId),
+        vector: generateEmbedding(text),
+        metadata: { id: entryId },
+    });
 }
 
 function defaultResolutionState(reason: ArchivedReason): ResolutionState {
@@ -295,6 +255,17 @@ function buildSearchFilters(input: HybridSearchInput): Prisma.Sql[] {
     return filters;
 }
 
+function buildVectorFilter(input: HybridSearchInput): Record<string, unknown> | undefined {
+    const filter: Record<string, unknown> = {};
+    if (input.entityType) {
+        filter.entityType = input.entityType;
+    }
+    if (input.entityId) {
+        filter.entityId = input.entityId;
+    }
+    return Object.keys(filter).length > 0 ? filter : undefined;
+}
+
 function mapHybridRows(rows: HybridSearchRow[]): HybridSearchResult[] {
     return rows.map((row) => ({
         id: row.id,
@@ -310,6 +281,60 @@ function mapHybridRows(rows: HybridSearchRow[]): HybridSearchResult[] {
         vectorScore: coerceScore(row.vectorScore),
         score: coerceScore(row.score),
     }));
+}
+
+async function fetchLexicalCandidateIds(
+    input: HybridSearchInput,
+    db: DbClient,
+    limit: number
+): Promise<number[]> {
+    const filters = buildSearchFilters(input);
+    const rows = await db.$queryRaw<Array<{ id: number }>>(Prisma.sql`
+        SELECT kb."id"
+        FROM "knowledge_base" kb
+        WHERE ${Prisma.join(filters, ' AND ')}
+        ORDER BY ts_rank_cd(
+            to_tsvector('english', coalesce(kb."key", '') || ' ' || coalesce(kb."valueSummary", '')),
+            websearch_to_tsquery('english', ${input.query})
+        ) DESC
+        LIMIT ${limit}
+    `);
+    return rows.map((row) => row.id);
+}
+
+async function scoreHybridCandidates(
+    candidateIds: number[],
+    input: HybridSearchInput,
+    db: DbClient
+): Promise<HybridSearchRow[]> {
+    if (candidateIds.length === 0) {
+        return [];
+    }
+
+    const idRows = Prisma.join(candidateIds.map((id) => Prisma.sql`(${id})`), ', ');
+    return db.$queryRaw<HybridSearchRow[]>(Prisma.sql`
+        WITH candidate_ids("id") AS (
+            VALUES ${idRows}
+        )
+        SELECT
+            kb."id",
+            kb."entityType",
+            kb."entityId",
+            kb."key",
+            kb."valueRaw",
+            kb."valueSummary",
+            kb."confidence",
+            kb."source",
+            kb."validUntil",
+            ts_rank_cd(
+                to_tsvector('english', coalesce(kb."key", '') || ' ' || coalesce(kb."valueSummary", '')),
+                websearch_to_tsquery('english', ${input.query})
+            ) AS "lexicalScore",
+            0::float8 AS "vectorScore",
+            0::float8 AS "score"
+        FROM "knowledge_base" kb
+        INNER JOIN candidate_ids c ON c."id" = kb."id"
+    `);
 }
 
 async function lexicalSearch(
@@ -373,87 +398,53 @@ export async function searchEntriesHybrid(input: HybridSearchInput, db?: DbClien
     const minScore = Math.max(input.minScore ?? DEFAULT_MIN_SCORE, 0);
     const weights = normalizeSearchWeights(input);
     const normalizedInput = { ...input, query };
+    const backend = getVectorBackendSingleton();
 
-    if (!(await hasVectorSupport(client))) {
+    if (!(await backend.ping())) {
         return lexicalSearch(normalizedInput, client, limit, minScore, weights.lexical);
     }
 
     try {
-        const filters = buildSearchFilters(normalizedInput);
-        const vectorLiteral = toPgVectorLiteral(generateEmbedding(query));
+        const [lexicalIds, vectorResults] = await Promise.all([
+            fetchLexicalCandidateIds(normalizedInput, client, 200),
+            backend.search(generateEmbedding(query), 200, buildVectorFilter(normalizedInput)),
+        ]);
 
-        const rows = await client.$queryRaw<HybridSearchRow[]>(Prisma.sql`
-            WITH candidate_lexical AS (
-                SELECT kb."id"
-                FROM "knowledge_base" kb
-                WHERE ${Prisma.join(filters, ' AND ')}
-                ORDER BY ts_rank_cd(
-                    to_tsvector('english', coalesce(kb."key", '') || ' ' || coalesce(kb."valueSummary", '')),
-                    websearch_to_tsquery('english', ${query})
-                ) DESC
-                LIMIT 200
-            ),
-            candidate_vector AS (
-                SELECT kb."id"
-                FROM "knowledge_base" kb
-                WHERE ${Prisma.join(filters, ' AND ')}
-                  AND kb."embedding" IS NOT NULL
-                ORDER BY kb."embedding" <=> ${vectorLiteral}::vector ASC
-                LIMIT 200
-            ),
-            candidates AS (
-                SELECT "id" FROM candidate_lexical
-                UNION
-                SELECT "id" FROM candidate_vector
-            ),
-            scored AS (
-                SELECT
-                    kb."id",
-                    kb."entityType",
-                    kb."entityId",
-                    kb."key",
-                    kb."valueRaw",
-                    kb."valueSummary",
-                    kb."confidence",
-                    kb."source",
-                    kb."validUntil",
-                    ts_rank_cd(
-                        to_tsvector('english', coalesce(kb."key", '') || ' ' || coalesce(kb."valueSummary", '')),
-                        websearch_to_tsquery('english', ${query})
-                    ) AS "lexicalScore",
-                    CASE
-                        WHEN kb."embedding" IS NULL THEN 0::float8
-                        ELSE (1 - (kb."embedding" <=> ${vectorLiteral}::vector))
-                    END AS "vectorScore"
-                FROM "knowledge_base" kb
-                INNER JOIN candidates c ON c."id" = kb."id"
-            )
-            SELECT
-                "id",
-                "entityType",
-                "entityId",
-                "key",
-                "valueRaw",
-                "valueSummary",
-                "confidence",
-                "source",
-                "validUntil",
-                "lexicalScore",
-                "vectorScore",
-                (${weights.lexical} * "lexicalScore" + ${weights.vector} * "vectorScore") AS "score"
-            FROM scored
-            WHERE (${weights.lexical} * "lexicalScore" + ${weights.vector} * "vectorScore") >= ${minScore}
-            ORDER BY "score" DESC
-            LIMIT ${limit}
-        `);
-
-        return mapHybridRows(rows);
-    } catch (error) {
-        if (isVectorRuntimeError(error)) {
-            vectorSupportCache = false;
-            return lexicalSearch(normalizedInput, client, limit, minScore, weights.lexical);
+        const vectorScores = new Map<number, number>();
+        for (const result of vectorResults) {
+            const rawId = result.metadata.id;
+            const id = typeof rawId === 'number' ? rawId : Number.parseInt(String(rawId), 10);
+            if (Number.isFinite(id)) {
+                vectorScores.set(id, result.score);
+            }
         }
-        throw error;
+
+        const candidateIds = Array.from(new Set([
+            ...lexicalIds,
+            ...vectorScores.keys(),
+        ]));
+
+        const rows = await scoreHybridCandidates(candidateIds, normalizedInput, client);
+        const scored = rows
+            .map((row) => {
+                const vectorScore = vectorScores.get(row.id) ?? 0;
+                const lexicalScore = coerceScore(row.lexicalScore);
+                const score = (weights.lexical * lexicalScore) + (weights.vector * vectorScore);
+                return {
+                    ...row,
+                    lexicalScore,
+                    vectorScore,
+                    score,
+                };
+            })
+            .filter((row) => row.score >= minScore)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, limit);
+
+        return mapHybridRows(scored);
+    } catch (error) {
+        console.warn(`[vector] Falling back to lexical-only search: ${error instanceof Error ? error.message : String(error)}`);
+        return lexicalSearch(normalizedInput, client, limit, minScore, weights.lexical);
     }
 }
 
@@ -489,11 +480,7 @@ export async function createEntry(input: EntryInput, db?: DbClient): Promise<Kno
         },
     });
 
-    await saveEmbedding(
-        entry.id,
-        buildEmbeddingText(entry.key, entry.valueSummary, entry.valueRaw),
-        client
-    );
+    await saveEmbedding(entry.id, buildEmbeddingText(entry.key, entry.valueSummary, entry.valueRaw));
 
     return entry;
 }
@@ -529,17 +516,14 @@ export async function updateEntry(
         },
     });
 
-    await saveEmbedding(
-        entry.id,
-        buildEmbeddingText(entry.key, entry.valueSummary, entry.valueRaw),
-        client
-    );
+    await saveEmbedding(entry.id, buildEmbeddingText(entry.key, entry.valueSummary, entry.valueRaw));
 
     return entry;
 }
 
 export async function deleteEntryById(entryId: number, db?: DbClient): Promise<void> {
     const client = db ?? getDb();
+    await getVectorBackendSingleton().delete(String(entryId)).catch(() => undefined);
     await client.knowledgeEntry.delete({
         where: { id: entryId },
     });

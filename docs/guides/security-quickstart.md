@@ -87,6 +87,10 @@ This keeps sensitive conflict artifacts and logs out of source control.
 - set rate limits:
   - `RATE_LIMIT_WINDOW_MS`
   - `RATE_LIMIT_MAX_REQUESTS`
+- set vector backend explicitly when using external vector infrastructure:
+  - `IRANTI_VECTOR_BACKEND=pgvector|qdrant|chroma`
+  - `IRANTI_QDRANT_URL` for Qdrant
+  - `IRANTI_CHROMA_URL` for ChromaDB
 - monitor `/metrics`
 - alert on repeated 401/403/429 responses
 

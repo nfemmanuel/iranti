@@ -117,6 +117,10 @@ const PROVIDERS: Record<string, () => Promise<LLMProvider>> = {
     ollama: () => import('./providers/ollama').then((m) => m.default as LLMProvider),
 };
 
+export function getSupportedProviders(): string[] {
+    return Object.keys(PROVIDERS).sort();
+}
+
 // ─── Provider Cache ──────────────────────────────────────────────────────────
 
 const providerCache: Map<string, LLMProvider> = new Map();

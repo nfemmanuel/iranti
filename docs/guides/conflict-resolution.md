@@ -346,6 +346,41 @@ Save the file. The Archivist will process it on the next maintenance cycle (or w
 
 ---
 
+## Resolutionist CLI
+
+If you do not want to edit escalation markdown by hand, use the interactive resolver:
+
+```bash
+iranti resolve
+```
+
+Options:
+
+- `--dir <path>`: review a non-default escalation root instead of `IRANTI_ESCALATION_DIR` or `~/.iranti/escalation`
+
+Interactive flow:
+
+1. Scans `active/` for files still marked `**Status:** PENDING`
+2. Prints the conflicted entity, key, both values, confidence scores, and Librarian reasoning
+3. Prompts you to:
+   - accept the existing fact
+   - accept the challenger
+   - enter a custom JSON value
+   - skip
+   - quit
+4. Rewrites `AUTHORITATIVE_JSON` in place and flips the status line to `RESOLVED`
+5. Leaves the Archivist to pick the file up on the next maintenance cycle
+
+Example:
+
+```bash
+iranti resolve --dir ~/.iranti/escalation
+```
+
+The Resolutionist does not write directly to the database. It only updates the escalation markdown in the exact format the Archivist already processes.
+
+---
+
 ## Archivist Processing
 
 When the Archivist finds a RESOLVED escalation file:

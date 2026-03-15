@@ -4,6 +4,7 @@ import { handshake, reconvene } from '../src/attendant';
 import { runArchivist } from '../src/archivist';
 import { queryEntry } from '../src/library/queries';
 import { bootstrapHarness } from './harness';
+import { configureMock } from '../src/lib/providers/mock';
 
 // ─── Mock Agent ──────────────────────────────────────────────────────────────
 // Simulates an external agent using Iranti as its memory layer.
@@ -103,7 +104,13 @@ async function mockAgent(agentId: string) {
 // ─── Integration Test ────────────────────────────────────────────────────────
 
 async function test() {
+    process.env.LLM_PROVIDER = 'mock';
     bootstrapHarness();
+    configureMock({
+        scenario: 'default',
+        seed: 42,
+        failureRate: 0,
+    });
     console.log('=== Iranti Integration Test ===');
 
     // Run mock agent

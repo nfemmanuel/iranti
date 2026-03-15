@@ -1,9 +1,16 @@
 import 'dotenv/config';
 import { handshake, reconvene, getAttendant } from '../src/attendant';
 import { bootstrapHarness } from './harness';
+import { configureMock } from '../src/lib/providers/mock';
 
 async function test() {
+    process.env.LLM_PROVIDER = 'mock';
     bootstrapHarness();
+    configureMock({
+        scenario: 'default',
+        seed: 42,
+        failureRate: 0,
+    });
     console.log('Testing Attendant...\n');
 
     // Test 1 — handshake with a fresh agent

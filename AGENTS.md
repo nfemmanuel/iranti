@@ -25,7 +25,7 @@ License: AGPL
 
 ## The Staff — System Components
 
-Iranti has four internal components collectively called The Staff:
+Iranti has five internal components collectively called The Staff:
 
 ### The Library
 The knowledge base itself. PostgreSQL database with five core tables:
@@ -100,6 +100,20 @@ when conflict flags exceed a threshold. Responsibilities:
 
 The Archivist never deletes. Worst case of bad reasoning is a messy Archive,
 not lost knowledge.
+
+### The Resolutionist
+An interactive CLI helper for human conflict review. It does not write to the
+database directly. Instead, it reads pending escalation files, guides a human
+reviewer through the conflicting facts, writes valid `AUTHORITATIVE_JSON`, and
+marks the file `RESOLVED` for the Archivist to process.
+
+Responsibilities:
+- Scans `escalation/active/` for files still marked `PENDING`
+- Displays conflict context clearly for a reviewer
+- Lets the reviewer accept the existing fact, accept the challenger, or enter
+  a custom value
+- Rewrites escalation markdown in the exact format the Archivist already parses
+- Leaves archival and KB writes to the Archivist maintenance cycle
 
 ---
 
@@ -206,6 +220,8 @@ iranti/
 │   │   ├── client.ts           — Prisma singleton
 │   │   ├── queries.ts          — All KB read/write operations
 │   │   ├── embeddings.ts       — Deterministic embedding generation utilities
+│   │   ├── vectorBackend.ts    — Vector backend interface for pgvector/Qdrant/Chroma
+│   │   ├── backends/           — Vector backend implementations + factory
 │   │   ├── entity-resolution.ts — Canonical entity resolution + alias mapping
 │   │   ├── relationships.ts    — Entity relationship graph
 │   │   └── agent-registry.ts  — Agent profiles, stats, whoKnows
@@ -219,6 +235,10 @@ iranti/
 │   │   └── registry.ts         — Singleton map, getAttendant()
 │   ├── archivist/
 │   │   └── index.ts            — runArchivist(), escalation processing
+│   ├── chat/
+│   │   └── index.ts            — Interactive CLI chat session backed by Iranti APIs + routed LLM calls
+│   ├── resolutionist/
+│   │   └── index.ts            — Interactive escalation review + AUTHORITATIVE_JSON writer
 │   ├── lib/
 │   │   ├── llm.ts              — LLMProvider interface, completeWithFallback(), fallback chain
 │   │   ├── router.ts           — route() by TaskType, model profiles
@@ -280,28 +300,33 @@ iranti/
 │   ├── engineering/            — CODE_STANDARDS.md, COMMENTING_GUIDELINES.md
 │   ├── decisions/              — One file per architectural decision
 │   └── features/               — One subfolder per feature, including ontology-evolution
-├── clients/
-│   └── python/
-│       ├── iranti.py           — Python HTTP client for REST API
-│       ├── test_client.py      — Python client smoke test
-│       ├── README.md           — Python client documentation
-│       ├── pyproject.toml      — Python package metadata for PyPI
-│       └── LICENSE             — AGPL metadata for Python package
-│   └── typescript/
-│       ├── src/
-│       │   ├── client.ts       — External TypeScript HTTP client for REST API
-│       │   ├── types.ts        — Request/response and error types for npm client
-│       │   └── index.ts        — Re-exports for package consumers
-│       ├── package.json        — npm package metadata for @iranti/sdk
-│       ├── tsconfig.json       — Package-local TypeScript build config
-│       └── README.md           — TypeScript client documentation
-├── tests/
-│   └── conflict/
-│       ├── run_conflict_benchmark.ts — Benchmark runner for adversarial conflict scenarios
-│       └── *.ts                — Direct contradiction, temporal, cascading, and multi-hop conflict cases
-│   └── consistency/
-│       └── run_consistency_tests.ts — Empirical validation for write serialization, read-after-write, escalation visibility, and observe isolation
-├── AGENTS.md                   — This file
++-- clients/
+�   +-- python/
+�       +-- iranti.py           � Python HTTP client for REST API
+�       +-- test_client.py      � Python client smoke test
+�       +-- README.md           � Python client documentation
+�       +-- pyproject.toml      � Python package metadata for PyPI
+�       +-- LICENSE             � AGPL metadata for Python package
+�   +-- typescript/
+�       +-- src/
+�       �   +-- client.ts       � External TypeScript HTTP client for REST API
+�       �   +-- types.ts        � Request/response and error types for npm client
+�       �   +-- index.ts        � Re-exports for package consumers
+�       +-- package.json        � npm package metadata for @iranti/sdk
+�       +-- tsconfig.json       � Package-local TypeScript build config
+�       +-- README.md           � TypeScript client documentation
++-- tests/
+�   +-- conflict/
+�   �   +-- run_conflict_benchmark.ts � Benchmark runner for adversarial conflict scenarios
+�   �   +-- *.ts                � Direct contradiction, temporal, cascading, and multi-hop conflict cases
+�   +-- vector-backends/
+�   �   +-- run_vector_backend_tests.ts � Vector backend factory + adapter tests
+�   +-- temporal/
+�   �   +-- common.ts           � Temporal test DB fallback and harness helpers
+�   �   +-- run_temporal_tests.ts � DB-backed temporal query/history/escalation validation
+�   +-- consistency/
+�       +-- run_consistency_tests.ts � Empirical validation for write serialization, read-after-write, escalation visibility, and observe isolation
++-- AGENTS.md                   � This file
 ├── docker-compose.yml          — PostgreSQL for local dev
 └── .env                        — Local environment (never committed)
 ```
@@ -325,6 +350,7 @@ Decay extension note:
 - the internal design note is `docs/internal/decay.md`
 - consistency model documentation lives in `docs/internal/consistency_model.md`
 - empirical consistency validation lives in `tests/consistency/`
+- DB-backed temporal validation lives in `tests/temporal/`
 
 ### knowledge_base
 | Column | Type | Notes |
@@ -624,6 +650,8 @@ manual env-file editing. Current CLI coverage includes:
 - `iranti doctor`
 - `iranti status`
 - `iranti upgrade`
+- `iranti chat`
+- `iranti resolve`
 - `iranti mcp`
 - `iranti claude-hook`
 - `iranti codex-setup`

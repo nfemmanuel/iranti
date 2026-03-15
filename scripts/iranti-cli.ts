@@ -9,6 +9,10 @@ import { Writable } from 'stream';
 import net from 'net';
 import { initDb } from '../src/library/client';
 import { createOrRotateApiKey, formatApiKeyToken, generateApiKeySecret, listApiKeys, revokeApiKey } from '../src/security/apiKeys';
+import { getEscalationPaths } from '../src/lib/escalationPaths';
+import { resolveInteractive } from '../src/resolutionist';
+import { startChatSession } from '../src/chat';
+import { createVectorBackend, resolveVectorBackendName } from '../src/library/backends';
 
 type Scope = 'user' | 'system';
 
@@ -377,6 +381,12 @@ function formatEnvValue(value: string): string {
     return /[\s#"'`]/.test(value)
         ? `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
         : value;
+}
+
+function vectorBackendUrl(name: string, env: Record<string, string>): string | null {
+    if (name === 'qdrant') return env.IRANTI_QDRANT_URL ?? null;
+    if (name === 'chroma') return env.IRANTI_CHROMA_URL ?? 'http://localhost:8000';
+    return null;
 }
 
 async function upsertEnvFile(filePath: string, updates: Record<string, string | undefined>): Promise<void> {
@@ -1744,6 +1754,46 @@ async function doctorCommand(args: ParsedArgs): Promise<void> {
             detail: `LLM_PROVIDER=${provider}`,
         });
         checks.push(detectProviderKey(provider, env));
+
+        try {
+            const backendName = resolveVectorBackendName({
+                vectorBackend: env.IRANTI_VECTOR_BACKEND,
+                qdrantUrl: env.IRANTI_QDRANT_URL,
+                qdrantApiKey: env.IRANTI_QDRANT_API_KEY,
+                qdrantCollection: env.IRANTI_QDRANT_COLLECTION,
+                chromaUrl: env.IRANTI_CHROMA_URL,
+                chromaCollection: env.IRANTI_CHROMA_COLLECTION,
+                chromaTenant: env.IRANTI_CHROMA_TENANT,
+                chromaDatabase: env.IRANTI_CHROMA_DATABASE,
+                chromaToken: env.IRANTI_CHROMA_TOKEN,
+            });
+            const backend = createVectorBackend({
+                vectorBackend: backendName,
+                qdrantUrl: env.IRANTI_QDRANT_URL,
+                qdrantApiKey: env.IRANTI_QDRANT_API_KEY,
+                qdrantCollection: env.IRANTI_QDRANT_COLLECTION,
+                chromaUrl: env.IRANTI_CHROMA_URL,
+                chromaCollection: env.IRANTI_CHROMA_COLLECTION,
+                chromaTenant: env.IRANTI_CHROMA_TENANT,
+                chromaDatabase: env.IRANTI_CHROMA_DATABASE,
+                chromaToken: env.IRANTI_CHROMA_TOKEN,
+            });
+            const reachable = await backend.ping();
+            const url = vectorBackendUrl(backendName, env);
+            checks.push({
+                name: 'vector backend',
+                status: reachable ? 'pass' : 'warn',
+                detail: url
+                    ? `${backendName} (${url}) is ${reachable ? 'reachable' : 'unreachable'}`
+                    : `${backendName} is ${reachable ? 'reachable' : 'unreachable'}`,
+            });
+        } catch (error) {
+            checks.push({
+                name: 'vector backend',
+                status: 'fail',
+                detail: error instanceof Error ? error.message : String(error),
+            });
+        }
     }
 
     const result = {
@@ -2367,6 +2417,26 @@ async function authRevokeKeyCommand(args: ParsedArgs): Promise<void> {
     process.exit(0);
 }
 
+async function resolveCommand(args: ParsedArgs): Promise<void> {
+    const explicitDir = getFlag(args, 'dir');
+    const escalationDir = explicitDir ? path.resolve(explicitDir) : getEscalationPaths().root;
+    await resolveInteractive(escalationDir);
+}
+
+async function chatCommand(args: ParsedArgs): Promise<void> {
+    const provider = normalizeProvider(getFlag(args, 'provider'));
+    if (provider && !isSupportedProvider(provider)) {
+        throw new Error(`Unsupported provider '${provider}'.`);
+    }
+
+    await startChatSession({
+        agentId: getFlag(args, 'agent') ?? 'iranti_chat',
+        provider,
+        model: getFlag(args, 'model'),
+        cwd: process.cwd(),
+    });
+}
+
 function printHelp(): void {
     console.log(`Iranti CLI
 
@@ -2402,6 +2472,8 @@ Diagnostics:
   iranti doctor [--instance <name>] [--scope user|system] [--env <file>] [--json]
   iranti status [--scope user|system] [--json]
   iranti upgrade [--json]
+  iranti chat [--agent <agent-id>] [--provider <provider>] [--model <model>]
+  iranti resolve [--dir <escalation-dir>]
 
 Integrations:
   iranti mcp [--help]
@@ -2513,6 +2585,16 @@ async function main(): Promise<void> {
 
     if (args.command === 'upgrade') {
         await upgradeCommand(args);
+        return;
+    }
+
+    if (args.command === 'chat') {
+        await chatCommand(args);
+        return;
+    }
+
+    if (args.command === 'resolve') {
+        await resolveCommand(args);
         return;
     }
 
