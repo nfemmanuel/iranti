@@ -1,6 +1,7 @@
 # Claude Code Guide
 
 Use Iranti with Claude Code through:
+- `iranti claude-setup` for project-local MCP + hook scaffolding
 - `iranti mcp` for explicit memory tools
 - `iranti claude-hook` for automatic working-memory injection
 
@@ -38,7 +39,48 @@ In one terminal:
 iranti run --instance local
 ```
 
-## 2. Add project-local MCP config
+## 2. Scaffold the Claude Code files
+
+From the bound project:
+
+```bash
+iranti claude-setup
+```
+
+This writes or refreshes:
+- `.mcp.json`
+- `.claude/settings.local.json`
+
+Use `--force` if you want Iranti to overwrite existing scaffold files.
+
+Batch mode for a parent projects folder:
+
+```bash
+iranti claude-setup --scan "C:/Users/NF/Documents/Projects"
+```
+
+Recursive scan for nested project trees:
+
+```bash
+iranti claude-setup --scan "C:/Users/NF/Documents/Projects" --recursive
+```
+
+Scan mode:
+- checks immediate subdirectories only
+- add `--recursive` to walk nested project folders too
+- only touches directories that already contain `.claude/`
+- adds or merges an `iranti` MCP server into `.mcp.json`
+- only creates `.claude/settings.local.json` when it is missing, unless `--force` is supplied
+
+Equivalent alias:
+
+```bash
+iranti integrate claude
+```
+
+## 3. Add project-local MCP config manually
+
+If you do not want to use `iranti claude-setup`, create the files yourself.
 
 Create `.mcp.json` in the project root:
 
@@ -64,7 +106,7 @@ This exposes these tools to Claude Code:
 - `iranti_relate`
 - `iranti_who_knows`
 
-## 3. Add Claude Code hooks
+## 4. Add Claude Code hooks
 
 Create `.claude/settings.local.json` in the same project:
 
@@ -110,7 +152,7 @@ Optional explicit overrides:
 }
 ```
 
-## 4. Recommended usage policy
+## 5. Recommended usage policy
 
 Use the integration like this:
 
@@ -122,18 +164,19 @@ Use the integration like this:
 
 Do not auto-save every Claude turn. That will pollute the Library and reduce retrieval quality over time.
 
-## 5. Suggested Claude standing instruction
+## 6. Suggested Claude standing instruction
 
 ```text
 Use Iranti for durable memory. Prefer iranti_query for exact lookup, iranti_search for discovery, and iranti_write only for stable facts such as preferences, decisions, constraints, task state, and repository knowledge.
 ```
 
-## 6. Verification
+## 7. Verification
 
 From the project root:
 
 ```bash
 iranti mcp --help
+iranti claude-setup --help
 iranti claude-hook --help
 iranti doctor
 ```
@@ -148,7 +191,7 @@ Important:
 - Protected Staff Namespace entries such as `system/library/schema_version` are intentionally hidden from regular agent queries.
 - If you want to test retrieval, use a non-protected project/user/entity fact instead.
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
 If Claude Code does not surface Iranti tools:
 
@@ -156,6 +199,7 @@ If Claude Code does not surface Iranti tools:
 
 ```bash
 iranti mcp --help
+iranti claude-setup --help
 iranti claude-hook --help
 ```
 
@@ -178,6 +222,10 @@ echo {} | iranti claude-hook --event SessionStart
 ```
 
 If the hook says `DATABASE_URL is required`, the current project is missing `.env.iranti` or `IRANTI_INSTANCE_ENV`.
+
+If you used `--scan`, remember:
+- scan mode does not create `.env.iranti`
+- scan mode is for broad MCP scaffolding, not full per-project binding
 
 ## Related
 

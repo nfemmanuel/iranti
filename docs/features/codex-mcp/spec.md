@@ -2,7 +2,7 @@
 
 ## Overview
 
-This feature connects Codex to Iranti through Codex's MCP client using the installed Iranti CLI surface. It provides a repeatable setup path for registering `iranti mcp` globally in Codex while keeping project-specific runtime resolution in `.env.iranti` and the linked instance env.
+This feature connects Codex to Iranti through Codex's MCP client using the installed Iranti CLI surface. It provides a repeatable setup path for registering `iranti mcp` globally in Codex through either `iranti codex-setup` or `iranti integrate codex`, while keeping project-specific runtime resolution in `.env.iranti` and the linked instance env.
 
 ## Inputs
 
@@ -27,7 +27,7 @@ This feature connects Codex to Iranti through Codex's MCP client using the insta
 ## Decision Tree / Flow
 
 1. Install Iranti globally and create a project binding with `iranti project init`.
-2. Run `iranti codex-setup`.
+2. Run `iranti codex-setup` or `iranti integrate codex`.
 3. The setup script verifies `codex` is installed.
 4. If a Codex MCP entry with the target name already exists, remove it.
 5. Register a new global Codex MCP entry using `codex mcp add`.
@@ -39,7 +39,7 @@ This feature connects Codex to Iranti through Codex's MCP client using the insta
 
 ## Edge Cases
 
-- If `codex` is not installed, setup fails fast with a direct error.
+- If `codex` is not installed, setup fails fast with a direct error that tells the user to confirm `codex --version` before retrying.
 - If `.env.iranti` is not present in the current working directory, setup still succeeds but the MCP server falls back to runtime cwd-based resolution.
 - If `--project-env` points to a missing file, setup fails fast.
 - If the installed `iranti` CLI does not expose `iranti mcp`, setup can fall back to `--local-script`.
@@ -52,6 +52,7 @@ This feature connects Codex to Iranti through Codex's MCP client using the insta
 
 - `npm run build` passes with the updated Codex setup script included.
 - `iranti codex-setup` successfully registers `iranti` in Codex MCP config.
+- `iranti integrate codex` resolves to the same setup path.
 - `codex mcp get iranti` returns the expected installed-command MCP entry.
 
 ## Related
