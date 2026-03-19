@@ -305,6 +305,12 @@ iranti mcp
 
 Use it with a project-local `.mcp.json`, and optionally add `iranti claude-hook` for `SessionStart` and `UserPromptSubmit`.
 
+Fast path:
+
+```bash
+iranti claude-setup
+```
+
 Guide: [`docs/guides/claude-code.md`](docs/guides/claude-code.md)
 
 ### Codex via MCP
@@ -317,6 +323,12 @@ codex -C /path/to/your/project
 ```
 
 When `iranti codex-setup` is run from a project directory, it automatically captures that project's `.env.iranti` as `IRANTI_PROJECT_ENV` so Codex resolves the correct Iranti instance consistently.
+
+Alias:
+
+```bash
+iranti integrate codex
+```
 
 Guide: [`docs/guides/codex.md`](docs/guides/codex.md)
 

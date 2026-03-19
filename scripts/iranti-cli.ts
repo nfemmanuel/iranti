@@ -94,6 +94,13 @@ type ProviderKeyTarget = {
     projectPath?: string;
 };
 
+type ClaudeScaffoldStatus = 'created' | 'updated' | 'unchanged';
+
+type ClaudeProjectScaffoldResult = {
+    mcp: ClaudeScaffoldStatus;
+    settings: ClaudeScaffoldStatus;
+};
+
 const PROVIDER_ENV_KEYS: Record<string, string | null> = {
     mock: null,
     ollama: null,
@@ -822,40 +829,98 @@ async function ensureInstanceConfigured(
     return { envFile, instanceDir, created };
 }
 
-async function writeClaudeCodeProjectFiles(projectPath: string): Promise<void> {
+function makeIrantiMcpServerConfig(): { command: string; args: string[] } {
+    return {
+        command: 'iranti',
+        args: ['mcp'],
+    };
+}
+
+function makeClaudeHookSettings(projectEnvPath?: string): Record<string, unknown> {
+    const hookArgs = (event: 'SessionStart' | 'UserPromptSubmit') => {
+        const args = ['claude-hook', '--event', event];
+        if (projectEnvPath) {
+            args.push('--project-env', projectEnvPath);
+        }
+        return args;
+    };
+
+    return {
+        hooks: {
+            SessionStart: [
+                {
+                    command: 'iranti',
+                    args: hookArgs('SessionStart'),
+                },
+            ],
+            UserPromptSubmit: [
+                {
+                    command: 'iranti',
+                    args: hookArgs('UserPromptSubmit'),
+                },
+            ],
+        },
+    };
+}
+
+async function writeClaudeCodeProjectFiles(projectPath: string, projectEnvPath?: string, force: boolean = false): Promise<ClaudeProjectScaffoldResult> {
     const mcpFile = path.join(projectPath, '.mcp.json');
+    let mcpStatus: ClaudeScaffoldStatus = 'unchanged';
+    const irantiMcpServer = makeIrantiMcpServerConfig();
     if (!fs.existsSync(mcpFile)) {
         await writeText(mcpFile, `${JSON.stringify({
             mcpServers: {
-                iranti: {
-                    command: 'iranti',
-                    args: ['mcp'],
-                },
+                iranti: irantiMcpServer,
             },
         }, null, 2)}\n`);
+        mcpStatus = 'created';
+    } else {
+        const existing = readJsonFile<Record<string, unknown>>(mcpFile);
+        if (!existing || typeof existing !== 'object' || Array.isArray(existing)) {
+            if (!force) {
+                throw new Error(`Existing .mcp.json is not valid JSON. Re-run with --force to overwrite it: ${mcpFile}`);
+            }
+            await writeText(mcpFile, `${JSON.stringify({
+                mcpServers: {
+                    iranti: irantiMcpServer,
+                },
+            }, null, 2)}\n`);
+            mcpStatus = 'updated';
+        } else {
+            const existingServers =
+                existing.mcpServers && typeof existing.mcpServers === 'object' && !Array.isArray(existing.mcpServers)
+                    ? existing.mcpServers as Record<string, unknown>
+                    : {};
+            const hasIranti = Object.prototype.hasOwnProperty.call(existingServers, 'iranti');
+            if (!hasIranti || force) {
+                await writeText(mcpFile, `${JSON.stringify({
+                    ...existing,
+                    mcpServers: {
+                        ...existingServers,
+                        iranti: irantiMcpServer,
+                    },
+                }, null, 2)}\n`);
+                mcpStatus = 'updated';
+            }
+        }
     }
 
     const claudeDir = path.join(projectPath, '.claude');
     await ensureDir(claudeDir);
     const settingsFile = path.join(claudeDir, 'settings.local.json');
+    let settingsStatus: ClaudeScaffoldStatus = 'unchanged';
     if (!fs.existsSync(settingsFile)) {
-        await writeText(settingsFile, `${JSON.stringify({
-            hooks: {
-                SessionStart: [
-                    {
-                        command: 'iranti',
-                        args: ['claude-hook', '--event', 'SessionStart'],
-                    },
-                ],
-                UserPromptSubmit: [
-                    {
-                        command: 'iranti',
-                        args: ['claude-hook', '--event', 'UserPromptSubmit'],
-                    },
-                ],
-            },
-        }, null, 2)}\n`);
+        await writeText(settingsFile, `${JSON.stringify(makeClaudeHookSettings(projectEnvPath), null, 2)}\n`);
+        settingsStatus = 'created';
+    } else if (force) {
+        await writeText(settingsFile, `${JSON.stringify(makeClaudeHookSettings(projectEnvPath), null, 2)}\n`);
+        settingsStatus = 'updated';
     }
+
+    return {
+        mcp: mcpStatus,
+        settings: settingsStatus,
+    };
 }
 
 function hasCodexInstalled(): boolean {
@@ -1623,16 +1688,16 @@ function describeUpgradeTarget(target: UpgradeTargetStatus): string {
     const latest = target.latestVersion ?? 'unknown';
     if (target.target === 'npm-repo') {
         return target.blockedReason
-            ? `repo checkout (${current}) — ${target.blockedReason}`
-            : `repo checkout (${current}) — refresh local checkout and rebuild`;
+            ? `repo checkout (${current}) â€” ${target.blockedReason}`
+            : `repo checkout (${current}) â€” refresh local checkout and rebuild`;
     }
     if (target.upToDate === true) {
-        return `${target.target} (${current}) — already at latest ${latest}`;
+        return `${target.target} (${current}) â€” already at latest ${latest}`;
     }
     if (target.blockedReason) {
-        return `${target.target} (${current}) — ${target.blockedReason}`;
+        return `${target.target} (${current}) â€” ${target.blockedReason}`;
     }
-    return `${target.target} (${current}) — latest ${latest}`;
+    return `${target.target} (${current}) â€” latest ${latest}`;
 }
 
 async function chooseInteractiveUpgradeTargets(
@@ -2387,7 +2452,7 @@ async function doctorCommand(args: ParsedArgs): Promise<void> {
             : check.status === 'warn'
                 ? warnLabel('WARN')
                 : failLabel('FAIL');
-        console.log(`${marker} ${check.name} — ${check.detail}`);
+        console.log(`${marker} ${check.name} â€” ${check.detail}`);
     }
 
     if (result.remediations.length > 0) {
@@ -3121,6 +3186,158 @@ async function resolveCommand(args: ParsedArgs): Promise<void> {
     await resolveInteractive(escalationDir);
 }
 
+function printClaudeSetupHelp(): void {
+    console.log([
+        'Scaffold Claude Code MCP and hook files for the current project.',
+        '',
+        'Usage:',
+        '  iranti claude-setup [path] [--project-env <path>] [--force]',
+        '  iranti claude-setup --scan <dir> [--recursive] [--force]',
+        '  iranti integrate claude [path] [--project-env <path>] [--force]',
+        '  iranti integrate claude --scan <dir> [--recursive] [--force]',
+        '',
+        'Notes:',
+        '  - Expects a project binding at .env.iranti unless --project-env is supplied.',
+        '  - Writes .mcp.json and .claude/settings.local.json.',
+        '  - Adds the Iranti MCP server to existing .mcp.json files without removing other servers.',
+        '  - Leaves existing Claude hook files untouched unless --force is supplied.',
+        '',
+        'Scan mode (--scan):',
+        '  - Scans immediate subdirectories of the given dir by default.',
+        '  - Add --recursive to scan nested project trees too.',
+        '  - Only scaffolds projects that already have a .claude subfolder.',
+        '  - No .env.iranti required - skips the per-project binding check.',
+        '  - Scan mode adds or merges .mcp.json and only creates hook settings when missing.',
+    ].join('\n'));
+}
+
+function shouldSkipRecursiveClaudeScanDir(name: string): boolean {
+    if (name.startsWith('.')) return true;
+    return [
+        'node_modules',
+        'dist',
+        'build',
+        'out',
+        'coverage',
+        '.next',
+        '.turbo',
+        '.cache',
+    ].includes(name);
+}
+
+function findClaudeProjects(scanDir: string, recursive: boolean): string[] {
+    if (!recursive) {
+        return fs.readdirSync(scanDir, { withFileTypes: true })
+            .filter((entry) => entry.isDirectory())
+            .map((entry) => path.join(scanDir, entry.name))
+            .filter((candidate) => fs.existsSync(path.join(candidate, '.claude')));
+    }
+
+    const found = new Set<string>();
+    const queue: string[] = [scanDir];
+    while (queue.length > 0) {
+        const current = queue.shift()!;
+        let entries: fs.Dirent[] = [];
+        try {
+            entries = fs.readdirSync(current, { withFileTypes: true });
+        } catch {
+            continue;
+        }
+        if (fs.existsSync(path.join(current, '.claude'))) {
+            found.add(current);
+        }
+        for (const entry of entries) {
+            if (!entry.isDirectory()) continue;
+            if (shouldSkipRecursiveClaudeScanDir(entry.name)) continue;
+            queue.push(path.join(current, entry.name));
+        }
+    }
+
+    found.delete(scanDir);
+    return Array.from(found).sort((a, b) => a.localeCompare(b));
+}
+
+async function claudeSetupCommand(args: ParsedArgs): Promise<void> {
+    if (hasFlag(args, 'help')) {
+        printClaudeSetupHelp();
+        return;
+    }
+
+    const force = hasFlag(args, 'force');
+
+    if (args.flags.has('scan')) {
+        const recursive = hasFlag(args, 'recursive');
+        const dirArg = getFlag(args, 'scan')
+            ?? args.positionals[0]
+            ?? (args.command === 'claude-setup' ? args.subcommand ?? undefined : undefined);
+        const scanDir = path.resolve(dirArg ?? process.cwd());
+
+        if (!fs.existsSync(scanDir)) {
+            throw new Error(`Scan directory not found: ${scanDir}`);
+        }
+
+        const candidates = findClaudeProjects(scanDir, recursive);
+
+        if (candidates.length === 0) {
+            console.log(`${infoLabel()} No ${recursive ? 'nested project directories' : 'subdirectories'} with a .claude folder found in ${scanDir}`);
+            return;
+        }
+
+        console.log(`${okLabel()} Scanning ${scanDir} - found ${candidates.length} project(s) with .claude${recursive ? ' (recursive)' : ''}`);
+        let createdMcp = 0;
+        let updatedMcp = 0;
+        let createdSettings = 0;
+        let updatedSettings = 0;
+        let unchanged = 0;
+        for (const projectPath of candidates) {
+            const result = await writeClaudeCodeProjectFiles(projectPath, undefined, force);
+            if (result.mcp === 'created') createdMcp += 1;
+            if (result.mcp === 'updated') updatedMcp += 1;
+            if (result.settings === 'created') createdSettings += 1;
+            if (result.settings === 'updated') updatedSettings += 1;
+            if (result.mcp === 'unchanged' && result.settings === 'unchanged') unchanged += 1;
+            console.log(`  ${projectPath}`);
+            console.log(`    mcp       ${result.mcp}`);
+            console.log(`    settings  ${result.settings}`);
+        }
+        console.log('');
+        console.log('Summary:');
+        console.log(`  projects          ${candidates.length}`);
+        console.log(`  mcp created       ${createdMcp}`);
+        console.log(`  mcp updated       ${updatedMcp}`);
+        console.log(`  settings created  ${createdSettings}`);
+        console.log(`  settings updated  ${updatedSettings}`);
+        console.log(`  unchanged         ${unchanged}`);
+        console.log(`${infoLabel()} Done. Open each project in Claude Code to verify Iranti tools are available.`);
+        return;
+    }
+
+    const projectArg = args.positionals[0] ?? (args.command === 'claude-setup' ? args.subcommand ?? undefined : undefined);
+    const projectPath = path.resolve(projectArg ?? process.cwd());
+    const explicitProjectEnv = getFlag(args, 'project-env');
+    const projectEnvPath = explicitProjectEnv
+        ? path.resolve(explicitProjectEnv)
+        : path.join(projectPath, '.env.iranti');
+
+    if (!fs.existsSync(projectPath)) {
+        throw new Error(`Project path not found: ${projectPath}`);
+    }
+    if (!fs.existsSync(projectEnvPath)) {
+        throw new Error(`Project binding not found at ${projectEnvPath}. Run \`iranti project init\` or \`iranti configure project\` first.`);
+    }
+
+    const result = await writeClaudeCodeProjectFiles(projectPath, projectEnvPath, force);
+
+    console.log(`${okLabel()} Claude Code integration scaffolded`);
+    console.log(`  project   ${projectPath}`);
+    console.log(`  binding   ${projectEnvPath}`);
+    console.log(`  mcp       ${path.join(projectPath, '.mcp.json')}`);
+    console.log(`  settings  ${path.join(projectPath, '.claude', 'settings.local.json')}`);
+    console.log(`  mcp status      ${result.mcp}`);
+    console.log(`  settings status ${result.settings}`);
+    console.log(`${infoLabel()} Next: open Claude Code in this project and verify Iranti tools are available.`);
+}
+
 async function chatCommand(args: ParsedArgs): Promise<void> {
     const provider = normalizeProvider(getFlag(args, 'provider'));
     if (provider && !isSupportedProvider(provider)) {
@@ -3175,8 +3392,13 @@ Project-level:
 
 Integrations:
   iranti mcp [--help]
+  iranti claude-setup [path] [--project-env <path>] [--force]
+  iranti claude-setup --scan <dir> [--force]
   iranti claude-hook --event SessionStart|UserPromptSubmit [--project-env <path>] [--instance-env <path>] [--env-file <path>]
   iranti codex-setup [--name iranti] [--agent codex_code] [--source Codex] [--provider openai] [--project-env <path>] [--local-script]
+  iranti integrate claude [path] [--project-env <path>] [--force]
+  iranti integrate claude --scan <dir> [--force]
+  iranti integrate codex [--name iranti] [--agent codex_code] [--source Codex] [--provider openai] [--project-env <path>] [--local-script]
   `);
 }
 
@@ -3301,6 +3523,11 @@ async function main(): Promise<void> {
         return;
     }
 
+    if (args.command === 'claude-setup') {
+        await claudeSetupCommand(args);
+        return;
+    }
+
     if (args.command === 'claude-hook') {
         await handoffToScript('claude-code-memory-hook', process.argv.slice(3));
         return;
@@ -3311,6 +3538,18 @@ async function main(): Promise<void> {
         return;
     }
 
+    if (args.command === 'integrate') {
+        if (args.subcommand === 'claude') {
+            await claudeSetupCommand(args);
+            return;
+        }
+        if (args.subcommand === 'codex') {
+            await handoffToScript('codex-setup', process.argv.slice(4));
+            return;
+        }
+        throw new Error(`Unknown integrate target '${args.subcommand ?? ''}'. Use 'claude' or 'codex'.`);
+    }
+
     throw new Error(`Unknown command '${args.command}'. Run: iranti help`);
 }
 
@@ -3319,3 +3558,4 @@ main().catch((err) => {
     console.error(`${failLabel('ERROR')} ${message}`);
     process.exit(1);
 });
+

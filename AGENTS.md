@@ -1,4 +1,4 @@
-# AGENTS.md — Iranti System Context
+﻿# AGENTS.md â€” Iranti System Context
 
 This file is the primary context document for any AI agent, coding assistant,
 or human developer working in this codebase. Read this before touching anything.
@@ -23,19 +23,19 @@ License: AGPL
 
 ---
 
-## The Staff — System Components
+## The Staff â€” System Components
 
 Iranti has five internal components collectively called The Staff:
 
 ### The Library
 The knowledge base itself. PostgreSQL database with five core tables:
-- `knowledge_base` — active truth. What agents read from and write to.
-- `archive` — challenged truth. Superseded or contradicted entries with full
+- `knowledge_base` â€” active truth. What agents read from and write to.
+- `archive` â€” challenged truth. Superseded or contradicted entries with full
   provenance. Never deleted.
-- `entity_relationships` — directional relationships between entities. Caller-
+- `entity_relationships` â€” directional relationships between entities. Caller-
   defined relationship types (MEMBER_OF, PART_OF, AUTHORED, etc.).
-- `entities` — canonical entity identity registry (`entityType + entityId`).
-- `entity_aliases` — normalized aliases mapped to canonical entities for
+- `entities` â€” canonical entity identity registry (`entityType + entityId`).
+- `entity_aliases` â€” normalized aliases mapped to canonical entities for
   resolution across detector/extractor/query variants.
 
 There is also a protected Staff Namespace: entries where `entityType = 'system'`.
@@ -45,7 +45,7 @@ metadata including source reliability scores and ontology governance records.
 
 ### The Librarian
 The agent that manages the Library. All writes from external agents go through
-the Librarian — never directly to the database. Responsibilities:
+the Librarian â€” never directly to the database. Responsibilities:
 - Receives findings from agents, decides how to store them
 - Chunks raw content blobs into atomic facts before writing
 - Loads source reliability scores and applies weighted confidence to all writes
@@ -54,7 +54,7 @@ the Librarian — never directly to the database. Responsibilities:
 - Uses LLM reasoning (conflict_resolution task type) for ambiguous conflicts
 - Escalates genuinely unresolvable conflicts to the Escalation Folder
 - Updates agent stats after every write
-- Logs every decision with a reason — nothing is silently overwritten
+- Logs every decision with a reason â€” nothing is silently overwritten
 - May record repeated unknown concepts into ontology candidate tracking, but may not
   promote new core ontology terms automatically
 
@@ -77,12 +77,12 @@ Responsibilities:
 - Reconvene: updates working memory if task context has shifted. Returns
   existing brief with updated timestamp if task is unchanged
 - In-memory consolidation: `updateWorkingMemory()` updates the brief without
-  a DB round trip — the Attendant is a fast cache, the Librarian owns truth
+  a DB round trip â€” the Attendant is a fast cache, the Librarian owns truth
 - Context recovery: after 20 LLM calls, re-reads operating rules from Staff
   Namespace rather than hallucinating behavior. Resets call counter
 
 Context inference method: observes the agent's recent messages to infer
-current task — does not require the agent to explicitly signal task type.
+current task â€” does not require the agent to explicitly signal task type.
 
 ### The Archivist
 A periodic cleanup agent. Does not run on every write. Runs on a schedule or
@@ -137,16 +137,16 @@ Override any model via environment variable (e.g. `CONFLICT_MODEL=claude-opus-4`
 
 ### Providers
 Providers live in `src/lib/providers/`. Current implementations:
-- `mock.ts` — hardcoded responses for local dev and testing (default)
-- `gemini.ts` — Google Gemini via REST API
-- `claude.ts` — Anthropic Claude via Anthropic SDK API
-- `openai.ts` — OpenAI chat/responses API
-- `groq.ts` — Groq chat completions API
-- `mistral.ts` — Mistral chat completions API
-- `ollama.ts` — local Ollama runtime
+- `mock.ts` â€” hardcoded responses for local dev and testing (default)
+- `gemini.ts` â€” Google Gemini via REST API
+- `claude.ts` â€” Anthropic Claude via Anthropic SDK API
+- `openai.ts` â€” OpenAI chat/responses API
+- `groq.ts` â€” Groq chat completions API
+- `mistral.ts` â€” Mistral chat completions API
+- `ollama.ts` â€” local Ollama runtime
 
 Switch provider by setting `LLM_PROVIDER` in `.env`. Swap is a one-line
-config change — no code changes required.
+config change â€” no code changes required.
 
 Provider API-key management is exposed through the CLI:
 - `iranti list api-keys`
@@ -163,10 +163,10 @@ instance env without requiring users to edit `.env` files manually.
 
 The Librarian tracks per-source reliability scores in the Staff Namespace
 under `system / librarian / source_reliability`. Scores are used to compute
-weighted confidence: `confidence × 0.7 + confidence × reliability × 0.3`.
+weighted confidence: `confidence Ã— 0.7 + confidence Ã— reliability Ã— 0.3`.
 
 - Default score: 0.5 (neutral, used for unknown sources)
-- Range: 0.1 – 1.0
+- Range: 0.1 â€“ 1.0
 - Win delta: +0.03 per resolution won
 - Loss delta: -0.02 per resolution lost
 - Human override delta: +/- 0.08
@@ -180,10 +180,10 @@ resolutions, trusted sources score higher and their findings carry more weight.
 ## Agent Registry
 
 Agents are first-class entities in the Library. Each registered agent has:
-- `agent / agentId / profile` — name, description, capabilities, model
-- `agent / agentId / stats` — totalWrites, totalRejections, totalEscalations,
+- `agent / agentId / profile` â€” name, description, capabilities, model
+- `agent / agentId / stats` â€” totalWrites, totalRejections, totalEscalations,
   avgConfidence, lastSeen, isActive
-- `agent / agentId / attendant_state` — persisted Attendant working memory
+- `agent / agentId / attendant_state` â€” persisted Attendant working memory
 
 Stats update automatically on every `librarianWrite` call. No manual tracking
 needed. `whoKnows(entityType, entityId)` returns every agent that has written
@@ -215,133 +215,133 @@ Rules:
 
 ```
 iranti/
-├── src/
-│   ├── library/
-│   │   ├── client.ts           — Prisma singleton
-│   │   ├── queries.ts          — All KB read/write operations
-│   │   ├── embeddings.ts       — Deterministic embedding generation utilities
-│   │   ├── vectorBackend.ts    — Vector backend interface for pgvector/Qdrant/Chroma
-│   │   ├── backends/           — Vector backend implementations + factory
-│   │   ├── entity-resolution.ts — Canonical entity resolution + alias mapping
-│   │   ├── relationships.ts    — Entity relationship graph
-│   │   └── agent-registry.ts  — Agent profiles, stats, whoKnows
-│   ├── librarian/
-│   │   ├── index.ts            — librarianWrite, librarianIngest
-│   │   ├── chunker.ts          — Raw content → atomic EntryInput facts
-│   │   └── source-reliability.ts — Reliability scores, weighted confidence
-│   ├── attendant/
-│   │   ├── index.ts            — Re-exports + legacy functional API
-│   │   ├── AttendantInstance.ts — Per-agent stateful class
-│   │   └── registry.ts         — Singleton map, getAttendant()
-│   ├── archivist/
-│   │   └── index.ts            — runArchivist(), escalation processing
-│   ├── chat/
-│   │   └── index.ts            — Interactive CLI chat session backed by Iranti APIs + routed LLM calls
-│   ├── resolutionist/
-│   │   └── index.ts            — Interactive escalation review + AUTHORITATIVE_JSON writer
-│   ├── lib/
-│   │   ├── llm.ts              — LLMProvider interface, completeWithFallback(), fallback chain
-│   │   ├── router.ts           — route() by TaskType, model profiles
-│   │   ├── runtimeEnv.ts       — Runtime env resolution for CLI/MCP/hook integrations
-│   │   ├── escalationPaths.ts  — Escalation runtime path resolution + folder bootstrap
-│   │   └── providers/
-│   │       ├── mock.ts         — Local dev provider
-│   │       ├── gemini.ts       — Google Gemini provider
-│   │       ├── claude.ts       — Anthropic Claude provider
-│   │       ├── openai.ts       — OpenAI provider
-│   │       ├── groq.ts         — Groq provider
-│   │       ├── mistral.ts      — Mistral AI provider
-│   │       └── ollama.ts       — Ollama local provider
-│   ├── sdk/
-│   │   └── index.ts            — Iranti class, public API
-│   ├── api/
-│   │   ├── server.ts           — Express REST API server
-│   │   ├── middleware/
-│   │   │   └── auth.ts         — API key authentication
-│   │   └── routes/
-│   │       ├── knowledge.ts    — Write, ingest, query, hybrid search, relationships, resolution
-│   │       ├── agents.ts       — Agent registration and management
-│   │       └── memory.ts       — Handshake, reconvene, observe, attend, whoKnows, maintenance
-│   └── types.ts                — Shared TypeScript types
-├── prisma/
-│   ├── schema.prisma           — KnowledgeEntry, Archive, EntityRelationship, Entity, EntityAlias
-│   └── migrations/             — Migration history
-├── scripts/
-│   ├── seed.ts                 — Seeds Staff Namespace
-│   ├── harness.ts              — Shared test harness bootstrap (DB + escalation path)
-│   ├── api-key-create.ts       — Creates/rotates per-user API key tokens
-│   ├── api-key-list.ts         — Lists API key registry entries
-│   ├── api-key-revoke.ts       — Revokes API key tokens
-│   ├── bump-version.ts         — Bumps coordinated Node/Python/runtime version surfaces for releases
-│   ├── check-release-version.ts — Verifies Node/Python/package tag version alignment before publish
-│   ├── iranti-cli.ts           — Machine install, configure/auth/status/diagnostics/upgrade, instance/project binding, provider-key management, MCP and Claude hook CLI
-│   ├── iranti-mcp.ts           — Stdio MCP server for Claude Code, Codex, and other MCP clients
-│   ├── codex-setup.ts          — Registers Iranti MCP with Codex global config, preferring the installed CLI path
-│   ├── claude-code-memory-hook.ts — Claude Code hook helper for SessionStart/UserPromptSubmit
-│   ├── demo.ts                 — Full system demo with two agents
-│   ├── test-librarian.ts       — Librarian smoke tests
-│   ├── test-attendant.ts       — Attendant smoke tests
-│   ├── test-archivist.ts       — Archivist smoke tests
-│   ├── test-chunker.ts         — Chunker + ingest tests
-│   ├── test-reliability.ts     — Source reliability learning tests
-│   ├── test-relationships.ts   — Knowledge graph tests
-│   ├── test-registry.ts        — Agent registry tests
-│   ├── test-sdk.ts             — Full SDK smoke tests
-│   ├── test-integration.ts     — End-to-end integration test
-│   ├── test-fallback.ts        — LLM provider fallback chain test
-│   └── test-contracts.ts       — API/SDK/client contract drift checks
-├── bin/
-│   └── iranti.js               — CLI launcher used by npm global installs
-├── escalation/                 — Optional local folder if IRANTI_ESCALATION_DIR points here
-│   ├── active/                 — Unresolved conflicts (PENDING)
-│   ├── resolved/               — Processed by Archivist
-│   └── archived/               — Long-term conflict log
-├── docs/
-│   ├── engineering/            — CODE_STANDARDS.md, COMMENTING_GUIDELINES.md
-│   ├── decisions/              — One file per architectural decision
-│   └── features/               — One subfolder per feature, including ontology-evolution
+â”œâ”€â”€ src/
+â”‚   â”œâ”€â”€ library/
+â”‚   â”‚   â”œâ”€â”€ client.ts           â€” Prisma singleton
+â”‚   â”‚   â”œâ”€â”€ queries.ts          â€” All KB read/write operations
+â”‚   â”‚   â”œâ”€â”€ embeddings.ts       â€” Deterministic embedding generation utilities
+â”‚   â”‚   â”œâ”€â”€ vectorBackend.ts    â€” Vector backend interface for pgvector/Qdrant/Chroma
+â”‚   â”‚   â”œâ”€â”€ backends/           â€” Vector backend implementations + factory
+â”‚   â”‚   â”œâ”€â”€ entity-resolution.ts â€” Canonical entity resolution + alias mapping
+â”‚   â”‚   â”œâ”€â”€ relationships.ts    â€” Entity relationship graph
+â”‚   â”‚   â””â”€â”€ agent-registry.ts  â€” Agent profiles, stats, whoKnows
+â”‚   â”œâ”€â”€ librarian/
+â”‚   â”‚   â”œâ”€â”€ index.ts            â€” librarianWrite, librarianIngest
+â”‚   â”‚   â”œâ”€â”€ chunker.ts          â€” Raw content â†’ atomic EntryInput facts
+â”‚   â”‚   â””â”€â”€ source-reliability.ts â€” Reliability scores, weighted confidence
+â”‚   â”œâ”€â”€ attendant/
+â”‚   â”‚   â”œâ”€â”€ index.ts            â€” Re-exports + legacy functional API
+â”‚   â”‚   â”œâ”€â”€ AttendantInstance.ts â€” Per-agent stateful class
+â”‚   â”‚   â””â”€â”€ registry.ts         â€” Singleton map, getAttendant()
+â”‚   â”œâ”€â”€ archivist/
+â”‚   â”‚   â””â”€â”€ index.ts            â€” runArchivist(), escalation processing
+â”‚   â”œâ”€â”€ chat/
+â”‚   â”‚   â””â”€â”€ index.ts            â€” Interactive CLI chat session backed by Iranti APIs + routed LLM calls
+â”‚   â”œâ”€â”€ resolutionist/
+â”‚   â”‚   â””â”€â”€ index.ts            â€” Interactive escalation review + AUTHORITATIVE_JSON writer
+â”‚   â”œâ”€â”€ lib/
+â”‚   â”‚   â”œâ”€â”€ llm.ts              â€” LLMProvider interface, completeWithFallback(), fallback chain
+â”‚   â”‚   â”œâ”€â”€ router.ts           â€” route() by TaskType, model profiles
+â”‚   â”‚   â”œâ”€â”€ runtimeEnv.ts       â€” Runtime env resolution for CLI/MCP/hook integrations
+â”‚   â”‚   â”œâ”€â”€ escalationPaths.ts  â€” Escalation runtime path resolution + folder bootstrap
+â”‚   â”‚   â””â”€â”€ providers/
+â”‚   â”‚       â”œâ”€â”€ mock.ts         â€” Local dev provider
+â”‚   â”‚       â”œâ”€â”€ gemini.ts       â€” Google Gemini provider
+â”‚   â”‚       â”œâ”€â”€ claude.ts       â€” Anthropic Claude provider
+â”‚   â”‚       â”œâ”€â”€ openai.ts       â€” OpenAI provider
+â”‚   â”‚       â”œâ”€â”€ groq.ts         â€” Groq provider
+â”‚   â”‚       â”œâ”€â”€ mistral.ts      â€” Mistral AI provider
+â”‚   â”‚       â””â”€â”€ ollama.ts       â€” Ollama local provider
+â”‚   â”œâ”€â”€ sdk/
+â”‚   â”‚   â””â”€â”€ index.ts            â€” Iranti class, public API
+â”‚   â”œâ”€â”€ api/
+â”‚   â”‚   â”œâ”€â”€ server.ts           â€” Express REST API server
+â”‚   â”‚   â”œâ”€â”€ middleware/
+â”‚   â”‚   â”‚   â””â”€â”€ auth.ts         â€” API key authentication
+â”‚   â”‚   â””â”€â”€ routes/
+â”‚   â”‚       â”œâ”€â”€ knowledge.ts    â€” Write, ingest, query, hybrid search, relationships, resolution
+â”‚   â”‚       â”œâ”€â”€ agents.ts       â€” Agent registration and management
+â”‚   â”‚       â””â”€â”€ memory.ts       â€” Handshake, reconvene, observe, attend, whoKnows, maintenance
+â”‚   â””â”€â”€ types.ts                â€” Shared TypeScript types
+â”œâ”€â”€ prisma/
+â”‚   â”œâ”€â”€ schema.prisma           â€” KnowledgeEntry, Archive, EntityRelationship, Entity, EntityAlias
+â”‚   â””â”€â”€ migrations/             â€” Migration history
+â”œâ”€â”€ scripts/
+â”‚   â”œâ”€â”€ seed.ts                 â€” Seeds Staff Namespace
+â”‚   â”œâ”€â”€ harness.ts              â€” Shared test harness bootstrap (DB + escalation path)
+â”‚   â”œâ”€â”€ api-key-create.ts       â€” Creates/rotates per-user API key tokens
+â”‚   â”œâ”€â”€ api-key-list.ts         â€” Lists API key registry entries
+â”‚   â”œâ”€â”€ api-key-revoke.ts       â€” Revokes API key tokens
+â”‚   â”œâ”€â”€ bump-version.ts         â€” Bumps coordinated Node/Python/runtime version surfaces for releases
+â”‚   â”œâ”€â”€ check-release-version.ts â€” Verifies Node/Python/package tag version alignment before publish
+â”‚   â”œâ”€â”€ iranti-cli.ts           â€” Machine install, configure/auth/status/diagnostics/upgrade, instance/project binding, provider-key management, MCP and Claude hook CLI
+â”‚   â”œâ”€â”€ iranti-mcp.ts           â€” Stdio MCP server for Claude Code, Codex, and other MCP clients
+â”‚   â”œâ”€â”€ codex-setup.ts          â€” Registers Iranti MCP with Codex global config, preferring the installed CLI path
+â”‚   â”œâ”€â”€ claude-code-memory-hook.ts â€” Claude Code hook helper for SessionStart/UserPromptSubmit
+â”‚   â”œâ”€â”€ demo.ts                 â€” Full system demo with two agents
+â”‚   â”œâ”€â”€ test-librarian.ts       â€” Librarian smoke tests
+â”‚   â”œâ”€â”€ test-attendant.ts       â€” Attendant smoke tests
+â”‚   â”œâ”€â”€ test-archivist.ts       â€” Archivist smoke tests
+â”‚   â”œâ”€â”€ test-chunker.ts         â€” Chunker + ingest tests
+â”‚   â”œâ”€â”€ test-reliability.ts     â€” Source reliability learning tests
+â”‚   â”œâ”€â”€ test-relationships.ts   â€” Knowledge graph tests
+â”‚   â”œâ”€â”€ test-registry.ts        â€” Agent registry tests
+â”‚   â”œâ”€â”€ test-sdk.ts             â€” Full SDK smoke tests
+â”‚   â”œâ”€â”€ test-integration.ts     â€” End-to-end integration test
+â”‚   â”œâ”€â”€ test-fallback.ts        â€” LLM provider fallback chain test
+â”‚   â””â”€â”€ test-contracts.ts       â€” API/SDK/client contract drift checks
+â”œâ”€â”€ bin/
+â”‚   â””â”€â”€ iranti.js               â€” CLI launcher used by npm global installs
+â”œâ”€â”€ escalation/                 â€” Optional local folder if IRANTI_ESCALATION_DIR points here
+â”‚   â”œâ”€â”€ active/                 â€” Unresolved conflicts (PENDING)
+â”‚   â”œâ”€â”€ resolved/               â€” Processed by Archivist
+â”‚   â””â”€â”€ archived/               â€” Long-term conflict log
+â”œâ”€â”€ docs/
+â”‚   â”œâ”€â”€ engineering/            â€” CODE_STANDARDS.md, COMMENTING_GUIDELINES.md
+â”‚   â”œâ”€â”€ decisions/              â€” One file per architectural decision
+â”‚   â””â”€â”€ features/               â€” One subfolder per feature, including ontology-evolution
 +-- clients/
-�   +-- python/
-�       +-- iranti.py           � Python HTTP client for REST API
-�       +-- test_client.py      � Python client smoke test
-�       +-- README.md           � Python client documentation
-�       +-- pyproject.toml      � Python package metadata for PyPI
-�       +-- LICENSE             � AGPL metadata for Python package
-�   +-- typescript/
-�       +-- src/
-�       �   +-- client.ts       � External TypeScript HTTP client for REST API
-�       �   +-- types.ts        � Request/response and error types for npm client
-�       �   +-- index.ts        � Re-exports for package consumers
-�       +-- package.json        � npm package metadata for @iranti/sdk
-�       +-- tsconfig.json       � Package-local TypeScript build config
-�       +-- README.md           � TypeScript client documentation
+¦   +-- python/
+¦       +-- iranti.py           — Python HTTP client for REST API
+¦       +-- test_client.py      — Python client smoke test
+¦       +-- README.md           — Python client documentation
+¦       +-- pyproject.toml      — Python package metadata for PyPI
+¦       +-- LICENSE             — AGPL metadata for Python package
+¦   +-- typescript/
+¦       +-- src/
+¦       ¦   +-- client.ts       — External TypeScript HTTP client for REST API
+¦       ¦   +-- types.ts        — Request/response and error types for npm client
+¦       ¦   +-- index.ts        — Re-exports for package consumers
+¦       +-- package.json        — npm package metadata for @iranti/sdk
+¦       +-- tsconfig.json       — Package-local TypeScript build config
+¦       +-- README.md           — TypeScript client documentation
 +-- tests/
-�   +-- conflict/
-�   �   +-- run_conflict_benchmark.ts � Benchmark runner for adversarial conflict scenarios
-�   �   +-- *.ts                � Direct contradiction, temporal, cascading, and multi-hop conflict cases
-�   +-- vector-backends/
-�   �   +-- run_vector_backend_tests.ts � Vector backend factory + adapter tests
-�   +-- temporal/
-�   �   +-- common.ts           � Temporal test DB fallback and harness helpers
-�   �   +-- run_temporal_tests.ts � DB-backed temporal query/history/escalation validation
-�   +-- consistency/
-�       +-- run_consistency_tests.ts � Empirical validation for write serialization, read-after-write, escalation visibility, and observe isolation
-+-- AGENTS.md                   � This file
-├── docker-compose.yml          — PostgreSQL for local dev
-└── .env                        — Local environment (never committed)
+¦   +-- conflict/
+¦   ¦   +-- run_conflict_benchmark.ts — Benchmark runner for adversarial conflict scenarios
+¦   ¦   +-- *.ts                — Direct contradiction, temporal, cascading, and multi-hop conflict cases
+¦   +-- vector-backends/
+¦   ¦   +-- run_vector_backend_tests.ts — Vector backend factory + adapter tests
+¦   +-- temporal/
+¦   ¦   +-- common.ts           — Temporal test DB fallback and harness helpers
+¦   ¦   +-- run_temporal_tests.ts — DB-backed temporal query/history/escalation validation
+¦   +-- consistency/
+¦       +-- run_consistency_tests.ts — Empirical validation for write serialization, read-after-write, escalation visibility, and observe isolation
++-- AGENTS.md                   — This file
+â”œâ”€â”€ docker-compose.yml          â€” PostgreSQL for local dev
+â””â”€â”€ .env                        â€” Local environment (never committed)
 ```
 
 ---
 
 Additional current paths not called out explicitly above:
-- `src/security/apiKeys.ts` — registry-backed API key storage and validation
-- `src/security/scopes.ts` — scope parsing and namespace ACL evaluation
-- `src/api/middleware/authorization.ts` — global and namespace-aware scope enforcement
-- `tests/access-control/run_access_control_tests.ts` — namespace-aware authorization coverage
+- `src/security/apiKeys.ts` â€” registry-backed API key storage and validation
+- `src/security/scopes.ts` â€” scope parsing and namespace ACL evaluation
+- `src/api/middleware/authorization.ts` â€” global and namespace-aware scope enforcement
+- `tests/access-control/run_access_control_tests.ts` â€” namespace-aware authorization coverage
 
 ---
 
-## Database Schema — Quick Reference
+## Database Schema â€” Quick Reference
 
 Decay extension note:
 - `knowledge_base` now also stores `lastAccessedAt` and `stability`
@@ -361,7 +361,7 @@ Decay extension note:
 | key | String | What this entry describes |
 | valueRaw | Json | Full exact value |
 | valueSummary | String | Compressed for working memory loading |
-| confidence | Int | 0–100 raw. Weighted by source reliability at resolution |
+| confidence | Int | 0â€“100 raw. Weighted by source reliability at resolution |
 | source | String | Data source |
 | validFrom | DateTime | When this row became the active truth interval |
 | validUntil | DateTime? | Expiry for time-sensitive facts |
@@ -373,7 +373,7 @@ Decay extension note:
 | properties | Json | Caller-defined metadata escape hatch |
 | embedding | vector(256)? | Optional embedding used by hybrid search ranking |
 
-Primary index: `(entityType, entityId, key)` — unique constraint enforced.
+Primary index: `(entityType, entityId, key)` â€” unique constraint enforced.
 
 ### archive
 Same as knowledge_base, plus:
@@ -431,7 +431,7 @@ Indexed on `(canonicalEntityType, canonicalEntityId)`.
 
 ---
 
-## Staff Namespace — Protected Entries
+## Staff Namespace â€” Protected Entries
 
 | Key | Contents |
 |---|---|
@@ -450,7 +450,7 @@ Indexed on `(canonicalEntityType, canonicalEntityId)`.
 
 ---
 
-## SDK — Public API
+## SDK â€” Public API
 
 ```typescript
 const iranti = new Iranti({ connectionString, llmProvider });
@@ -498,12 +498,12 @@ Entity format: `"entityType/entityId"` e.g. `"researcher/jane_smith"`
 
 ### For AI Agents and Coding Assistants
 - Read this file before making any changes
-- Never write directly to any DB table — all writes go through the Librarian
+- Never write directly to any DB table â€” all writes go through the Librarian
 - Never modify entries where `isProtected = true`
 - Never delete from the Archive table
-- Never call provider SDKs directly — use `route()` or `complete()` from
+- Never call provider SDKs directly â€” use `route()` or `complete()` from
   `src/lib/router.ts` and `src/lib/llm.ts`
-- LLM provider fallback is automatic — configure via `LLM_PROVIDER_FALLBACK` env var,
+- LLM provider fallback is automatic â€” configure via `LLM_PROVIDER_FALLBACK` env var,
   mock is always used as final safety net
 - Follow CODE_STANDARDS.md in docs/engineering/
 - When adding a new component or method, update this file
@@ -511,11 +511,11 @@ Entity format: `"entityType/entityId"` e.g. `"researcher/jane_smith"`
 ### For Humans
 - All architectural decisions go in docs/decisions/ as individual files
 - `.env` is never committed
-- Escalation files in escalation/active/ are written by the Librarian —
+- Escalation files in escalation/active/ are written by the Librarian â€”
   human resolution goes in the HUMAN RESOLUTION section only, change
   Status to RESOLVED when done
 - The Staff Namespace (entityType = system) is only modified by seed.ts
-  or explicit system operations (including API key registry scripts) — never by external agents
+  or explicit system operations (including API key registry scripts) â€” never by external agents
 - Package publishing is driven by `.github/workflows/publish-packages.yml`; release tags and package versions must match
 
 ---
@@ -524,20 +524,20 @@ Entity format: `"entityType/entityId"` e.g. `"researcher/jane_smith"`
 
 ### Doc Types and Where They Live
 
-- **docs/guides/** — How-to guides for developers using Iranti. One file per
+- **docs/guides/** â€” How-to guides for developers using Iranti. One file per
   topic, including Claude Code / MCP integration and Codex setup. Written for external developers, not internal contributors.
-- **docs/decisions/** — Architectural decision records (ADRs). One file per
+- **docs/decisions/** â€” Architectural decision records (ADRs). One file per
   decision. Named `NNN-short-title.md` e.g. `001-agpl-license.md`. Never
-  deleted or edited after the fact — add a new ADR if a decision changes.
-- **docs/features/** — One subfolder per feature. Each contains `spec.md`
+  deleted or edited after the fact â€” add a new ADR if a decision changes.
+- **docs/features/** â€” One subfolder per feature. Each contains `spec.md`
   covering inputs, outputs, decision tree, edge cases, and test results.
-- **docs/engineering/** — Internal standards for contributors.
+- **docs/engineering/** â€” Internal standards for contributors.
   `CODE_STANDARDS.md`, `COMMENTING_GUIDELINES.md`.
-- **README.md** — Public-facing overview. Updated only when public API or
+- **README.md** â€” Public-facing overview. Updated only when public API or
   onboarding flow changes.
-- **AGENTS.md** — System context for AI agents and contributors. Updated
+- **AGENTS.md** â€” System context for AI agents and contributors. Updated
   whenever components, rules, file structure, or schema change.
-- **Living Document (Iranti_Living_Document.docx)** — Full implementation
+- **Living Document (Iranti_Living_Document.docx)** â€” Full implementation
   history, decisions, and current state. Updated after every significant
   build session.
 
@@ -558,7 +558,7 @@ Entity format: `"entityType/entityId"` e.g. `"researcher/jane_smith"`
 Every file in `docs/decisions/` must follow this exact structure:
 
 ```markdown
-# NNN — Title
+# NNN â€” Title
 
 ## Context
 What situation or problem led to this decision?
@@ -567,7 +567,7 @@ What situation or problem led to this decision?
 What was decided?
 
 ## Consequences
-What are the results of this decision — good and bad?
+What are the results of this decision â€” good and bad?
 
 ## Alternatives Considered
 What else was evaluated and why was it rejected?
@@ -620,16 +620,16 @@ Before committing any change, verify:
 
 The Living Document (`Iranti_Living_Document.docx`) is the authoritative
 record of implementation history. It is updated after every significant build
-session. It is not a substitute for inline docs or AGENTS.md — it is the
+session. It is not a substitute for inline docs or AGENTS.md â€” it is the
 audit trail. If the Living Document and AGENTS.md disagree, AGENTS.md is the
 source of truth for current state.
 
 Rules:
 - Do not summarize or compress existing Living Document entries
 - Add new entries at the end of the relevant section
-- Never edit past entries — add corrections as new entries
+- Never edit past entries â€” add corrections as new entries
 - The Living Document is generated programmatically from `iranti_living_doc.js`
-  — do not edit the `.docx` directly
+  â€” do not edit the `.docx` directly
 
 ---
 
@@ -653,8 +653,10 @@ manual env-file editing. Current CLI coverage includes:
 - `iranti chat`
 - `iranti resolve`
 - `iranti mcp`
+- `iranti claude-setup` / `iranti claude-setup --scan [dir]`
 - `iranti claude-hook`
 - `iranti codex-setup`
+- `iranti integrate claude|codex`
 
 ---
 
@@ -665,11 +667,11 @@ Runtime root is configurable with `IRANTI_ESCALATION_DIR` and defaults to
 `~/.iranti/escalation` if unset.
 Each file has two sections:
 
-**LIBRARIAN ASSESSMENT** — written by the Librarian. Contains entity,
+**LIBRARIAN ASSESSMENT** â€” written by the Librarian. Contains entity,
 existing and incoming values, confidence scores, reasoning, and
 `**Status:** PENDING`.
 
-**HUMAN RESOLUTION** — written by a human, with optional plain-language notes.
+**HUMAN RESOLUTION** â€” written by a human, with optional plain-language notes.
 Change `**Status:** PENDING` to `**Status:** RESOLVED` when done and include
 `### AUTHORITATIVE_JSON` with valid JSON. JSON is the commit source.
 
@@ -683,12 +685,12 @@ and moves the file to escalation/resolved/ with an archived copy.
 
 | Phase | Description | Status |
 |---|---|---|
-| 0 — Architecture | Schema, PRD, docs | DONE |
-| 1 — The Library | DB client, CRUD, seed script, relationships, registry | DONE |
-| 2 — The Librarian | Conflict resolution, chunking, source reliability | DONE |
-| 3 — The Attendant | Per-agent class, singleton registry, session persistence | DONE |
-| 4 — The Archivist | Periodic scan, escalation processing | DONE |
-| 5 — Integration | Full multi-agent loop, end-to-end tests | DONE |
-| 6 — SDK | TypeScript SDK, full public API | DONE |
-| 7 — Open Source | README, Docker onboarding, GitHub public | IN PROGRESS |
-| 8 — Hosted Version | Cloud deployment, pricing | Not Started |
+| 0 â€” Architecture | Schema, PRD, docs | DONE |
+| 1 â€” The Library | DB client, CRUD, seed script, relationships, registry | DONE |
+| 2 â€” The Librarian | Conflict resolution, chunking, source reliability | DONE |
+| 3 â€” The Attendant | Per-agent class, singleton registry, session persistence | DONE |
+| 4 â€” The Archivist | Periodic scan, escalation processing | DONE |
+| 5 â€” Integration | Full multi-agent loop, end-to-end tests | DONE |
+| 6 â€” SDK | TypeScript SDK, full public API | DONE |
+| 7 â€” Open Source | README, Docker onboarding, GitHub public | IN PROGRESS |
+| 8 â€” Hosted Version | Cloud deployment, pricing | Not Started |

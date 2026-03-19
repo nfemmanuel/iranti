@@ -162,12 +162,20 @@ function canUseInstalledIranti(repoRoot: string): boolean {
     }
 }
 
+function ensureCodexInstalled(repoRoot: string): void {
+    try {
+        run('codex', ['--version'], repoRoot);
+    } catch {
+        throw new Error('Codex CLI is not installed or not on PATH. Install Codex first, confirm `codex --version` works, then rerun `iranti codex-setup`.');
+    }
+}
+
 function main(): void {
     const options = parseArgs(process.argv.slice(2));
     const repoRoot = findPackageRoot(__dirname);
     const mcpScript = path.join(repoRoot, 'dist', 'scripts', 'iranti-mcp.js');
 
-    run('codex', ['--version'], repoRoot);
+    ensureCodexInstalled(repoRoot);
 
     const useInstalled = !options.useLocalScript && canUseInstalledIranti(repoRoot);
     if (!useInstalled && !fs.existsSync(mcpScript)) {

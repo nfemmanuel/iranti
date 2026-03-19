@@ -2,6 +2,7 @@
 
 Use Iranti with Codex through:
 - `iranti codex-setup` for global Codex MCP registration
+- `iranti integrate codex` as an alias for the same setup flow
 - `iranti mcp` as the actual MCP server command used by Codex
 
 This guide is written for the installed-package path, not for running Iranti out of a source checkout.
@@ -45,6 +46,12 @@ Run once on the machine:
 
 ```bash
 iranti codex-setup
+```
+
+Equivalent alias:
+
+```bash
+iranti integrate codex
 ```
 
 What it does:
@@ -116,6 +123,12 @@ If Codex does not surface Iranti tools:
 ```bash
 iranti mcp --help
 iranti codex-setup --help
+```
+
+If `iranti codex-setup` says `codex` is not installed or not on `PATH`, fix that first:
+
+```bash
+codex --version
 ```
 
 2. Confirm the global MCP registration exists:
