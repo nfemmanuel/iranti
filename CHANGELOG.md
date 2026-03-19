@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.6 - 2026-03-19
+
+### Added
+
+- `iranti claude-setup` for project-local Claude Code MCP and hook scaffolding.
+- `iranti integrate claude` and `iranti integrate codex` as integration-focused aliases.
+
+### Changed
+
+- `iranti claude-setup --scan` now supports recursive project discovery and safe `.mcp.json` merging without overwriting other MCP servers.
+- `iranti codex-setup` now fails with a direct install/PATH message when the Codex CLI is missing.
+- Claude/Codex integration docs and specs now match the shipped CLI surface.
+
 ## 0.2.5 - 2026-03-15
 
 ### Added
