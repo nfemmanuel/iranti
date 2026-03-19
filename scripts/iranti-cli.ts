@@ -1417,19 +1417,28 @@ function isPathInside(parentDir: string, childDir: string): boolean {
     return child === parent || child.startsWith(`${parent}/`);
 }
 
-function resolveSpawnExecutable(executable: string): string {
-    if (process.platform !== 'win32') return executable;
-    if (executable === 'npm') return 'npm.cmd';
-    if (executable === 'npx') return 'npx.cmd';
-    return executable;
+function quoteForCmd(arg: string): string {
+    if (arg.length === 0) return '""';
+    if (!/[ \t"&()<>|^]/.test(arg)) return arg;
+    return `"${arg.replace(/"/g, '\\"')}"`;
 }
 
 function runCommandCapture(executable: string, args: string[], cwd?: string): { status: number | null; stdout: string; stderr: string } {
-    const proc = spawnSync(resolveSpawnExecutable(executable), args, {
-        cwd,
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    const proc = process.platform === 'win32'
+        ? spawnSync(process.env.ComSpec ?? 'cmd.exe', [
+            '/d',
+            '/c',
+            [executable, ...args].map(quoteForCmd).join(' '),
+        ], {
+            cwd,
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+        })
+        : spawnSync(executable, args, {
+            cwd,
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+        });
     return {
         status: proc.status,
         stdout: proc.stdout ?? '',
@@ -1438,10 +1447,19 @@ function runCommandCapture(executable: string, args: string[], cwd?: string): { 
 }
 
 function runCommandInteractive(step: UpgradeCommand): number | null {
-    const proc = spawnSync(resolveSpawnExecutable(step.executable), step.args, {
-        cwd: step.cwd,
-        stdio: 'inherit',
-    });
+    const proc = process.platform === 'win32'
+        ? spawnSync(process.env.ComSpec ?? 'cmd.exe', [
+            '/d',
+            '/c',
+            [step.executable, ...step.args].map(quoteForCmd).join(' '),
+        ], {
+            cwd: step.cwd,
+            stdio: 'inherit',
+        })
+        : spawnSync(step.executable, step.args, {
+            cwd: step.cwd,
+            stdio: 'inherit',
+        });
     return proc.status;
 }
 
@@ -1590,8 +1608,8 @@ function detectUpgradeContext(args: ParsedArgs): {
     const repoCheckout = fs.existsSync(path.join(packageRootPath, '.git'));
     const repoDirty = repoCheckout ? repoIsDirty(packageRootPath) : false;
     const globalNpmRoot = detectGlobalNpmRoot();
-    const globalNpmInstall = globalNpmRoot !== null && isPathInside(globalNpmRoot, packageRootPath);
-    const globalNpmVersion = globalNpmInstall ? detectGlobalNpmInstalledVersion() : null;
+    const globalNpmVersion = detectGlobalNpmInstalledVersion();
+    const globalNpmInstall = globalNpmVersion !== null;
     const python = detectPythonLauncher();
     const pythonVersion = detectPythonInstalledVersion(python);
     const availableTargets: Exclude<UpgradeTarget, 'auto'>[] = [];

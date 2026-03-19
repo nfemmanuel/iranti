@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.7 - 2026-03-19
+
+### Fixed
+
+- `iranti upgrade` on Windows now detects and executes the global npm upgrade path correctly instead of silently falling back to Python-only updates.
+- npm-based upgrade checks now use the same Windows command execution strategy as the rest of the CLI, so global package version detection no longer fails with `EINVAL`.
+
 ## 0.2.6 - 2026-03-19
 
 ### Added
