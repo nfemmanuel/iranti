@@ -495,6 +495,7 @@ iranti upgrade --yes
 This validates the active env file, database URL, API key presence, provider selection, and provider-specific credentials.
 `iranti status` shows the current runtime root, known instances, and local binding files.
 `iranti upgrade` detects repo/global/Python install paths, compares current vs latest published versions, prints the exact plan, and executes the selected upgrade path when you pass `--yes`.
+On Windows, if the currently running CLI is itself the global npm install being upgraded, Iranti now hands that npm-global step off to a detached updater process instead of trying to replace the live binary in place.
 `iranti configure ...` updates instance/project credentials without manual env editing.
 `iranti auth ...` manages registry-backed API keys and can sync them into instance or project bindings.
 

@@ -1898,6 +1898,7 @@ function detectUpgradeContext(args: ParsedArgs): {
     globalNpmInstall: boolean;
     globalNpmRoot: string | null;
     globalNpmVersion: string | null;
+    runningFromGlobalNpmInstall: boolean;
     python: UpgradeCommand | null;
     pythonVersion: string | null;
     availableTargets: Exclude<UpgradeTarget, 'auto'>[];
@@ -1911,6 +1912,7 @@ function detectUpgradeContext(args: ParsedArgs): {
     const globalNpmRoot = detectGlobalNpmRoot();
     const globalNpmVersion = detectGlobalNpmInstalledVersion();
     const globalNpmInstall = globalNpmVersion !== null;
+    const runningFromGlobalNpmInstall = Boolean(globalNpmRoot && isPathInside(globalNpmRoot, packageRootPath));
     const python = detectPythonLauncher();
     const pythonVersion = detectPythonInstalledVersion(python);
     const availableTargets: Exclude<UpgradeTarget, 'auto'>[] = [];
@@ -1927,6 +1929,7 @@ function detectUpgradeContext(args: ParsedArgs): {
         globalNpmInstall,
         globalNpmRoot,
         globalNpmVersion,
+        runningFromGlobalNpmInstall,
         python,
         pythonVersion,
         availableTargets,
@@ -2116,6 +2119,23 @@ function verifyGlobalNpmInstall(): { status: 'pass' | 'warn' | 'fail'; detail: s
     }
 }
 
+function canScheduleWindowsGlobalNpmSelfUpgrade(context: ReturnType<typeof detectUpgradeContext>): boolean {
+    return process.platform === 'win32' && context.runningFromGlobalNpmInstall;
+}
+
+function scheduleDetachedWindowsGlobalNpmUpgrade(command: UpgradeCommand): void {
+    const shell = process.env.ComSpec ?? 'cmd.exe';
+    const commandLine = `ping 127.0.0.1 -n 3 >nul & ${command.display}`;
+    const child = spawn(shell, ['/d', '/c', commandLine], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+        cwd: command.cwd,
+        env: process.env,
+    });
+    child.unref();
+}
+
 function verifyPythonInstall(command: UpgradeCommand): { status: 'pass' | 'warn' | 'fail'; detail: string } {
     const version = detectPythonInstalledVersion(command);
     return version
@@ -2133,6 +2153,21 @@ async function executeUpgradeTarget(
 
     const commands = commandListForTarget(target, context);
     const steps: Array<{ label: string; command: string }> = [];
+    if (target === 'npm-global' && canScheduleWindowsGlobalNpmSelfUpgrade(context)) {
+        const command = commands[0]!;
+        console.log(`${infoLabel()} ${command.display} (scheduled in a detached updater because the current Windows CLI cannot replace its own live global install)`);
+        scheduleDetachedWindowsGlobalNpmUpgrade(command);
+        steps.push({ label: `${command.label} (detached)`, command: command.display });
+        return {
+            target,
+            steps,
+            verification: {
+                status: 'warn',
+                detail: 'Scheduled detached npm global upgrade. Wait a few seconds, then open a new shell or rerun `iranti upgrade --check` to confirm the new global CLI is active.',
+            },
+        };
+    }
+
     for (const command of commands) {
         console.log(`${infoLabel()} ${command.display}`);
         const status = runCommandInteractive(command);
@@ -2943,6 +2978,7 @@ async function upgradeCommand(args: ParsedArgs): Promise<void> {
                 globalNpmInstall: context.globalNpmInstall,
                 globalNpmRoot: context.globalNpmRoot,
                 globalNpmVersion: context.globalNpmVersion,
+                runningFromGlobalNpmInstall: context.runningFromGlobalNpmInstall,
                 pythonLauncher: context.python?.executable ?? null,
                 pythonVersion: context.pythonVersion,
             },
@@ -2968,6 +3004,9 @@ async function upgradeCommand(args: ParsedArgs): Promise<void> {
     console.log(`  runtime_root     ${context.runtimeRoot}`);
     console.log(`  repo_checkout    ${context.repoCheckout ? paint('yes', 'green') : paint('no', 'gray')}${context.repoDirty ? paint(' (dirty)', 'yellow') : ''}`);
     console.log(`  npm_global       ${context.globalNpmInstall ? paint('yes', 'green') : paint('no', 'gray')}${context.globalNpmVersion ? ` (${context.globalNpmVersion})` : ''}`);
+    if (context.runningFromGlobalNpmInstall) {
+        console.log(`  npm_global_mode  ${paint('self-update requires detached handoff on Windows', 'yellow')}`);
+    }
     console.log(`  python           ${context.python?.executable ?? paint('not found', 'yellow')}${context.pythonVersion ? ` (${context.pythonVersion})` : ''}`);
     console.log('');
     if (selectedTargets.length > 0) {

@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.9 - 2026-03-20
+
+### Fixed
+
+- On Windows, `iranti upgrade` no longer tries to overwrite the live global npm install in place when the currently running CLI is that same global install.
+- The npm-global upgrade step now hands off to a detached updater process in that case, avoiding `EBUSY` rename failures and allowing other selected targets such as the Python client upgrade to continue.
+
 ## 0.2.8 - 2026-03-20
 
 ### Added

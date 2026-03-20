@@ -40,12 +40,13 @@
    - `npm-repo`: `git pull --ff-only`, `npm install`, `npm run build`
    - `npm-global`: `npm install -g iranti@latest`
    - `python`: `python -m pip install --upgrade iranti` (or `py -3 -m pip ...` on Windows)
-8. Verify the result:
+8. On Windows, if the currently running CLI is the same global npm install being upgraded, hand off the npm-global step to a detached updater process instead of attempting an in-place self-replacement that would fail with `EBUSY`.
+9. Verify the result:
    - npm-global via `npm list -g iranti`
    - Python via `pip show iranti`
    - repo target by requiring the build to complete successfully
-9. If the repo worktree is dirty, block `npm-repo --yes` rather than risking a destructive pull.
-10. After a successful global npm upgrade, remind the user that an already-running old CLI process may need a fresh shell to pick up the new binary.
+10. If the repo worktree is dirty, block `npm-repo --yes` rather than risking a destructive pull.
+11. After a successful or scheduled global npm upgrade, remind the user that an already-running old CLI process may need a fresh shell to pick up the new binary.
 
 ## Edge Cases
 
@@ -56,6 +57,7 @@
 - If no executable target is detected automatically, the command stays informational until the user passes an explicit supported `--target`.
 - `--dry-run` and `--check` always skip mutation even if `--yes` is also present.
 - After `npm install -g`, the already-running old CLI process may still be the binary handling the current command; the command prints a handoff hint instead of pretending that process replaced itself.
+- On Windows, when the running CLI itself is the global npm install being upgraded, the npm-global step is scheduled in a detached updater process to avoid `EBUSY` rename failures.
 
 ## Test Results
 
