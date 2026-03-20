@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.8 - 2026-03-20
+
+### Added
+
+- `iranti handshake` and `iranti attend` as manual Attendant inspection commands for debugging memory briefs and injection decisions outside Claude Code or MCP clients.
+- Dependency preflight in `iranti install` and `iranti setup`, reporting Docker, `psql`, `pg_isready`, and local PostgreSQL reachability before deeper setup continues.
+
+### Fixed
+
+- `iranti claude-setup` now generates the current Claude Code hook schema using `matcher` + `hooks`, rather than the legacy `command` + `args` shape.
+- Existing Iranti-generated Claude hook files are upgraded in place when they still use the legacy hook schema, while preserving unrelated settings.
+
 ## 0.2.7 - 2026-03-19
 
 ### Fixed
