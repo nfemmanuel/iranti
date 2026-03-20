@@ -150,6 +150,14 @@ function bold(text: string): string {
     return useColor() ? `${ANSI.bold}${text}${ANSI.reset}` : text;
 }
 
+function commandText(text: string): string {
+    return paint(text, 'cyan');
+}
+
+function sectionTitle(text: string): string {
+    return bold(paint(text, 'blue'));
+}
+
 function okLabel(text = 'SUCCESS'): string {
     return paint(`[${text}]`, 'green');
 }
@@ -164,6 +172,15 @@ function failLabel(text = 'FAIL'): string {
 
 function infoLabel(text = 'INFO'): string {
     return paint(`[${text}]`, 'cyan');
+}
+
+function printNextSteps(steps: string[]): void {
+    if (steps.length === 0) return;
+    console.log('');
+    console.log(sectionTitle('Next Steps'));
+    for (const [index, step] of steps.entries()) {
+        console.log(`  ${index + 1}. ${step}`);
+    }
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -337,7 +354,34 @@ async function handoffToScript(scriptName: string, rawArgs: string[]): Promise<v
 async function runBundledScript(scriptName: string, rawArgs: string[], extraEnv?: Record<string, string | undefined>): Promise<void> {
     const builtPath = builtScriptPath(scriptName);
     if (!fs.existsSync(builtPath)) {
-        throw new Error(`Unable to locate bundled script: ${scriptName}`);
+        const sourcePath = path.resolve(process.cwd(), 'scripts', `${scriptName}.ts`);
+        if (!fs.existsSync(sourcePath)) {
+            throw new Error(`Unable to locate bundled script: ${scriptName}`);
+        }
+        await new Promise<void>((resolve, reject) => {
+            const child = spawn('npx', ['ts-node', sourcePath, ...rawArgs], {
+                stdio: 'inherit',
+                env: {
+                    ...process.env,
+                    ...extraEnv,
+                },
+                cwd: packageRoot(),
+                shell: process.platform === 'win32',
+            });
+            child.on('error', reject);
+            child.on('exit', (code, signal) => {
+                if (signal) {
+                    reject(new Error(`${scriptName} terminated with signal ${signal}`));
+                    return;
+                }
+                if ((code ?? 0) !== 0) {
+                    reject(new Error(`${scriptName} exited with code ${code ?? 1}`));
+                    return;
+                }
+                resolve();
+            });
+        });
+        return;
     }
 
     await new Promise<void>((resolve, reject) => {
@@ -639,18 +683,25 @@ async function writeProjectBinding(projectPath: string, updates: Record<string, 
 type PromptSession = {
     line: (prompt: string, currentValue?: string) => Promise<string | undefined>;
     secret: (prompt: string, currentValue?: string) => Promise<string | undefined>;
+    secretRequired: (prompt: string, currentValue?: string) => Promise<string | undefined>;
 };
 
 type SetupProjectBinding = {
     projectPath: string;
     envFile: string;
     agentId: string;
+    projectMode: ProjectMemoryMode;
 };
+
+type ProjectMemoryMode = 'isolated' | 'shared';
+
+type DatabaseSetupMode = 'local' | 'managed' | 'docker';
 
 type SetupProjectPlan = {
     path: string;
     agentId: string;
     memoryEntity: string;
+    projectMode: ProjectMemoryMode;
     claudeCode?: boolean;
 };
 
@@ -661,6 +712,7 @@ type SetupExecutionPlan = {
     instanceName: string;
     port: number;
     databaseUrl: string;
+    databaseMode: DatabaseSetupMode;
     provider: string;
     providerKeys: Record<string, string>;
     apiKey: string;
@@ -676,6 +728,8 @@ type SetupExecutionResult = {
     instanceName: string;
     instanceEnvFile: string;
     port: number;
+    mode: 'shared' | 'isolated';
+    databaseMode: DatabaseSetupMode;
     bindings: SetupProjectBinding[];
 };
 
@@ -700,7 +754,7 @@ async function withPromptSession<T>(run: (session: PromptSession) => Promise<T>)
     });
     const session: PromptSession = {
         line: async (prompt: string, currentValue?: string) => {
-            const suffix = currentValue !== undefined ? ` [${currentValue}]` : '';
+            const suffix = currentValue !== undefined && currentValue !== '' ? ` [${currentValue}]` : '';
             const answer = (await rl.question(`${prompt}${suffix}: `)).trim();
             return answer.length > 0 ? answer : currentValue;
         },
@@ -713,6 +767,16 @@ async function withPromptSession<T>(run: (session: PromptSession) => Promise<T>)
             process.stdout.write('\n');
             if (!answer || answer === placeholder) return currentValue;
             if (answer === '__clear__') return undefined;
+            return answer;
+        },
+        secretRequired: async (prompt: string, currentValue?: string) => {
+            const placeholder = currentValue ? `${redactSecret(currentValue)} (enter new value to replace)` : 'required';
+            const suffix = placeholder ? ` [${placeholder}]` : '';
+            muted = true;
+            const answer = (await rl.question(`${prompt}${suffix}: `)).trim();
+            muted = false;
+            process.stdout.write('\n');
+            if (!answer || answer === placeholder) return currentValue;
             return answer;
         },
     };
@@ -736,6 +800,41 @@ function detectPlaceholder(value: string | undefined): boolean {
         || normalized === 'changeme';
 }
 
+function quoteSqlLiteral(value: string): string {
+    return `'${value.replace(/'/g, "''")}'`;
+}
+
+function quoteSqlIdentifier(value: string): string {
+    return `"${value.replace(/"/g, '""')}"`;
+}
+
+function parsePostgresConnectionString(databaseUrl: string): URL {
+    let parsed: URL;
+    try {
+        parsed = new URL(databaseUrl);
+    } catch {
+        throw new Error(`Invalid PostgreSQL connection string: ${databaseUrl}`);
+    }
+    if (parsed.protocol !== 'postgresql:' && parsed.protocol !== 'postgres:') {
+        throw new Error(`Unsupported database protocol '${parsed.protocol}'. Iranti setup only bootstraps PostgreSQL.`);
+    }
+    return parsed;
+}
+
+function postgresDatabaseName(databaseUrl: string): string {
+    const parsed = parsePostgresConnectionString(databaseUrl);
+    const database = decodeURIComponent(parsed.pathname.replace(/^\/+/, ''));
+    if (!database) {
+        throw new Error('DATABASE_URL must include a database name.');
+    }
+    return database;
+}
+
+function isLocalPostgresHost(hostname: string): boolean {
+    const normalized = hostname.trim().toLowerCase();
+    return normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1';
+}
+
 function sanitizeIdentifier(input: string, fallback: string): string {
     const value = input.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
     return value || fallback;
@@ -743,6 +842,56 @@ function sanitizeIdentifier(input: string, fallback: string): string {
 
 function projectAgentDefault(projectPath: string): string {
     return `${sanitizeIdentifier(path.basename(projectPath), 'project')}_main`;
+}
+
+function normalizeProjectMode(raw: string | undefined, fallback: ProjectMemoryMode = 'shared'): ProjectMemoryMode {
+    if (!raw) return fallback;
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === 'isolated' || normalized === 'shared') {
+        return normalized;
+    }
+    throw new Error(`Invalid project mode '${raw}'. Use isolated or shared.`);
+}
+
+function inferProjectMode(projectPath: string, instanceEnvFile?: string): ProjectMemoryMode {
+    if (instanceEnvFile && isPathInside(projectPath, instanceEnvFile)) {
+        return 'isolated';
+    }
+    return 'shared';
+}
+
+function recommendDatabaseMode(checks: DependencyCheck[]): DatabaseSetupMode {
+    const reachableLocal = checks.find((check) => check.name === 'localhost:5432')?.status === 'pass';
+    const docker = checks.find((check) => check.name === 'docker')?.status === 'pass';
+    if (reachableLocal) return 'local';
+    if (docker) return 'docker';
+    return 'managed';
+}
+
+function quickInstallGuidanceLines(): string[] {
+    if (process.platform === 'win32') {
+        return [
+            'Docker: winget install Docker.DockerDesktop',
+            'PostgreSQL: winget install PostgreSQL.PostgreSQL.17',
+        ];
+    }
+    if (process.platform === 'darwin') {
+        return [
+            'Docker: brew install --cask docker',
+            'PostgreSQL: brew install postgresql@17',
+        ];
+    }
+    return [
+        'Docker: install Docker Engine using your distro package manager or the official Docker instructions.',
+        'PostgreSQL: install PostgreSQL 16+ using your distro package manager.',
+    ];
+}
+
+function printQuickInstallGuidance(): void {
+    console.log(bold('Quick local database install options'));
+    for (const line of quickInstallGuidanceLines()) {
+        console.log(`  - ${line}`);
+    }
 }
 
 function isSupportedProvider(provider: string | undefined): boolean {
@@ -772,7 +921,7 @@ async function promptNonEmpty(session: PromptSession, prompt: string, currentVal
 
 async function promptRequiredSecret(session: PromptSession, prompt: string, currentValue?: string): Promise<string> {
     while (true) {
-        const value = (await session.secret(prompt, currentValue) ?? '').trim();
+        const value = (await session.secretRequired(prompt, currentValue) ?? '').trim();
         if (value.length > 0 && !detectPlaceholder(value)) return value;
         console.log(`${warnLabel()} A real secret is required.`);
     }
@@ -1281,6 +1430,10 @@ async function runDockerPostgresContainer(options: {
 }
 
 async function executeSetupPlan(plan: SetupExecutionPlan): Promise<SetupExecutionResult> {
+    if (plan.mode === 'isolated' && plan.projects.length > 1) {
+        throw new Error('Isolated setup supports one bound project. Use shared mode to bind multiple projects to the same instance.');
+    }
+
     await ensureRuntimeInstalled(plan.root, plan.scope);
 
     const configured = await ensureInstanceConfigured(plan.root, plan.instanceName, {
@@ -1293,6 +1446,18 @@ async function executeSetupPlan(plan: SetupExecutionPlan): Promise<SetupExecutio
 
     if (plan.bootstrapDatabase) {
         try {
+            if (plan.databaseMode === 'docker') {
+                const parsed = parsePostgresConnectionString(plan.databaseUrl);
+                await runDockerPostgresContainer({
+                    containerName: sanitizeIdentifier(`iranti_${plan.instanceName}_db`, `iranti_${plan.instanceName}_db`),
+                    hostPort: Number.parseInt(parsed.port || '5432', 10),
+                    password: decodeURIComponent(parsed.password || 'postgres'),
+                    database: postgresDatabaseName(plan.databaseUrl),
+                });
+            }
+            if (plan.databaseMode === 'local') {
+                await ensurePostgresDatabaseExists(plan.databaseUrl);
+            }
             await runBundledScript('setup', [], {
                 DATABASE_URL: plan.databaseUrl,
                 IRANTI_ESCALATION_DIR: path.join(configured.instanceDir, 'escalation'),
@@ -1310,10 +1475,11 @@ async function executeSetupPlan(plan: SetupExecutionPlan): Promise<SetupExecutio
             IRANTI_API_KEY: plan.apiKey,
             IRANTI_AGENT_ID: project.agentId,
             IRANTI_MEMORY_ENTITY: project.memoryEntity,
+            IRANTI_PROJECT_MODE: project.projectMode,
             IRANTI_INSTANCE: plan.instanceName,
             IRANTI_INSTANCE_ENV: configured.envFile,
         });
-        bindings.push({ projectPath, envFile: written, agentId: project.agentId });
+        bindings.push({ projectPath, envFile: written, agentId: project.agentId, projectMode: project.projectMode });
         if (project.claudeCode) {
             await writeClaudeCodeProjectFiles(projectPath);
         }
@@ -1337,6 +1503,8 @@ async function executeSetupPlan(plan: SetupExecutionPlan): Promise<SetupExecutio
         instanceName: plan.instanceName,
         instanceEnvFile: configured.envFile,
         port: plan.port,
+        mode: plan.mode,
+        databaseMode: plan.databaseMode,
         bindings,
     };
 }
@@ -1347,7 +1515,7 @@ function parseSetupConfig(filePath: string): SetupExecutionPlan {
         throw new Error(`Setup config file not found: ${resolved}`);
     }
     const raw = JSON.parse(fs.readFileSync(resolved, 'utf-8')) as any;
-    const mode = raw?.mode === 'isolated' ? 'isolated' : 'shared';
+    const mode: 'shared' | 'isolated' = raw?.mode === 'shared' ? 'shared' : 'isolated';
     const scope: Scope = raw?.scope === 'system' ? 'system' : 'user';
     const root = path.resolve(String(raw?.root ?? defaultInstallRoot(scope)));
     const instanceName = sanitizeIdentifier(String(raw?.instanceName ?? raw?.instance ?? 'local'), 'local');
@@ -1355,10 +1523,15 @@ function parseSetupConfig(filePath: string): SetupExecutionPlan {
     if (!Number.isFinite(port) || port <= 0) {
         throw new Error(`Invalid setup config port: ${raw?.port}`);
     }
-    const databaseUrl = String(raw?.databaseUrl ?? raw?.dbUrl ?? '').trim();
-    if (!databaseUrl || detectPlaceholder(databaseUrl)) {
-        throw new Error('Setup config requires a non-placeholder databaseUrl.');
-    }
+    const databaseModeRaw = String(raw?.databaseMode ?? raw?.dbMode ?? '').trim().toLowerCase();
+    const databaseMode: DatabaseSetupMode = databaseModeRaw === 'docker'
+        ? 'docker'
+        : databaseModeRaw === 'managed'
+            ? 'managed'
+            : databaseModeRaw === 'existing' || databaseModeRaw === 'local' || databaseModeRaw.length === 0
+                ? 'local'
+                : (() => { throw new Error(`Unsupported databaseMode in setup config: ${databaseModeRaw}`); })();
+    const databaseUrl = deriveDatabaseUrlForMode(databaseMode, instanceName, String(raw?.databaseUrl ?? raw?.dbUrl ?? '').trim());
     const provider = normalizeProvider(String(raw?.provider ?? 'mock')) ?? 'mock';
     if (!isSupportedProvider(provider)) {
         throw new Error(`Unsupported provider in setup config: ${provider}`);
@@ -1385,6 +1558,7 @@ function parseSetupConfig(filePath: string): SetupExecutionPlan {
         path: path.resolve(String(item?.path ?? process.cwd())),
         agentId: sanitizeIdentifier(String(item?.agentId ?? projectAgentDefault(String(item?.path ?? process.cwd()))), 'project_main'),
         memoryEntity: String(item?.memoryEntity ?? 'user/main'),
+        projectMode: normalizeProjectMode(String(item?.projectMode ?? mode), mode),
         claudeCode: item?.claudeCode !== false,
     }));
 
@@ -1395,6 +1569,7 @@ function parseSetupConfig(filePath: string): SetupExecutionPlan {
         instanceName,
         port,
         databaseUrl,
+        databaseMode,
         provider,
         providerKeys,
         apiKey,
@@ -1408,16 +1583,25 @@ function parseSetupConfig(filePath: string): SetupExecutionPlan {
 function defaultsSetupPlan(args: ParsedArgs): SetupExecutionPlan {
     const scope = normalizeScope(getFlag(args, 'scope'));
     const root = path.resolve(getFlag(args, 'root') ?? resolveInstallRoot(args, scope));
+    const mode: 'shared' | 'isolated' = getFlag(args, 'mode') === 'shared' ? 'shared' : 'isolated';
     const instanceName = sanitizeIdentifier(getFlag(args, 'instance') ?? 'local', 'local');
     const port = Number.parseInt(getFlag(args, 'port') ?? '3001', 10);
     if (!Number.isFinite(port) || port <= 0) {
         throw new Error(`Invalid --port '${getFlag(args, 'port')}'.`);
     }
 
-    const databaseUrl = (getFlag(args, 'db-url') ?? process.env.DATABASE_URL ?? '').trim();
-    if (!databaseUrl || detectPlaceholder(databaseUrl)) {
-        throw new Error('--defaults requires a real DATABASE_URL via --db-url or the DATABASE_URL environment variable.');
-    }
+    const databaseMode = (() => {
+        const explicit = getFlag(args, 'db-mode')?.trim().toLowerCase();
+        if (!explicit) {
+            if (hasCommandInstalled('psql')) return 'local';
+            if (hasDockerInstalled()) return 'docker';
+            return 'managed';
+        }
+        if (explicit === 'existing' || explicit === 'local') return 'local';
+        if (explicit === 'managed' || explicit === 'docker') return explicit;
+        throw new Error(`Invalid --db-mode '${explicit}'. Use local, managed, or docker.`);
+    })();
+    const databaseUrl = deriveDatabaseUrlForMode(databaseMode, instanceName, (getFlag(args, 'db-url') ?? process.env.DATABASE_URL ?? '').trim());
 
     const provider = normalizeProvider(getFlag(args, 'provider') ?? process.env.LLM_PROVIDER ?? 'mock') ?? 'mock';
     if (!isSupportedProvider(provider)) {
@@ -1445,17 +1629,23 @@ function defaultsSetupPlan(args: ParsedArgs): SetupExecutionPlan {
             path: path.resolve(projectPath),
             agentId: projectAgentDefault(projectPath),
             memoryEntity: 'user/main',
+            projectMode: mode,
             claudeCode: hasFlag(args, 'claude-code'),
         }))
         : [];
 
+    if (mode === 'isolated' && projects.length > 1) {
+        throw new Error('--mode isolated supports one project. Use --mode shared to bind multiple projects.');
+    }
+
     return {
-        mode: 'shared',
+        mode,
         scope,
         root,
         instanceName,
         port,
         databaseUrl,
+        databaseMode,
         provider,
         providerKeys,
         apiKey,
@@ -1708,10 +1898,10 @@ async function collectDependencyChecks(): Promise<DependencyCheck[]> {
 }
 
 function printDependencyChecks(checks: DependencyCheck[]): void {
-    console.log(bold('Dependency check'));
+    console.log(sectionTitle('Dependency Check'));
     for (const check of checks) {
         const marker = check.status === 'pass' ? okLabel('PASS') : warnLabel('WARN');
-        console.log(`${marker} ${check.name} — ${check.detail}`);
+        console.log(`${marker} ${check.name} - ${check.detail}`);
     }
     if (checks.every((check) => check.status === 'warn')) {
         console.log(`${warnLabel()} No PostgreSQL tooling or reachable local Postgres was detected. You can still continue if you plan to use managed Postgres, but local setup will be rough until you install PostgreSQL tooling or Docker.`);
@@ -1724,7 +1914,12 @@ function quoteForCmd(arg: string): string {
     return `"${arg.replace(/"/g, '\\"')}"`;
 }
 
-function runCommandCapture(executable: string, args: string[], cwd?: string): { status: number | null; stdout: string; stderr: string } {
+function runCommandCapture(
+    executable: string,
+    args: string[],
+    cwd?: string,
+    extraEnv?: Record<string, string | undefined>,
+): { status: number | null; stdout: string; stderr: string } {
     const proc = process.platform === 'win32'
         ? spawnSync(process.env.ComSpec ?? 'cmd.exe', [
             '/d',
@@ -1734,11 +1929,19 @@ function runCommandCapture(executable: string, args: string[], cwd?: string): { 
             cwd,
             encoding: 'utf8',
             stdio: ['ignore', 'pipe', 'pipe'],
+            env: {
+                ...process.env,
+                ...extraEnv,
+            },
         })
         : spawnSync(executable, args, {
             cwd,
             encoding: 'utf8',
             stdio: ['ignore', 'pipe', 'pipe'],
+            env: {
+                ...process.env,
+                ...extraEnv,
+            },
         });
     return {
         status: proc.status,
@@ -1762,6 +1965,93 @@ function runCommandInteractive(step: UpgradeCommand): number | null {
             stdio: 'inherit',
         });
     return proc.status;
+}
+
+function deriveDatabaseUrlForMode(
+    mode: DatabaseSetupMode,
+    instanceName: string,
+    explicitDatabaseUrl?: string,
+): string {
+    if (explicitDatabaseUrl && !detectPlaceholder(explicitDatabaseUrl)) {
+        return explicitDatabaseUrl.trim();
+    }
+    if (mode === 'managed') {
+        throw new Error('--db-url is required when --db-mode managed is selected.');
+    }
+    const user = encodeURIComponent((process.env.POSTGRES_USER ?? 'postgres').trim() || 'postgres');
+    const password = encodeURIComponent((process.env.POSTGRES_PASSWORD ?? 'postgres').trim() || 'postgres');
+    if (mode === 'local') {
+        return `postgresql://${user}:${password}@localhost:5432/iranti_${instanceName}`;
+    }
+    return `postgresql://${user}:${password}@localhost:5432/iranti_${instanceName}`;
+}
+
+async function ensurePostgresDatabaseExists(databaseUrl: string): Promise<void> {
+    const parsed = parsePostgresConnectionString(databaseUrl);
+    if (!isLocalPostgresHost(parsed.hostname)) {
+        return;
+    }
+    if (!hasCommandInstalled('psql')) {
+        return;
+    }
+
+    const databaseName = postgresDatabaseName(databaseUrl);
+    const adminDatabase = parsed.searchParams.get('admin_db')?.trim() || 'postgres';
+    const host = parsed.hostname;
+    const port = parsed.port || '5432';
+    const user = decodeURIComponent(parsed.username || 'postgres');
+    const password = decodeURIComponent(parsed.password || '');
+    const extraEnv = password ? { PGPASSWORD: password } : undefined;
+    const runPsql = (args: string[]) => spawnSync('psql', args, {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: {
+            ...process.env,
+            ...extraEnv,
+        },
+    });
+
+    const lookup = runPsql([
+        '-h',
+        host,
+        '-p',
+        port,
+        '-U',
+        user,
+        '-d',
+        adminDatabase,
+        '-tAc',
+        `SELECT 1 FROM pg_database WHERE datname = ${quoteSqlLiteral(databaseName)};`,
+    ]);
+
+    if (lookup.status !== 0) {
+        throw new Error(`Failed to inspect local PostgreSQL for database '${databaseName}'. ${lookup.stderr?.trim() || lookup.stdout?.trim() || 'psql returned a non-zero exit code.'}`);
+    }
+
+    if ((lookup.stdout ?? '').trim() === '1') {
+        return;
+    }
+
+    const create = runPsql([
+        '-h',
+        host,
+        '-p',
+        port,
+        '-U',
+        user,
+        '-d',
+        adminDatabase,
+        '-c',
+        `CREATE DATABASE ${quoteSqlIdentifier(databaseName)};`,
+    ]);
+
+    if (create.status !== 0) {
+        const combined = `${create.stderr ?? ''}\n${create.stdout ?? ''}`.toLowerCase();
+        if (combined.includes('already exists')) {
+            return;
+        }
+        throw new Error(`Failed to create local PostgreSQL database '${databaseName}'. ${create.stderr?.trim() || create.stdout?.trim() || 'psql returned a non-zero exit code.'}`);
+    }
 }
 
 function detectPythonLauncher(): UpgradeCommand | null {
@@ -2010,16 +2300,16 @@ function describeUpgradeTarget(target: UpgradeTargetStatus): string {
     const latest = target.latestVersion ?? 'unknown';
     if (target.target === 'npm-repo') {
         return target.blockedReason
-            ? `repo checkout (${current}) â€” ${target.blockedReason}`
-            : `repo checkout (${current}) â€” refresh local checkout and rebuild`;
+            ? `repo checkout (${current}) - ${target.blockedReason}`
+            : `repo checkout (${current}) - refresh local checkout and rebuild`;
     }
     if (target.upToDate === true) {
-        return `${target.target} (${current}) â€” already at latest ${latest}`;
+        return `${target.target} (${current}) - already at latest ${latest}`;
     }
     if (target.blockedReason) {
-        return `${target.target} (${current}) â€” ${target.blockedReason}`;
+        return `${target.target} (${current}) - ${target.blockedReason}`;
     }
-    return `${target.target} (${current}) â€” latest ${latest}`;
+    return `${target.target} (${current}) - latest ${latest}`;
 }
 
 async function chooseInteractiveUpgradeTargets(
@@ -2236,7 +2526,7 @@ async function listProviderKeysCommand(args: ParsedArgs): Promise<void> {
         return;
     }
 
-    console.log(bold('Iranti provider keys'));
+    console.log(sectionTitle('Provider Keys'));
     console.log(`  target    ${target.envFile}`);
     if (target.instanceName) console.log(`  instance  ${target.instanceName}`);
     if (target.bindingFile) console.log(`  binding   ${target.bindingFile}`);
@@ -2290,7 +2580,7 @@ async function upsertProviderKeyCommand(args: ParsedArgs, mode: 'add' | 'update'
         return;
     }
 
-    console.log(okLabel(), `${providerDisplayName(provider)} API key ${mode === 'add' ? 'stored' : 'updated'}.`);
+    console.log(`${okLabel()} ${providerDisplayName(provider)} API key ${mode === 'add' ? 'stored' : 'updated'}.`);
     console.log(`  provider  ${provider}`);
     console.log(`  env key   ${envKey}`);
     console.log(`  value     ${redactSecret(key)}`);
@@ -2298,6 +2588,9 @@ async function upsertProviderKeyCommand(args: ParsedArgs, mode: 'add' | 'update'
     if (updates.LLM_PROVIDER) {
         console.log(`  default   ${paint(provider, 'cyan')}`);
     }
+    printNextSteps([
+        `iranti list api-keys${target.instanceName ? ` --instance ${target.instanceName}` : target.projectPath ? ` --project "${target.projectPath}"` : ''}`,
+    ]);
 }
 
 async function removeProviderKeyCommand(args: ParsedArgs): Promise<void> {
@@ -2338,10 +2631,13 @@ async function removeProviderKeyCommand(args: ParsedArgs): Promise<void> {
         return;
     }
 
-    console.log(okLabel(), `${providerDisplayName(provider)} API key removed.`);
+    console.log(`${okLabel()} ${providerDisplayName(provider)} API key removed.`);
     console.log(`  provider  ${provider}`);
     console.log(`  env key   ${envKey}`);
     console.log(`  target    ${target.envFile}`);
+    printNextSteps([
+        `iranti list api-keys${target.instanceName ? ` --instance ${target.instanceName}` : target.projectPath ? ` --project "${target.projectPath}"` : ''}`,
+    ]);
 }
 
 async function setupCommand(args: ParsedArgs): Promise<void> {
@@ -2359,24 +2655,26 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
         const plan = configPath ? parseSetupConfig(configPath) : defaultsSetupPlan(args);
         const result = await executeSetupPlan(plan);
 
-        console.log(bold('Setup complete'));
+        console.log(sectionTitle('Setup Complete'));
         console.log(`  runtime root   ${result.root}`);
         console.log(`  scope          ${result.scope}`);
         console.log(`  instance       ${result.instanceName}`);
         console.log(`  instance env   ${result.instanceEnvFile}`);
         console.log(`  instance url   http://localhost:${result.port}`);
+        console.log(`  memory mode    ${result.mode}`);
+        console.log(`  database mode  ${result.databaseMode}`);
         if (result.bindings.length === 0) {
             console.log(`  projects       ${paint('none bound yet', 'yellow')}`);
         } else {
             console.log('  projects');
             for (const binding of result.bindings) {
-                console.log(`    - ${binding.projectPath} (${binding.agentId})`);
+                console.log(`    - ${binding.projectPath} (${binding.agentId}, ${binding.projectMode})`);
             }
         }
-        console.log('');
-        console.log(`${infoLabel()} Next steps:`);
-        console.log(`  1. iranti run --instance ${result.instanceName} --root "${result.root}"`);
-        console.log(`  2. iranti doctor --instance ${result.instanceName} --root "${result.root}"`);
+        printNextSteps([
+            `iranti run --instance ${result.instanceName} --root "${result.root}"`,
+            `iranti doctor --instance ${result.instanceName} --root "${result.root}"`,
+        ]);
         return;
     }
 
@@ -2387,18 +2685,24 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
     const explicitScope = getFlag(args, 'scope');
     const explicitRoot = getFlag(args, 'root');
 
-    console.log(bold('Iranti setup'));
+    console.log(sectionTitle('Iranti Setup'));
     console.log('This wizard will get Iranti set up: install a runtime, create or update an instance, connect provider keys, create a usable Iranti API key, and optionally bind one or more project folders.');
     console.log('');
-    printDependencyChecks(await collectDependencyChecks());
+    const dependencyChecks = await collectDependencyChecks();
+    printDependencyChecks(dependencyChecks);
+    const recommendedDatabaseMode = recommendDatabaseMode(dependencyChecks);
+    console.log(`${infoLabel()} Recommended database path: ${recommendedDatabaseMode === 'local' ? 'local PostgreSQL' : recommendedDatabaseMode === 'docker' ? 'Docker-hosted PostgreSQL' : 'managed PostgreSQL'}`);
+    if (recommendedDatabaseMode === 'managed' && dependencyChecks.every((check) => check.status === 'warn')) {
+        printQuickInstallGuidance();
+    }
     console.log('');
 
     let result: SetupExecutionResult | null = null;
 
     await withPromptSession(async (prompt) => {
-        let setupMode: 'shared' | 'isolated' = 'shared';
+        let setupMode: 'shared' | 'isolated' = 'isolated';
         while (true) {
-            const chosen = (await prompt.line('How should Iranti install the runtime: shared or isolated folder', 'shared') ?? 'shared').trim().toLowerCase();
+            const chosen = (await prompt.line('How should Iranti install the runtime: isolated per-project or shared machine runtime', 'isolated') ?? 'isolated').trim().toLowerCase();
             if (chosen === 'shared' || chosen === 'isolated') {
                 setupMode = chosen;
                 break;
@@ -2449,32 +2753,46 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
         const port = await chooseAvailablePort(prompt, 'Which port should the Iranti API use', existingPort, Boolean(existingInstance));
 
         const dockerAvailable = hasDockerInstalled();
+        const psqlAvailable = hasCommandInstalled('psql');
         let dbUrl = '';
         let bootstrapDatabase = false;
+        let databaseMode: DatabaseSetupMode = recommendedDatabaseMode;
         while (true) {
-            const defaultMode = dockerAvailable ? 'docker' : 'existing';
+            const defaultMode = recommendedDatabaseMode;
             const dbMode = (await prompt.line(
-                'How should we set up the database: existing, managed, or docker',
+                'How should we set up the database: local, managed, or docker',
                 defaultMode
             ) ?? defaultMode).trim().toLowerCase();
 
-            if (dbMode === 'existing' || dbMode === 'managed') {
+            if (dbMode === 'existing' || dbMode === 'local' || dbMode === 'managed') {
+                databaseMode = dbMode === 'existing' ? 'local' : dbMode;
+                const defaultDatabaseUrl = databaseMode === 'local'
+                    ? existingInstance?.env.DATABASE_URL ?? deriveDatabaseUrlForMode('local', instanceName)
+                    : existingInstance?.env.DATABASE_URL ?? '';
                 while (true) {
                     dbUrl = await promptNonEmpty(
                         prompt,
                         'Database connection string (DATABASE_URL)',
-                        existingInstance?.env.DATABASE_URL ?? `postgresql://postgres:yourpassword@localhost:5432/iranti_${instanceName}`
+                        defaultDatabaseUrl
                     );
                     if (!detectPlaceholder(dbUrl)) break;
                     console.log(`${warnLabel()} DATABASE_URL still looks like a placeholder. Enter a real connection string before finishing setup.`);
+                }
+                if (databaseMode === 'local') {
+                    if (!psqlAvailable) {
+                        console.log(`${warnLabel()} psql is not installed, so Iranti can only self-create the local database if it already exists. Install PostgreSQL tools if you want setup to create the database for you.`);
+                    } else {
+                        console.log(`${infoLabel()} Iranti will create the local database automatically if it does not already exist.`);
+                    }
                 }
                 bootstrapDatabase = await promptYesNo(prompt, 'Run migrations and seed the database now?', true);
                 break;
             }
 
             if (dbMode === 'docker') {
+                databaseMode = 'docker';
                 if (!dockerAvailable) {
-                    console.log(`${warnLabel()} Docker is not installed or not on PATH. Choose existing or managed instead.`);
+                    console.log(`${warnLabel()} Docker is not installed or not on PATH. Choose local or managed instead.`);
                     continue;
                 }
                 const dbHostPort = await chooseAvailablePort(prompt, 'Which host port should Docker PostgreSQL use', 5432, false);
@@ -2502,7 +2820,7 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
                 break;
             }
 
-            console.log(`${warnLabel()} Choose one of: existing, managed, docker.`);
+            console.log(`${warnLabel()} Choose one of: local, managed, docker.`);
         }
 
         let provider = normalizeProvider(existingInstance?.env.LLM_PROVIDER ?? 'openai') ?? 'openai';
@@ -2582,9 +2900,14 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
                 path: projectPath,
                 agentId,
                 memoryEntity,
+                projectMode: setupMode,
                 claudeCode,
             });
-            shouldBindProject = await promptYesNo(prompt, 'Bind another project folder?', false);
+            if (setupMode === 'shared') {
+                shouldBindProject = await promptYesNo(prompt, 'Bind another project folder?', false);
+            } else {
+                shouldBindProject = false;
+            }
         }
 
         const codex = projects.length > 0 && hasCodexInstalled()
@@ -2598,6 +2921,7 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
             instanceName,
             port,
             databaseUrl: dbUrl,
+            databaseMode,
             provider,
             providerKeys,
             apiKey: defaultApiKey,
@@ -2614,28 +2938,31 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
     const finalResult: SetupExecutionResult = result;
 
     console.log('');
-    console.log(bold('Setup complete'));
+    console.log(sectionTitle('Setup Complete'));
     console.log(`  runtime root   ${finalResult.root}`);
     console.log(`  scope          ${finalResult.scope}`);
     console.log(`  instance       ${finalResult.instanceName}`);
     console.log(`  instance env   ${finalResult.instanceEnvFile}`);
     console.log(`  instance url   http://localhost:${finalResult.port}`);
+    console.log(`  memory mode    ${finalResult.mode}`);
+    console.log(`  database mode  ${finalResult.databaseMode}`);
     if (finalResult.bindings.length === 0) {
             console.log(`  projects       ${paint('none bound yet', 'yellow')}`);
     } else {
         console.log('  projects');
         for (const binding of finalResult.bindings) {
-            console.log(`    - ${binding.projectPath} (${binding.agentId})`);
+            console.log(`    - ${binding.projectPath} (${binding.agentId}, ${binding.projectMode})`);
         }
     }
-    console.log('');
-    console.log(`${infoLabel()} Next steps:`);
-    console.log(`  1. iranti run --instance ${finalResult.instanceName} --root "${finalResult.root}"`);
-    console.log(`  2. iranti doctor --instance ${finalResult.instanceName} --root "${finalResult.root}"`);
+    const nextSteps = [
+        `iranti run --instance ${finalResult.instanceName} --root "${finalResult.root}"`,
+        `iranti doctor --instance ${finalResult.instanceName} --root "${finalResult.root}"`,
+    ];
     if (finalResult.bindings.length > 0) {
-        console.log(`  3. cd "${finalResult.bindings[0]!.projectPath}"`);
-        console.log('  4. iranti chat');
+        nextSteps.push(`cd "${finalResult.bindings[0]!.projectPath}"`);
+        nextSteps.push('iranti chat');
     }
+    printNextSteps(nextSteps);
 }
 
 async function doctorCommand(args: ParsedArgs): Promise<void> {
@@ -2796,7 +3123,7 @@ async function doctorCommand(args: ParsedArgs): Promise<void> {
         return;
     }
 
-    console.log(bold('Iranti doctor'));
+    console.log(sectionTitle('Iranti Doctor'));
     console.log(`  version : ${version}`);
     console.log(`  status  : ${result.status === 'pass'
         ? paint(result.status.toUpperCase(), 'green')
@@ -2811,7 +3138,7 @@ async function doctorCommand(args: ParsedArgs): Promise<void> {
             : check.status === 'warn'
                 ? warnLabel('WARN')
                 : failLabel('FAIL');
-        console.log(`${marker} ${check.name} â€” ${check.detail}`);
+        console.log(`${marker} ${check.name} - ${check.detail}`);
     }
 
     if (result.remediations.length > 0) {
@@ -2880,7 +3207,7 @@ async function statusCommand(args: ParsedArgs): Promise<void> {
         return;
     }
 
-    console.log(bold('Iranti status'));
+    console.log(sectionTitle('Iranti Status'));
     for (const row of rows) {
         console.log(`  ${row.label.padEnd(15)} ${row.value}`);
     }
@@ -2996,7 +3323,7 @@ async function upgradeCommand(args: ParsedArgs): Promise<void> {
         return;
     }
 
-    console.log(bold('Iranti upgrade'));
+    console.log(sectionTitle('Iranti Upgrade'));
     console.log(`  current_version  ${context.currentVersion}`);
     console.log(`  latest_npm       ${latestNpm ?? '(unavailable)'}`);
     console.log(`  latest_python    ${latestPython ?? '(unavailable)'}`);
@@ -3074,7 +3401,11 @@ async function installCommand(args: ParsedArgs): Promise<void> {
     console.log(`  root : ${root}`);
     console.log('');
     printDependencyChecks(dependencyChecks);
-    console.log(`Next: iranti instance create local --port 3001`);
+    printNextSteps(['iranti setup']);
+    if (dependencyChecks.every((check) => check.status === 'warn')) {
+        console.log('');
+        printQuickInstallGuidance();
+    }
 }
 
 async function createInstanceCommand(args: ParsedArgs): Promise<void> {
@@ -3124,7 +3455,8 @@ async function createInstanceCommand(args: ParsedArgs): Promise<void> {
     };
     await writeJson(metaFile, meta);
 
-    console.log(`${okLabel()} Instance created: ${name}`);
+    console.log(sectionTitle('Instance Created'));
+    console.log(`  status  ${okLabel()}`);
     console.log(`  dir : ${instanceDir}`);
     console.log(`  env : ${envFile}`);
     console.log(`  port: ${port}`);
@@ -3132,7 +3464,10 @@ async function createInstanceCommand(args: ParsedArgs): Promise<void> {
     if (providerKey && providerKeyName) {
         console.log(`  ${providerKeyName}: ${redactSecret(providerKey)}`);
     }
-    console.log(`Next: iranti instance show ${name}`);
+    printNextSteps([
+        `iranti instance show ${name}`,
+        `iranti run --instance ${name}`,
+    ]);
 }
 
 async function listInstancesCommand(args: ParsedArgs): Promise<void> {
@@ -3219,7 +3554,8 @@ async function projectInitCommand(args: ParsedArgs): Promise<void> {
     const { envFile, env: instanceEnv } = await loadInstanceEnv(root, instanceName);
     const port = instanceEnv.IRANTI_PORT ?? '3001';
     const apiKey = getFlag(args, 'api-key') ?? instanceEnv.IRANTI_API_KEY ?? 'replace_me_with_api_key';
-    const agentId = getFlag(args, 'agent-id') ?? 'my_agent';
+    const agentId = getFlag(args, 'agent-id') ?? projectAgentDefault(projectPath);
+    const projectMode = normalizeProjectMode(getFlag(args, 'mode'), 'isolated');
 
     const outFile = path.join(projectPath, '.env.iranti');
     if (fs.existsSync(outFile) && !hasFlag(args, 'force')) {
@@ -3231,13 +3567,19 @@ async function projectInitCommand(args: ParsedArgs): Promise<void> {
         IRANTI_API_KEY: apiKey,
         IRANTI_AGENT_ID: agentId,
         IRANTI_MEMORY_ENTITY: 'user/main',
+        IRANTI_PROJECT_MODE: projectMode,
         IRANTI_INSTANCE: instanceName,
         IRANTI_INSTANCE_ENV: envFile,
     });
 
-    console.log(`${okLabel()} Project initialized at ${projectPath}`);
+    console.log(sectionTitle('Project Initialized'));
+    console.log(`  status ${okLabel()}`);
     console.log(`  wrote ${outFile}`);
-    console.log(`Use with Python client/middleware by loading .env.iranti`);
+    console.log(`  mode  ${projectMode}`);
+    printNextSteps([
+        `iranti doctor --instance ${instanceName}`,
+        'iranti chat',
+    ]);
 }
 
 async function configureInstanceCommand(args: ParsedArgs): Promise<void> {
@@ -3323,7 +3665,8 @@ async function configureInstanceCommand(args: ParsedArgs): Promise<void> {
         return;
     }
 
-    console.log(`${okLabel()} Instance updated: ${name}`);
+    console.log(sectionTitle('Instance Updated'));
+    console.log(`  status   ${okLabel()}`);
     console.log(`  env      ${envFile}`);
     console.log(`  keys     ${result.updatedKeys.join(', ')}`);
     if (apiKey) {
@@ -3332,7 +3675,9 @@ async function configureInstanceCommand(args: ParsedArgs): Promise<void> {
     if (providerKey) {
         console.log(`  provider ${result.provider}`);
     }
-    console.log(`${infoLabel()} Next: iranti doctor --instance ${name}${scope ? ` --scope ${scope}` : ''}`);
+    printNextSteps([
+        `iranti doctor --instance ${name}${scope ? ` --scope ${scope}` : ''}`,
+    ]);
 }
 
 async function configureProjectCommand(args: ParsedArgs): Promise<void> {
@@ -3346,14 +3691,16 @@ async function configureProjectCommand(args: ParsedArgs): Promise<void> {
     let explicitApiKey: string | undefined = getFlag(args, 'api-key');
     let explicitAgentId: string | undefined = getFlag(args, 'agent-id');
     let explicitMemoryEntity: string | undefined = getFlag(args, 'memory-entity');
+    let explicitProjectMode: string | undefined = getFlag(args, 'mode');
 
     if (hasFlag(args, 'interactive')) {
         await withPromptSession(async (prompt) => {
             instanceName = await prompt.line('Which instance should this project use', instanceName);
             explicitUrl = await prompt.line('What Iranti URL should this project talk to', explicitUrl ?? existing.IRANTI_URL);
             explicitApiKey = await prompt.secret('What API key should this project use', explicitApiKey ?? existing.IRANTI_API_KEY);
-            explicitAgentId = await prompt.line('What agent id should this project use', explicitAgentId ?? existing.IRANTI_AGENT_ID ?? 'my_agent');
+            explicitAgentId = await prompt.line('What agent id should this project use', explicitAgentId ?? existing.IRANTI_AGENT_ID ?? projectAgentDefault(projectPath));
             explicitMemoryEntity = await prompt.line('What memory entity should this project use', explicitMemoryEntity ?? existing.IRANTI_MEMORY_ENTITY ?? 'user/main');
+            explicitProjectMode = await prompt.line('Should this project be isolated or shared', explicitProjectMode ?? existing.IRANTI_PROJECT_MODE ?? inferProjectMode(projectPath, existing.IRANTI_INSTANCE_ENV));
         });
     }
 
@@ -3372,8 +3719,9 @@ async function configureProjectCommand(args: ParsedArgs): Promise<void> {
     const updates: Record<string, string | undefined> = {
         IRANTI_URL: explicitUrl ?? derivedUrl,
         IRANTI_API_KEY: explicitApiKey ?? derivedApiKey,
-        IRANTI_AGENT_ID: explicitAgentId ?? existing.IRANTI_AGENT_ID ?? 'my_agent',
+        IRANTI_AGENT_ID: explicitAgentId ?? existing.IRANTI_AGENT_ID ?? projectAgentDefault(projectPath),
         IRANTI_MEMORY_ENTITY: explicitMemoryEntity ?? existing.IRANTI_MEMORY_ENTITY ?? 'user/main',
+        IRANTI_PROJECT_MODE: normalizeProjectMode(explicitProjectMode, normalizeProjectMode(existing.IRANTI_PROJECT_MODE, inferProjectMode(projectPath, instanceEnvFile))),
         IRANTI_INSTANCE: instanceName,
         IRANTI_INSTANCE_ENV: instanceEnvFile,
     };
@@ -3392,6 +3740,7 @@ async function configureProjectCommand(args: ParsedArgs): Promise<void> {
         envFile: written,
         url: updates.IRANTI_URL,
         agentId: updates.IRANTI_AGENT_ID,
+        projectMode: updates.IRANTI_PROJECT_MODE,
         instance: updates.IRANTI_INSTANCE ?? null,
     };
 
@@ -3400,15 +3749,19 @@ async function configureProjectCommand(args: ParsedArgs): Promise<void> {
         return;
     }
 
-    console.log(`${okLabel()} Project binding updated`);
+    console.log(sectionTitle('Project Binding Updated'));
+    console.log(`  status   ${okLabel()}`);
     console.log(`  path     ${projectPath}`);
     console.log(`  env      ${written}`);
     console.log(`  url      ${updates.IRANTI_URL}`);
     console.log(`  agent    ${updates.IRANTI_AGENT_ID}`);
+    console.log(`  mode     ${updates.IRANTI_PROJECT_MODE}`);
     if (updates.IRANTI_INSTANCE) {
         console.log(`  instance ${updates.IRANTI_INSTANCE}`);
     }
-    console.log(`${infoLabel()} Next: iranti doctor${updates.IRANTI_INSTANCE ? ` --instance ${updates.IRANTI_INSTANCE}` : ''}`);
+    printNextSteps([
+        `iranti doctor${updates.IRANTI_INSTANCE ? ` --instance ${updates.IRANTI_INSTANCE}` : ''}`,
+    ]);
 }
 
 async function authCreateKeyCommand(args: ParsedArgs): Promise<void> {
@@ -3472,7 +3825,8 @@ async function authCreateKeyCommand(args: ParsedArgs): Promise<void> {
         process.exit(0);
     }
 
-    console.log(`${okLabel()} API key created (or rotated):`);
+    console.log(sectionTitle('API Key Ready'));
+    console.log(`  status  ${okLabel()}`);
     console.log(`  keyId   ${created.record.keyId}`);
     console.log(`  owner   ${created.record.owner}`);
     console.log(`  scopes  ${created.record.scopes.join(',') || '(none)'}`);
@@ -3483,7 +3837,9 @@ async function authCreateKeyCommand(args: ParsedArgs): Promise<void> {
     if (projectPath) {
         console.log(`  project ${path.resolve(projectPath)}`);
     }
-    console.log(`${infoLabel()} Next: iranti doctor --instance ${instanceName}`);
+    printNextSteps([
+        `iranti doctor --instance ${instanceName}`,
+    ]);
     process.exit(0);
 }
 
@@ -3510,7 +3866,7 @@ async function authListKeysCommand(args: ParsedArgs): Promise<void> {
         process.exit(0);
     }
 
-    console.log(bold(`Registry API keys for ${instanceName}:`));
+    console.log(sectionTitle(`Registry API Keys For ${instanceName}`));
     for (const key of keys) {
         console.log(`  - ${key.keyId} owner=${key.owner} active=${key.isActive} scopes=${key.scopes.join(',') || '(none)'}`);
     }
@@ -3542,7 +3898,10 @@ async function authRevokeKeyCommand(args: ParsedArgs): Promise<void> {
         process.exit(0);
     }
 
-    console.log(`${okLabel()} Revoked API key '${keyId}' for instance '${instanceName}'.`);
+    console.log(sectionTitle('API Key Revoked'));
+    console.log(`  status   ${okLabel()}`);
+    console.log(`  keyId    ${keyId}`);
+    console.log(`  instance ${instanceName}`);
     process.exit(0);
 }
 
@@ -3787,55 +4146,113 @@ async function chatCommand(args: ParsedArgs): Promise<void> {
 }
 
 function printHelp(): void {
-    console.log(`Iranti CLI
+    const rows: Array<[string, string]> = [
+        ['iranti setup', 'Guided first-run setup. Best place to start.'],
+        ['iranti run --instance local', 'Start a configured instance.'],
+        ['iranti doctor', 'Check env, database, provider keys, and runtime health.'],
+        ['iranti chat', 'Open the local Iranti chat shell.'],
+    ];
 
-Machine-level:
-  iranti install [--scope user|system] [--root <path>]
-  iranti setup [--scope user|system] [--root <path>] [--config <file> | --defaults] [--db-url <url>] [--bootstrap-db]
+    const printRows = (title: string, entries: Array<[string, string]>) => {
+        console.log(sectionTitle(title));
+        for (const [command, description] of entries) {
+            console.log(`  ${commandText(command.padEnd(72))} ${description}`);
+        }
+        console.log('');
+    };
 
-Instance-level:
-  iranti instance create <name> [--port 3001] [--db-url <url>] [--api-key <token>] [--provider <name>] [--provider-key <token>] [--scope user|system]
-  iranti instance list [--scope user|system]
-  iranti instance show <name> [--scope user|system]
-  iranti run --instance <name> [--scope user|system]
+    console.log(sectionTitle('Iranti CLI'));
+    console.log('Memory infrastructure for multi-agent systems.');
+    console.log('');
 
-Configuration:
-  iranti configure instance <name> [--interactive] [--db-url <url>] [--port <n>] [--api-key <token>] [--provider <name>] [--provider-key <token>] [--clear-provider-key]
-  iranti configure project [path] [--interactive] [--instance <name>] [--url <http://host:port>] [--api-key <token>] [--agent-id <id>] [--memory-entity <entity>]
+    printRows('Start Here', rows);
 
-  Auth:
-    iranti auth create-key --instance <name> --key-id <id> --owner <owner> [--scopes kb:read,kb:write:project/*] [--description <text>] [--write-instance] [--project <path>] [--agent-id <id>]
-    iranti auth list-keys --instance <name>
-    iranti auth revoke-key --instance <name> --key-id <id>
+    printRows('Setup And Runtime', [
+        ['iranti install [--scope user|system] [--root <path>]', 'Initialize the machine-level runtime folders.'],
+        ['iranti setup [--scope user|system] [--root <path>] [--mode isolated|shared] [--config <file> | --defaults] [--db-mode local|managed|docker] [--db-url <url>] [--bootstrap-db]', 'Guided setup for runtime, database, instance, keys, and project binding.'],
+        ['iranti instance create <name> [--port 3001] [--db-url <url>] [--api-key <token>] [--provider <name>] [--provider-key <token>] [--scope user|system]', 'Create an instance directly if you want low-level control.'],
+        ['iranti instance list [--scope user|system]', 'List configured instances.'],
+        ['iranti instance show <name> [--scope user|system]', 'Show one instance env, port, and database target.'],
+        ['iranti run --instance <name> [--scope user|system]', 'Start an instance.'],
+    ]);
 
-  Provider Keys:
-    iranti list api-keys [--instance <name>] [--project <path>] [--json]
-    iranti add api-key [provider] [--instance <name>] [--project <path>] [--key <token>] [--set-default]
-    iranti update api-key [provider] [--instance <name>] [--project <path>] [--key <token>] [--set-default]
-    iranti remove api-key [provider] [--instance <name>] [--project <path>]
+    printRows('Configuration', [
+        ['iranti configure instance <name> [--interactive] [--db-url <url>] [--port <n>] [--api-key <token>] [--provider <name>] [--provider-key <token>] [--clear-provider-key]', 'Update an instance without editing env files manually.'],
+        ['iranti project init [path] --instance <name> [--api-key <token>] [--agent-id <id>] [--mode isolated|shared] [--force]', 'Create a new .env.iranti binding for one project.'],
+        ['iranti configure project [path] [--interactive] [--instance <name>] [--url <http://host:port>] [--api-key <token>] [--agent-id <id>] [--memory-entity <entity>] [--mode isolated|shared] [--json]', 'Refresh or retarget an existing project binding.'],
+    ]);
 
-Project-level:
-  iranti project init [path] --instance <name> [--api-key <token>] [--agent-id <id>] [--force]
+    printRows('Keys', [
+        ['iranti auth create-key --instance <name> --key-id <id> --owner <owner> [--scopes kb:read,kb:write:project/*] [--description <text>] [--write-instance] [--project <path>] [--agent-id <id>] [--json]', 'Create or rotate an Iranti client key.'],
+        ['iranti auth list-keys --instance <name> [--json]', 'List registry-backed Iranti client keys.'],
+        ['iranti auth revoke-key --instance <name> --key-id <id> [--json]', 'Revoke an Iranti client key.'],
+        ['iranti list api-keys [--instance <name>] [--project <path>] [--json]', 'Show stored upstream provider keys.'],
+        ['iranti add api-key [provider] [--instance <name>] [--project <path>] [--key <token>] [--set-default] [--json]', 'Store a provider key and optionally make it the default.'],
+        ['iranti update api-key [provider] [--instance <name>] [--project <path>] [--key <token>] [--set-default] [--json]', 'Replace a stored provider key.'],
+        ['iranti remove api-key [provider] [--instance <name>] [--project <path>] [--json]', 'Remove a stored provider key.'],
+    ]);
 
-  Diagnostics:
-    iranti doctor [--instance <name>] [--scope user|system] [--env <file>] [--json]
-    iranti status [--scope user|system] [--json]
-    iranti upgrade [--check] [--dry-run] [--yes] [--all] [--target auto|npm-global|npm-repo|python[,python]] [--json]
-    iranti handshake [--instance <name> | --project-env <file>] [--agent <id>] [--task <text>] [--recent <msg1||msg2>] [--recent-file <path>] [--json]
-    iranti attend [message] [--instance <name> | --project-env <file>] [--agent <id>] [--context <text> | --context-file <path>] [--entity-hint <entity>] [--force] [--max-facts <n>] [--json]
-    iranti chat [--agent <agent-id>] [--provider <provider>] [--model <model>]
-    iranti resolve [--dir <escalation-dir>]
+    printRows('Diagnostics And Operator Tools', [
+        ['iranti doctor [--instance <name>] [--scope user|system] [--env <file>] [--json]', 'Run environment and runtime diagnostics.'],
+        ['iranti status [--scope user|system] [--json]', 'Show runtime roots, bindings, and known instances.'],
+        ['iranti upgrade [--check] [--dry-run] [--yes] [--all] [--target auto|npm-global|npm-repo|python[,python]] [--json]', 'Check or run CLI/runtime/package upgrades.'],
+        ['iranti handshake [--instance <name> | --project-env <file>] [--agent <id>] [--task <text>] [--recent <msg1||msg2>] [--recent-file <path>] [--json]', 'Manually inspect Attendant handshake output.'],
+        ['iranti attend [message] [--instance <name> | --project-env <file>] [--agent <id>] [--context <text> | --context-file <path>] [--entity-hint <entity>] [--force] [--max-facts <n>] [--json]', 'Manually inspect turn-level memory injection decisions.'],
+        ['iranti chat [--agent <agent-id>] [--provider <provider>] [--model <model>]', 'Open the local interactive chat shell.'],
+        ['iranti resolve [--dir <escalation-dir>]', 'Walk through pending escalation files.'],
+    ]);
 
-Integrations:
-  iranti mcp [--help]
-  iranti claude-setup [path] [--project-env <path>] [--force]
-  iranti claude-setup --scan <dir> [--force]
-  iranti claude-hook --event SessionStart|UserPromptSubmit [--project-env <path>] [--instance-env <path>] [--env-file <path>]
-  iranti codex-setup [--name iranti] [--agent codex_code] [--source Codex] [--provider openai] [--project-env <path>] [--local-script]
-  iranti integrate claude [path] [--project-env <path>] [--force]
-  iranti integrate claude --scan <dir> [--force]
-  iranti integrate codex [--name iranti] [--agent codex_code] [--source Codex] [--provider openai] [--project-env <path>] [--local-script]
-  `);
+    printRows('Integrations', [
+        ['iranti mcp [--help]', 'Start the stdio MCP server.'],
+        ['iranti claude-setup [path] [--project-env <path>] [--force]', 'Scaffold Claude Code files for one project.'],
+        ['iranti claude-setup --scan <dir> [--recursive] [--force]', 'Find Claude-enabled projects and scaffold them in batch.'],
+        ['iranti claude-hook --event SessionStart|UserPromptSubmit [--project-env <path>] [--instance-env <path>] [--env-file <path>]', 'Run the Claude Code hook helper directly.'],
+        ['iranti codex-setup [--name iranti] [--agent codex_code] [--source Codex] [--provider openai] [--project-env <path>] [--local-script]', 'Register Iranti with the Codex CLI.'],
+        ['iranti integrate claude [path] [--project-env <path>] [--force]', 'Alias for Claude setup.'],
+        ['iranti integrate claude --scan <dir> [--recursive] [--force]', 'Alias for batch Claude setup.'],
+        ['iranti integrate codex [--name iranti] [--agent codex_code] [--source Codex] [--provider openai] [--project-env <path>] [--local-script]', 'Alias for Codex setup.'],
+    ]);
+
+    console.log(sectionTitle('Common Flows'));
+    console.log(`  ${commandText('First install')}`);
+    console.log(`    ${commandText('iranti setup')}`);
+    console.log(`    ${commandText('iranti run --instance local')}`);
+    console.log(`    ${commandText('iranti doctor --instance local')}`);
+    console.log('');
+    console.log(`  ${commandText('Bind a project')}`);
+    console.log(`    ${commandText('iranti project init . --instance local')}`);
+    console.log(`    ${commandText('iranti claude-setup .')}`);
+    console.log('');
+    console.log(`  ${commandText('Work with keys')}`);
+    console.log(`    ${commandText('iranti auth create-key --instance local --key-id app_main --owner \"App Main\" --scopes \"kb:read,kb:write,memory:read,memory:write\"')}`);
+    console.log(`    ${commandText('iranti add api-key openai --instance local --set-default')}`);
+}
+
+function printInstanceHelp(): void {
+    console.log(sectionTitle('Instance Commands'));
+    console.log(`  ${commandText('iranti instance create <name> [--port 3001] [--db-url <url>] [--api-key <token>] [--provider <name>] [--provider-key <token>] [--scope user|system]')}`);
+    console.log(`  ${commandText('iranti instance list [--scope user|system]')}`);
+    console.log(`  ${commandText('iranti instance show <name> [--scope user|system]')}`);
+}
+
+function printConfigureHelp(): void {
+    console.log(sectionTitle('Configure Commands'));
+    console.log(`  ${commandText('iranti configure instance <name> [--interactive] [--db-url <url>] [--port <n>] [--api-key <token>] [--provider <name>] [--provider-key <token>] [--clear-provider-key]')}`);
+    console.log(`  ${commandText('iranti configure project [path] [--interactive] [--instance <name>] [--url <http://host:port>] [--api-key <token>] [--agent-id <id>] [--memory-entity <entity>] [--mode isolated|shared] [--json]')}`);
+}
+
+function printAuthHelp(): void {
+    console.log(sectionTitle('Auth Commands'));
+    console.log(`  ${commandText('iranti auth create-key --instance <name> --key-id <id> --owner <owner> [--scopes ...] [--description <text>] [--write-instance] [--project <path>] [--agent-id <id>] [--json]')}`);
+    console.log(`  ${commandText('iranti auth list-keys --instance <name> [--json]')}`);
+    console.log(`  ${commandText('iranti auth revoke-key --instance <name> --key-id <id> [--json]')}`);
+}
+
+function printIntegrateHelp(): void {
+    console.log(sectionTitle('Integrations'));
+    console.log(`  ${commandText('iranti integrate claude [path] [--project-env <path>] [--force]')}`);
+    console.log(`  ${commandText('iranti integrate claude --scan <dir> [--recursive] [--force]')}`);
+    console.log(`  ${commandText('iranti integrate codex [--name iranti] [--agent codex_code] [--source Codex] [--provider openai] [--project-env <path>] [--local-script]')}`);
 }
 
 async function main(): Promise<void> {
@@ -3856,6 +4273,10 @@ async function main(): Promise<void> {
     }
 
     if (args.command === 'instance') {
+        if (!args.subcommand || args.subcommand === 'help' || args.subcommand === '--help') {
+            printInstanceHelp();
+            return;
+        }
         if (args.subcommand === 'create') {
             await createInstanceCommand(args);
             return;
@@ -3877,6 +4298,10 @@ async function main(): Promise<void> {
     }
 
     if (args.command === 'configure') {
+        if (!args.subcommand || args.subcommand === 'help' || args.subcommand === '--help') {
+            printConfigureHelp();
+            return;
+        }
         if (args.subcommand === 'instance') {
             await configureInstanceCommand(args);
             return;
@@ -3889,6 +4314,10 @@ async function main(): Promise<void> {
     }
 
     if (args.command === 'auth') {
+        if (!args.subcommand || args.subcommand === 'help' || args.subcommand === '--help') {
+            printAuthHelp();
+            return;
+        }
         if (args.subcommand === 'create-key') {
             await authCreateKeyCommand(args);
             return;
@@ -3985,6 +4414,10 @@ async function main(): Promise<void> {
     }
 
     if (args.command === 'integrate') {
+        if (!args.subcommand || args.subcommand === 'help' || args.subcommand === '--help') {
+            printIntegrateHelp();
+            return;
+        }
         if (args.subcommand === 'claude') {
             await claudeSetupCommand(args);
             return;
@@ -4004,4 +4437,5 @@ main().catch((err) => {
     console.error(`${failLabel('ERROR')} ${message}`);
     process.exit(1);
 });
+
 

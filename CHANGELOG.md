@@ -2,6 +2,28 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.10 - 2026-03-20
+
+### Added
+
+- New operator manual covering setup, instances, project bindings, keys, integrations, chat, troubleshooting, and the command map.
+- Dedicated subgroup help for `instance`, `configure`, `auth`, and `integrate` command families.
+- Explicit project memory mode persistence in `.env.iranti` through `IRANTI_PROJECT_MODE`.
+- ADR `005` documenting isolated-per-project onboarding as the default model.
+
+### Changed
+
+- `iranti setup` now defaults to isolated per-project installs instead of shared runtime-first onboarding.
+- Setup now recommends `local`, `docker`, or `managed` PostgreSQL more clearly and can create a localhost target database automatically when `psql` is available.
+- `iranti install`, `iranti setup`, key-management flows, and project/configuration commands now print cleaner, more structured next steps and easier-to-scan output.
+- CLI help now better reflects the real command surface, including `--json`, `--mode`, and `--recursive` options where applicable.
+- Required secret prompts and yes/no prompts are more consistent and less noisy.
+
+### Fixed
+
+- `--bootstrap-db` setup bootstrap now works from repo `ts-node` usage as well as bundled installs.
+- Remaining garbled CLI separators and help/output readability issues were cleaned up.
+
 ## 0.2.9 - 2026-03-20
 
 ### Fixed

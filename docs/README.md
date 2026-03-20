@@ -2,6 +2,7 @@
 
 ## Getting Started
 
+- [Operator Manual](guides/manual.md) - Full install, binding, keys, integrations, and troubleshooting reference
 - [Quickstart Guide](guides/quickstart.md) - Get up and running in 5 minutes
 - [API Reference](API.md) - Complete API documentation
 - [Python Client](guides/python-client.md) - Using the Python SDK

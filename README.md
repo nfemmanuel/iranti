@@ -9,10 +9,10 @@
 
 Iranti gives agents persistent, identity-based memory. Facts written by one agent are retrievable by any other agent through exact entity+key lookup. Iranti also supports hybrid search (lexical + vector) when exact keys are unknown. Memory persists across sessions and survives context window limits.
 
-**Latest release:** [`v0.2.2`](https://github.com/nfemmanuel/iranti/releases/tag/v0.2.2)  
+**Latest release:** [`v0.2.10`](https://github.com/nfemmanuel/iranti/releases/tag/v0.2.10)  
 Published packages:
-- `iranti@0.2.2`
-- `@iranti/sdk@0.2.2`
+- `iranti@0.2.10`
+- `@iranti/sdk@0.2.10`
 
 ---
 
@@ -228,7 +228,24 @@ The next leverage is still product simplicity: setup, operations, and day-to-day
 
 **Requirements**: Node.js 18+, PostgreSQL, Python 3.8+
 
-Docker is optional. It is one local way to run PostgreSQL if you do not already have a database.
+Docker is optional. It is one local way to run PostgreSQL if you do not already have a database. Iranti still requires PostgreSQL; the setup improvement is smarter bootstrap and clearer guidance, not a second storage backend.
+
+```bash
+# 1. Install the CLI
+npm install -g iranti
+
+# 2. Run the guided setup
+iranti setup
+
+# 3. Start the instance
+iranti run --instance local
+```
+
+`iranti setup` now defaults to an isolated per-project runtime. Shared machine-level instances are still supported, but they are now an explicit choice rather than the default.
+
+If local PostgreSQL is available, setup can bootstrap a localhost database for you. If local PostgreSQL is not available, setup recommends Docker when Docker is installed, and otherwise steers you to managed PostgreSQL with concrete install guidance.
+
+Advanced/manual path:
 
 ```bash
 # 1. Clone and configure
@@ -290,6 +307,7 @@ Scopes use `resource:action` format (for example `kb:read`, `memory:write`, `met
 - Use TLS/reverse proxy for non-local deployments.
 
 Security quickstart: [`docs/guides/security-quickstart.md`](docs/guides/security-quickstart.md)
+Operator manual: [`docs/guides/manual.md`](docs/guides/manual.md)
 Claude Code guide: [`docs/guides/claude-code.md`](docs/guides/claude-code.md)
 Codex guide: [`docs/guides/codex.md`](docs/guides/codex.md)
 Release guide: [`docs/guides/releasing.md`](docs/guides/releasing.md)

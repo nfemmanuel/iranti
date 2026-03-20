@@ -116,16 +116,15 @@ iranti setup --config ./iranti.setup.json
 ```
 
 `iranti setup` is the preferred onboarding path for new users. It keeps prompting until the runtime, instance, provider credentials, Iranti client key, and optional project bindings are configured. It also lets you choose between:
-- a shared machine-level runtime
-- an isolated runtime folder for one project or sandbox
-- existing or managed PostgreSQL
-- optional Docker-hosted PostgreSQL when Docker is installed
+- an isolated per-project runtime folder (default and recommended)
+- a shared machine-level runtime when you explicitly want multiple projects to share one instance
+- local, managed, or Docker-hosted PostgreSQL
 
 The setup wizard also checks whether the default API port (`3001`) is already occupied and suggests the next free port instead of failing late.
-It now also prints a dependency preflight up front so you can see whether Docker, `psql`, `pg_isready`, or a local PostgreSQL listener on `localhost:5432` are available before going deeper into database setup.
+It now also prints a dependency preflight up front so you can see whether Docker, `psql`, `pg_isready`, or a local PostgreSQL listener on `localhost:5432` are available before going deeper into database setup. If local PostgreSQL is reachable, setup recommends that path. If local PostgreSQL is unavailable but Docker is installed, setup recommends Docker. If neither is present, setup stays on PostgreSQL and steers you toward a managed connection plus concrete install guidance for local tooling.
 
 Automation notes:
-- `--defaults` skips prompts and uses defaults plus environment/flag input. It still requires a real `DATABASE_URL`.
+- `--defaults` skips prompts and uses defaults plus environment/flag input. It now derives a localhost or Docker `DATABASE_URL` automatically when `--db-mode local` or `--db-mode docker` is selected. A real `--db-url` is still required for `--db-mode managed`.
 - `--config` accepts a JSON setup plan for repeatable bootstrap in CI or managed installs.
 - `--bootstrap-db` runs migrations and seeding during automated setup when the target database is reachable and suitable for Prisma bootstrap.
 - Example config: [`iranti.setup.example.json`](./iranti.setup.example.json)
@@ -141,6 +140,8 @@ iranti install --scope user
 iranti instance create local --port 3001 --db-url "postgresql://postgres:yourpassword@localhost:5432/iranti_local" --provider mock
 iranti instance show local
 ```
+
+That path is still supported, but it is the lower-level plumbing path now. New users should prefer `iranti setup`, which defaults to isolated per-project installs and writes `IRANTI_PROJECT_MODE=isolated` into project bindings.
 
 Finish setup without hand-editing the env file:
 
@@ -184,7 +185,13 @@ cd /path/to/chatbot-project
 iranti project init . --instance local --agent-id chatbot_main
 ```
 
-This writes `.env.iranti` with `IRANTI_URL`, `IRANTI_API_KEY`, and `IRANTI_AGENT_ID`.
+This writes `.env.iranti` with `IRANTI_URL`, `IRANTI_API_KEY`, `IRANTI_AGENT_ID`, and `IRANTI_PROJECT_MODE`.
+
+Default manual binding mode is `isolated`. If you intentionally want a project to share memory with another project on the same instance, make that explicit:
+
+```bash
+iranti project init . --instance shared_team --agent-id chatbot_main --mode shared
+```
 
 To rotate a bound project key later:
 
@@ -196,6 +203,7 @@ To change the project agent identity or rebind to another instance:
 
 ```bash
 iranti configure project . --instance local --agent-id chatbot_worker
+iranti configure project . --mode shared
 iranti configure project . --interactive
 ```
 

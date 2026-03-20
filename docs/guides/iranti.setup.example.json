@@ -1,9 +1,10 @@
 {
-  "mode": "shared",
+  "mode": "isolated",
   "scope": "user",
-  "root": "C:/Users/YOUR_USER/.iranti",
+  "root": "C:/Users/YOUR_USER/Documents/Projects/my-app/.iranti-runtime",
   "instanceName": "local",
   "port": 3001,
+  "databaseMode": "local",
   "databaseUrl": "postgresql://postgres:YOUR_PASSWORD@localhost:5432/iranti_local",
   "provider": "openai",
   "bootstrapDatabase": true,
@@ -16,6 +17,7 @@
       "path": "C:/Users/YOUR_USER/Documents/Projects/my-app",
       "agentId": "my_app_main",
       "memoryEntity": "user/main",
+      "projectMode": "isolated",
       "claudeCode": true
     }
   ],
