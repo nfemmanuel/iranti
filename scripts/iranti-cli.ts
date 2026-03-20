@@ -903,7 +903,7 @@ function isSupportedProvider(provider: string | undefined): boolean {
 async function promptYesNo(session: PromptSession, prompt: string, defaultValue: boolean): Promise<boolean> {
     const defaultToken = defaultValue ? 'Y/n' : 'y/N';
     while (true) {
-        const answer = (await session.line(`${prompt} (${defaultToken})`, '') ?? '').trim().toLowerCase();
+        const answer = (await session.line(`${prompt} (${defaultToken})`) ?? '').trim().toLowerCase();
         if (!answer) return defaultValue;
         if (['y', 'yes'].includes(answer)) return true;
         if (['n', 'no'].includes(answer)) return false;
@@ -923,7 +923,7 @@ async function promptRequiredSecret(session: PromptSession, prompt: string, curr
     while (true) {
         const value = (await session.secretRequired(prompt, currentValue) ?? '').trim();
         if (value.length > 0 && !detectPlaceholder(value)) return value;
-        console.log(`${warnLabel()} A real secret is required.`);
+        console.log(`${warnLabel()} ${prompt} is required.`);
     }
 }
 
@@ -1726,8 +1726,12 @@ function collectDoctorRemediations(
                 add('Run `iranti setup`, or rerun `iranti doctor` with `--instance <name>` or `--env <file>`.');
             }
         }
-        if (check.name === 'database configuration' && check.status === 'fail') {
-            add(`Set a real DATABASE_URL in ${envFile ?? 'the target env file'}, or rerun \`iranti setup\` to configure the database again.`);
+        if ((check.name === 'database configuration' || check.name === 'bound instance database configuration') && check.status === 'fail') {
+            if (check.name === 'bound instance database configuration') {
+                add('Fix the linked instance env, or rerun `iranti setup` / `iranti configure instance` for the bound instance.');
+            } else {
+                add(`Set a real DATABASE_URL in ${envFile ?? 'the target env file'}, or rerun \`iranti setup\` to configure the database again.`);
+            }
         }
         if (check.name === 'project binding url' && check.status === 'fail') {
             add('Run `iranti configure project` to refresh the project binding, or set IRANTI_URL in `.env.iranti`.');
@@ -1735,15 +1739,18 @@ function collectDoctorRemediations(
         if (check.name === 'project api key' && check.status === 'fail') {
             add('Run `iranti configure project` or set IRANTI_API_KEY in `.env.iranti`.');
         }
+        if (check.name === 'bound instance env' && check.status !== 'pass') {
+            add('Run `iranti configure project` to refresh the project binding, or set IRANTI_INSTANCE_ENV in `.env.iranti` so doctor can inspect the bound local instance.');
+        }
         if (check.name === 'api key' && check.status !== 'pass') {
             add(envSource === 'project-binding'
                 ? 'Set IRANTI_API_KEY in the project binding, or rerun `iranti configure project`.'
                 : 'Create or rotate an Iranti key with `iranti auth create-key`, then store it in the target env.');
         }
-        if (check.name === 'provider credentials' && check.status === 'fail') {
+        if ((check.name === 'provider credentials' || check.name === 'bound instance provider credentials') && check.status === 'fail') {
             add('Store or refresh the upstream provider key with `iranti add api-key` or `iranti update api-key`.');
         }
-        if (check.name === 'vector backend' && check.status === 'fail') {
+        if ((check.name === 'vector backend' || check.name === 'bound instance vector backend') && check.status === 'fail') {
             add('Check the vector backend env vars, or switch back to `IRANTI_VECTOR_BACKEND=pgvector` if the external backend is not ready.');
         }
     }
@@ -2702,7 +2709,7 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
     await withPromptSession(async (prompt) => {
         let setupMode: 'shared' | 'isolated' = 'isolated';
         while (true) {
-            const chosen = (await prompt.line('How should Iranti install the runtime: isolated per-project or shared machine runtime', 'isolated') ?? 'isolated').trim().toLowerCase();
+            const chosen = (await prompt.line('Runtime mode (isolated or shared)', 'isolated') ?? 'isolated').trim().toLowerCase();
             if (chosen === 'shared' || chosen === 'isolated') {
                 setupMode = chosen;
                 break;
@@ -2715,13 +2722,13 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
         if (setupMode === 'isolated') {
             finalRoot = path.resolve(await promptNonEmpty(
                 prompt,
-                'Where should the isolated runtime live',
+                'Isolated runtime path',
                 explicitRoot ?? path.join(process.cwd(), '.iranti-runtime')
             ));
             finalScope = 'user';
         } else {
             while (true) {
-                const chosenScope = (await prompt.line('Install scope: user or system', explicitScope ?? 'user') ?? 'user').trim().toLowerCase();
+                const chosenScope = (await prompt.line('Install scope (user or system)', explicitScope ?? 'user') ?? 'user').trim().toLowerCase();
                 if (chosenScope === 'user' || chosenScope === 'system') {
                     finalScope = chosenScope;
                     break;
@@ -2735,7 +2742,7 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
         console.log(`${okLabel()} Runtime ready at ${finalRoot}`);
 
         const instanceName = sanitizeIdentifier(
-            await promptNonEmpty(prompt, 'What should this instance be called', setupMode === 'isolated' ? sanitizeIdentifier(path.basename(process.cwd()), 'local') : 'local'),
+            await promptNonEmpty(prompt, 'Instance name', setupMode === 'isolated' ? sanitizeIdentifier(path.basename(process.cwd()), 'local') : 'local'),
             'local'
         );
 
@@ -2750,7 +2757,7 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
         }
 
         const existingPort = Number.parseInt(existingInstance?.env.IRANTI_PORT ?? '3001', 10);
-        const port = await chooseAvailablePort(prompt, 'Which port should the Iranti API use', existingPort, Boolean(existingInstance));
+        const port = await chooseAvailablePort(prompt, 'API port', existingPort, Boolean(existingInstance));
 
         const dockerAvailable = hasDockerInstalled();
         const psqlAvailable = hasCommandInstalled('psql');
@@ -2760,7 +2767,7 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
         while (true) {
             const defaultMode = recommendedDatabaseMode;
             const dbMode = (await prompt.line(
-                'How should we set up the database: local, managed, or docker',
+                'Database mode (local, managed, or docker)',
                 defaultMode
             ) ?? defaultMode).trim().toLowerCase();
 
@@ -2772,7 +2779,7 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
                 while (true) {
                     dbUrl = await promptNonEmpty(
                         prompt,
-                        'Database connection string (DATABASE_URL)',
+                        'DATABASE_URL',
                         defaultDatabaseUrl
                     );
                     if (!detectPlaceholder(dbUrl)) break;
@@ -2795,9 +2802,9 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
                     console.log(`${warnLabel()} Docker is not installed or not on PATH. Choose local or managed instead.`);
                     continue;
                 }
-                const dbHostPort = await chooseAvailablePort(prompt, 'Which host port should Docker PostgreSQL use', 5432, false);
-                const dbName = sanitizeIdentifier(await promptNonEmpty(prompt, 'What should the Docker PostgreSQL database be called', `iranti_${instanceName}`), `iranti_${instanceName}`);
-                const dbPassword = await promptRequiredSecret(prompt, 'Set a password for Docker PostgreSQL');
+                const dbHostPort = await chooseAvailablePort(prompt, 'Docker PostgreSQL host port', 5432, false);
+                const dbName = sanitizeIdentifier(await promptNonEmpty(prompt, 'Docker PostgreSQL database name', `iranti_${instanceName}`), `iranti_${instanceName}`);
+                const dbPassword = await promptRequiredSecret(prompt, 'Docker PostgreSQL password');
                 const containerName = sanitizeIdentifier(
                     await promptNonEmpty(prompt, 'Docker container name', `iranti_${instanceName}_db`),
                     `iranti_${instanceName}_db`
@@ -2826,7 +2833,7 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
         let provider = normalizeProvider(existingInstance?.env.LLM_PROVIDER ?? 'openai') ?? 'openai';
         while (true) {
             listProviderChoices(provider, existingInstance?.env ?? {});
-            const chosen = normalizeProvider(await promptNonEmpty(prompt, 'Which LLM provider should Iranti use by default', provider));
+            const chosen = normalizeProvider(await promptNonEmpty(prompt, 'Default LLM provider', provider));
             if (chosen && isSupportedProvider(chosen)) {
                 provider = chosen;
                 break;
@@ -2851,7 +2858,7 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
             let extraProvider = provider;
             while (true) {
                 listProviderChoices(provider, { ...seedEnv, ...providerKeys });
-                const chosen = normalizeProvider(await promptNonEmpty(prompt, 'Which extra provider would you like to add', 'claude'));
+                const chosen = normalizeProvider(await promptNonEmpty(prompt, 'Additional provider', 'claude'));
                 if (!chosen) {
                     console.log(`${warnLabel()} Provider is required.`);
                     continue;
@@ -2889,12 +2896,12 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
         const defaultProjectPath = process.cwd();
         let shouldBindProject = await promptYesNo(prompt, 'Bind a project folder to this instance now?', true);
         while (shouldBindProject) {
-            const projectPath = path.resolve(await promptNonEmpty(prompt, 'Which project folder should we bind', projects.length === 0 ? defaultProjectPath : process.cwd()));
+            const projectPath = path.resolve(await promptNonEmpty(prompt, 'Project path to bind', projects.length === 0 ? defaultProjectPath : process.cwd()));
             const agentId = sanitizeIdentifier(
-                await promptNonEmpty(prompt, 'What agent id should this project use', projectAgentDefault(projectPath)),
+                await promptNonEmpty(prompt, 'Project agent ID', projectAgentDefault(projectPath)),
                 'project_main'
             );
-            const memoryEntity = await promptNonEmpty(prompt, 'What memory entity should this project use', 'user/main');
+            const memoryEntity = await promptNonEmpty(prompt, 'Project memory entity', 'user/main');
             const claudeCode = await promptYesNo(prompt, 'Create Claude Code project files here now?', true);
             projects.push({
                 path: projectPath,
@@ -2971,6 +2978,73 @@ async function doctorCommand(args: ParsedArgs): Promise<void> {
 
     const checks: DoctorCheck[] = [];
     const version = getPackageVersion();
+    const pushEnvironmentChecks = async (env: Record<string, string>, prefix = ''): Promise<void> => {
+        const databaseUrl = env.DATABASE_URL;
+        checks.push(detectPlaceholder(databaseUrl)
+            ? {
+                name: `${prefix}database configuration`,
+                status: 'fail',
+                detail: 'DATABASE_URL is missing or still uses a placeholder value.',
+            }
+            : {
+                name: `${prefix}database configuration`,
+                status: 'pass',
+                detail: 'DATABASE_URL is present and non-placeholder.',
+            });
+
+        const provider = env.LLM_PROVIDER ?? 'mock';
+        checks.push({
+            name: `${prefix}llm provider`,
+            status: 'pass',
+            detail: `LLM_PROVIDER=${provider}`,
+        });
+
+        const providerKeyCheck = detectProviderKey(provider, env);
+        checks.push({
+            ...providerKeyCheck,
+            name: `${prefix}${providerKeyCheck.name}`,
+        });
+
+        try {
+            const backendName = resolveVectorBackendName({
+                vectorBackend: env.IRANTI_VECTOR_BACKEND,
+                qdrantUrl: env.IRANTI_QDRANT_URL,
+                qdrantApiKey: env.IRANTI_QDRANT_API_KEY,
+                qdrantCollection: env.IRANTI_QDRANT_COLLECTION,
+                chromaUrl: env.IRANTI_CHROMA_URL,
+                chromaCollection: env.IRANTI_CHROMA_COLLECTION,
+                chromaTenant: env.IRANTI_CHROMA_TENANT,
+                chromaDatabase: env.IRANTI_CHROMA_DATABASE,
+                chromaToken: env.IRANTI_CHROMA_TOKEN,
+            });
+            const backend = createVectorBackend({
+                vectorBackend: backendName,
+                qdrantUrl: env.IRANTI_QDRANT_URL,
+                qdrantApiKey: env.IRANTI_QDRANT_API_KEY,
+                qdrantCollection: env.IRANTI_QDRANT_COLLECTION,
+                chromaUrl: env.IRANTI_CHROMA_URL,
+                chromaCollection: env.IRANTI_CHROMA_COLLECTION,
+                chromaTenant: env.IRANTI_CHROMA_TENANT,
+                chromaDatabase: env.IRANTI_CHROMA_DATABASE,
+                chromaToken: env.IRANTI_CHROMA_TOKEN,
+            });
+            const reachable = await backend.ping();
+            const url = vectorBackendUrl(backendName, env);
+            checks.push({
+                name: `${prefix}vector backend`,
+                status: reachable ? 'pass' : 'warn',
+                detail: url
+                    ? `${backendName} (${url}) is ${reachable ? 'reachable' : 'unreachable'}`
+                    : `${backendName} is ${reachable ? 'reachable' : 'unreachable'}`,
+            });
+        } catch (error) {
+            checks.push({
+                name: `${prefix}vector backend`,
+                status: 'fail',
+                detail: error instanceof Error ? error.message : String(error),
+            });
+        }
+    };
 
     checks.push({
         name: 'node version',
@@ -3001,26 +3075,16 @@ async function doctorCommand(args: ParsedArgs): Promise<void> {
         });
     } else {
         const env = await readEnvFile(envFile);
+        const treatAsProjectBinding = envSource === 'project-binding'
+            || path.basename(envFile).toLowerCase() === '.env.iranti'
+            || (Boolean(env.IRANTI_URL?.trim()) && detectPlaceholder(env.DATABASE_URL));
         checks.push({
             name: 'environment file',
             status: 'pass',
             detail: `${envSource} env loaded from ${envFile}`,
         });
 
-        const databaseUrl = env.DATABASE_URL;
-        checks.push(detectPlaceholder(databaseUrl)
-            ? {
-                name: 'database configuration',
-                status: 'fail',
-                detail: 'DATABASE_URL is missing or still uses a placeholder value.',
-            }
-            : {
-                name: 'database configuration',
-                status: 'pass',
-                detail: 'DATABASE_URL is present and non-placeholder.',
-            });
-
-        if (envSource === 'project-binding') {
+        if (treatAsProjectBinding) {
             checks.push(detectPlaceholder(env.IRANTI_URL)
                 ? {
                     name: 'project binding url',
@@ -3034,7 +3098,7 @@ async function doctorCommand(args: ParsedArgs): Promise<void> {
                 });
         }
 
-        if (envSource === 'project-binding') {
+        if (treatAsProjectBinding) {
             checks.push(detectPlaceholder(env.IRANTI_API_KEY)
                 ? {
                     name: 'project api key',
@@ -3046,7 +3110,30 @@ async function doctorCommand(args: ParsedArgs): Promise<void> {
                     status: 'pass',
                     detail: 'IRANTI_API_KEY is present in .env.iranti.',
                 });
+            const linkedInstanceEnv = env.IRANTI_INSTANCE_ENV?.trim();
+            if (!linkedInstanceEnv) {
+                checks.push({
+                    name: 'bound instance env',
+                    status: 'warn',
+                    detail: 'IRANTI_INSTANCE_ENV is not set in .env.iranti. Skipping database and provider checks for the bound instance.',
+                });
+            } else if (!fs.existsSync(linkedInstanceEnv)) {
+                checks.push({
+                    name: 'bound instance env',
+                    status: 'warn',
+                    detail: `Linked instance env not found: ${linkedInstanceEnv}. Skipping database and provider checks for the bound instance.`,
+                });
+            } else {
+                checks.push({
+                    name: 'bound instance env',
+                    status: 'pass',
+                    detail: `Using ${linkedInstanceEnv} for bound instance diagnostics.`,
+                });
+                const linkedEnv = await readEnvFile(linkedInstanceEnv);
+                await pushEnvironmentChecks(linkedEnv, 'bound instance ');
+            }
         } else {
+            await pushEnvironmentChecks(env);
             checks.push(detectPlaceholder(env.IRANTI_API_KEY)
                 ? {
                     name: 'api key',
@@ -3058,54 +3145,6 @@ async function doctorCommand(args: ParsedArgs): Promise<void> {
                     status: 'pass',
                     detail: 'IRANTI_API_KEY is present.',
                 });
-        }
-
-        const provider = env.LLM_PROVIDER ?? 'mock';
-        checks.push({
-            name: 'llm provider',
-            status: 'pass',
-            detail: `LLM_PROVIDER=${provider}`,
-        });
-        checks.push(detectProviderKey(provider, env));
-
-        try {
-            const backendName = resolveVectorBackendName({
-                vectorBackend: env.IRANTI_VECTOR_BACKEND,
-                qdrantUrl: env.IRANTI_QDRANT_URL,
-                qdrantApiKey: env.IRANTI_QDRANT_API_KEY,
-                qdrantCollection: env.IRANTI_QDRANT_COLLECTION,
-                chromaUrl: env.IRANTI_CHROMA_URL,
-                chromaCollection: env.IRANTI_CHROMA_COLLECTION,
-                chromaTenant: env.IRANTI_CHROMA_TENANT,
-                chromaDatabase: env.IRANTI_CHROMA_DATABASE,
-                chromaToken: env.IRANTI_CHROMA_TOKEN,
-            });
-            const backend = createVectorBackend({
-                vectorBackend: backendName,
-                qdrantUrl: env.IRANTI_QDRANT_URL,
-                qdrantApiKey: env.IRANTI_QDRANT_API_KEY,
-                qdrantCollection: env.IRANTI_QDRANT_COLLECTION,
-                chromaUrl: env.IRANTI_CHROMA_URL,
-                chromaCollection: env.IRANTI_CHROMA_COLLECTION,
-                chromaTenant: env.IRANTI_CHROMA_TENANT,
-                chromaDatabase: env.IRANTI_CHROMA_DATABASE,
-                chromaToken: env.IRANTI_CHROMA_TOKEN,
-            });
-            const reachable = await backend.ping();
-            const url = vectorBackendUrl(backendName, env);
-            checks.push({
-                name: 'vector backend',
-                status: reachable ? 'pass' : 'warn',
-                detail: url
-                    ? `${backendName} (${url}) is ${reachable ? 'reachable' : 'unreachable'}`
-                    : `${backendName} is ${reachable ? 'reachable' : 'unreachable'}`,
-            });
-        } catch (error) {
-            checks.push({
-                name: 'vector backend',
-                status: 'fail',
-                detail: error instanceof Error ? error.message : String(error),
-            });
         }
     }
 
@@ -3602,13 +3641,13 @@ async function configureInstanceCommand(args: ParsedArgs): Promise<void> {
 
     if (hasFlag(args, 'interactive')) {
         await withPromptSession(async (prompt) => {
-            portRaw = await prompt.line('Which API port should this instance use', portRaw ?? env.IRANTI_PORT);
-            dbUrl = await prompt.line('Database connection string (DATABASE_URL)', dbUrl ?? env.DATABASE_URL);
-            providerInput = await prompt.line('Which LLM provider should this instance use', providerInput ?? env.LLM_PROVIDER ?? 'mock');
+            portRaw = await prompt.line('API port', portRaw ?? env.IRANTI_PORT);
+            dbUrl = await prompt.line('DATABASE_URL', dbUrl ?? env.DATABASE_URL);
+            providerInput = await prompt.line('LLM provider', providerInput ?? env.LLM_PROVIDER ?? 'mock');
             const interactiveProvider = normalizeProvider(providerInput ?? env.LLM_PROVIDER ?? 'mock');
             const interactiveProviderEnvKey = providerKeyEnv(interactiveProvider);
             if (interactiveProvider && interactiveProviderEnvKey) {
-                providerKey = await prompt.secret(`Enter the ${providerDisplayName(interactiveProvider)} API key`, providerKey ?? env[interactiveProviderEnvKey]);
+                providerKey = await prompt.secret(`${providerDisplayName(interactiveProvider)} API key`, providerKey ?? env[interactiveProviderEnvKey]);
             }
             apiKey = await prompt.secret('Iranti API key', apiKey ?? env.IRANTI_API_KEY);
         });
@@ -3695,12 +3734,12 @@ async function configureProjectCommand(args: ParsedArgs): Promise<void> {
 
     if (hasFlag(args, 'interactive')) {
         await withPromptSession(async (prompt) => {
-            instanceName = await prompt.line('Which instance should this project use', instanceName);
-            explicitUrl = await prompt.line('What Iranti URL should this project talk to', explicitUrl ?? existing.IRANTI_URL);
-            explicitApiKey = await prompt.secret('What API key should this project use', explicitApiKey ?? existing.IRANTI_API_KEY);
-            explicitAgentId = await prompt.line('What agent id should this project use', explicitAgentId ?? existing.IRANTI_AGENT_ID ?? projectAgentDefault(projectPath));
-            explicitMemoryEntity = await prompt.line('What memory entity should this project use', explicitMemoryEntity ?? existing.IRANTI_MEMORY_ENTITY ?? 'user/main');
-            explicitProjectMode = await prompt.line('Should this project be isolated or shared', explicitProjectMode ?? existing.IRANTI_PROJECT_MODE ?? inferProjectMode(projectPath, existing.IRANTI_INSTANCE_ENV));
+            instanceName = await prompt.line('Instance name', instanceName);
+            explicitUrl = await prompt.line('Iranti URL', explicitUrl ?? existing.IRANTI_URL);
+            explicitApiKey = await prompt.secret('Project API key', explicitApiKey ?? existing.IRANTI_API_KEY);
+            explicitAgentId = await prompt.line('Project agent ID', explicitAgentId ?? existing.IRANTI_AGENT_ID ?? projectAgentDefault(projectPath));
+            explicitMemoryEntity = await prompt.line('Project memory entity', explicitMemoryEntity ?? existing.IRANTI_MEMORY_ENTITY ?? 'user/main');
+            explicitProjectMode = await prompt.line('Project mode (isolated or shared)', explicitProjectMode ?? existing.IRANTI_PROJECT_MODE ?? inferProjectMode(projectPath, existing.IRANTI_INSTANCE_ENV));
         });
     }
 
@@ -4156,20 +4195,22 @@ function printHelp(): void {
     const printRows = (title: string, entries: Array<[string, string]>) => {
         console.log(sectionTitle(title));
         for (const [command, description] of entries) {
-            console.log(`  ${commandText(command.padEnd(72))} ${description}`);
+            console.log(`  ${commandText(command)}`);
+            console.log(`    ${description}`);
         }
         console.log('');
     };
 
     console.log(sectionTitle('Iranti CLI'));
     console.log('Memory infrastructure for multi-agent systems.');
+    console.log('Most instance-aware commands also accept --root <path> in addition to --scope.');
     console.log('');
 
     printRows('Start Here', rows);
 
     printRows('Setup And Runtime', [
         ['iranti install [--scope user|system] [--root <path>]', 'Initialize the machine-level runtime folders.'],
-        ['iranti setup [--scope user|system] [--root <path>] [--mode isolated|shared] [--config <file> | --defaults] [--db-mode local|managed|docker] [--db-url <url>] [--bootstrap-db]', 'Guided setup for runtime, database, instance, keys, and project binding.'],
+        ['iranti setup [--scope user|system] [--root <path>] [--mode isolated|shared] [--instance <name>] [--port <n>] [--config <file> | --defaults] [--db-mode local|managed|docker] [--db-url <url>] [--provider <name>] [--api-key <token>] [--projects <path1,path2>] [--claude-code] [--bootstrap-db]', 'Guided setup for runtime, database, instance, keys, and project binding. Run iranti setup --help for the non-interactive flow.'],
         ['iranti instance create <name> [--port 3001] [--db-url <url>] [--api-key <token>] [--provider <name>] [--provider-key <token>] [--scope user|system]', 'Create an instance directly if you want low-level control.'],
         ['iranti instance list [--scope user|system]', 'List configured instances.'],
         ['iranti instance show <name> [--scope user|system]', 'Show one instance env, port, and database target.'],
@@ -4177,7 +4218,7 @@ function printHelp(): void {
     ]);
 
     printRows('Configuration', [
-        ['iranti configure instance <name> [--interactive] [--db-url <url>] [--port <n>] [--api-key <token>] [--provider <name>] [--provider-key <token>] [--clear-provider-key]', 'Update an instance without editing env files manually.'],
+        ['iranti configure instance <name> [--interactive] [--db-url <url>] [--port <n>] [--api-key <token>] [--provider <name>] [--provider-key <token>] [--clear-provider-key] [--json]', 'Update an instance without editing env files manually.'],
         ['iranti project init [path] --instance <name> [--api-key <token>] [--agent-id <id>] [--mode isolated|shared] [--force]', 'Create a new .env.iranti binding for one project.'],
         ['iranti configure project [path] [--interactive] [--instance <name>] [--url <http://host:port>] [--api-key <token>] [--agent-id <id>] [--memory-entity <entity>] [--mode isolated|shared] [--json]', 'Refresh or retarget an existing project binding.'],
     ]);
@@ -4228,24 +4269,34 @@ function printHelp(): void {
     console.log(`    ${commandText('iranti add api-key openai --instance local --set-default')}`);
 }
 
+function printSetupHelp(): void {
+    console.log(sectionTitle('Setup Command'));
+    console.log(`  ${commandText('iranti setup [--scope user|system] [--root <path>] [--mode isolated|shared] [--instance <name>] [--port <n>] [--config <file> | --defaults] [--db-mode local|managed|docker] [--db-url <url>] [--provider <name>] [--api-key <token>] [--projects <path1,path2>] [--claude-code] [--bootstrap-db]')}`);
+    console.log('');
+    console.log('  Interactive mode walks through runtime, database, provider keys, API keys, and project binding.');
+    console.log('  Use `--defaults` to build a plan from flags and environment variables without prompts.');
+    console.log('  Use `--config <file>` to execute a saved setup plan.');
+    console.log('  `--projects` and `--claude-code` apply to the non-interactive defaults flow.');
+}
+
 function printInstanceHelp(): void {
     console.log(sectionTitle('Instance Commands'));
-    console.log(`  ${commandText('iranti instance create <name> [--port 3001] [--db-url <url>] [--api-key <token>] [--provider <name>] [--provider-key <token>] [--scope user|system]')}`);
-    console.log(`  ${commandText('iranti instance list [--scope user|system]')}`);
-    console.log(`  ${commandText('iranti instance show <name> [--scope user|system]')}`);
+    console.log(`  ${commandText('iranti instance create <name> [--port 3001] [--db-url <url>] [--api-key <token>] [--provider <name>] [--provider-key <token>] [--scope user|system] [--root <path>]')}`);
+    console.log(`  ${commandText('iranti instance list [--scope user|system] [--root <path>]')}`);
+    console.log(`  ${commandText('iranti instance show <name> [--scope user|system] [--root <path>]')}`);
 }
 
 function printConfigureHelp(): void {
     console.log(sectionTitle('Configure Commands'));
-    console.log(`  ${commandText('iranti configure instance <name> [--interactive] [--db-url <url>] [--port <n>] [--api-key <token>] [--provider <name>] [--provider-key <token>] [--clear-provider-key]')}`);
-    console.log(`  ${commandText('iranti configure project [path] [--interactive] [--instance <name>] [--url <http://host:port>] [--api-key <token>] [--agent-id <id>] [--memory-entity <entity>] [--mode isolated|shared] [--json]')}`);
+    console.log(`  ${commandText('iranti configure instance <name> [--interactive] [--db-url <url>] [--port <n>] [--api-key <token>] [--provider <name>] [--provider-key <token>] [--clear-provider-key] [--scope user|system] [--root <path>] [--json]')}`);
+    console.log(`  ${commandText('iranti configure project [path] [--interactive] [--instance <name>] [--url <http://host:port>] [--api-key <token>] [--agent-id <id>] [--memory-entity <entity>] [--mode isolated|shared] [--scope user|system] [--root <path>] [--json]')}`);
 }
 
 function printAuthHelp(): void {
     console.log(sectionTitle('Auth Commands'));
-    console.log(`  ${commandText('iranti auth create-key --instance <name> --key-id <id> --owner <owner> [--scopes ...] [--description <text>] [--write-instance] [--project <path>] [--agent-id <id>] [--json]')}`);
-    console.log(`  ${commandText('iranti auth list-keys --instance <name> [--json]')}`);
-    console.log(`  ${commandText('iranti auth revoke-key --instance <name> --key-id <id> [--json]')}`);
+    console.log(`  ${commandText('iranti auth create-key --instance <name> --key-id <id> --owner <owner> [--scopes ...] [--description <text>] [--write-instance] [--project <path>] [--agent-id <id>] [--scope user|system] [--root <path>] [--json]')}`);
+    console.log(`  ${commandText('iranti auth list-keys --instance <name> [--scope user|system] [--root <path>] [--json]')}`);
+    console.log(`  ${commandText('iranti auth revoke-key --instance <name> --key-id <id> [--scope user|system] [--root <path>] [--json]')}`);
 }
 
 function printIntegrateHelp(): void {
@@ -4253,6 +4304,16 @@ function printIntegrateHelp(): void {
     console.log(`  ${commandText('iranti integrate claude [path] [--project-env <path>] [--force]')}`);
     console.log(`  ${commandText('iranti integrate claude --scan <dir> [--recursive] [--force]')}`);
     console.log(`  ${commandText('iranti integrate codex [--name iranti] [--agent codex_code] [--source Codex] [--provider openai] [--project-env <path>] [--local-script]')}`);
+}
+
+function printProviderKeyHelp(): void {
+    console.log(sectionTitle('Provider Key Commands'));
+    console.log(`  ${commandText('iranti list api-keys [--instance <name>] [--project <path>] [--json]')}`);
+    console.log(`  ${commandText('iranti add api-key [provider] [--instance <name>] [--project <path>] [--key <token>] [--set-default] [--json]')}`);
+    console.log(`  ${commandText('iranti update api-key [provider] [--instance <name>] [--project <path>] [--key <token>] [--set-default] [--json]')}`);
+    console.log(`  ${commandText('iranti remove api-key [provider] [--instance <name>] [--project <path>] [--json]')}`);
+    console.log('');
+    console.log('  Target either an instance env or a project binding. If neither is supplied, the CLI will try the current project first.');
 }
 
 async function main(): Promise<void> {
@@ -4268,6 +4329,10 @@ async function main(): Promise<void> {
     }
 
     if (args.command === 'setup') {
+        if (hasFlag(args, 'help')) {
+            printSetupHelp();
+            return;
+        }
         await setupCommand(args);
         return;
     }
@@ -4334,21 +4399,37 @@ async function main(): Promise<void> {
     }
 
     if (args.command === 'list' && args.subcommand === 'api-keys') {
+        if (hasFlag(args, 'help')) {
+            printProviderKeyHelp();
+            return;
+        }
         await listProviderKeysCommand(args);
         return;
     }
 
     if (args.command === 'add' && args.subcommand === 'api-key') {
+        if (hasFlag(args, 'help')) {
+            printProviderKeyHelp();
+            return;
+        }
         await upsertProviderKeyCommand(args, 'add');
         return;
     }
 
     if (args.command === 'update' && args.subcommand === 'api-key') {
+        if (hasFlag(args, 'help')) {
+            printProviderKeyHelp();
+            return;
+        }
         await upsertProviderKeyCommand(args, 'update');
         return;
     }
 
     if (args.command === 'remove' && args.subcommand === 'api-key') {
+        if (hasFlag(args, 'help')) {
+            printProviderKeyHelp();
+            return;
+        }
         await removeProviderKeyCommand(args);
         return;
     }

@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.11 - 2026-03-20
+
+### Fixed
+
+- `iranti doctor` now treats `.env.iranti` as a project binding and follows `IRANTI_INSTANCE_ENV` to inspect the bound instance, instead of incorrectly requiring `DATABASE_URL` inside the project binding file.
+- Project-bound doctor output now reports bound-instance database, provider, and vector-backend diagnostics directly, which fixes false failures for correctly configured bound repos like `iranti-site`.
+
 ## 0.2.10 - 2026-03-20
 
 ### Added
