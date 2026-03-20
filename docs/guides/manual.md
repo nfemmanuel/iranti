@@ -89,6 +89,18 @@ iranti status
 Use `doctor` when something feels wrong.
 Use `status` when you want to see what this machine and current directory are bound to.
 
+When a command fails and you need more detail:
+
+```bash
+iranti doctor --debug
+iranti run --instance local --debug
+iranti upgrade --verbose
+```
+
+Debugging flags:
+- `--debug` prints extra CLI diagnostics, structured error details, and stack traces
+- `--verbose` prints subprocess trace output
+
 ---
 
 ## Project Binding

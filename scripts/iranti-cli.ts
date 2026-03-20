@@ -26,6 +26,8 @@ type ParsedArgs = {
     flags: Map<string, string | boolean>;
 };
 
+type CliErrorDetails = Record<string, string | number | boolean | null | undefined>;
+
 type InstallMeta = {
     version: string;
     scope: Scope;
@@ -112,6 +114,20 @@ type AttendantCliTarget = {
     iranti: Iranti;
 };
 
+class CliError extends Error {
+    readonly code: string;
+    readonly hints: string[];
+    readonly details?: CliErrorDetails;
+
+    constructor(code: string, message: string, hints: string[] = [], details?: CliErrorDetails) {
+        super(message);
+        this.name = 'CliError';
+        this.code = code;
+        this.hints = hints;
+        this.details = details;
+    }
+}
+
 const PROVIDER_ENV_KEYS: Record<string, string | null> = {
     mock: null,
     ollama: null,
@@ -136,6 +152,9 @@ const ANSI = {
     cyan: '\x1b[36m',
     gray: '\x1b[90m',
 } as const;
+
+let CLI_DEBUG = process.argv.includes('--debug') || process.env.IRANTI_DEBUG === '1';
+let CLI_VERBOSE = CLI_DEBUG || process.argv.includes('--verbose') || process.env.IRANTI_VERBOSE === '1';
 
 function useColor(): boolean {
     return Boolean(process.stdout.isTTY && !process.env.NO_COLOR);
@@ -181,6 +200,27 @@ function printNextSteps(steps: string[]): void {
     for (const [index, step] of steps.entries()) {
         console.log(`  ${index + 1}. ${step}`);
     }
+}
+
+function setCliDebugFlags(args: ParsedArgs): void {
+    CLI_DEBUG = CLI_DEBUG || hasFlag(args, 'debug');
+    CLI_VERBOSE = CLI_VERBOSE || CLI_DEBUG || hasFlag(args, 'verbose');
+}
+
+function debugLog(message: string, details?: CliErrorDetails): void {
+    if (!CLI_DEBUG) return;
+    const suffix = details && Object.keys(details).length > 0 ? ` ${JSON.stringify(details)}` : '';
+    console.log(`${paint('[DEBUG]', 'gray')} ${message}${suffix}`);
+}
+
+function verboseLog(message: string, details?: CliErrorDetails): void {
+    if (!CLI_VERBOSE) return;
+    const suffix = details && Object.keys(details).length > 0 ? ` ${JSON.stringify(details)}` : '';
+    console.log(`${paint('[TRACE]', 'gray')} ${message}${suffix}`);
+}
+
+function cliError(code: string, message: string, hints: string[] = [], details?: CliErrorDetails): CliError {
+    return new CliError(code, message, hints, details);
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -305,6 +345,7 @@ function formatSetupBootstrapFailure(error: unknown): Error {
 
 async function handoffToScript(scriptName: string, rawArgs: string[]): Promise<void> {
     const builtPath = builtScriptPath(scriptName);
+    debugLog('Handing off to companion script.', { scriptName, builtPath, rawArgs: rawArgs.join(' ') });
     if (fs.existsSync(builtPath)) {
         await new Promise<void>((resolve, reject) => {
             const child = spawn(process.execPath, [builtPath, ...rawArgs], {
@@ -328,7 +369,12 @@ async function handoffToScript(scriptName: string, rawArgs: string[]): Promise<v
 
     const sourcePath = path.resolve(process.cwd(), 'scripts', `${scriptName}.ts`);
     if (!fs.existsSync(sourcePath)) {
-        throw new Error(`Unable to locate ${scriptName} implementation.`);
+        throw cliError(
+            'IRANTI_SCRIPT_NOT_FOUND',
+            `Unable to locate ${scriptName} implementation.`,
+            ['Run from an installed Iranti package or from the Iranti repo root where scripts/ exists.'],
+            { scriptName, sourcePath, builtPath }
+        );
     }
 
     await new Promise<void>((resolve, reject) => {
@@ -551,8 +597,17 @@ function instancePaths(root: string, name: string): { instanceDir: string; envFi
 async function loadInstanceEnv(root: string, name: string): Promise<{ instanceDir: string; envFile: string; metaFile: string; env: Record<string, string> }> {
     const paths = instancePaths(root, name);
     if (!fs.existsSync(paths.envFile)) {
-        throw new Error(`Instance '${name}' not found at ${paths.instanceDir}`);
+        throw cliError(
+            'IRANTI_INSTANCE_NOT_FOUND',
+            `Instance '${name}' not found at ${paths.instanceDir}`,
+            [
+                'Run `iranti instance list` to see known instances.',
+                `Run \`iranti setup\` or \`iranti instance create ${name}\` if this instance does not exist yet.`,
+            ],
+            { instance: name, root, instanceDir: paths.instanceDir }
+        );
     }
+    debugLog('Loaded instance env target.', { instance: name, envFile: paths.envFile });
     return {
         ...paths,
         env: await readEnvFile(paths.envFile),
@@ -576,16 +631,31 @@ async function resolveProviderKeyTarget(args: ParsedArgs): Promise<ProviderKeyTa
     const projectPath = path.resolve(getFlag(args, 'project') ?? process.cwd());
     const bindingFile = path.join(projectPath, '.env.iranti');
     if (!fs.existsSync(bindingFile)) {
-        throw new Error('No --instance provided and no .env.iranti found in the current project. Run from a bound project or pass --instance <name>.');
+        throw cliError(
+            'IRANTI_PROJECT_BINDING_MISSING',
+            'No --instance provided and no .env.iranti found in the current project.',
+            ['Run `iranti project init . --instance <name>` or pass `--instance <name>`.'],
+            { projectPath, bindingFile }
+        );
     }
 
     const binding = await readEnvFile(bindingFile);
     const envFile = binding.IRANTI_INSTANCE_ENV?.trim();
     if (!envFile) {
-        throw new Error(`Project binding is missing IRANTI_INSTANCE_ENV: ${bindingFile}`);
+        throw cliError(
+            'IRANTI_BINDING_INSTANCE_ENV_MISSING',
+            `Project binding is missing IRANTI_INSTANCE_ENV: ${bindingFile}`,
+            ['Run `iranti configure project` to refresh the binding.'],
+            { bindingFile }
+        );
     }
     if (!fs.existsSync(envFile)) {
-        throw new Error(`Instance env referenced by project binding was not found: ${envFile}`);
+        throw cliError(
+            'IRANTI_BINDING_INSTANCE_ENV_NOT_FOUND',
+            `Instance env referenced by project binding was not found: ${envFile}`,
+            ['Run `iranti configure project` to refresh the binding or recreate the target instance.'],
+            { bindingFile, envFile }
+        );
     }
 
     return {
@@ -1769,6 +1839,7 @@ function resolveDoctorEnvTarget(args: ParsedArgs): DoctorEnvTarget {
     const cwd = process.cwd();
 
     if (explicitEnv) {
+        debugLog('Doctor target resolved from explicit env.', { envFile: path.resolve(explicitEnv) });
         return {
             envFile: path.resolve(explicitEnv),
             envSource: 'explicit-env',
@@ -1777,6 +1848,7 @@ function resolveDoctorEnvTarget(args: ParsedArgs): DoctorEnvTarget {
 
     if (instanceName) {
         const root = resolveInstallRoot(args, scope);
+        debugLog('Doctor target resolved from instance.', { instance: instanceName, root });
         return {
             envFile: path.join(root, 'instances', instanceName, '.env'),
             envSource: `instance:${instanceName}`,
@@ -1786,12 +1858,15 @@ function resolveDoctorEnvTarget(args: ParsedArgs): DoctorEnvTarget {
     const repoEnv = path.join(cwd, '.env');
     const projectEnv = path.join(cwd, '.env.iranti');
     if (fs.existsSync(repoEnv)) {
+        debugLog('Doctor target resolved from repo env.', { envFile: repoEnv });
         return { envFile: repoEnv, envSource: 'repo' };
     }
     if (fs.existsSync(projectEnv)) {
+        debugLog('Doctor target resolved from project binding.', { envFile: projectEnv });
         return { envFile: projectEnv, envSource: 'project-binding' };
     }
 
+    debugLog('Doctor target resolution found no env file.', { cwd });
     return { envFile: null, envSource: 'repo' };
 }
 
@@ -1927,6 +2002,11 @@ function runCommandCapture(
     cwd?: string,
     extraEnv?: Record<string, string | undefined>,
 ): { status: number | null; stdout: string; stderr: string } {
+    verboseLog('Running subprocess (capture).', {
+        executable,
+        args: args.join(' '),
+        cwd: cwd ?? process.cwd(),
+    });
     const proc = process.platform === 'win32'
         ? spawnSync(process.env.ComSpec ?? 'cmd.exe', [
             '/d',
@@ -1950,14 +2030,25 @@ function runCommandCapture(
                 ...extraEnv,
             },
         });
-    return {
+    const result = {
         status: proc.status,
         stdout: proc.stdout ?? '',
         stderr: proc.stderr ?? '',
     };
+    verboseLog('Subprocess finished (capture).', {
+        executable,
+        status: result.status ?? -1,
+        stderr: result.stderr.trim() || null,
+    });
+    return result;
 }
 
 function runCommandInteractive(step: UpgradeCommand): number | null {
+    verboseLog('Running subprocess (interactive).', {
+        label: step.label,
+        command: step.display,
+        cwd: step.cwd ?? process.cwd(),
+    });
     const proc = process.platform === 'win32'
         ? spawnSync(process.env.ComSpec ?? 'cmd.exe', [
             '/d',
@@ -1971,6 +2062,10 @@ function runCommandInteractive(step: UpgradeCommand): number | null {
             cwd: step.cwd,
             stdio: 'inherit',
         });
+    verboseLog('Subprocess finished (interactive).', {
+        label: step.label,
+        status: proc.status ?? -1,
+    });
     return proc.status;
 }
 
@@ -3561,11 +3656,24 @@ async function showInstanceCommand(args: ParsedArgs): Promise<void> {
 
 async function runInstanceCommand(args: ParsedArgs): Promise<void> {
     const name = getFlag(args, 'instance') ?? args.positionals[0] ?? args.subcommand;
-    if (!name) throw new Error('Missing instance name. Usage: iranti run --instance <name>');
+    if (!name) {
+        throw cliError(
+            'IRANTI_INSTANCE_NAME_REQUIRED',
+            'Missing instance name. Usage: iranti run --instance <name>',
+            ['Run `iranti instance list` to see configured instances.']
+        );
+    }
     const scope = normalizeScope(getFlag(args, 'scope'));
     const root = resolveInstallRoot(args, scope);
     const envFile = path.join(root, 'instances', name, '.env');
-    if (!fs.existsSync(envFile)) throw new Error(`Instance '${name}' not found. Create it first.`);
+    if (!fs.existsSync(envFile)) {
+        throw cliError(
+            'IRANTI_INSTANCE_NOT_FOUND',
+            `Instance '${name}' not found. Create it first.`,
+            [`Run \`iranti setup\` or \`iranti instance create ${name}\` first.`],
+            { instance: name, envFile }
+        );
+    }
 
     const env = await readEnvFile(envFile);
     for (const [k, v] of Object.entries(env)) {
@@ -3573,7 +3681,12 @@ async function runInstanceCommand(args: ParsedArgs): Promise<void> {
     }
 
     if (!process.env.DATABASE_URL || process.env.DATABASE_URL.includes('yourpassword')) {
-        throw new Error(`Instance '${name}' has placeholder DATABASE_URL. Edit ${envFile} first.`);
+        throw cliError(
+            'IRANTI_INSTANCE_DATABASE_PLACEHOLDER',
+            `Instance '${name}' has placeholder DATABASE_URL. Edit ${envFile} first.`,
+            ['Run `iranti configure instance <name> --interactive` or rerun `iranti setup`.'],
+            { instance: name, envFile }
+        );
     }
 
     console.log(`${infoLabel()} Starting Iranti instance '${name}' on port ${process.env.IRANTI_PORT ?? '3001'}...`);
@@ -3586,7 +3699,11 @@ async function projectInitCommand(args: ParsedArgs): Promise<void> {
     const projectPath = path.resolve(args.positionals[0] ?? process.cwd());
     const instanceName = getFlag(args, 'instance');
     if (!instanceName) {
-        throw new Error('Missing --instance <name>. Usage: iranti project init [path] --instance <name>');
+        throw cliError(
+            'IRANTI_INSTANCE_NAME_REQUIRED',
+            'Missing --instance <name>. Usage: iranti project init [path] --instance <name>',
+            ['Run `iranti instance list` to see available instances.']
+        );
     }
     const scope = normalizeScope(getFlag(args, 'scope'));
     const root = resolveInstallRoot(args, scope);
@@ -3598,7 +3715,12 @@ async function projectInitCommand(args: ParsedArgs): Promise<void> {
 
     const outFile = path.join(projectPath, '.env.iranti');
     if (fs.existsSync(outFile) && !hasFlag(args, 'force')) {
-        throw new Error(`${outFile} already exists. Use --force to overwrite.`);
+        throw cliError(
+            'IRANTI_PROJECT_BINDING_EXISTS',
+            `${outFile} already exists. Use --force to overwrite.`,
+            ['Use `iranti configure project` if you want to refresh the existing binding instead.'],
+            { outFile }
+        );
     }
 
     await writeProjectBinding(projectPath, {
@@ -4105,7 +4227,7 @@ async function claudeSetupCommand(args: ParsedArgs): Promise<void> {
         const scanDir = path.resolve(dirArg ?? process.cwd());
 
         if (!fs.existsSync(scanDir)) {
-            throw new Error(`Scan directory not found: ${scanDir}`);
+            throw cliError('IRANTI_SCAN_PATH_NOT_FOUND', `Scan directory not found: ${scanDir}`);
         }
 
         const candidates = findClaudeProjects(scanDir, recursive);
@@ -4152,10 +4274,15 @@ async function claudeSetupCommand(args: ParsedArgs): Promise<void> {
         : path.join(projectPath, '.env.iranti');
 
     if (!fs.existsSync(projectPath)) {
-        throw new Error(`Project path not found: ${projectPath}`);
+        throw cliError('IRANTI_PROJECT_PATH_NOT_FOUND', `Project path not found: ${projectPath}`);
     }
     if (!fs.existsSync(projectEnvPath)) {
-        throw new Error(`Project binding not found at ${projectEnvPath}. Run \`iranti project init\` or \`iranti configure project\` first.`);
+        throw cliError(
+            'IRANTI_PROJECT_BINDING_MISSING',
+            `Project binding not found at ${projectEnvPath}. Run \`iranti project init\` or \`iranti configure project\` first.`,
+            ['Run `iranti project init . --instance <name>` before `iranti claude-setup`.'],
+            { projectEnvPath }
+        );
     }
 
     const result = await writeClaudeCodeProjectFiles(projectPath, projectEnvPath, force);
@@ -4201,10 +4328,11 @@ function printHelp(): void {
         console.log('');
     };
 
-    console.log(sectionTitle('Iranti CLI'));
-    console.log('Memory infrastructure for multi-agent systems.');
-    console.log('Most instance-aware commands also accept --root <path> in addition to --scope.');
-    console.log('');
+      console.log(sectionTitle('Iranti CLI'));
+      console.log('Memory infrastructure for multi-agent systems.');
+      console.log('Most instance-aware commands also accept --root <path> in addition to --scope.');
+      console.log('Global debugging flags: --debug for extra diagnostics, --verbose for subprocess trace output.');
+      console.log('');
 
     printRows('Start Here', rows);
 
@@ -4234,7 +4362,7 @@ function printHelp(): void {
     ]);
 
     printRows('Diagnostics And Operator Tools', [
-        ['iranti doctor [--instance <name>] [--scope user|system] [--env <file>] [--json]', 'Run environment and runtime diagnostics.'],
+        ['iranti doctor [--instance <name>] [--scope user|system] [--env <file>] [--json] [--debug]', 'Run environment and runtime diagnostics.'],
         ['iranti status [--scope user|system] [--json]', 'Show runtime roots, bindings, and known instances.'],
         ['iranti upgrade [--check] [--dry-run] [--yes] [--all] [--target auto|npm-global|npm-repo|python[,python]] [--json]', 'Check or run CLI/runtime/package upgrades.'],
         ['iranti handshake [--instance <name> | --project-env <file>] [--agent <id>] [--task <text>] [--recent <msg1||msg2>] [--recent-file <path>] [--json]', 'Manually inspect Attendant handshake output.'],
@@ -4318,6 +4446,12 @@ function printProviderKeyHelp(): void {
 
 async function main(): Promise<void> {
     const args = parseArgs(process.argv.slice(2));
+    setCliDebugFlags(args);
+    debugLog('CLI invocation started.', {
+        command: args.command,
+        subcommand: args.subcommand,
+        cwd: process.cwd(),
+    });
     if (!args.command || args.command === 'help' || args.command === '--help') {
         printHelp();
         return;
@@ -4510,12 +4644,33 @@ async function main(): Promise<void> {
         throw new Error(`Unknown integrate target '${args.subcommand ?? ''}'. Use 'claude' or 'codex'.`);
     }
 
-    throw new Error(`Unknown command '${args.command}'. Run: iranti help`);
+    throw cliError(
+        'IRANTI_UNKNOWN_COMMAND',
+        `Unknown command '${args.command}'. Run: iranti help`,
+        ['Use `iranti help` to see the current command surface.'],
+        { command: args.command }
+    );
 }
 
 main().catch((err) => {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(`${failLabel('ERROR')} ${message}`);
+    const code = err instanceof CliError ? err.code : null;
+    console.error(`${failLabel('ERROR')}${code ? ` [${code}]` : ''} ${message}`);
+    if (err instanceof CliError && err.hints.length > 0) {
+        console.error('');
+        console.error('Possible fixes:');
+        for (const hint of err.hints) {
+            console.error(`  - ${hint}`);
+        }
+    }
+    if (CLI_DEBUG && err instanceof CliError && err.details && Object.keys(err.details).length > 0) {
+        console.error('');
+        console.error(`${paint('[DEBUG]', 'gray')} ${JSON.stringify(err.details, null, 2)}`);
+    }
+    if (CLI_DEBUG && err instanceof Error && err.stack) {
+        console.error('');
+        console.error(err.stack);
+    }
     process.exit(1);
 });
 

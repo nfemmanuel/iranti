@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.12 - 2026-03-20
+
+### Added
+
+- Global CLI debugging flags:
+  - `--debug` for structured diagnostics and stack traces
+  - `--verbose` for subprocess trace output
+- Internal CLI debugging backlog under `docs/internal/cli_debugging_backlog.md`.
+
+### Changed
+
+- Top-level CLI failures now print stable error codes, fix hints, and optional debug details instead of only a flat error string.
+- CLI help and operator docs now advertise the debug and verbose troubleshooting path.
+
+### Fixed
+
+- Common high-friction failures such as missing instances, missing project bindings, and placeholder instance databases now surface more directly actionable remediation.
+- Script handoff and subprocess execution now expose clearer trace output when debugging is enabled.
+
 ## 0.2.11 - 2026-03-20
 
 ### Fixed

@@ -245,6 +245,14 @@ iranti run --instance local
 
 If local PostgreSQL is available, setup can bootstrap a localhost database for you. If local PostgreSQL is not available, setup recommends Docker when Docker is installed, and otherwise steers you to managed PostgreSQL with concrete install guidance.
 
+If something still fails and you need more detail, use:
+
+```bash
+iranti doctor --debug
+iranti run --instance local --debug
+iranti upgrade --verbose
+```
+
 Advanced/manual path:
 
 ```bash
