@@ -32,20 +32,21 @@ This feature exposes Iranti to Claude Code through the installed CLI surface: `i
 2. Optional batch mode: `iranti claude-setup --scan <dir>` inspects immediate subdirectories that already contain `.claude/`.
 3. Optional recursive batch mode: add `--recursive` to walk nested project trees while skipping `node_modules`, `.git`, build output, and other obvious non-project directories.
 4. Write or merge `.mcp.json` so it contains an `iranti` MCP server entry.
-5. Write `.claude/settings.local.json` pointing hooks at `iranti claude-hook` when the file is missing, or overwrite it only when `--force` is supplied.
-6. Start the stdio MCP server through `iranti mcp`.
-7. Load runtime configuration from:
+5. Write `.claude/settings.local.json` using Claude Code's `matcher` + `hooks` schema, pointing hooks at `iranti claude-hook` when the file is missing.
+6. If an existing settings file contains the older Iranti-generated `command` + `args` hook shape, upgrade it in place to the current Claude Code schema.
+7. Start the stdio MCP server through `iranti mcp`.
+8. Load runtime configuration from:
    - explicit env variables, if present
    - fallback `.env`
    - linked instance env from `.env.iranti`
    - `.env.iranti` itself for project binding values
-8. Require a valid `DATABASE_URL` after env resolution.
-9. Auto-register a default Claude-facing agent if needed.
-10. Expose Iranti memory and write operations as MCP tools.
-11. For hook usage, parse Claude Code hook stdin payload.
-12. On `SessionStart`, call `handshake()` and emit a compact working-memory brief.
-13. On `UserPromptSubmit`, call `attend()` and emit only relevant retrieved facts when injection is needed.
-14. Keep durable writes explicit through MCP tool calls rather than auto-saving all turns.
+9. Require a valid `DATABASE_URL` after env resolution.
+10. Auto-register a default Claude-facing agent if needed.
+11. Expose Iranti memory and write operations as MCP tools.
+12. For hook usage, parse Claude Code hook stdin payload.
+13. On `SessionStart`, call `handshake()` and emit a compact working-memory brief.
+14. On `UserPromptSubmit`, call `attend()` and emit only relevant retrieved facts when injection is needed.
+15. Keep durable writes explicit through MCP tool calls rather than auto-saving all turns.
 
 ## Edge Cases
 - Missing `DATABASE_URL`: process exits with a fatal configuration error.
@@ -53,8 +54,8 @@ This feature exposes Iranti to Claude Code through the installed CLI surface: `i
 - Empty `UserPromptSubmit` prompt: hook emits no additional context.
 - Invalid `valueJson` or `propertiesJson`: MCP write/relate tools reject with a clear JSON parsing error.
 - Unregistered agent ids: auto-registration creates a stable Claude-facing agent profile.
-- Existing `.mcp.json` / `.claude/settings.local.json`: `iranti claude-setup` leaves them untouched unless `--force` is supplied.
-- Existing `.mcp.json` with other MCP servers: the `iranti` server is merged in without removing the others.
+- Existing `.mcp.json`: the `iranti` server is merged in without removing other MCP servers.
+- Existing `.claude/settings.local.json`: `iranti claude-setup` upgrades legacy Iranti hook entries to Claude Code's current `matcher` + `hooks` schema, and otherwise leaves the file untouched unless `--force` is supplied.
 - `--scan` mode does not create `.env.iranti`; it only broadens Claude scaffolding for already-Claude-enabled projects.
 - `--recursive` skips obvious non-project directories such as `.git`, `node_modules`, and build output folders to keep scan time reasonable.
 - Hook events other than `SessionStart` and `UserPromptSubmit`: helper rejects with an explicit error.

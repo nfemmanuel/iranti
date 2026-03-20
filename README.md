@@ -354,6 +354,19 @@ Use `--agent`, `--provider`, and `--model` to pin the session identity and model
 The chat surface now includes slash commands for fact history, relationships, conflict-resolution handoff, and confidence updates in addition to memory search/write operations.
 Guide: [`docs/guides/chat.md`](docs/guides/chat.md)
 
+### Manual Attendant Inspection
+
+For debugging and operator visibility, Iranti also exposes manual Attendant commands:
+
+```bash
+iranti handshake --task "Working on ProofScript repo"
+iranti attend "What did we decide about the parser?" --context-file transcript.txt
+```
+
+Both commands accept `--json`.
+They are useful for verifying what the Attendant would load or inject for a given agent and project binding.
+They are not a replacement for Claude Code hooks or MCP tools in normal use.
+
 ---
 
 ## Install Strategy (Double Layer)

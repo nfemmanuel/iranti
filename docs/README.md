@@ -49,6 +49,7 @@
 ### Features
 
 - [Chat](features/chat/) - Native CLI chat session
+- [CLI Attendant Debug](features/cli-attendant-debug/) - Manual handshake/attend inspection commands
 - [Chunking](features/chunking/) - Auto-chunking raw content into facts
 - [Conflict Resolution](features/conflict-resolution/) - Librarian conflict handling
 - [Resolutionist](features/resolutionist/) - Human escalation review workflow

@@ -115,14 +115,24 @@ Create `.claude/settings.local.json` in the same project:
   "hooks": {
     "SessionStart": [
       {
-        "command": "iranti",
-        "args": ["claude-hook", "--event", "SessionStart"]
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "iranti claude-hook --event SessionStart"
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
       {
-        "command": "iranti",
-        "args": ["claude-hook", "--event", "UserPromptSubmit"]
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "iranti claude-hook --event UserPromptSubmit"
+          }
+        ]
       }
     ]
   }
@@ -138,13 +148,12 @@ Optional explicit overrides:
   "hooks": {
     "SessionStart": [
       {
-        "command": "iranti",
-        "args": [
-          "claude-hook",
-          "--event",
-          "SessionStart",
-          "--project-env",
-          "C:/path/to/project/.env.iranti"
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "iranti claude-hook --event SessionStart --project-env \"C:/path/to/project/.env.iranti\""
+          }
         ]
       }
     ]
@@ -220,6 +229,15 @@ iranti doctor --instance local
 ```bash
 echo {} | iranti claude-hook --event SessionStart
 ```
+
+5. Inspect the Attendant manually if you need to debug memory loading:
+
+```bash
+iranti handshake --task "Debug Claude Code memory"
+iranti attend "What did we decide earlier?" --context-file transcript.txt
+```
+
+Use `--json` if you want the raw brief or attend decision. These commands are for debugging and operator inspection. They do not replace the normal Claude Code hook + MCP flow.
 
 If the hook says `DATABASE_URL is required`, the current project is missing `.env.iranti` or `IRANTI_INSTANCE_ENV`.
 

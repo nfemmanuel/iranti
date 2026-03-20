@@ -11,9 +11,11 @@ import net from 'net';
 import { initDb } from '../src/library/client';
 import { createOrRotateApiKey, formatApiKeyToken, generateApiKeySecret, listApiKeys, revokeApiKey } from '../src/security/apiKeys';
 import { getEscalationPaths } from '../src/lib/escalationPaths';
+import { loadRuntimeEnv } from '../src/lib/runtimeEnv';
 import { resolveInteractive } from '../src/resolutionist';
 import { startChatSession } from '../src/chat';
 import { createVectorBackend, resolveVectorBackendName } from '../src/library/backends';
+import { Iranti } from '../src/sdk';
 
 type Scope = 'user' | 'system';
 
@@ -99,6 +101,15 @@ type ClaudeScaffoldStatus = 'created' | 'updated' | 'unchanged';
 type ClaudeProjectScaffoldResult = {
     mcp: ClaudeScaffoldStatus;
     settings: ClaudeScaffoldStatus;
+};
+
+type AttendantCliTarget = {
+    envSource: string;
+    envFile: string | null;
+    projectEnvFile?: string;
+    instanceEnvFile?: string;
+    agentId: string;
+    iranti: Iranti;
 };
 
 const PROVIDER_ENV_KEYS: Record<string, string | null> = {
@@ -836,29 +847,234 @@ function makeIrantiMcpServerConfig(): { command: string; args: string[] } {
     };
 }
 
-function makeClaudeHookSettings(projectEnvPath?: string): Record<string, unknown> {
-    const hookArgs = (event: 'SessionStart' | 'UserPromptSubmit') => {
-        const args = ['claude-hook', '--event', event];
-        if (projectEnvPath) {
-            args.push('--project-env', projectEnvPath);
-        }
-        return args;
-    };
+function applyEnvMap(vars: Record<string, string>): void {
+    for (const [key, value] of Object.entries(vars)) {
+        process.env[key] = value;
+    }
+}
+
+async function resolveAttendantCliTarget(args: ParsedArgs): Promise<AttendantCliTarget> {
+    const explicitAgent = getFlag(args, 'agent')?.trim();
+    const explicitProjectEnv = getFlag(args, 'project-env');
+    const instanceName = getFlag(args, 'instance');
+
+    let envSource = 'project';
+    let envFile: string | null = null;
+    let projectEnvFile: string | undefined;
+    let instanceEnvFile: string | undefined;
+
+    if (instanceName) {
+        const scope = normalizeScope(getFlag(args, 'scope'));
+        const root = resolveInstallRoot(args, scope);
+        const loaded = await loadInstanceEnv(root, instanceName);
+        applyEnvMap(loaded.env);
+        envSource = `instance:${instanceName}`;
+        envFile = loaded.envFile;
+        instanceEnvFile = loaded.envFile;
+    } else {
+        const cwd = path.resolve(getFlag(args, 'project') ?? process.cwd());
+        const loaded = loadRuntimeEnv({
+            cwd,
+            projectEnvFile: explicitProjectEnv ? path.resolve(explicitProjectEnv) : undefined,
+        });
+        envSource = loaded.projectEnvFile ? 'project-binding' : 'environment';
+        envFile = loaded.projectEnvFile ?? loaded.instanceEnvFile ?? null;
+        projectEnvFile = loaded.projectEnvFile;
+        instanceEnvFile = loaded.instanceEnvFile;
+    }
+
+    const connectionString = process.env.DATABASE_URL?.trim();
+    if (!connectionString) {
+        throw new Error('DATABASE_URL is required. Run from a bound project, pass --instance <name>, or set DATABASE_URL first.');
+    }
+
+    const agentId = explicitAgent
+        || process.env.IRANTI_AGENT_ID?.trim()
+        || process.env.IRANTI_CLAUDE_AGENT_ID?.trim()
+        || 'iranti_cli';
 
     return {
+        envSource,
+        envFile,
+        projectEnvFile,
+        instanceEnvFile,
+        agentId,
+        iranti: new Iranti({ connectionString }),
+    };
+}
+
+function truncateText(value: string, limit: number): string {
+    return value.length <= limit ? value : `${value.slice(0, limit - 3)}...`;
+}
+
+function resolveRecentMessages(args: ParsedArgs): string[] {
+    const inline = getFlag(args, 'recent');
+    const file = getFlag(args, 'recent-file');
+    if (inline) {
+        return inline
+            .split('||')
+            .map((item) => item.trim())
+            .filter(Boolean);
+    }
+    if (file) {
+        const content = fs.readFileSync(path.resolve(file), 'utf-8');
+        return content
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter(Boolean);
+    }
+    return [];
+}
+
+function parsePositiveInteger(raw: string | undefined, label: string): number | undefined {
+    if (!raw) return undefined;
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        throw new Error(`${label} must be a positive integer.`);
+    }
+    return parsed;
+}
+
+function resolveContextText(args: ParsedArgs): string {
+    const inline = getFlag(args, 'context');
+    if (inline) return inline;
+    const file = getFlag(args, 'context-file');
+    if (file) {
+        return fs.readFileSync(path.resolve(file), 'utf-8');
+    }
+    return '';
+}
+
+function resolveAttendMessage(args: ParsedArgs): string {
+    const fromFlag = getFlag(args, 'message');
+    if (fromFlag?.trim()) return fromFlag.trim();
+    const fromPositionals = args.positionals.join(' ').trim();
+    if (fromPositionals) return fromPositionals;
+    throw new Error('Missing latest message. Usage: iranti attend [message] [--message <text>] [--context <text>] [--json]');
+}
+
+function printHandshakeResult(target: AttendantCliTarget, task: string, result: Awaited<ReturnType<Iranti['handshake']>>): void {
+    console.log(bold('Iranti handshake'));
+    console.log(`  agent         ${target.agentId}`);
+    console.log(`  env source    ${target.envSource}`);
+    if (target.envFile) console.log(`  env file      ${target.envFile}`);
+    console.log(`  task          ${task}`);
+    console.log(`  inferred task ${result.inferredTaskType}`);
+    console.log(`  memory facts  ${result.workingMemory.length}`);
+    console.log(`  generated     ${result.briefGeneratedAt}`);
+    console.log('');
+    console.log(`Rules: ${truncateText(result.operatingRules, 160)}`);
+    if (result.workingMemory.length === 0) {
+        console.log('');
+        console.log('No working memory entries loaded.');
+        return;
+    }
+    console.log('');
+    for (const entry of result.workingMemory) {
+        console.log(`- ${entry.entityKey} | ${entry.summary} | ${entry.confidence} | ${entry.source}`);
+    }
+}
+
+function printAttendResult(
+    target: AttendantCliTarget,
+    latestMessage: string,
+    result: Awaited<ReturnType<Iranti['attend']>>,
+): void {
+    console.log(bold('Iranti attend'));
+    console.log(`  agent         ${target.agentId}`);
+    console.log(`  env source    ${target.envSource}`);
+    if (target.envFile) console.log(`  env file      ${target.envFile}`);
+    console.log(`  message       ${truncateText(latestMessage, 120)}`);
+    console.log(`  inject        ${result.shouldInject ? 'yes' : 'no'}`);
+    console.log(`  reason        ${result.reason}`);
+    console.log(`  method        ${result.decision.method}`);
+    console.log(`  confidence    ${result.decision.confidence}`);
+    console.log(`  explanation   ${result.decision.explanation}`);
+    console.log(`  facts         ${result.facts.length}`);
+    if (result.facts.length === 0) {
+        console.log('');
+        console.log('No facts selected for injection.');
+        return;
+    }
+    console.log('');
+    for (const fact of result.facts) {
+        console.log(`- ${fact.entityKey} | ${fact.summary} | ${fact.confidence} | ${fact.source}`);
+    }
+}
+
+function quoteClaudeHookArg(value: string): string {
+    if (/^[A-Za-z0-9_./:-]+$/.test(value)) {
+        return value;
+    }
+    return `"${value.replace(/(["\\])/g, '\\$1')}"`;
+}
+
+function makeClaudeHookCommand(event: 'SessionStart' | 'UserPromptSubmit', projectEnvPath?: string): string {
+    const parts = ['iranti', 'claude-hook', '--event', event];
+    if (projectEnvPath) {
+        parts.push('--project-env', quoteClaudeHookArg(projectEnvPath));
+    }
+    return parts.join(' ');
+}
+
+function makeClaudeHookEntry(event: 'SessionStart' | 'UserPromptSubmit', projectEnvPath?: string): Record<string, unknown> {
+    return {
+        matcher: '',
+        hooks: [
+            {
+                type: 'command',
+                command: makeClaudeHookCommand(event, projectEnvPath),
+            },
+        ],
+    };
+}
+
+function isClaudeHooksObject(value: unknown): value is Record<string, unknown> {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isLegacyIrantiClaudeHookEntry(value: unknown): boolean {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return false;
+    }
+    const entry = value as Record<string, unknown>;
+    return entry.command === 'iranti'
+        && Array.isArray(entry.args)
+        && entry.args[0] === 'claude-hook';
+}
+
+function needsClaudeHookSettingsUpgrade(value: unknown): boolean {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return false;
+    }
+    const settings = value as Record<string, unknown>;
+    const hooks = isClaudeHooksObject(settings.hooks) ? settings.hooks : null;
+    if (!hooks) {
+        return false;
+    }
+    for (const event of ['SessionStart', 'UserPromptSubmit'] as const) {
+        const entries = hooks[event];
+        if (!Array.isArray(entries) || entries.length === 0) {
+            continue;
+        }
+        if (entries.some((entry) => isLegacyIrantiClaudeHookEntry(entry))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function makeClaudeHookSettings(projectEnvPath?: string, existing?: Record<string, unknown>): Record<string, unknown> {
+    const existingHooks = existing && isClaudeHooksObject(existing.hooks)
+        ? existing.hooks
+        : {};
+
+    return {
+        ...(existing ?? {}),
         hooks: {
-            SessionStart: [
-                {
-                    command: 'iranti',
-                    args: hookArgs('SessionStart'),
-                },
-            ],
-            UserPromptSubmit: [
-                {
-                    command: 'iranti',
-                    args: hookArgs('UserPromptSubmit'),
-                },
-            ],
+            ...existingHooks,
+            SessionStart: [makeClaudeHookEntry('SessionStart', projectEnvPath)],
+            UserPromptSubmit: [makeClaudeHookEntry('UserPromptSubmit', projectEnvPath)],
         },
     };
 }
@@ -912,9 +1128,17 @@ async function writeClaudeCodeProjectFiles(projectPath: string, projectEnvPath?:
     if (!fs.existsSync(settingsFile)) {
         await writeText(settingsFile, `${JSON.stringify(makeClaudeHookSettings(projectEnvPath), null, 2)}\n`);
         settingsStatus = 'created';
-    } else if (force) {
-        await writeText(settingsFile, `${JSON.stringify(makeClaudeHookSettings(projectEnvPath), null, 2)}\n`);
-        settingsStatus = 'updated';
+    } else {
+        const existingSettings = readJsonFile<Record<string, unknown>>(settingsFile);
+        if (existingSettings && typeof existingSettings === 'object' && !Array.isArray(existingSettings)) {
+            if (force || needsClaudeHookSettingsUpgrade(existingSettings)) {
+                await writeText(settingsFile, `${JSON.stringify(makeClaudeHookSettings(projectEnvPath, existingSettings), null, 2)}\n`);
+                settingsStatus = 'updated';
+            }
+        } else if (force) {
+            await writeText(settingsFile, `${JSON.stringify(makeClaudeHookSettings(projectEnvPath), null, 2)}\n`);
+            settingsStatus = 'updated';
+        }
     }
 
     return {
@@ -1415,6 +1639,83 @@ function isPathInside(parentDir: string, childDir: string): boolean {
     const parent = normalizePathForCompare(parentDir);
     const child = normalizePathForCompare(childDir);
     return child === parent || child.startsWith(`${parent}/`);
+}
+
+function hasCommandInstalled(command: string): boolean {
+    try {
+        const proc = process.platform === 'win32'
+            ? spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/c', `${command} --version`], { stdio: 'ignore' })
+            : spawnSync(command, ['--version'], { stdio: 'ignore' });
+        return proc.status === 0;
+    } catch {
+        return false;
+    }
+}
+
+async function canConnectTcp(port: number, host: string = '127.0.0.1', timeoutMs: number = 800): Promise<boolean> {
+    return await new Promise<boolean>((resolve) => {
+        const socket = net.createConnection({ port, host });
+        let settled = false;
+        const finish = (value: boolean) => {
+            if (settled) return;
+            settled = true;
+            socket.destroy();
+            resolve(value);
+        };
+        socket.setTimeout(timeoutMs);
+        socket.on('connect', () => finish(true));
+        socket.on('timeout', () => finish(false));
+        socket.on('error', () => finish(false));
+    });
+}
+
+type DependencyCheck = {
+    name: string;
+    status: 'pass' | 'warn';
+    detail: string;
+};
+
+async function collectDependencyChecks(): Promise<DependencyCheck[]> {
+    const docker = hasDockerInstalled();
+    const psql = hasCommandInstalled('psql');
+    const pgIsReady = hasCommandInstalled('pg_isready');
+    const postgresPort = await canConnectTcp(5432);
+
+    const checks: DependencyCheck[] = [
+        {
+            name: 'docker',
+            status: docker ? 'pass' : 'warn',
+            detail: docker ? 'Docker is installed.' : 'Docker is not installed or not on PATH.',
+        },
+        {
+            name: 'psql',
+            status: psql ? 'pass' : 'warn',
+            detail: psql ? 'psql is installed.' : 'psql is not installed or not on PATH.',
+        },
+        {
+            name: 'pg_isready',
+            status: pgIsReady ? 'pass' : 'warn',
+            detail: pgIsReady ? 'pg_isready is installed.' : 'pg_isready is not installed or not on PATH.',
+        },
+        {
+            name: 'localhost:5432',
+            status: postgresPort ? 'pass' : 'warn',
+            detail: postgresPort ? 'A PostgreSQL listener appears reachable on localhost:5432.' : 'Nothing is reachable on localhost:5432 right now.',
+        },
+    ];
+
+    return checks;
+}
+
+function printDependencyChecks(checks: DependencyCheck[]): void {
+    console.log(bold('Dependency check'));
+    for (const check of checks) {
+        const marker = check.status === 'pass' ? okLabel('PASS') : warnLabel('WARN');
+        console.log(`${marker} ${check.name} — ${check.detail}`);
+    }
+    if (checks.every((check) => check.status === 'warn')) {
+        console.log(`${warnLabel()} No PostgreSQL tooling or reachable local Postgres was detected. You can still continue if you plan to use managed Postgres, but local setup will be rough until you install PostgreSQL tooling or Docker.`);
+    }
 }
 
 function quoteForCmd(arg: string): string {
@@ -2017,6 +2318,9 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
     }
 
     if (configPath || useDefaults) {
+        const dependencyChecks = await collectDependencyChecks();
+        printDependencyChecks(dependencyChecks);
+        console.log('');
         const plan = configPath ? parseSetupConfig(configPath) : defaultsSetupPlan(args);
         const result = await executeSetupPlan(plan);
 
@@ -2050,6 +2354,8 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
 
     console.log(bold('Iranti setup'));
     console.log('This wizard will get Iranti set up: install a runtime, create or update an instance, connect provider keys, create a usable Iranti API key, and optionally bind one or more project folders.');
+    console.log('');
+    printDependencyChecks(await collectDependencyChecks());
     console.log('');
 
     let result: SetupExecutionResult | null = null;
@@ -2709,6 +3015,7 @@ async function upgradeCommand(args: ParsedArgs): Promise<void> {
 async function installCommand(args: ParsedArgs): Promise<void> {
     const scope = normalizeScope(getFlag(args, 'scope'));
     const root = resolveInstallRoot(args, scope);
+    const dependencyChecks = await collectDependencyChecks();
 
     await ensureDir(root);
     await ensureDir(path.join(root, 'instances'));
@@ -2726,6 +3033,8 @@ async function installCommand(args: ParsedArgs): Promise<void> {
     console.log(`${okLabel()} Iranti runtime initialized`);
     console.log(`  scope: ${scope}`);
     console.log(`  root : ${root}`);
+    console.log('');
+    printDependencyChecks(dependencyChecks);
     console.log(`Next: iranti instance create local --port 3001`);
 }
 
@@ -3204,6 +3513,74 @@ async function resolveCommand(args: ParsedArgs): Promise<void> {
     await resolveInteractive(escalationDir);
 }
 
+async function handshakeCommand(args: ParsedArgs): Promise<void> {
+    const json = hasFlag(args, 'json');
+    const target = await resolveAttendantCliTarget(args);
+    const task = getFlag(args, 'task')?.trim() || 'CLI handshake';
+    const recentMessages = resolveRecentMessages(args);
+    const result = await target.iranti.handshake({
+        agent: target.agentId,
+        task,
+        recentMessages,
+    });
+
+    if (json) {
+        console.log(JSON.stringify({
+            agent: target.agentId,
+            envSource: target.envSource,
+            envFile: target.envFile,
+            task,
+            recentMessages,
+            result,
+        }, null, 2));
+        return;
+    }
+
+    printHandshakeResult(target, task, result);
+    console.log('');
+    console.log(`${infoLabel()} This is a manual Attendant inspection tool. Claude Code should still use hooks + MCP in normal operation.`);
+}
+
+async function attendCommand(args: ParsedArgs): Promise<void> {
+    const json = hasFlag(args, 'json');
+    const target = await resolveAttendantCliTarget(args);
+    const latestMessage = resolveAttendMessage(args);
+    const currentContext = resolveContextText(args);
+    const maxFacts = parsePositiveInteger(getFlag(args, 'max-facts'), 'max-facts');
+    const entityHint = getFlag(args, 'entity-hint')?.trim();
+    if (entityHint && !entityHint.includes('/')) {
+        throw new Error('entity-hint must use entityType/entityId format.');
+    }
+
+    const result = await target.iranti.attend({
+        agent: target.agentId,
+        currentContext,
+        latestMessage,
+        forceInject: hasFlag(args, 'force'),
+        maxFacts,
+        entityHints: entityHint ? [entityHint] : undefined,
+    });
+
+    if (json) {
+        console.log(JSON.stringify({
+            agent: target.agentId,
+            envSource: target.envSource,
+            envFile: target.envFile,
+            latestMessage,
+            currentContext,
+            maxFacts: maxFacts ?? null,
+            entityHints: entityHint ? [entityHint] : [],
+            forceInject: hasFlag(args, 'force'),
+            result,
+        }, null, 2));
+        return;
+    }
+
+    printAttendResult(target, latestMessage, result);
+    console.log('');
+    console.log(`${infoLabel()} This is a manual Attendant inspection tool. Claude Code should still use hooks + MCP in normal operation.`);
+}
+
 function printClaudeSetupHelp(): void {
     console.log([
         'Scaffold Claude Code MCP and hook files for the current project.',
@@ -3405,6 +3782,8 @@ Project-level:
     iranti doctor [--instance <name>] [--scope user|system] [--env <file>] [--json]
     iranti status [--scope user|system] [--json]
     iranti upgrade [--check] [--dry-run] [--yes] [--all] [--target auto|npm-global|npm-repo|python[,python]] [--json]
+    iranti handshake [--instance <name> | --project-env <file>] [--agent <id>] [--task <text>] [--recent <msg1||msg2>] [--recent-file <path>] [--json]
+    iranti attend [message] [--instance <name> | --project-env <file>] [--agent <id>] [--context <text> | --context-file <path>] [--entity-hint <entity>] [--force] [--max-facts <n>] [--json]
     iranti chat [--agent <agent-id>] [--provider <provider>] [--model <model>]
     iranti resolve [--dir <escalation-dir>]
 
@@ -3523,6 +3902,16 @@ async function main(): Promise<void> {
 
     if (args.command === 'upgrade') {
         await upgradeCommand(args);
+        return;
+    }
+
+    if (args.command === 'handshake') {
+        await handshakeCommand(args);
+        return;
+    }
+
+    if (args.command === 'attend') {
+        await attendCommand(args);
         return;
     }
 

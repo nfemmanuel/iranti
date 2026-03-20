@@ -23,25 +23,27 @@
 | project bindings | filesystem | Writes `.env.iranti` into selected project folders. |
 | Claude Code config | filesystem | Optionally creates `.mcp.json` and `.claude/settings.local.json` in bound projects. |
 | Codex registration | external config | Optionally registers the first bound project with Codex MCP through `codex-setup`. |
+| dependency preflight | text | Reports whether Docker, `psql`, `pg_isready`, and a local PostgreSQL listener on `localhost:5432` are detected before deeper setup continues. |
 
 ## Decision Tree / Flow
-1. Require a real terminal session.
-2. Ask whether setup should use a shared runtime or an isolated runtime folder.
-3. Resolve and create the runtime root.
-4. Ask for the instance name.
-5. Select an API port, warning if `3001` is occupied and suggesting the next free port.
-6. Ask how PostgreSQL should be provided: existing, managed, or Docker-local.
-7. When Docker-local is selected, optionally start or reuse a Docker PostgreSQL container and derive the connection string automatically.
-8. Ask for the default LLM provider.
-9. If the provider is remote, require its API key.
-10. Offer to collect additional provider keys for other supported providers.
-11. Generate or rotate a usable instance `IRANTI_API_KEY` so the instance can run even without DB-backed registry setup.
-12. Create or update the target instance env.
-13. Optionally bootstrap the database schema and seed data.
-14. Offer to bind one or more project folders by writing `.env.iranti`.
-15. For each bound project, optionally scaffold Claude Code MCP and hook files.
-16. If Codex is installed and at least one project was bound, optionally register Codex globally against the first bound project.
-17. Print a runnable summary with next-step commands.
+1. Report a dependency preflight for Docker, `psql`, `pg_isready`, and `localhost:5432`.
+2. Require a real terminal session.
+3. Ask whether setup should use a shared runtime or an isolated runtime folder.
+4. Resolve and create the runtime root.
+5. Ask for the instance name.
+6. Select an API port, warning if `3001` is occupied and suggesting the next free port.
+7. Ask how PostgreSQL should be provided: existing, managed, or Docker-local.
+8. When Docker-local is selected, optionally start or reuse a Docker PostgreSQL container and derive the connection string automatically.
+9. Ask for the default LLM provider.
+10. If the provider is remote, require its API key.
+11. Offer to collect additional provider keys for other supported providers.
+12. Generate or rotate a usable instance `IRANTI_API_KEY` so the instance can run even without DB-backed registry setup.
+13. Create or update the target instance env.
+14. Optionally bootstrap the database schema and seed data.
+15. Offer to bind one or more project folders by writing `.env.iranti`.
+16. For each bound project, optionally scaffold Claude Code MCP and hook files.
+17. If Codex is installed and at least one project was bound, optionally register Codex globally against the first bound project.
+18. Print a runnable summary with next-step commands.
 
 Non-interactive variants:
 - `--defaults` derives values from flags and environment variables, but still requires a real `DATABASE_URL`.
@@ -57,6 +59,7 @@ Non-interactive variants:
 - Existing `.mcp.json` or `.claude/settings.local.json` files are left untouched; scaffolding only fills missing files.
 - `--defaults` fails fast if no real database URL is available rather than creating a fake finished setup.
 - Docker is optional and only used when the user explicitly chooses a Docker-hosted PostgreSQL path.
+- Dependency preflight is advisory rather than blocking: setup continues even if Docker or PostgreSQL tooling is missing, because managed Postgres remains valid.
 - `--bootstrap-db` requires a fresh or already-compatible pgvector-capable PostgreSQL database. If the target DB is populated but not Prisma-baselined, or pgvector is unavailable, setup stops with actionable guidance instead of a generic failure.
 
 ## Test Results

@@ -122,6 +122,7 @@ iranti setup --config ./iranti.setup.json
 - optional Docker-hosted PostgreSQL when Docker is installed
 
 The setup wizard also checks whether the default API port (`3001`) is already occupied and suggests the next free port instead of failing late.
+It now also prints a dependency preflight up front so you can see whether Docker, `psql`, `pg_isready`, or a local PostgreSQL listener on `localhost:5432` are available before going deeper into database setup.
 
 Automation notes:
 - `--defaults` skips prompts and uses defaults plus environment/flag input. It still requires a real `DATABASE_URL`.
