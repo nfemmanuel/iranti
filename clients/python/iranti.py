@@ -28,7 +28,7 @@ import requests
 from typing import Any, Optional
 from dataclasses import dataclass, field
 
-__version__ = "0.2.15"
+__version__ = "0.2.16"
 
 
 def _default_entity_hints(entity_hints: Optional[list[str]]) -> Optional[list[str]]:
@@ -109,6 +109,47 @@ class WorkingMemoryEntry:
 
 
 @dataclass
+class SessionCheckpointPayload:
+    current_step: Optional[str] = None
+    next_step: Optional[str] = None
+    open_risks: list[str] = field(default_factory=list)
+    recent_outputs: list[str] = field(default_factory=list)
+    entity_targets: list[str] = field(default_factory=list)
+    notes: Optional[str] = None
+
+
+@dataclass
+class SessionCheckpointRecord:
+    session_id: str
+    task: str
+    task_fingerprint: str
+    status: str
+    started_at: str
+    last_heartbeat_at: str
+    updated_at: str
+    checkpoint: SessionCheckpointPayload
+    interrupted_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    abandoned_at: Optional[str] = None
+    resumed_at: Optional[str] = None
+
+
+@dataclass
+class SessionRecoveryInfo:
+    available: bool
+    session_id: str
+    task: str
+    task_fingerprint: str
+    matched_current_task: bool
+    match_confidence: float
+    recommendation: str
+    summary: str
+    last_heartbeat_at: str
+    interrupted_at: str
+    checkpoint: Optional[SessionCheckpointPayload] = None
+
+
+@dataclass
 class WorkingMemoryBrief:
     agent_id: str
     operating_rules: str
@@ -117,6 +158,8 @@ class WorkingMemoryBrief:
     session_started: str
     brief_generated_at: str
     context_call_count: int
+    session_checkpoint: Optional[SessionCheckpointRecord] = None
+    session_recovery: Optional[SessionRecoveryInfo] = None
 
 
 @dataclass
@@ -531,6 +574,55 @@ class IrantiClient:
         })
         return self._parse_brief(data)
 
+    def checkpoint(
+        self,
+        agent_id: str,
+        task: str,
+        recent_messages: list[str],
+        checkpoint: Any,
+        session_id: Optional[str] = None,
+        heartbeat_at: Optional[str] = None,
+    ) -> WorkingMemoryBrief:
+        """Persist a durable checkpoint for the current agent task."""
+        if isinstance(checkpoint, str):
+            checkpoint = {'notes': checkpoint}
+        payload = {
+            'agentId': agent_id,
+            'task': task,
+            'recentMessages': recent_messages,
+            'checkpoint': checkpoint,
+        }
+        if session_id is not None:
+            payload['sessionId'] = session_id
+        if heartbeat_at is not None:
+            payload['heartbeatAt'] = heartbeat_at
+        data = self._post('/memory/checkpoint', payload)
+        return self._parse_brief(data)
+
+    def resume_session(self, agent_id: str, session_id: Optional[str] = None) -> WorkingMemoryBrief:
+        """Mark an interrupted session as active again."""
+        payload = {'agentId': agent_id}
+        if session_id is not None:
+            payload['sessionId'] = session_id
+        data = self._post('/memory/resume', payload)
+        return self._parse_brief(data)
+
+    def complete_session(self, agent_id: str, session_id: Optional[str] = None) -> WorkingMemoryBrief:
+        """Mark a session as completed."""
+        payload = {'agentId': agent_id}
+        if session_id is not None:
+            payload['sessionId'] = session_id
+        data = self._post('/memory/complete', payload)
+        return self._parse_brief(data)
+
+    def abandon_session(self, agent_id: str, session_id: Optional[str] = None) -> WorkingMemoryBrief:
+        """Mark a session as abandoned while keeping the checkpoint durable."""
+        payload = {'agentId': agent_id}
+        if session_id is not None:
+            payload['sessionId'] = session_id
+        data = self._post('/memory/abandon', payload)
+        return self._parse_brief(data)
+
     def who_knows(self, entity: str) -> list[dict]:
         """Find all agents that have written facts about an entity."""
         entity_type, entity_id = entity.split('/', 1)
@@ -672,6 +764,9 @@ class IrantiClient:
             )
             for e in data.get('workingMemory', [])
         ]
+
+        checkpoint_data = data.get('sessionCheckpoint')
+        recovery_data = data.get('sessionRecovery')
         return WorkingMemoryBrief(
             agent_id=data['agentId'],
             operating_rules=data['operatingRules'],
@@ -680,6 +775,50 @@ class IrantiClient:
             session_started=data['sessionStarted'],
             brief_generated_at=data['briefGeneratedAt'],
             context_call_count=data['contextCallCount'],
+            session_checkpoint=self._parse_session_checkpoint(checkpoint_data) if isinstance(checkpoint_data, dict) else None,
+            session_recovery=self._parse_session_recovery(recovery_data) if isinstance(recovery_data, dict) else None,
+        )
+
+    def _parse_session_checkpoint(self, data: dict) -> SessionCheckpointRecord:
+        return SessionCheckpointRecord(
+            session_id=data['sessionId'],
+            task=data['task'],
+            task_fingerprint=data['taskFingerprint'],
+            status=data['status'],
+            started_at=data['startedAt'],
+            last_heartbeat_at=data['lastHeartbeatAt'],
+            updated_at=data['updatedAt'],
+            checkpoint=self._parse_checkpoint_payload(data.get('checkpoint', {})),
+            interrupted_at=data.get('interruptedAt'),
+            completed_at=data.get('completedAt'),
+            abandoned_at=data.get('abandonedAt'),
+            resumed_at=data.get('resumedAt'),
+        )
+
+    def _parse_session_recovery(self, data: dict) -> SessionRecoveryInfo:
+        checkpoint_data = data.get('checkpoint')
+        return SessionRecoveryInfo(
+            available=data['available'],
+            session_id=data['sessionId'],
+            task=data['task'],
+            task_fingerprint=data['taskFingerprint'],
+            matched_current_task=data['matchedCurrentTask'],
+            match_confidence=data['matchConfidence'],
+            recommendation=data['recommendation'],
+            summary=data['summary'],
+            last_heartbeat_at=data['lastHeartbeatAt'],
+            interrupted_at=data['interruptedAt'],
+            checkpoint=self._parse_checkpoint_payload(checkpoint_data) if isinstance(checkpoint_data, dict) else None,
+        )
+
+    def _parse_checkpoint_payload(self, data: dict) -> SessionCheckpointPayload:
+        return SessionCheckpointPayload(
+            current_step=data.get('currentStep'),
+            next_step=data.get('nextStep'),
+            open_risks=list(data.get('openRisks', [])) if isinstance(data.get('openRisks', []), list) else [],
+            recent_outputs=list(data.get('recentOutputs', [])) if isinstance(data.get('recentOutputs', []), list) else [],
+            entity_targets=list(data.get('entityTargets', [])) if isinstance(data.get('entityTargets', []), list) else [],
+            notes=data.get('notes'),
         )
 
     def last_http(self) -> dict:

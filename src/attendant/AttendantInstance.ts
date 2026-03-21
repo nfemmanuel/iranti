@@ -16,6 +16,7 @@ const ATTENDANT_RULES_QUERY: EntryQuery = {
     key: 'operating_rules',
 };
 const CONTEXT_RECOVERY_THRESHOLD = 20;  // LLM calls before context recovery
+const SESSION_INTERRUPTION_TTL_MS = 5 * 60 * 1000;
 const ENTITY_DETECTION_WINDOW_CHARS = 1500;
 const MIN_ENTITY_CONFIDENCE = 0.75;
 const MEMORY_DECISION_CONTEXT_WINDOW_CHARS = 2000;
@@ -59,6 +60,48 @@ export interface WorkingMemoryBrief {
     sessionStarted: string;
     briefGeneratedAt: string;
     contextCallCount: number;
+    sessionCheckpoint?: SessionCheckpointRecord | null;
+    sessionRecovery?: SessionRecoveryInfo | null;
+}
+
+export type SessionStatus = 'active' | 'interrupted' | 'completed' | 'abandoned';
+
+export interface SessionCheckpointPayload {
+    currentStep?: string;
+    nextStep?: string;
+    openRisks?: string[];
+    recentOutputs?: string[];
+    entityTargets?: string[];
+    notes?: string;
+}
+
+export interface SessionCheckpointRecord {
+    sessionId: string;
+    task: string;
+    taskFingerprint: string;
+    status: SessionStatus;
+    startedAt: string;
+    lastHeartbeatAt: string;
+    updatedAt: string;
+    checkpoint: SessionCheckpointPayload;
+    interruptedAt?: string;
+    completedAt?: string;
+    abandonedAt?: string;
+    resumedAt?: string;
+}
+
+export interface SessionRecoveryInfo {
+    available: boolean;
+    sessionId: string;
+    task: string;
+    taskFingerprint: string;
+    matchedCurrentTask: boolean;
+    matchConfidence: number;
+    recommendation: 'resume' | 'review' | 'ignore';
+    summary: string;
+    lastHeartbeatAt: string;
+    interruptedAt: string;
+    checkpoint: SessionCheckpointPayload | null;
 }
 
 // ─── Observe Types ────────────────────────────────────────────────────────────
@@ -106,6 +149,16 @@ export interface ObserveResult {
 export interface AttendInput extends ObserveInput {
     latestMessage?: string;
     forceInject?: boolean;
+}
+
+export interface SessionCheckpointInput extends AgentContext {
+    sessionId?: string;
+    heartbeatAt?: string;
+    checkpoint: SessionCheckpointPayload | string | Record<string, unknown>;
+}
+
+export interface SessionActionInput {
+    sessionId?: string;
 }
 
 export interface AttendDecision {
@@ -244,6 +297,175 @@ function normalizeMessage(message: string | undefined): string {
     return (message ?? '').trim();
 }
 
+function normalizeText(text: string | undefined): string {
+    return (text ?? '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function tokenize(text: string | undefined): string[] {
+    return normalizeText(text)
+        .split(' ')
+        .map((part) => part.trim())
+        .filter((part) => part.length > 2);
+}
+
+function fingerprintTask(task: string, recentMessages: string[] = []): string {
+    const messageSeed = recentMessages
+        .slice(-3)
+        .map((message) => normalizeText(message))
+        .filter((message) => message.length > 0)
+        .join(' ');
+
+    return normalizeText([task, messageSeed].filter(Boolean).join(' | '));
+}
+
+function similarityScore(left: string, right: string): number {
+    const normalizedLeft = normalizeText(left);
+    const normalizedRight = normalizeText(right);
+
+    if (!normalizedLeft || !normalizedRight) return 0;
+    if (normalizedLeft === normalizedRight) return 1;
+    if (normalizedLeft.includes(normalizedRight) || normalizedRight.includes(normalizedLeft)) {
+        return 0.92;
+    }
+
+    const leftTokens = new Set(tokenize(normalizedLeft));
+    const rightTokens = new Set(tokenize(normalizedRight));
+    if (leftTokens.size === 0 || rightTokens.size === 0) return 0;
+
+    let overlap = 0;
+    for (const token of leftTokens) {
+        if (rightTokens.has(token)) overlap++;
+    }
+
+    return overlap / Math.max(leftTokens.size, rightTokens.size);
+}
+
+function truncate(value: string, maxLength: number): string {
+    if (value.length <= maxLength) return value;
+    return `${value.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+function normalizeStringArray(value: unknown, maxItems: number = 5, maxLength: number = 160): string[] {
+    if (!Array.isArray(value)) return [];
+
+    const out: string[] = [];
+    for (const item of value) {
+        if (typeof item !== 'string') continue;
+        const normalized = truncate(item.trim(), maxLength);
+        if (!normalized) continue;
+        out.push(normalized);
+        if (out.length >= maxItems) break;
+    }
+
+    return out;
+}
+
+function normalizeCheckpointPayload(
+    payload: SessionCheckpointInput['checkpoint']
+): SessionCheckpointPayload {
+    if (typeof payload === 'string') {
+        return {
+            notes: truncate(payload.trim(), 500),
+        };
+    }
+
+    if (!payload || typeof payload !== 'object') {
+        return {};
+    }
+
+    const raw = payload as Record<string, unknown>;
+    const normalized: SessionCheckpointPayload = {};
+
+    if (typeof raw.currentStep === 'string') {
+        normalized.currentStep = truncate(raw.currentStep.trim(), 180);
+    }
+    if (typeof raw.nextStep === 'string') {
+        normalized.nextStep = truncate(raw.nextStep.trim(), 180);
+    }
+
+    const openRisks = normalizeStringArray(raw.openRisks, 5, 180);
+    if (openRisks.length > 0) {
+        normalized.openRisks = openRisks;
+    }
+
+    const recentOutputs = normalizeStringArray(raw.recentOutputs, 5, 220);
+    if (recentOutputs.length > 0) {
+        normalized.recentOutputs = recentOutputs;
+    }
+
+    const entityTargets = normalizeStringArray(raw.entityTargets, 5, 180);
+    if (entityTargets.length > 0) {
+        normalized.entityTargets = entityTargets;
+    }
+
+    if (typeof raw.notes === 'string') {
+        normalized.notes = truncate(raw.notes.trim(), 500);
+    }
+
+    return normalized;
+}
+
+function createSessionId(agentId: string, taskFingerprint: string): string {
+    const seed = `${agentId}:${taskFingerprint}:${Date.now()}`;
+    let hash = 0;
+    for (let i = 0; i < seed.length; i++) {
+        hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+    }
+    return `session_${hash.toString(36)}`;
+}
+
+function createRecoverySummary(record: SessionCheckpointRecord, matchedCurrentTask: boolean): string {
+    const checkpoint = record.checkpoint;
+    const stepSummary = checkpoint.currentStep ? `Last completed step: ${checkpoint.currentStep}.` : 'No completed step was stored.';
+    const nextStepSummary = checkpoint.nextStep ? `Recommended next step: ${checkpoint.nextStep}.` : 'No next step was stored.';
+    const matchSummary = matchedCurrentTask
+        ? 'The returning task matches the interrupted session.'
+        : 'The returning task does not strongly match the interrupted session.';
+
+    return [matchSummary, stepSummary, nextStepSummary].join(' ');
+}
+
+function evaluateSessionRecovery(
+    record: SessionCheckpointRecord,
+    context: AgentContext
+): { recovery: SessionRecoveryInfo | null; interrupted: boolean } {
+    const heartbeatAt = new Date(record.lastHeartbeatAt);
+    const stale = Number.isNaN(heartbeatAt.getTime())
+        ? true
+        : Date.now() - heartbeatAt.getTime() > SESSION_INTERRUPTION_TTL_MS;
+    const interrupted = record.status === 'interrupted' || stale;
+
+    if (!interrupted) {
+        return { recovery: null, interrupted: false };
+    }
+
+    const currentFingerprint = fingerprintTask(context.task, context.recentMessages);
+    const matchConfidence = similarityScore(currentFingerprint, record.taskFingerprint);
+    const matchedCurrentTask = matchConfidence >= 0.45;
+    const recommendation = matchedCurrentTask ? 'resume' : 'review';
+
+    return {
+        interrupted: true,
+        recovery: {
+            available: true,
+            sessionId: record.sessionId,
+            task: record.task,
+            taskFingerprint: record.taskFingerprint,
+            matchedCurrentTask,
+            matchConfidence,
+            recommendation,
+            summary: createRecoverySummary(record, matchedCurrentTask),
+            lastHeartbeatAt: record.lastHeartbeatAt,
+            interruptedAt: record.interruptedAt ?? record.lastHeartbeatAt,
+            checkpoint: record.checkpoint ?? null,
+        },
+    };
+}
+
 function heuristicMemoryNeed(message: string): MemoryDecisionHeuristic {
     const normalized = normalizeMessage(message);
     if (!normalized) {
@@ -284,6 +506,7 @@ export class AttendantInstance {
     private brief: WorkingMemoryBrief | null = null;
     private contextCallCount: number = 0;
     private sessionStarted: string = new Date().toISOString();
+    private sessionCheckpoint: SessionCheckpointRecord | null = null;
 
     constructor(agentId: string) {
         this.agentId = agentId;
@@ -304,6 +527,20 @@ export class AttendantInstance {
 
         // Load knowledge — agent entries + related entities
         const workingMemory = await this.buildWorkingMemory(inferredTaskType);
+        const recoveryResult = persisted?.sessionCheckpoint
+            ? this.buildRecovery(context, persisted.sessionCheckpoint)
+            : { interrupted: false, recovery: null as SessionRecoveryInfo | null };
+
+        if (recoveryResult.interrupted && recoveryResult.recovery) {
+            this.sessionCheckpoint = {
+                ...persisted!.sessionCheckpoint!,
+                status: 'interrupted',
+                interruptedAt: recoveryResult.recovery.interruptedAt,
+                updatedAt: new Date().toISOString(),
+            };
+        } else {
+            this.sessionCheckpoint = persisted?.sessionCheckpoint ?? null;
+        }
 
         this.brief = {
             agentId: this.agentId,
@@ -313,6 +550,8 @@ export class AttendantInstance {
             sessionStarted: persisted?.sessionStarted ?? this.sessionStarted,
             briefGeneratedAt: new Date().toISOString(),
             contextCallCount: this.contextCallCount,
+            sessionCheckpoint: this.sessionCheckpoint,
+            sessionRecovery: recoveryResult.recovery,
         };
 
         await this.persistState();
@@ -334,10 +573,20 @@ export class AttendantInstance {
 
         // Task hasn't shifted — update timestamp only
         if (newTaskType.toLowerCase() === this.brief.inferredTaskType.toLowerCase()) {
+            if (this.sessionCheckpoint && this.sessionCheckpoint.status === 'active') {
+                const now = new Date().toISOString();
+                this.sessionCheckpoint = {
+                    ...this.sessionCheckpoint,
+                    lastHeartbeatAt: now,
+                    updatedAt: now,
+                };
+            }
             this.brief = {
                 ...this.brief,
                 briefGeneratedAt: new Date().toISOString(),
                 contextCallCount: this.contextCallCount,
+                sessionCheckpoint: this.sessionCheckpoint,
+                sessionRecovery: null,
             };
             await this.persistState();
             timeEnd('attendant.reconvene_ms', t0);
@@ -352,6 +601,8 @@ export class AttendantInstance {
             workingMemory,
             briefGeneratedAt: new Date().toISOString(),
             contextCallCount: this.contextCallCount,
+            sessionCheckpoint: this.sessionCheckpoint,
+            sessionRecovery: null,
         };
 
         await this.persistState();
@@ -398,6 +649,137 @@ export class AttendantInstance {
     // ── Getters ──────────────────────────────────────────────────────────────
 
     getBrief(): WorkingMemoryBrief | null {
+        return this.brief;
+    }
+
+    async checkpoint(input: SessionCheckpointInput): Promise<WorkingMemoryBrief> {
+        const now = new Date().toISOString();
+        if (!this.brief) {
+            await this.handshake({
+                task: input.task,
+                recentMessages: input.recentMessages,
+            });
+        }
+
+        const normalizedCheckpoint = normalizeCheckpointPayload(input.checkpoint);
+        const taskFingerprint = fingerprintTask(input.task, input.recentMessages);
+        const existing = this.sessionCheckpoint;
+        const sessionId = input.sessionId?.trim() || existing?.sessionId || createSessionId(this.agentId, taskFingerprint);
+        const startedAt = existing?.sessionId === sessionId ? existing.startedAt : now;
+
+        this.sessionCheckpoint = {
+            sessionId,
+            task: input.task,
+            taskFingerprint,
+            status: 'active',
+            startedAt,
+            lastHeartbeatAt: input.heartbeatAt ?? now,
+            updatedAt: now,
+            checkpoint: normalizedCheckpoint,
+        };
+
+        if (!this.brief) {
+            throw new Error('Unable to initialize attendant brief for checkpoint persistence.');
+        }
+
+        this.brief = {
+            ...this.brief,
+            sessionCheckpoint: this.sessionCheckpoint,
+            sessionRecovery: null,
+            briefGeneratedAt: now,
+        };
+
+        await this.persistState();
+        return this.brief;
+    }
+
+    async resumeSession(input: SessionActionInput = {}): Promise<WorkingMemoryBrief> {
+        await this.ensureSessionLoaded();
+        if (!this.brief || !this.sessionCheckpoint) {
+            return this.brief ?? (await this.handshake({ task: 'resume session', recentMessages: [] }));
+        }
+
+        if (input.sessionId && input.sessionId.trim() !== this.sessionCheckpoint.sessionId) {
+            throw new Error(`Session "${input.sessionId}" does not match the active checkpoint.`);
+        }
+
+        const now = new Date().toISOString();
+        this.sessionCheckpoint = {
+            ...this.sessionCheckpoint,
+            status: 'active',
+            resumedAt: now,
+            lastHeartbeatAt: now,
+            updatedAt: now,
+        };
+
+        this.brief = {
+            ...this.brief,
+            sessionCheckpoint: this.sessionCheckpoint,
+            sessionRecovery: null,
+            briefGeneratedAt: now,
+        };
+
+        await this.persistState();
+        return this.brief;
+    }
+
+    async completeSession(input: SessionActionInput = {}): Promise<WorkingMemoryBrief> {
+        await this.ensureSessionLoaded();
+        if (!this.brief || !this.sessionCheckpoint) {
+            return this.brief ?? (await this.handshake({ task: 'complete session', recentMessages: [] }));
+        }
+
+        if (input.sessionId && input.sessionId.trim() !== this.sessionCheckpoint.sessionId) {
+            throw new Error(`Session "${input.sessionId}" does not match the active checkpoint.`);
+        }
+
+        const now = new Date().toISOString();
+        this.sessionCheckpoint = {
+            ...this.sessionCheckpoint,
+            status: 'completed',
+            completedAt: now,
+            lastHeartbeatAt: now,
+            updatedAt: now,
+        };
+
+        this.brief = {
+            ...this.brief,
+            sessionCheckpoint: this.sessionCheckpoint,
+            sessionRecovery: null,
+            briefGeneratedAt: now,
+        };
+
+        await this.persistState();
+        return this.brief;
+    }
+
+    async abandonSession(input: SessionActionInput = {}): Promise<WorkingMemoryBrief> {
+        await this.ensureSessionLoaded();
+        if (!this.brief || !this.sessionCheckpoint) {
+            return this.brief ?? (await this.handshake({ task: 'abandon session', recentMessages: [] }));
+        }
+
+        if (input.sessionId && input.sessionId.trim() !== this.sessionCheckpoint.sessionId) {
+            throw new Error(`Session "${input.sessionId}" does not match the active checkpoint.`);
+        }
+
+        const now = new Date().toISOString();
+        this.sessionCheckpoint = {
+            ...this.sessionCheckpoint,
+            status: 'abandoned',
+            abandonedAt: now,
+            lastHeartbeatAt: now,
+            updatedAt: now,
+        };
+
+        this.brief = {
+            ...this.brief,
+            sessionCheckpoint: this.sessionCheckpoint,
+            sessionRecovery: null,
+            briefGeneratedAt: now,
+        };
+
+        await this.persistState();
         return this.brief;
     }
 
@@ -805,6 +1187,18 @@ ${detectionWindow}`,
 
     // ── Private ──────────────────────────────────────────────────────────────
 
+    private buildRecovery(
+        context: AgentContext,
+        record: SessionCheckpointRecord
+    ): { interrupted: boolean; recovery: SessionRecoveryInfo | null } {
+        return evaluateSessionRecovery(record, context);
+    }
+
+    private async ensureSessionLoaded(): Promise<void> {
+        if (this.brief) return;
+        await this.loadPersistedState();
+    }
+
     private async decideMemoryNeed(input: {
         currentContext: string;
         latestMessage: string;
@@ -1055,6 +1449,7 @@ If nothing is relevant, return: none`,
         const state = entry.valueRaw as unknown as WorkingMemoryBrief;
         this.sessionStarted = state.sessionStarted;
         this.contextCallCount = state.contextCallCount ?? 0;
+        this.sessionCheckpoint = state.sessionCheckpoint ?? null;
         this.brief = state;
         return state;
     }

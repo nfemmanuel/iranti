@@ -64,6 +64,57 @@ export function memoryRoutes(iranti: Iranti): Router {
         }
     });
 
+    // POST /checkpoint
+    router.post('/checkpoint', validateInput('checkpoint'), async (req: Request, res: Response) => {
+        try {
+            const { agentId, task, recentMessages, checkpoint, sessionId, heartbeatAt } = req.body;
+            const result = await iranti.checkpoint({
+                agentId,
+                task,
+                recentMessages,
+                checkpoint,
+                sessionId,
+                heartbeatAt,
+            });
+            res.json(result);
+        } catch (err) {
+            res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+    });
+
+    // POST /resume
+    router.post('/resume', validateInput('sessionAction'), async (req: Request, res: Response) => {
+        try {
+            const { agentId, sessionId } = req.body;
+            const result = await iranti.resumeSession({ agentId, sessionId });
+            res.json(result);
+        } catch (err) {
+            res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+    });
+
+    // POST /complete
+    router.post('/complete', validateInput('sessionAction'), async (req: Request, res: Response) => {
+        try {
+            const { agentId, sessionId } = req.body;
+            const result = await iranti.completeSession({ agentId, sessionId });
+            res.json(result);
+        } catch (err) {
+            res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+    });
+
+    // POST /abandon
+    router.post('/abandon', validateInput('sessionAction'), async (req: Request, res: Response) => {
+        try {
+            const { agentId, sessionId } = req.body;
+            const result = await iranti.abandonSession({ agentId, sessionId });
+            res.json(result);
+        } catch (err) {
+            res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+    });
+
     // GET /whoknows/:entityType/:entityId
     router.get('/whoknows/:entityType/:entityId', async (req: Request, res: Response) => {
         try {

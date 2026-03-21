@@ -52,8 +52,17 @@ Response:
 ```json
 {
   "status": "ok",
-  "version": "0.2.0",
-  "provider": "mock"
+  "version": "0.2.15",
+  "provider": "mock",
+  "runtime": {
+    "instanceName": "local",
+    "pid": 25476,
+    "port": 3001,
+    "status": "running",
+    "startedAt": "2026-03-21T07:12:34.000Z",
+    "lastHeartbeatAt": "2026-03-21T07:13:04.000Z",
+    "healthUrl": "http://localhost:3001/health"
+  }
 }
 ```
 
@@ -191,10 +200,102 @@ Hybrid search response:
 
 - `POST /memory/handshake`
 - `POST /memory/reconvene`
+- `POST /memory/checkpoint`
+- `POST /memory/resume`
+- `POST /memory/complete`
+- `POST /memory/abandon`
 - `POST /memory/observe`
 - `POST /memory/attend`
 - `GET /memory/whoknows/:entityType/:entityId`
 - `POST /memory/maintenance`
+
+Checkpoint request body:
+
+```json
+{
+  "agentId": "research_agent_001",
+  "task": "Audit launch blockers for local setup",
+  "recentMessages": [
+    "Investigating Docker fallback behavior.",
+    "Need to verify upgrade behavior on Windows."
+  ],
+  "checkpoint": {
+    "currentStep": "Comparing docs with runtime behavior",
+    "nextStep": "Patch API docs and rerun tests",
+    "openRisks": ["Repo .env points at a stale local schema"],
+    "recentOutputs": ["runtime-upgrades spec drafted"],
+    "entityTargets": ["project/iranti"],
+    "notes": "Resume from contract parity if the session drops."
+  }
+}
+```
+
+Checkpoint response:
+
+```json
+{
+  "agentId": "research_agent_001",
+  "operatingRules": "Attendant manages per-agent working memory.",
+  "inferredTaskType": "research",
+  "workingMemory": [],
+  "sessionStarted": "2026-03-21T07:10:00.000Z",
+  "briefGeneratedAt": "2026-03-21T07:13:30.000Z",
+  "contextCallCount": 0,
+  "sessionCheckpoint": {
+    "sessionId": "sess_9f21b6f7",
+    "task": "Audit launch blockers for local setup",
+    "taskFingerprint": "2d0c0f4f5f0c9d2f",
+    "status": "active",
+    "startedAt": "2026-03-21T07:10:00.000Z",
+    "lastHeartbeatAt": "2026-03-21T07:13:30.000Z",
+    "updatedAt": "2026-03-21T07:13:30.000Z",
+    "checkpoint": {
+      "currentStep": "Comparing docs with runtime behavior",
+      "nextStep": "Patch API docs and rerun tests",
+      "openRisks": ["Repo .env points at a stale local schema"]
+    }
+  },
+  "sessionRecovery": null
+}
+```
+
+Resume / complete / abandon request body:
+
+```json
+{
+  "agentId": "research_agent_001",
+  "sessionId": "sess_9f21b6f7"
+}
+```
+
+Resume / complete / abandon response:
+
+```json
+{
+  "agentId": "research_agent_001",
+  "operatingRules": "Attendant manages per-agent working memory.",
+  "inferredTaskType": "research",
+  "workingMemory": [],
+  "sessionStarted": "2026-03-21T07:10:00.000Z",
+  "briefGeneratedAt": "2026-03-21T07:14:00.000Z",
+  "contextCallCount": 0,
+  "sessionCheckpoint": {
+    "sessionId": "sess_9f21b6f7",
+    "task": "Audit launch blockers for local setup",
+    "taskFingerprint": "2d0c0f4f5f0c9d2f",
+    "status": "completed",
+    "startedAt": "2026-03-21T07:10:00.000Z",
+    "lastHeartbeatAt": "2026-03-21T07:13:30.000Z",
+    "updatedAt": "2026-03-21T07:14:00.000Z",
+    "completedAt": "2026-03-21T07:14:00.000Z",
+    "checkpoint": {
+      "currentStep": "Comparing docs with runtime behavior",
+      "nextStep": "Patch API docs and rerun tests"
+    }
+  },
+  "sessionRecovery": null
+}
+```
 
 Observe request body:
 
@@ -300,4 +401,8 @@ Typical status codes:
   - `POST /kb/write`
   - `POST /kb/relate`
   - `POST /memory/handshake`
+  - `POST /memory/checkpoint`
+  - `POST /memory/resume`
+  - `POST /memory/complete`
+  - `POST /memory/abandon`
 - Rate limiting middleware is applied to protected route groups (`/kb`, `/memory`, `/agents`).

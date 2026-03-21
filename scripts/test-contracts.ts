@@ -101,6 +101,10 @@ function assertMemoryRoutes(): void {
 
     expectIncludes(filePath, content, "router.post('/handshake', validateInput('handshake')", 'Memory route: POST /handshake uses validation');
     expectIncludes(filePath, content, "router.post('/reconvene'", 'Memory route: POST /reconvene');
+    expectIncludes(filePath, content, "router.post('/checkpoint', validateInput('checkpoint')", 'Memory route: POST /checkpoint uses validation');
+    expectIncludes(filePath, content, "router.post('/resume', validateInput('sessionAction')", 'Memory route: POST /resume uses validation');
+    expectIncludes(filePath, content, "router.post('/complete', validateInput('sessionAction')", 'Memory route: POST /complete uses validation');
+    expectIncludes(filePath, content, "router.post('/abandon', validateInput('sessionAction')", 'Memory route: POST /abandon uses validation');
     expectIncludes(filePath, content, "router.post('/observe'", 'Memory route: POST /observe');
     expectIncludes(filePath, content, "router.post('/attend'", 'Memory route: POST /attend');
     expectIncludes(filePath, content, "router.get('/whoknows/:entityType/:entityId'", 'Memory route: GET /whoknows/:type/:id');
@@ -139,6 +143,10 @@ function assertPythonClientContract(): void {
     expectIncludes(filePath, content, "self._get(f'/kb/related/{entity_type}/{entity_id}/deep?depth={depth}')", 'Python client reads /kb/related/:type/:id/deep');
     expectIncludes(filePath, content, "self._post('/memory/handshake'", 'Python client handshakes via /memory/handshake');
     expectIncludes(filePath, content, "self._post('/memory/reconvene'", 'Python client reconvenes via /memory/reconvene');
+    expectIncludes(filePath, content, "self._post('/memory/checkpoint'", 'Python client checkpoints via /memory/checkpoint');
+    expectIncludes(filePath, content, "self._post('/memory/resume'", 'Python client resumes via /memory/resume');
+    expectIncludes(filePath, content, "self._post('/memory/complete'", 'Python client completes via /memory/complete');
+    expectIncludes(filePath, content, "self._post('/memory/abandon'", 'Python client abandons via /memory/abandon');
     expectIncludes(filePath, content, "self._post('/memory/attend'", 'Python client attends via /memory/attend');
     expectIncludes(filePath, content, "self._get(f'/memory/whoknows/{entity_type}/{entity_id}')", 'Python client reads /memory/whoknows/:type/:id');
     expectIncludes(filePath, content, "self._post('/memory/maintenance'", 'Python client calls /memory/maintenance');
@@ -159,6 +167,10 @@ function assertTypeScriptSdkSurface(): void {
         'async ingest(',
         'async handshake(',
         'async reconvene(',
+        'async checkpoint(',
+        'async resumeSession(',
+        'async completeSession(',
+        'async abandonSession(',
         'async attend(',
         'async query(',
         'async history(',
@@ -180,6 +192,31 @@ function assertTypeScriptSdkSurface(): void {
     }
 }
 
+function assertTypeScriptHttpClientContract(): void {
+    const filePath = 'clients/typescript/src/client.ts';
+    const content = readFile(filePath);
+
+    expectIncludes(filePath, content, "'/kb/write'", 'TypeScript client writes to /kb/write');
+    expectIncludes(filePath, content, "'/kb/ingest'", 'TypeScript client ingests to /kb/ingest');
+    expectIncludes(filePath, content, '`/kb/query/${entityType}/${entityId}/${key}${query}`', 'TypeScript client queries /kb/query/:type/:id/:key');
+    expectIncludes(filePath, content, '`/kb/query/${entityType}/${entityId}`', 'TypeScript client queries /kb/query/:type/:id');
+    expectIncludes(filePath, content, "'/kb/relate'", 'TypeScript client relates via /kb/relate');
+    expectIncludes(filePath, content, "'/memory/handshake'", 'TypeScript client handshakes via /memory/handshake');
+    expectIncludes(filePath, content, "'/memory/reconvene'", 'TypeScript client reconvenes via /memory/reconvene');
+    expectIncludes(filePath, content, "'/memory/checkpoint'", 'TypeScript client checkpoints via /memory/checkpoint');
+    expectIncludes(filePath, content, "'/memory/resume'", 'TypeScript client resumes via /memory/resume');
+    expectIncludes(filePath, content, "'/memory/complete'", 'TypeScript client completes via /memory/complete');
+    expectIncludes(filePath, content, "'/memory/abandon'", 'TypeScript client abandons via /memory/abandon');
+    expectIncludes(filePath, content, "'/memory/attend'", 'TypeScript client attends via /memory/attend');
+    expectIncludes(filePath, content, "'/memory/observe'", 'TypeScript client observes via /memory/observe');
+    expectIncludes(filePath, content, '`/memory/whoknows/${entityType}/${entityId}`', 'TypeScript client reads /memory/whoknows/:type/:id');
+    expectIncludes(filePath, content, "'/memory/maintenance'", 'TypeScript client calls /memory/maintenance');
+    expectIncludes(filePath, content, "'/agents/register'", 'TypeScript client registers via /agents/register');
+
+    expectNotRegex(filePath, content, /['"`]\/write['"`]/, 'TypeScript client does not use deprecated /write route');
+    expectNotRegex(filePath, content, /['"`]\/observe['"`]/, 'TypeScript client does not use deprecated /observe route');
+}
+
 function assertApiDocsContract(): void {
     const filePath = 'docs/API.md';
     const content = readFile(filePath);
@@ -192,6 +229,10 @@ function assertApiDocsContract(): void {
         '- `POST /kb/relate`',
         '- `POST /memory/handshake`',
         '- `POST /memory/reconvene`',
+        '- `POST /memory/checkpoint`',
+        '- `POST /memory/resume`',
+        '- `POST /memory/complete`',
+        '- `POST /memory/abandon`',
         '- `POST /memory/attend`',
         '- `POST /memory/observe`',
         '- `GET /memory/whoknows/:entityType/:entityId`',
@@ -251,6 +292,7 @@ function main(): void {
     assertBatchRoute();
     assertPythonClientContract();
     assertTypeScriptSdkSurface();
+    assertTypeScriptHttpClientContract();
     assertApiDocsContract();
     assertPackageMainPointsToBuiltFile();
     printSummaryAndExit();

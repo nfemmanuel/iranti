@@ -85,6 +85,24 @@ turn = client.attend(
 )
 print(turn["shouldInject"], turn["reason"])
 
+# Save task progress so a later handshake can recommend resuming it
+brief = client.checkpoint(
+    agent_id="my_agent",
+    task="Research publication history",
+    recent_messages=["Still comparing two source timelines."],
+    checkpoint={
+        "currentStep": "Review affiliation conflict",
+        "nextStep": "Write corrected fact",
+        "openRisks": ["Two sources disagree on start year"],
+    },
+)
+
+if brief.session_recovery and brief.session_recovery.available:
+    client.resume_session(
+        agent_id="my_agent",
+        session_id=brief.session_recovery.session_id
+    )
+
 # Query facts
 result = client.query("researcher/jane_smith", "affiliation")
 if result.found:

@@ -28,6 +28,18 @@ const schemas = {
     task: { type: 'string', required: true, maxLength: 1000 },
     recentMessages: { type: 'array', required: false, maxLength: 100 }
   },
+  checkpoint: {
+    agentId: { type: 'string', required: true, maxLength: 200 },
+    task: { type: 'string', required: true, maxLength: 1000 },
+    recentMessages: { type: 'array', required: true, maxLength: 100 },
+    checkpoint: { type: 'any', required: true, maxSize: 20000 },
+    sessionId: { type: 'string', required: false, maxLength: 200 },
+    heartbeatAt: { type: 'string', required: false, maxLength: 50 }
+  },
+  sessionAction: {
+    agentId: { type: 'string', required: true, maxLength: 200 },
+    sessionId: { type: 'string', required: false, maxLength: 200 }
+  },
   relate: {
     fromEntity: { type: 'string', required: true, pattern: /^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_/-]+$/, maxLength: 200 },
     toEntity: { type: 'string', required: true, pattern: /^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_/-]+$/, maxLength: 200 },

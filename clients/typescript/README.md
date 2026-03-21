@@ -50,6 +50,23 @@ const turn = await client.attend({
   currentContext: 'User: What did we decide about budget?\nAssistant:',
   latestMessage: 'What did we decide about budget?',
 });
+
+const checkpointed = await client.checkpoint({
+  agentId: 'research_agent',
+  task: 'Audit budget decisions',
+  recentMessages: ['Checking the latest blocker list.'],
+  checkpoint: {
+    currentStep: 'Review contract parity failures',
+    nextStep: 'Patch API docs and rerun tests',
+  },
+});
+
+if (checkpointed.sessionRecovery?.available) {
+  await client.resumeSession({
+    agentId: 'research_agent',
+    sessionId: checkpointed.sessionRecovery.sessionId,
+  });
+}
 ```
 
 ## Graph

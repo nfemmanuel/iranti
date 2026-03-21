@@ -2,7 +2,24 @@
 
 All notable changes to this project are documented in this file.
 
-## 0.2.15 - Unreleased
+## 0.2.16 - 2026-03-21
+
+### Added
+
+- Durable interrupted-session recovery with checkpoint, resume, complete, and abandon flows across the SDK, REST API, and published clients.
+- Runtime lifecycle tracking for instance-backed API servers, including persisted runtime metadata, `/health` runtime state, and CLI visibility into running versus stale instances.
+- New feature specs and ADR coverage for runtime upgrades and interrupted session recovery.
+
+### Changed
+
+- `iranti upgrade` can now coordinate a restart for a named running instance with `--restart --instance <name>` after installing a new version.
+- Operator docs, quickstart guidance, API docs, and client READMEs now describe checkpointed recovery and runtime lifecycle behavior.
+
+### Fixed
+
+- The release bump helper now updates the API server version constant correctly after the runtime lifecycle refactor.
+
+## 0.2.15 - 2026-03-21
 
 ### Added
 

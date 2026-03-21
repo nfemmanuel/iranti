@@ -15,6 +15,7 @@ import { loadRuntimeEnv } from '../src/lib/runtimeEnv';
 import { resolveInteractive } from '../src/resolutionist';
 import { startChatSession } from '../src/chat';
 import { createVectorBackend, resolveVectorBackendName } from '../src/library/backends';
+import { InstanceRuntimeState, isPidRunning, readRuntimeState, waitForPidExit } from '../src/lib/runtimeLifecycle';
 import { Iranti } from '../src/sdk';
 
 type Scope = 'user' | 'system';
@@ -41,6 +42,12 @@ type InstanceMeta = {
     port: number;
     envFile: string;
     instanceDir: string;
+};
+
+type InstanceRuntimeSummary = {
+    state: InstanceRuntimeState | null;
+    running: boolean;
+    stale: boolean;
 };
 
 type DoctorStatus = 'pass' | 'warn' | 'fail';
@@ -585,16 +592,17 @@ function redactSecret(value: string | undefined): string {
     return `${value.slice(0, 4)}...${value.slice(-4)}`;
 }
 
-function instancePaths(root: string, name: string): { instanceDir: string; envFile: string; metaFile: string } {
+function instancePaths(root: string, name: string): { instanceDir: string; envFile: string; metaFile: string; runtimeFile: string } {
     const instanceDir = path.join(root, 'instances', name);
     return {
         instanceDir,
         envFile: path.join(instanceDir, '.env'),
         metaFile: path.join(instanceDir, 'instance.json'),
+        runtimeFile: path.join(instanceDir, 'runtime.json'),
     };
 }
 
-async function loadInstanceEnv(root: string, name: string): Promise<{ instanceDir: string; envFile: string; metaFile: string; env: Record<string, string> }> {
+async function loadInstanceEnv(root: string, name: string): Promise<{ instanceDir: string; envFile: string; metaFile: string; runtimeFile: string; env: Record<string, string> }> {
     const paths = instancePaths(root, name);
     if (!fs.existsSync(paths.envFile)) {
         throw cliError(
@@ -612,6 +620,65 @@ async function loadInstanceEnv(root: string, name: string): Promise<{ instanceDi
         ...paths,
         env: await readEnvFile(paths.envFile),
     };
+}
+
+async function readInstanceRuntimeSummary(root: string, name: string): Promise<InstanceRuntimeSummary> {
+    const { runtimeFile } = instancePaths(root, name);
+    const state = await readRuntimeState(runtimeFile);
+    if (!state) {
+        return { state: null, running: false, stale: false };
+    }
+    const running = isPidRunning(state.pid);
+    return {
+        state,
+        running,
+        stale: !running && state.status !== 'stopped',
+    };
+}
+
+function describeInstanceRuntime(summary: InstanceRuntimeSummary): string {
+    if (!summary.state) {
+        return `${warnLabel('STOPPED')} no runtime metadata`;
+    }
+    if (summary.running) {
+        return `${okLabel('RUNNING')} pid=${summary.state.pid} version=${summary.state.version}`;
+    }
+    if (summary.stale) {
+        return `${warnLabel('STALE')} last_pid=${summary.state.pid} version=${summary.state.version}`;
+    }
+    return `${warnLabel('STOPPED')} version=${summary.state.version}`;
+}
+
+async function startInstanceRuntime(name: string, instanceDir: string, envFile: string, runtimeFile: string): Promise<void> {
+    process.env.IRANTI_INSTANCE_NAME = name;
+    process.env.IRANTI_INSTANCE_DIR = instanceDir;
+    process.env.IRANTI_INSTANCE_RUNTIME_FILE = runtimeFile;
+    process.env.IRANTI_INSTANCE_ENV_FILE = envFile;
+
+    console.log(`${infoLabel()} Starting Iranti instance '${name}' on port ${process.env.IRANTI_PORT ?? '3001'}...`);
+    const serverEntry = path.resolve(__dirname, '..', 'src', 'api', 'server');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    require(serverEntry);
+}
+
+async function stopRuntimeProcess(pid: number, timeoutMs: number): Promise<boolean> {
+    if (!isPidRunning(pid)) return true;
+    try {
+        process.kill(pid, 'SIGTERM');
+    } catch {
+        if (process.platform === 'win32') {
+            const proc = runCommandCapture('taskkill', ['/PID', String(pid), '/T']);
+            if (proc.status !== 0) {
+                return false;
+            }
+        } else {
+            return false;
+        }
+    }
+    if (await waitForPidExit(pid, timeoutMs)) {
+        return true;
+    }
+    return false;
 }
 
 async function resolveProviderKeyTarget(args: ParsedArgs): Promise<ProviderKeyTarget> {
@@ -2069,6 +2136,85 @@ function runCommandInteractive(step: UpgradeCommand): number | null {
     return proc.status;
 }
 
+function currentCliInvocation(): { executable: string; args: string[] } {
+    const argv1 = process.argv[1] ? path.resolve(process.argv[1]) : '';
+    const forwardedDebug = CLI_DEBUG ? ['--debug'] : [];
+    const forwardedVerbose = !CLI_DEBUG && CLI_VERBOSE ? ['--verbose'] : [];
+
+    if (argv1.endsWith('.ts')) {
+        return {
+            executable: 'npx',
+            args: ['ts-node', argv1, ...forwardedDebug, ...forwardedVerbose],
+        };
+    }
+
+    return {
+        executable: process.execPath,
+        args: argv1 ? [argv1, ...forwardedDebug, ...forwardedVerbose] : [...forwardedDebug, ...forwardedVerbose],
+    };
+}
+
+function spawnDetachedCli(args: string[], cwd?: string): number {
+    const invocation = currentCliInvocation();
+    const child = spawn(invocation.executable, [...invocation.args, ...args], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+        cwd: cwd ?? process.cwd(),
+        env: process.env,
+    });
+    child.unref();
+    return child.pid ?? 0;
+}
+
+async function restartInstanceRuntime(args: ParsedArgs, instanceName: string, scope: Scope, root: string): Promise<{
+    previousPid: number | null;
+    newPid: number;
+    runtimeBefore: InstanceRuntimeSummary;
+}> {
+    const runtimeBefore = await readInstanceRuntimeSummary(root, instanceName);
+    if (!runtimeBefore.running || !runtimeBefore.state?.pid) {
+        throw cliError(
+            'IRANTI_INSTANCE_NOT_RUNNING',
+            `Instance '${instanceName}' is not currently running.`,
+            [`Start it with \`iranti run --instance ${instanceName}\` before requesting a restart.`],
+            { instance: instanceName, root, runtimePresent: Boolean(runtimeBefore.state), pid: runtimeBefore.state?.pid ?? null }
+        );
+    }
+    const timeoutSeconds = Number.parseInt(getFlag(args, 'graceful-timeout') ?? '20', 10);
+    const timeoutMs = Number.isFinite(timeoutSeconds) && timeoutSeconds > 0 ? timeoutSeconds * 1000 : 20_000;
+    const previousPid = runtimeBefore.state?.pid ?? null;
+
+    if (previousPid) {
+        console.log(`${infoLabel()} Stopping instance '${instanceName}' (pid ${previousPid})...`);
+        const stopped = await stopRuntimeProcess(previousPid, timeoutMs);
+        if (!stopped) {
+            throw cliError(
+                'IRANTI_INSTANCE_STOP_TIMEOUT',
+                `Instance '${instanceName}' did not stop within ${timeoutSeconds}s.`,
+                ['Close the process manually or rerun with a longer --graceful-timeout.'],
+                { instance: instanceName, pid: previousPid, timeoutSeconds }
+            );
+        }
+    }
+
+    const newPid = spawnDetachedCli([
+        'run',
+        '--instance',
+        instanceName,
+        '--scope',
+        scope,
+        '--root',
+        root,
+    ], root);
+
+    return {
+        previousPid,
+        newPid,
+        runtimeBefore,
+    };
+}
+
 function deriveDatabaseUrlForMode(
     mode: DatabaseSetupMode,
     instanceName: string,
@@ -2446,11 +2592,12 @@ async function chooseInteractiveUpgradeTargets(
 
 async function executeUpgradeTargets(
     targets: Exclude<UpgradeTarget, 'auto'>[],
-    context: ReturnType<typeof detectUpgradeContext>
+    context: ReturnType<typeof detectUpgradeContext>,
+    options: { detachedPostCommand?: string } = {},
 ): Promise<UpgradeExecutionResult[]> {
     const results: UpgradeExecutionResult[] = [];
     for (const target of targets) {
-        const result = await executeUpgradeTarget(target, context);
+        const result = await executeUpgradeTarget(target, context, options);
         results.push(result);
     }
     return results;
@@ -2533,7 +2680,7 @@ function resolveDetachedUpgradeCwd(command: UpgradeCommand): string {
     return normalized;
 }
 
-function scheduleDetachedWindowsGlobalNpmUpgrade(command: UpgradeCommand): void {
+function scheduleDetachedWindowsGlobalNpmUpgrade(command: UpgradeCommand, postCommand?: string): void {
     const neutralCwd = resolveDetachedUpgradeCwd(command);
     const parentPid = process.pid;
     const powershell = 'powershell.exe';
@@ -2545,6 +2692,7 @@ function scheduleDetachedWindowsGlobalNpmUpgrade(command: UpgradeCommand): void 
         'while (Get-Process -Id $parentPid -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 500 }',
         `Set-Location -LiteralPath '${escapedCwd}'`,
         `& '${escapedExecutable}' @(${escapedArgs})`,
+        ...(postCommand ? [`if ($LASTEXITCODE -eq 0) { ${postCommand} }`] : []),
         'exit $LASTEXITCODE',
     ].join('; ');
     const child = spawn(powershell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], {
@@ -2566,7 +2714,8 @@ function verifyPythonInstall(command: UpgradeCommand): { status: 'pass' | 'warn'
 
 async function executeUpgradeTarget(
     target: Exclude<UpgradeTarget, 'auto'>,
-    context: ReturnType<typeof detectUpgradeContext>
+    context: ReturnType<typeof detectUpgradeContext>,
+    options: { detachedPostCommand?: string } = {},
 ): Promise<UpgradeExecutionResult> {
     if (target === 'npm-repo' && repoIsDirty(context.packageRootPath)) {
         throw new Error('Repository worktree is dirty. Commit or stash changes before running `iranti upgrade --target npm-repo --yes`.');
@@ -2577,7 +2726,7 @@ async function executeUpgradeTarget(
     if (target === 'npm-global' && canScheduleWindowsGlobalNpmSelfUpgrade(context)) {
         const command = commands[0]!;
         console.log(`${infoLabel()} ${command.display} (scheduled in a detached updater because the current Windows CLI cannot replace its own live global install)`);
-        scheduleDetachedWindowsGlobalNpmUpgrade(command);
+        scheduleDetachedWindowsGlobalNpmUpgrade(command, options.detachedPostCommand);
         steps.push({ label: `${command.label} (detached)`, command: command.display });
         return {
             target,
@@ -3335,7 +3484,12 @@ async function statusCommand(args: ParsedArgs): Promise<void> {
     rows.push({ label: 'project_binding', value: fs.existsSync(projectEnv) ? projectEnv : '(missing)' });
     rows.push({ label: 'install_meta', value: fs.existsSync(installMetaPath) ? installMetaPath : '(not initialized)' });
 
-    const instances: Array<{ name: string; port: string; envFile: string }> = [];
+    const instances: Array<{
+        name: string;
+        port: string;
+        envFile: string;
+        runtime: InstanceRuntimeSummary;
+    }> = [];
     if (fs.existsSync(instancesDir)) {
         const entries = await fsp.readdir(instancesDir, { withFileTypes: true });
         for (const entry of entries.filter((value) => value.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
@@ -3353,6 +3507,7 @@ async function statusCommand(args: ParsedArgs): Promise<void> {
                 name: entry.name,
                 port,
                 envFile: fs.existsSync(envFile) ? envFile : '(missing)',
+                runtime: await readInstanceRuntimeSummary(root, entry.name),
             });
         }
     }
@@ -3383,8 +3538,58 @@ async function statusCommand(args: ParsedArgs): Promise<void> {
         for (const instance of instances) {
             console.log(`  - ${instance.name} (port ${instance.port})`);
             console.log(`    env: ${instance.envFile}`);
+            if (instance.runtime.state) {
+                const runtimeLabel = instance.runtime.running
+                    ? `${okLabel('RUNNING')} pid=${instance.runtime.state.pid} version=${instance.runtime.state.version}`
+                    : instance.runtime.stale
+                        ? `${warnLabel('STALE')} last_pid=${instance.runtime.state.pid} version=${instance.runtime.state.version}`
+                        : `${warnLabel('STOPPED')} version=${instance.runtime.state.version}`;
+                console.log(`    runtime: ${runtimeLabel}`);
+                console.log(`    health: ${instance.runtime.state.healthUrl}`);
+            } else {
+                console.log(`    runtime: ${warnLabel('STOPPED')} no runtime metadata`);
+            }
         }
     }
+}
+
+async function collectRuntimeInstanceSummaries(root: string): Promise<Array<{
+    name: string;
+    port: string;
+    envFile: string;
+    runtime: InstanceRuntimeSummary;
+}>> {
+    const instancesDir = path.join(root, 'instances');
+    const instances: Array<{
+        name: string;
+        port: string;
+        envFile: string;
+        runtime: InstanceRuntimeSummary;
+    }> = [];
+    if (!fs.existsSync(instancesDir)) {
+        return instances;
+    }
+
+    const entries = await fsp.readdir(instancesDir, { withFileTypes: true });
+    for (const entry of entries.filter((value) => value.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
+        const envFile = path.join(instancesDir, entry.name, '.env');
+        let port = '(unknown)';
+        if (fs.existsSync(envFile)) {
+            try {
+                const env = await readEnvFile(envFile);
+                port = env.IRANTI_PORT ?? '(unknown)';
+            } catch {
+                port = '(unreadable)';
+            }
+        }
+        instances.push({
+            name: entry.name,
+            port,
+            envFile: fs.existsSync(envFile) ? envFile : '(missing)',
+            runtime: await readInstanceRuntimeSummary(root, entry.name),
+        });
+    }
+    return instances;
 }
 
 async function upgradeCommand(args: ParsedArgs): Promise<void> {
@@ -3428,9 +3633,19 @@ async function upgradeCommand(args: ParsedArgs): Promise<void> {
         python: context.pythonVersion && latestPython ? compareVersions(latestPython, context.pythonVersion) > 0 : null,
     };
     const plan = selectedTargets.flatMap((target) => commandListForTarget(target, context).map((step) => step.display));
+    const runtimeInstances = await collectRuntimeInstanceSummaries(context.runtimeRoot);
+    const runningRuntimeInstances = runtimeInstances.filter((instance) => instance.runtime.running);
+    const restartRequiredInstances = runningRuntimeInstances.filter((instance) => {
+        const version = instance.runtime.state?.version;
+        return Boolean(version && version !== context.currentVersion);
+    });
+    const detachedRestartCommand = hasFlag(args, 'restart') && getFlag(args, 'instance')
+        ? `& 'iranti' instance restart '${escapeForSingleQuotedPowerShell(getFlag(args, 'instance')!)}' --scope '${normalizeScope(getFlag(args, 'scope'))}' --root '${escapeForSingleQuotedPowerShell(resolveInstallRoot(args, normalizeScope(getFlag(args, 'scope'))))}'`
+        : undefined;
 
     let execution: UpgradeExecutionResult[] = [];
     let note: string | null = null;
+    let restartSummary: { instanceName: string; newPid: number; previousPid: number | null } | null = null;
 
     if (execute) {
         if (selectedTargets.length === 0) {
@@ -3439,7 +3654,40 @@ async function upgradeCommand(args: ParsedArgs): Promise<void> {
         if (dryRun || checkOnly) {
             note = 'Execution skipped because --dry-run or --check was provided.';
         } else {
-            execution = await executeUpgradeTargets(selectedTargets, context);
+            execution = await executeUpgradeTargets(selectedTargets, context, {
+                detachedPostCommand: detachedRestartCommand,
+            });
+            if (hasFlag(args, 'restart')) {
+                const instanceName = getFlag(args, 'instance');
+                if (!instanceName) {
+                    throw cliError(
+                        'IRANTI_INSTANCE_NAME_REQUIRED',
+                        'Missing --instance <name>. Usage: iranti upgrade --yes --restart --instance <name>',
+                        ['Pass the running instance name you want restarted after upgrade.']
+                    );
+                }
+                const scope = normalizeScope(getFlag(args, 'scope'));
+                const root = resolveInstallRoot(args, scope);
+                const detachedHandled = execution.some((result) =>
+                    result.target === 'npm-global'
+                    && result.verification.status === 'warn'
+                    && result.verification.detail.includes('Scheduled detached npm global upgrade')
+                );
+                if (!detachedHandled) {
+                    const restarted = await restartInstanceRuntime(args, instanceName, scope, root);
+                    restartSummary = {
+                        instanceName,
+                        newPid: restarted.newPid,
+                        previousPid: restarted.previousPid,
+                    };
+                } else {
+                    restartSummary = {
+                        instanceName,
+                        newPid: 0,
+                        previousPid: null,
+                    };
+                }
+            }
         }
     } else if (!checkOnly && !dryRun && !json && process.stdin.isTTY && process.stdout.isTTY) {
         const interactiveTargets = await chooseInteractiveUpgradeTargets(statuses);
@@ -3472,6 +3720,9 @@ async function upgradeCommand(args: ParsedArgs): Promise<void> {
                 pythonLauncher: context.python?.executable ?? null,
                 pythonVersion: context.pythonVersion,
             },
+            runtimeInstances,
+            runningRuntimeInstances,
+            restartRequiredInstances,
             requestedTargets,
             selectedTargets,
             availableTargets: context.availableTargets,
@@ -3481,6 +3732,7 @@ async function upgradeCommand(args: ParsedArgs): Promise<void> {
             plan,
             action: execution.length > 0 ? 'upgrade' : checkOnly ? 'check' : dryRun ? 'dry-run' : 'inspect',
             execution,
+            restartSummary,
             note,
         }, null, 2));
         return;
@@ -3499,6 +3751,20 @@ async function upgradeCommand(args: ParsedArgs): Promise<void> {
     }
     console.log(`  python           ${context.python?.executable ?? paint('not found', 'yellow')}${context.pythonVersion ? ` (${context.pythonVersion})` : ''}`);
     console.log('');
+    if (runningRuntimeInstances.length > 0) {
+        console.log('  running_instances');
+        for (const instance of runningRuntimeInstances) {
+            const state = instance.runtime.state!;
+            const versionLabel = state.version === context.currentVersion
+                ? paint(state.version, 'green')
+                : paint(`${state.version} != ${context.currentVersion}`, 'yellow');
+            console.log(`    - ${instance.name} pid=${state.pid} port=${instance.port} version=${versionLabel}`);
+        }
+        if (restartRequiredInstances.length > 0) {
+            console.log(`  restart_required ${paint(restartRequiredInstances.map((instance) => instance.name).join(', '), 'yellow')}`);
+        }
+        console.log('');
+    }
     if (selectedTargets.length > 0) {
         console.log(`  selected_target${selectedTargets.length > 1 ? 's' : ''} ${paint(selectedTargets.join(', '), 'cyan')}${requestedTargets.includes('auto') ? paint(' (auto)', 'gray') : ''}`);
         console.log('  plan');
@@ -3524,6 +3790,10 @@ async function upgradeCommand(args: ParsedArgs): Promise<void> {
                     : failLabel('FAIL');
             console.log(`${okLabel()} Upgrade completed for ${result.target}.`);
             console.log(`${marker} ${result.verification.detail}`);
+        }
+        if (restartSummary) {
+            console.log(`${okLabel()} Restart scheduled for instance '${restartSummary.instanceName}'.`);
+            console.log(`${infoLabel()} previous_pid=${restartSummary.previousPid ?? 'none'} new_pid=${restartSummary.newPid || '(unknown)'}`);
         }
         const { envFile } = resolveDoctorEnvTarget(args);
         if (envFile) {
@@ -3650,17 +3920,20 @@ async function listInstancesCommand(args: ParsedArgs): Promise<void> {
     console.log(bold(`Instances (${instancesDir}):`));
     for (const name of dirs) {
         const metaPath = path.join(instancesDir, name, 'instance.json');
+        const runtime = await readInstanceRuntimeSummary(root, name);
         if (fs.existsSync(metaPath)) {
             try {
                 const raw = await fsp.readFile(metaPath, 'utf-8');
                 const meta = JSON.parse(raw) as InstanceMeta;
                 console.log(`  - ${name} (port ${meta.port})`);
+                console.log(`    runtime: ${describeInstanceRuntime(runtime)}`);
                 continue;
             } catch {
                 // fall through
             }
         }
         console.log(`  - ${name}`);
+        console.log(`    runtime: ${describeInstanceRuntime(runtime)}`);
     }
 }
 
@@ -3674,12 +3947,17 @@ async function showInstanceCommand(args: ParsedArgs): Promise<void> {
     if (!fs.existsSync(envFile)) throw new Error(`Instance '${name}' not found at ${instanceDir}`);
 
     const env = await readEnvFile(envFile);
+    const runtime = await readInstanceRuntimeSummary(root, name);
     console.log(bold(`Instance: ${name}`));
     console.log(`  dir : ${instanceDir}`);
     console.log(`  env : ${envFile}`);
     console.log(`  port: ${env.IRANTI_PORT ?? '3001'}`);
     console.log(`  db  : ${env.DATABASE_URL ?? '(missing)'}`);
     console.log(`  esc : ${env.IRANTI_ESCALATION_DIR ?? '(missing)'}`);
+    console.log(`  runtime: ${describeInstanceRuntime(runtime)}`);
+    if (runtime.state?.healthUrl) {
+        console.log(`  health: ${runtime.state.healthUrl}`);
+    }
     console.log(`${infoLabel()} Run with: iranti run --instance ${name}`);
 }
 
@@ -3694,7 +3972,7 @@ async function runInstanceCommand(args: ParsedArgs): Promise<void> {
     }
     const scope = normalizeScope(getFlag(args, 'scope'));
     const root = resolveInstallRoot(args, scope);
-    const envFile = path.join(root, 'instances', name, '.env');
+    const { instanceDir, envFile, runtimeFile } = instancePaths(root, name);
     if (!fs.existsSync(envFile)) {
         throw cliError(
             'IRANTI_INSTANCE_NOT_FOUND',
@@ -3705,10 +3983,21 @@ async function runInstanceCommand(args: ParsedArgs): Promise<void> {
     }
 
     const env = await readEnvFile(envFile);
+    const runtime = await readInstanceRuntimeSummary(root, name);
+    if (runtime.running) {
+        throw cliError(
+            'IRANTI_INSTANCE_ALREADY_RUNNING',
+            `Instance '${name}' is already running on pid ${runtime.state?.pid ?? '(unknown)'}.`,
+            [`Run \`iranti instance restart ${name}\` to restart the live process, or stop the existing process first.`],
+            { instance: name, pid: runtime.state?.pid ?? null, runtimeFile }
+        );
+    }
+    if (runtime.stale) {
+        console.log(`${warnLabel()} Found stale runtime metadata for '${name}' at ${runtimeFile}; starting a fresh process.`);
+    }
     for (const [k, v] of Object.entries(env)) {
         process.env[k] = v;
     }
-
     if (!process.env.DATABASE_URL || process.env.DATABASE_URL.includes('yourpassword')) {
         throw cliError(
             'IRANTI_INSTANCE_DATABASE_PLACEHOLDER',
@@ -3717,11 +4006,37 @@ async function runInstanceCommand(args: ParsedArgs): Promise<void> {
             { instance: name, envFile }
         );
     }
+    await startInstanceRuntime(name, instanceDir, envFile, runtimeFile);
+}
 
-    console.log(`${infoLabel()} Starting Iranti instance '${name}' on port ${process.env.IRANTI_PORT ?? '3001'}...`);
-    const serverEntry = path.resolve(__dirname, '..', 'src', 'api', 'server');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    require(serverEntry);
+async function restartInstanceCommand(args: ParsedArgs): Promise<void> {
+    const name = getFlag(args, 'instance') ?? args.positionals[0] ?? args.subcommand;
+    if (!name) {
+        throw cliError(
+            'IRANTI_INSTANCE_NAME_REQUIRED',
+            'Missing instance name. Usage: iranti instance restart <name>',
+            ['Run `iranti instance list` to see configured instances.']
+        );
+    }
+
+    const scope = normalizeScope(getFlag(args, 'scope'));
+    const root = resolveInstallRoot(args, scope);
+    const { envFile } = await loadInstanceEnv(root, name);
+    const restarted = await restartInstanceRuntime(args, name, scope, root);
+
+    console.log(sectionTitle('Instance Restart Scheduled'));
+    console.log(`  status    ${okLabel()}`);
+    console.log(`  instance  ${name}`);
+    console.log(`  env       ${envFile}`);
+    if (restarted.previousPid) {
+        console.log(`  previous  ${restarted.previousPid}`);
+    }
+    console.log(`  new_pid   ${restarted.newPid || '(unknown)'}`);
+    console.log(`  runtime   ${restarted.runtimeBefore.running ? 'was running' : restarted.runtimeBefore.state ? 'was stale/stopped' : 'no prior runtime metadata'}`);
+    printNextSteps([
+        `iranti status --scope ${scope}${root ? ` --root "${root}"` : ''}`,
+        `iranti doctor --instance ${name}${root ? ` --root "${root}"` : ''}`,
+    ]);
 }
 
 async function projectInitCommand(args: ParsedArgs): Promise<void> {
@@ -4343,7 +4658,7 @@ async function chatCommand(args: ParsedArgs): Promise<void> {
 function printHelp(): void {
     const rows: Array<[string, string]> = [
         ['iranti setup', 'Guided first-run setup. Best place to start.'],
-        ['iranti run --instance local', 'Start a configured instance.'],
+        ['iranti run --instance local', 'Start a configured instance and record runtime metadata.'],
         ['iranti doctor', 'Check env, database, provider keys, and runtime health.'],
         ['iranti chat', 'Open the local Iranti chat shell.'],
     ];
@@ -4370,8 +4685,9 @@ function printHelp(): void {
         ['iranti setup [--scope user|system] [--root <path>] [--mode isolated|shared] [--instance <name>] [--port <n>] [--config <file> | --defaults] [--db-mode local|managed|docker] [--db-url <url>] [--provider <name>] [--api-key <token>] [--projects <path1,path2>] [--claude-code] [--bootstrap-db]', 'Guided setup for runtime, database, instance, keys, and project binding. Run iranti setup --help for the non-interactive flow.'],
         ['iranti instance create <name> [--port 3001] [--db-url <url>] [--api-key <token>] [--provider <name>] [--provider-key <token>] [--scope user|system]', 'Create an instance directly if you want low-level control.'],
         ['iranti instance list [--scope user|system]', 'List configured instances.'],
-        ['iranti instance show <name> [--scope user|system]', 'Show one instance env, port, and database target.'],
-        ['iranti run --instance <name> [--scope user|system]', 'Start an instance.'],
+        ['iranti instance show <name> [--scope user|system]', 'Show one instance env, port, database target, and runtime state.'],
+        ['iranti instance restart <name> [--scope user|system] [--graceful-timeout <seconds>]', 'Restart a running instance using its runtime metadata.'],
+        ['iranti run --instance <name> [--scope user|system]', 'Start an instance and write runtime metadata.'],
     ]);
 
     printRows('Configuration', [
@@ -4441,6 +4757,7 @@ function printInstanceHelp(): void {
     console.log(`  ${commandText('iranti instance create <name> [--port 3001] [--db-url <url>] [--api-key <token>] [--provider <name>] [--provider-key <token>] [--scope user|system] [--root <path>]')}`);
     console.log(`  ${commandText('iranti instance list [--scope user|system] [--root <path>]')}`);
     console.log(`  ${commandText('iranti instance show <name> [--scope user|system] [--root <path>]')}`);
+    console.log(`  ${commandText('iranti instance restart <name> [--scope user|system] [--root <path>] [--graceful-timeout <seconds>]')}`);
 }
 
 function printConfigureHelp(): void {
@@ -4515,6 +4832,10 @@ async function main(): Promise<void> {
         }
         if (args.subcommand === 'show') {
             await showInstanceCommand(args);
+            return;
+        }
+        if (args.subcommand === 'restart') {
+            await restartInstanceCommand(args);
             return;
         }
         throw new Error(`Unknown instance subcommand '${args.subcommand ?? ''}'.`);

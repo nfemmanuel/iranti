@@ -166,6 +166,20 @@ iranti auth create-key --instance local --key-id local_admin --owner "Local Admi
 iranti run --instance local
 ```
 
+The running API now records runtime metadata and exposes it through both `/health` and the CLI:
+
+```bash
+iranti status
+iranti instance show local
+iranti upgrade --check
+```
+
+If you install a newer CLI/runtime and want the instance-backed API server to pick it up immediately:
+
+```bash
+iranti upgrade --restart --instance local
+```
+
 ### Check configuration before run
 
 ```bash
@@ -378,6 +392,28 @@ const turn = await iranti.attend({
 
 if (turn.shouldInject) {
     console.log('Inject these facts:', turn.facts.map((f) => f.summary));
+}
+```
+
+For longer tasks, checkpoint the current step so the next handshake can recommend resuming interrupted work:
+
+```typescript
+const checkpointed = await iranti.checkpoint({
+    agentId: 'research_agent_001',
+    task: 'Research publication history for Dr. Jane Smith',
+    recentMessages: ['Still comparing affiliation sources.'],
+    checkpoint: {
+        currentStep: 'Resolve source disagreement',
+        nextStep: 'Write corrected affiliation fact',
+        openRisks: ['OpenAlex and homepage disagree on date range'],
+    },
+});
+
+if (checkpointed.sessionRecovery?.available && checkpointed.sessionRecovery.recommendation === 'resume') {
+    await iranti.resumeSession({
+        agentId: 'research_agent_001',
+        sessionId: checkpointed.sessionRecovery.sessionId,
+    });
 }
 ```
 

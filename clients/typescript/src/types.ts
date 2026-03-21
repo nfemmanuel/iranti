@@ -33,6 +33,15 @@ export interface HealthResponse {
     status: string;
     version: string;
     provider: string;
+    runtime?: {
+        instanceName: string;
+        pid: number | null;
+        port: number | null;
+        status: 'running' | 'stopped' | 'stale';
+        startedAt: string;
+        lastHeartbeatAt: string;
+        healthUrl?: string | null;
+    } | null;
 }
 
 export interface WriteParams {
@@ -182,6 +191,60 @@ export interface HandshakeParams {
     recentMessages: string[];
 }
 
+export type SessionStatus = 'active' | 'interrupted' | 'completed' | 'abandoned';
+
+export interface SessionCheckpointPayload {
+    currentStep?: string;
+    nextStep?: string;
+    openRisks?: string[];
+    recentOutputs?: string[];
+    entityTargets?: string[];
+    notes?: string;
+}
+
+export interface SessionCheckpointRecord {
+    sessionId: string;
+    task: string;
+    taskFingerprint: string;
+    status: SessionStatus;
+    startedAt: string;
+    lastHeartbeatAt: string;
+    updatedAt: string;
+    checkpoint: SessionCheckpointPayload;
+    interruptedAt?: string;
+    completedAt?: string;
+    abandonedAt?: string;
+    resumedAt?: string;
+}
+
+export interface SessionRecoveryInfo {
+    available: boolean;
+    sessionId: string;
+    task: string;
+    taskFingerprint: string;
+    matchedCurrentTask: boolean;
+    matchConfidence: number;
+    recommendation: 'resume' | 'review' | 'ignore';
+    summary: string;
+    lastHeartbeatAt: string;
+    interruptedAt: string;
+    checkpoint: SessionCheckpointPayload | null;
+}
+
+export interface SessionCheckpointParams {
+    agentId: string;
+    task: string;
+    recentMessages: string[];
+    checkpoint: SessionCheckpointPayload | string | Record<string, unknown>;
+    sessionId?: string;
+    heartbeatAt?: string;
+}
+
+export interface SessionActionParams {
+    agentId: string;
+    sessionId?: string;
+}
+
 export interface ReconveneParams {
     agentId: string;
     task: string;
@@ -196,6 +259,8 @@ export interface WorkingMemoryBrief {
     sessionStarted: string;
     briefGeneratedAt: string;
     contextCallCount: number;
+    sessionCheckpoint?: SessionCheckpointRecord | null;
+    sessionRecovery?: SessionRecoveryInfo | null;
 }
 
 export interface FactInjection {

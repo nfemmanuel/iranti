@@ -24,6 +24,8 @@ import type {
     ResolveEntityResponse,
     SearchParams,
     SearchResult,
+    SessionActionParams,
+    SessionCheckpointParams,
     WhoKnowsResult,
     WorkingMemoryBrief,
     WriteParams,
@@ -337,6 +339,22 @@ export class IrantiClient {
 
     reconvene(params: ReconveneParams): Promise<WorkingMemoryBrief> {
         return this.request<WorkingMemoryBrief>('POST', '/memory/reconvene', { body: params });
+    }
+
+    checkpoint(params: SessionCheckpointParams): Promise<WorkingMemoryBrief> {
+        return this.request<WorkingMemoryBrief>('POST', '/memory/checkpoint', { body: params });
+    }
+
+    resumeSession(params: SessionActionParams): Promise<WorkingMemoryBrief> {
+        return this.request<WorkingMemoryBrief>('POST', '/memory/resume', { body: params });
+    }
+
+    completeSession(params: SessionActionParams): Promise<WorkingMemoryBrief> {
+        return this.request<WorkingMemoryBrief>('POST', '/memory/complete', { body: params });
+    }
+
+    abandonSession(params: SessionActionParams): Promise<WorkingMemoryBrief> {
+        return this.request<WorkingMemoryBrief>('POST', '/memory/abandon', { body: params });
     }
 
     observe(params: ObserveParams): Promise<ObserveResult> {

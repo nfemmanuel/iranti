@@ -9,10 +9,10 @@
 
 Iranti gives agents persistent, identity-based memory. Facts written by one agent are retrievable by any other agent through exact entity+key lookup. Iranti also supports hybrid search (lexical + vector) when exact keys are unknown. Memory persists across sessions and survives context window limits.
 
-**Latest release:** [`v0.2.10`](https://github.com/nfemmanuel/iranti/releases/tag/v0.2.10)  
+**Latest release:** [`v0.2.16`](https://github.com/nfemmanuel/iranti/releases/tag/v0.2.16)  
 Published packages:
-- `iranti@0.2.10`
-- `@iranti/sdk@0.2.10`
+- `iranti@0.2.16`
+- `@iranti/sdk@0.2.16`
 
 ---
 
@@ -244,6 +244,18 @@ iranti run --instance local
 `iranti setup` now defaults to an isolated per-project runtime. Shared machine-level instances are still supported, but they are now an explicit choice rather than the default.
 
 If local PostgreSQL is available, setup can bootstrap a localhost database for you. If local PostgreSQL is not available, setup recommends Docker when Docker is installed, and otherwise steers you to managed PostgreSQL with concrete install guidance.
+
+Long-running agents can now checkpoint and recover interrupted work. Programmatic session lifecycle methods are available through the SDK and REST API:
+- `checkpoint()`
+- `resumeSession()`
+- `completeSession()`
+- `abandonSession()`
+
+Running instances now publish runtime metadata in `/health`, and the CLI can see that state through `iranti status`, `iranti instance show`, and `iranti upgrade --check`. When you want an installed upgrade to immediately take effect on an instance-backed API server, use:
+
+```bash
+iranti upgrade --restart --instance local
+```
 
 If something still fails and you need more detail, use:
 

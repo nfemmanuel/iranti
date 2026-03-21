@@ -18,6 +18,13 @@ import { requestContext } from '../lib/requestContext';
 import { startArchivistScheduler } from './archivistScheduler';
 import { getEscalationPaths } from '../lib/escalationPaths';
 import { completeWithFallback } from '../lib/llm';
+import {
+    InstanceRuntimeState,
+    markRuntimeStopped,
+    resolveInstanceDirFromRuntimeEnv,
+    runtimeFileForInstance,
+    writeRuntimeState,
+} from '../lib/runtimeLifecycle';
 
 const app = express();
 
@@ -32,6 +39,13 @@ const ROUTES = {
 const REQUEST_LOG_FILE =
     process.env.IRANTI_REQUEST_LOG_FILE?.trim() ||
     path.join(process.cwd(), 'logs', 'api-requests.log');
+const INSTANCE_DIR = process.env.IRANTI_INSTANCE_DIR?.trim()
+    || resolveInstanceDirFromRuntimeEnv(process.env)
+    || null;
+const INSTANCE_RUNTIME_FILE = process.env.IRANTI_INSTANCE_RUNTIME_FILE?.trim()
+    || (INSTANCE_DIR ? runtimeFileForInstance(INSTANCE_DIR) : null);
+const INSTANCE_NAME = process.env.IRANTI_INSTANCE_NAME?.trim() || (INSTANCE_DIR ? path.basename(INSTANCE_DIR) : 'adhoc');
+const VERSION = '0.2.16';
 
 try {
     fs.mkdirSync(path.dirname(REQUEST_LOG_FILE), { recursive: true });
@@ -46,6 +60,44 @@ const requestLogStream = fs.createWriteStream(REQUEST_LOG_FILE, {
 requestLogStream.on('error', (err) => {
     console.error('[api] request log stream error:', err);
 });
+
+let runtimeState: InstanceRuntimeState | null = null;
+let runtimeHeartbeat: NodeJS.Timeout | null = null;
+
+function runtimeHealthPayload(): InstanceRuntimeState | null {
+    return runtimeState
+        ? {
+            ...runtimeState,
+            lastHeartbeatAt: runtimeState.lastHeartbeatAt,
+            updatedAt: runtimeState.updatedAt,
+        }
+        : null;
+}
+
+async function persistRuntimeState(status: InstanceRuntimeState['status'], signal?: string | null): Promise<void> {
+    if (!INSTANCE_RUNTIME_FILE || !INSTANCE_DIR) return;
+    const now = new Date().toISOString();
+    runtimeState = {
+        instanceName: INSTANCE_NAME,
+        instanceDir: INSTANCE_DIR,
+        envFile: process.env.IRANTI_INSTANCE_ENV_FILE?.trim() || path.join(INSTANCE_DIR, '.env'),
+        runtimeFile: INSTANCE_RUNTIME_FILE,
+        version: VERSION,
+        pid: process.pid,
+        ppid: process.ppid,
+        port: PORT,
+        startedAt: runtimeState?.startedAt || now,
+        lastHeartbeatAt: now,
+        updatedAt: now,
+        status,
+        healthUrl: `http://localhost:${PORT}/health`,
+        exitSignal: signal ?? runtimeState?.exitSignal ?? undefined,
+        requestLogFile: REQUEST_LOG_FILE,
+        packageRoot: process.cwd(),
+        exitCode: signal ? null : runtimeState?.exitCode ?? 0,
+    };
+    await writeRuntimeState(INSTANCE_RUNTIME_FILE, runtimeState);
+}
 
 function logApiRequest(line: string): void {
     console.log(line);
@@ -77,8 +129,9 @@ app.use(express.json({ limit: process.env.IRANTI_MAX_BODY_BYTES ?? '256kb' }));
 app.get(ROUTES.health, (_req, res) => {
     res.json({
         status: 'ok',
-        version: '0.2.15',
+        version: VERSION,
         provider: process.env.LLM_PROVIDER ?? 'mock',
+        runtime: runtimeHealthPayload(),
     });
 });
 
@@ -158,17 +211,53 @@ app.post(['/v1/chat/completions', '/chat/completions'], authenticate, rateLimitM
 });
 
 const PORT = parseInt(process.env.IRANTI_PORT ?? '3001');
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
     console.log(`\nIranti API running on port ${PORT}`);
     console.log(`Health: http://localhost:${PORT}/health`);
     console.log(`Provider: ${process.env.LLM_PROVIDER ?? 'mock'}\n`);
     console.log(`Escalation root: ${getEscalationPaths().root}`);
     console.log(`Request log file: ${REQUEST_LOG_FILE}\n`);
+    if (INSTANCE_RUNTIME_FILE) {
+        void persistRuntimeState('running').then(() => {
+            if (runtimeHeartbeat) clearInterval(runtimeHeartbeat);
+            runtimeHeartbeat = setInterval(() => {
+                void persistRuntimeState('running').catch((err) => {
+                    console.error('[runtime] failed to refresh runtime state:', err);
+                });
+            }, 15000);
+            runtimeHeartbeat.unref();
+        }).catch((err) => {
+            console.error('[runtime] failed to write runtime state:', err);
+        });
+    }
 });
+
+async function shutdownRuntime(signal: string): Promise<void> {
+    if (runtimeHeartbeat) {
+        clearInterval(runtimeHeartbeat);
+        runtimeHeartbeat = null;
+    }
+    if (INSTANCE_RUNTIME_FILE) {
+        try {
+            await persistRuntimeState('stopping', signal);
+            await markRuntimeStopped(INSTANCE_RUNTIME_FILE, signal);
+        } catch (err) {
+            console.error('[runtime] failed to mark runtime stopped:', err);
+        }
+    }
+}
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
     process.on(signal, () => {
-        if (stopArchivistScheduler) stopArchivistScheduler();
-        requestLogStream.end(() => process.exit(0));
+        void (async () => {
+            if (stopArchivistScheduler) stopArchivistScheduler();
+            await shutdownRuntime(signal);
+            server.close(() => {
+                requestLogStream.end(() => process.exit(0));
+            });
+        })().catch((err) => {
+            console.error('[runtime] shutdown handler failed:', err);
+            requestLogStream.end(() => process.exit(1));
+        });
     });
 }

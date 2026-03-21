@@ -46,6 +46,7 @@
 - [001: AGPL License](decisions/001-agpl-license.md)
 - [002: Per-Agent Attendants](decisions/002-per-agent-attendants.md)
 - [003: Flat KB with Relationships](decisions/003-flat-kb-with-relationships.md)
+- [006: Runtime Lifecycle Safety](decisions/006-runtime-lifecycle-safety.md)
 
 ### Features
 
@@ -53,7 +54,9 @@
 - [CLI Attendant Debug](features/cli-attendant-debug/) - Manual handshake/attend inspection commands
 - [Chunking](features/chunking/) - Auto-chunking raw content into facts
 - [Conflict Resolution](features/conflict-resolution/) - Librarian conflict handling
+- [Interrupted Session Recovery](features/interrupted-session-recovery/) - Checkpointed mid-task recovery on return
 - [Resolutionist](features/resolutionist/) - Human escalation review workflow
+- [Runtime Upgrades](features/runtime-upgrades/) - Staged upgrade plus supervised restart instead of live overwrite
 - [Source Reliability](features/source-reliability/) - Dynamic source scoring
 - [Vector Backends](features/vector-backends/) - Pluggable vector similarity backends
 

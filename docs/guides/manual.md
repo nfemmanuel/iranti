@@ -88,6 +88,7 @@ iranti status
 
 Use `doctor` when something feels wrong.
 Use `status` when you want to see what this machine and current directory are bound to.
+`status` and `instance show` now also surface runtime metadata for live or stale instance-backed API processes.
 
 When a command fails and you need more detail:
 
@@ -100,6 +101,56 @@ iranti upgrade --verbose
 Debugging flags:
 - `--debug` prints extra CLI diagnostics, structured error details, and stack traces
 - `--verbose` prints subprocess trace output
+
+---
+
+## Runtime Lifecycle
+
+Iranti now records runtime metadata for instance-backed API servers. That metadata includes:
+- PID
+- port
+- start time
+- last heartbeat
+- health URL
+- running vs stale status
+
+Use it here:
+
+```bash
+iranti status
+iranti instance show local
+iranti upgrade --check
+```
+
+If you want an installed upgrade to take effect on a running instance immediately:
+
+```bash
+iranti upgrade --restart --instance local
+```
+
+This is a staged operator flow, not live in-place binary replacement. Clients should reconnect after restart.
+
+---
+
+## Interrupted Sessions
+
+Iranti now supports durable session checkpoints for long-running agent work.
+
+Use this when an agent is in the middle of a multi-step task and you do not want to lose progress if the process dies or the session ends unexpectedly.
+
+Available programmatic operations:
+- `checkpoint()`
+- `resumeSession()`
+- `completeSession()`
+- `abandonSession()`
+
+On the next handshake or checkpoint cycle, the Attendant can surface interrupted-session recovery information, including:
+- whether recovery is available
+- whether the current task matches the interrupted task
+- a recommendation to resume, review, or ignore
+- the last saved checkpoint payload
+
+This preserves task continuity better, but it is not a workflow engine. Only what has been checkpointed or written through the Librarian is durable.
 
 ---
 

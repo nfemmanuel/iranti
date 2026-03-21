@@ -86,9 +86,9 @@ function main(): void {
 
     writeText(apiServerPath, replaceOrThrow(
         readText(apiServerPath),
-        /version:\s*'[^']+'/,
-        `version: '${targetVersion}'`,
-        'src/api/server.ts health version',
+        /const VERSION = '[^']+';/,
+        `const VERSION = '${targetVersion}';`,
+        'src/api/server.ts VERSION constant',
     ));
 
     writeText(seedPath, replaceAllLiteral(readText(seedPath), currentVersion, targetVersion));

@@ -112,6 +112,50 @@ async function main(): Promise<void> {
     });
     expect(brief.agentId === agentId, `Expected handshake agentId ${agentId}, got ${brief.agentId}`);
 
+    const recoveryAgent = uniqueId('ts_client_recovery_agent');
+    const recoveryTask = 'Prepare the incident response checklist';
+    const checkpointBrief = await client.checkpoint({
+        agentId: recoveryAgent,
+        task: recoveryTask,
+        recentMessages: [
+            'Drafting the incident response checklist',
+            'Waiting on the final approvals',
+        ],
+        checkpoint: {
+            currentStep: 'drafting incident response checklist',
+            nextStep: 'collect approvals',
+            openRisks: ['Approval pending'],
+            recentOutputs: ['Listed escalation owners'],
+            entityTargets: ['project/incident_response'],
+            notes: 'Interrupted before sign-off.',
+        },
+        heartbeatAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+    });
+    expect(Boolean(checkpointBrief.sessionCheckpoint?.sessionId), 'Expected checkpoint() to return a session id.');
+
+    const recoveryBrief = await client.handshake({
+        agent: recoveryAgent,
+        task: recoveryTask,
+        recentMessages: ['Returning to the incident response checklist.'],
+    });
+    expect(recoveryBrief.sessionRecovery?.available === true, 'Expected handshake() to surface interrupted-session recovery.');
+    expect(recoveryBrief.sessionRecovery?.recommendation === 'resume', 'Expected recovery recommendation to be resume.');
+    expect(
+        recoveryBrief.sessionRecovery?.matchedCurrentTask === true,
+        'Expected recovery handshake to match the returning task.'
+    );
+
+    const resumedBrief = await client.resumeSession({
+        agentId: recoveryAgent,
+        sessionId: checkpointBrief.sessionCheckpoint?.sessionId,
+    });
+    expect(resumedBrief.sessionCheckpoint?.status === 'active', 'Expected resumeSession() to reactivate the checkpoint.');
+
+    await client.completeSession({
+        agentId: recoveryAgent,
+        sessionId: checkpointBrief.sessionCheckpoint?.sessionId,
+    });
+
     const observe = await client.observe({
         agentId,
         currentContext: '',

@@ -2,7 +2,7 @@
 
 ## Overview
 
-`iranti upgrade` detects the current install context, compares the local CLI version against the latest published npm/PyPI versions, prints the exact upgrade plan, and can execute the selected upgrade path safely when explicitly confirmed.
+`iranti upgrade` detects the current install context, compares the local CLI version against the latest published npm/PyPI versions, prints the exact upgrade plan, and can execute the selected upgrade path safely when explicitly confirmed. It also reports live Iranti instance processes so the operator can see which runtimes will continue running the old version until they are restarted.
 
 ## Inputs
 
@@ -13,14 +13,14 @@
 | `--yes` | boolean | Execute the selected upgrade path non-interactively. |
 | `--all` | boolean | Select every detected executable upgrade surface. |
 | `--target` | enum/list | Force `auto`, `npm-global`, `npm-repo`, or `python`, optionally comma-separated. |
-| `--json` | boolean | Output machine-readable upgrade state, plan, and execution result. |
+| `--json` | boolean | Output machine-readable upgrade state, plan, running-instance inventory, and execution result. |
 
 ## Outputs
 
 | Output | Type | Description |
 |---|---|---|
 | Upgrade summary | text | Human-readable current/latest versions, detected install mode, and the selected command plan. |
-| Upgrade summary | JSON | Structured machine-readable install detection, version state, plan, and execution result. |
+| Upgrade summary | JSON | Structured machine-readable install detection, version state, plan, running-instance inventory, and execution result. |
 | Execution result | text | Success/warn/fail verification after a real upgrade run. |
 
 ## Decision Tree / Flow
@@ -47,6 +47,7 @@
    - repo target by requiring the build to complete successfully
 10. If the repo worktree is dirty, block `npm-repo --yes` rather than risking a destructive pull.
 11. After a successful or scheduled global npm upgrade, remind the user that an already-running old CLI process may need a fresh shell to pick up the new binary.
+12. Read runtime metadata for known instances under the active runtime root and report which ones are currently running versus stale or stopped.
 
 ## Edge Cases
 
@@ -58,6 +59,7 @@
 - `--dry-run` and `--check` always skip mutation even if `--yes` is also present.
 - After `npm install -g`, the already-running old CLI process may still be the binary handling the current command; the command prints a handoff hint instead of pretending that process replaced itself.
 - On Windows, when the running CLI itself is the global npm install being upgraded, the npm-global step is scheduled in a detached updater process to avoid `EBUSY` rename failures.
+- If runtime metadata reports live instances, upgrade output lists them so the operator can tell whether a restart will be needed for those running runtimes to pick up a newly installed version.
 
 ## Test Results
 
@@ -65,6 +67,7 @@
 - `npx ts-node scripts/iranti-cli.ts upgrade --target npm-repo --dry-run`
 - `npx ts-node scripts/iranti-cli.ts upgrade --all --dry-run`
 - `npx tsc --noEmit`
+- `node -r ts-node/register/transpile-only tests/runtime-lifecycle/run_runtime_lifecycle_tests.ts`
 
 ## Related
 

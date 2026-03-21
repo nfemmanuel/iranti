@@ -46,6 +46,60 @@ export interface HandshakeInput {
     recentMessages: string[];
 }
 
+export type SessionStatus = 'active' | 'interrupted' | 'completed' | 'abandoned';
+
+export interface SessionCheckpointPayload {
+    currentStep?: string;
+    nextStep?: string;
+    openRisks?: string[];
+    recentOutputs?: string[];
+    entityTargets?: string[];
+    notes?: string;
+}
+
+export interface SessionCheckpointRecord {
+    sessionId: string;
+    task: string;
+    taskFingerprint: string;
+    status: SessionStatus;
+    startedAt: string;
+    lastHeartbeatAt: string;
+    updatedAt: string;
+    checkpoint: SessionCheckpointPayload;
+    interruptedAt?: string;
+    completedAt?: string;
+    abandonedAt?: string;
+    resumedAt?: string;
+}
+
+export interface SessionRecoveryInfo {
+    available: boolean;
+    sessionId: string;
+    task: string;
+    taskFingerprint: string;
+    matchedCurrentTask: boolean;
+    matchConfidence: number;
+    recommendation: 'resume' | 'review' | 'ignore';
+    summary: string;
+    lastHeartbeatAt: string;
+    interruptedAt: string;
+    checkpoint: SessionCheckpointPayload | null;
+}
+
+export interface SessionCheckpointInput {
+    agentId: string;
+    task: string;
+    recentMessages: string[];
+    checkpoint: SessionCheckpointPayload | string | Record<string, unknown>;
+    sessionId?: string;
+    heartbeatAt?: string;
+}
+
+export interface SessionActionInput {
+    agentId: string;
+    sessionId?: string;
+}
+
 export interface TemporalQueryOptions {
     asOf?: Date;
     includeExpired?: boolean;
@@ -346,6 +400,38 @@ export class Iranti {
         return attendant.reconvene({
             task: input.task,
             recentMessages: input.recentMessages,
+        });
+    }
+
+    async checkpoint(input: SessionCheckpointInput): Promise<WorkingMemoryBrief> {
+        const attendant = getAttendant(input.agentId);
+        return attendant.checkpoint({
+            task: input.task,
+            recentMessages: input.recentMessages,
+            checkpoint: input.checkpoint,
+            sessionId: input.sessionId,
+            heartbeatAt: input.heartbeatAt,
+        });
+    }
+
+    async resumeSession(input: SessionActionInput): Promise<WorkingMemoryBrief> {
+        const attendant = getAttendant(input.agentId);
+        return attendant.resumeSession({
+            sessionId: input.sessionId,
+        });
+    }
+
+    async completeSession(input: SessionActionInput): Promise<WorkingMemoryBrief> {
+        const attendant = getAttendant(input.agentId);
+        return attendant.completeSession({
+            sessionId: input.sessionId,
+        });
+    }
+
+    async abandonSession(input: SessionActionInput): Promise<WorkingMemoryBrief> {
+        const attendant = getAttendant(input.agentId);
+        return attendant.abandonSession({
+            sessionId: input.sessionId,
         });
     }
 

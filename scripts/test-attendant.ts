@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { handshake, reconvene, getAttendant } from '../src/attendant';
+import { clearAttendant } from '../src/attendant/registry';
 import { bootstrapHarness } from './harness';
 import { configureMock } from '../src/lib/providers/mock';
 import { librarianWrite } from '../src/librarian';
@@ -87,6 +88,58 @@ async function test() {
     console.log('  detected candidates:', observeResult.debug?.detectedCandidates ?? 0);
     console.log('  entities detected:', observeResult.entitiesDetected.join(', ') || '(none)');
     console.log('  facts returned:', observeResult.facts.length);
+
+    // Test 6 â€” recovery handshake after an interrupted session checkpoint
+    console.log('\nTest 6 â€” checkpoint recovery after restart:');
+    const recoveryAgentId = 'research_agent_recovery_001';
+    const recoveryTask = 'Prepare the launch checklist for Project Atlas';
+    const recoveryCheckpoint = await getAttendant(recoveryAgentId).checkpoint({
+        task: recoveryTask,
+        recentMessages: [
+            'Drafting the launch checklist',
+            'Waiting on approvals and open risks',
+        ],
+        checkpoint: {
+            currentStep: 'drafting launch checklist',
+            nextStep: 'collect final approvals',
+            openRisks: ['Legal review pending'],
+            recentOutputs: ['Outlined launch milestones'],
+            entityTargets: ['project/project_atlas'],
+            notes: 'Stopped before approvals were gathered.',
+        },
+        heartbeatAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+    });
+    clearAttendant(recoveryAgentId);
+
+    const recoveryBrief = await handshake({
+        agentId: recoveryAgentId,
+        taskDescription: recoveryTask,
+        recentMessages: [
+            'Need to continue the launch checklist',
+            'Resuming after the interruption',
+        ],
+    });
+    console.log('  recovery available:', recoveryBrief.sessionRecovery?.available === true);
+    console.log('  recovery recommendation:', recoveryBrief.sessionRecovery?.recommendation);
+    console.log('  recovery matches task:', recoveryBrief.sessionRecovery?.matchedCurrentTask);
+    console.log('  checkpoint session:', recoveryBrief.sessionCheckpoint?.sessionId);
+
+    if (!recoveryBrief.sessionRecovery?.available || recoveryBrief.sessionRecovery.recommendation !== 'resume') {
+        throw new Error('Expected interrupted-session recovery to recommend resume.');
+    }
+
+    const resumedBrief = await getAttendant(recoveryAgentId).resumeSession({
+        sessionId: recoveryCheckpoint.sessionCheckpoint?.sessionId,
+    });
+    console.log('  resumed status:', resumedBrief.sessionCheckpoint?.status);
+
+    if (resumedBrief.sessionCheckpoint?.status !== 'active') {
+        throw new Error('Expected resumeSession() to reactivate the checkpoint.');
+    }
+
+    await getAttendant(recoveryAgentId).completeSession({
+        sessionId: recoveryCheckpoint.sessionCheckpoint?.sessionId,
+    });
 
     process.exit(0);
 }

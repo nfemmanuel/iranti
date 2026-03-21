@@ -243,6 +243,7 @@ iranti/
 â”‚   â”‚   â”œâ”€â”€ llm.ts              â€” LLMProvider interface, completeWithFallback(), fallback chain
 â”‚   â”‚   â”œâ”€â”€ router.ts           â€” route() by TaskType, model profiles
 â”‚   â”‚   â”œâ”€â”€ runtimeEnv.ts       â€” Runtime env resolution for CLI/MCP/hook integrations
+â”‚   â”‚   â”œâ”€â”€ runtimeLifecycle.ts â€” Runtime metadata read/write, pid probes, restart helpers
 â”‚   â”‚   â”œâ”€â”€ escalationPaths.ts  â€” Escalation runtime path resolution + folder bootstrap
 â”‚   â”‚   â””â”€â”€ providers/
 â”‚   â”‚       â”œâ”€â”€ mock.ts         â€” Local dev provider
@@ -321,11 +322,15 @@ iranti/
 ¦   ¦   +-- *.ts                — Direct contradiction, temporal, cascading, and multi-hop conflict cases
 ¦   +-- vector-backends/
 ¦   ¦   +-- run_vector_backend_tests.ts — Vector backend factory + adapter tests
+¦   +-- runtime-lifecycle/
+¦   ¦   +-- run_runtime_lifecycle_tests.ts — CLI runtime metadata and restart guard smoke test
 ¦   +-- temporal/
 ¦   ¦   +-- common.ts           — Temporal test DB fallback and harness helpers
 ¦   ¦   +-- run_temporal_tests.ts — DB-backed temporal query/history/escalation validation
 ¦   +-- consistency/
 ¦       +-- run_consistency_tests.ts — Empirical validation for write serialization, read-after-write, escalation visibility, and observe isolation
+¦   +-- session-recovery/
+¦   ¦   +-- run_session_recovery_tests.ts — Stubbed attendant recovery validation without a live DB
 +-- AGENTS.md                   — This file
 â”œâ”€â”€ docker-compose.yml          â€” PostgreSQL for local dev
 â””â”€â”€ .env                        â€” Local environment (never committed)
@@ -466,6 +471,12 @@ const brief = await iranti.handshake({ agent, task, recentMessages });
 await iranti.reconvene(agentId, { task, recentMessages });
 const turn = await iranti.attend({ agent, latestMessage, currentContext, entityHints });
 const attendant = iranti.getAttendant(agentId);
+
+// Session checkpoints and recovery
+const checkpoint = await iranti.checkpoint({ agentId, task, recentMessages, checkpoint: { currentStep, nextStep, openRisks } });
+const resumed = await iranti.resumeSession({ agentId, sessionId });
+const completed = await iranti.completeSession({ agentId, sessionId });
+const abandoned = await iranti.abandonSession({ agentId, sessionId });
 
 // Query
 const result = await iranti.query(entity, key);
