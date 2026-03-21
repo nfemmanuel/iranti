@@ -15,7 +15,7 @@ import {
     ResolutionOutcome,
     ResolutionState,
 } from '../generated/prisma/client';
-import { buildEmbeddingText, generateEmbedding } from './embeddings';
+import { buildEmbeddingText, cosineSimilarity, generateEmbedding } from './embeddings';
 import { getScore, getReliabilityScores } from '../librarian/source-reliability';
 import { getDecayConfig, initialStabilityFromReliability, readOriginalConfidence } from '../lib/decay';
 import { createVectorBackend } from './backends';
@@ -60,6 +60,7 @@ const MAX_SEARCH_LIMIT = 50;
 const DEFAULT_LEXICAL_WEIGHT = 0.45;
 const DEFAULT_VECTOR_WEIGHT = 0.55;
 const DEFAULT_MIN_SCORE = 0;
+const DEFAULT_VECTOR_FALLBACK_SCAN_LIMIT = 2000;
 
 let vectorBackend: VectorBackend | null = null;
 
@@ -76,11 +77,20 @@ function getVectorBackendSingleton(): VectorBackend {
     return vectorBackend;
 }
 
-async function saveEmbedding(entryId: number, text: string): Promise<void> {
+async function saveEmbedding(entry: Pick<KnowledgeEntry, 'id' | 'entityType' | 'entityId' | 'key' | 'valueSummary' | 'valueRaw' | 'source'>): Promise<void> {
+    const text = buildEmbeddingText(entry.key, entry.valueSummary, entry.valueRaw);
     await getVectorBackendSingleton().upsert({
-        id: String(entryId),
+        id: String(entry.id),
         vector: generateEmbedding(text),
-        metadata: { id: entryId },
+        metadata: {
+            id: entry.id,
+            entityType: entry.entityType,
+            entityId: entry.entityId,
+            key: entry.key,
+            summary: entry.valueSummary,
+            source: entry.source,
+            text,
+        },
     });
 }
 
@@ -293,6 +303,10 @@ async function fetchLexicalCandidateIds(
         SELECT kb."id"
         FROM "knowledge_base" kb
         WHERE ${Prisma.join(filters, ' AND ')}
+          AND ts_rank_cd(
+                to_tsvector('english', coalesce(kb."key", '') || ' ' || coalesce(kb."valueSummary", '')),
+                websearch_to_tsquery('english', ${input.query})
+              ) > 0
         ORDER BY ts_rank_cd(
             to_tsvector('english', coalesce(kb."key", '') || ' ' || coalesce(kb."valueSummary", '')),
             websearch_to_tsquery('english', ${input.query})
@@ -300,6 +314,74 @@ async function fetchLexicalCandidateIds(
         LIMIT ${limit}
     `);
     return rows.map((row) => row.id);
+}
+
+async function hybridSearchWithoutBackend(
+    input: HybridSearchInput,
+    db: DbClient,
+    limit: number,
+    minScore: number,
+    weights: { lexical: number; vector: number }
+): Promise<HybridSearchResult[]> {
+    const configuredLimit = Number.parseInt(process.env.IRANTI_VECTOR_FALLBACK_SCAN_LIMIT ?? '', 10);
+    const scanLimit = Number.isFinite(configuredLimit) && configuredLimit > 0
+        ? Math.max(limit, configuredLimit)
+        : Math.max(limit, DEFAULT_VECTOR_FALLBACK_SCAN_LIMIT);
+
+    const entries = await db.knowledgeEntry.findMany({
+        where: {
+            isProtected: false,
+            ...(input.entityType ? { entityType: input.entityType } : {}),
+            ...(input.entityId ? { entityId: input.entityId } : {}),
+        },
+        select: {
+            id: true,
+            entityType: true,
+            entityId: true,
+            key: true,
+            valueRaw: true,
+            valueSummary: true,
+            confidence: true,
+            source: true,
+            validUntil: true,
+        },
+        orderBy: { updatedAt: 'desc' },
+        take: scanLimit,
+    });
+
+    if (entries.length === 0) {
+        return [];
+    }
+
+    const lexicalRows = await scoreHybridCandidates(entries.map((entry) => entry.id), input, db);
+    const lexicalById = new Map<number, number>();
+    for (const row of lexicalRows) {
+        lexicalById.set(row.id, coerceScore(row.lexicalScore));
+    }
+
+    const queryEmbedding = generateEmbedding(input.query);
+    const scored = entries
+        .map((entry) => {
+            const lexicalScore = lexicalById.get(entry.id) ?? 0;
+            const vectorScore = cosineSimilarity(
+                queryEmbedding,
+                generateEmbedding(buildEmbeddingText(entry.key, entry.valueSummary, entry.valueRaw)),
+            );
+            const score = (weights.lexical * lexicalScore) + (weights.vector * vectorScore);
+
+            return {
+                ...entry,
+                lexicalScore,
+                vectorScore,
+                score,
+            };
+        })
+        .filter((entry) => entry.score >= minScore)
+        .filter((entry) => entry.lexicalScore > 0 || entry.vectorScore > 0)
+        .sort((left, right) => right.score - left.score)
+        .slice(0, limit);
+
+    return mapHybridRows(scored);
 }
 
 async function scoreHybridCandidates(
@@ -311,10 +393,10 @@ async function scoreHybridCandidates(
         return [];
     }
 
-    const idRows = Prisma.join(candidateIds.map((id) => Prisma.sql`(${id})`), ', ');
+    const idRows = Prisma.join(candidateIds);
     return db.$queryRaw<HybridSearchRow[]>(Prisma.sql`
-        WITH candidate_ids("id") AS (
-            VALUES ${idRows}
+        WITH candidate_ids AS (
+            SELECT UNNEST(ARRAY[${idRows}]::int[]) AS "id"
         )
         SELECT
             kb."id",
@@ -379,7 +461,8 @@ async function lexicalSearch(
             0::float8 AS "vectorScore",
             (${lexicalWeight} * "lexicalScore") AS "score"
         FROM scored
-        WHERE (${lexicalWeight} * "lexicalScore") >= ${minScore}
+        WHERE "lexicalScore" > 0
+          AND (${lexicalWeight} * "lexicalScore") >= ${minScore}
         ORDER BY "score" DESC
         LIMIT ${limit}
     `);
@@ -401,7 +484,7 @@ export async function searchEntriesHybrid(input: HybridSearchInput, db?: DbClien
     const backend = getVectorBackendSingleton();
 
     if (!(await backend.ping())) {
-        return lexicalSearch(normalizedInput, client, limit, minScore, weights.lexical);
+        return hybridSearchWithoutBackend(normalizedInput, client, limit, minScore, weights);
     }
 
     try {
@@ -444,7 +527,7 @@ export async function searchEntriesHybrid(input: HybridSearchInput, db?: DbClien
         return mapHybridRows(scored);
     } catch (error) {
         console.warn(`[vector] Falling back to lexical-only search: ${error instanceof Error ? error.message : String(error)}`);
-        return lexicalSearch(normalizedInput, client, limit, minScore, weights.lexical);
+        return hybridSearchWithoutBackend(normalizedInput, client, limit, minScore, weights);
     }
 }
 
@@ -480,7 +563,7 @@ export async function createEntry(input: EntryInput, db?: DbClient): Promise<Kno
         },
     });
 
-    await saveEmbedding(entry.id, buildEmbeddingText(entry.key, entry.valueSummary, entry.valueRaw));
+    await saveEmbedding(entry);
 
     return entry;
 }
@@ -516,7 +599,7 @@ export async function updateEntry(
         },
     });
 
-    await saveEmbedding(entry.id, buildEmbeddingText(entry.key, entry.valueSummary, entry.valueRaw));
+    await saveEmbedding(entry);
 
     return entry;
 }

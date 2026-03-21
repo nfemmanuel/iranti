@@ -298,7 +298,7 @@ Relationships are directional. `jane_smith MEMBER_OF mit_csail` is different fro
 related = client.get_related("researcher/jane_smith")
 
 for r in related:
-    print(f"{r['relationshipType']}: {r['toType']}/{r['toId']}")
+    print(f"{r['relationshipType']} ({r['direction']}): {r['entityType']}/{r['entityId']}")
 ```
 
 `client.related(...)` is an alias for `client.get_related(...)`.

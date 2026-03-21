@@ -1,25 +1,36 @@
-import { LLMProvider, LLMMessage, LLMResponse, CompleteOptions } from '../llm';
-
-// ─── Scenario Types ───────────────────────────────────────────────────────────
+import { CompleteOptions, LLMMessage, LLMProvider, LLMResponse } from '../llm';
 
 export type MockScenario =
-    | 'default'          // Current behavior — deterministic responses
-    | 'disagreement'     // Agents produce conflicting facts
-    | 'unreliable'       // Occasional failures and low confidence
-    | 'collaborative'    // Agents build on each other's findings
-    | 'noisy';           // Mix of relevant and irrelevant responses
-
-// ─── Config ───────────────────────────────────────────────────────────────────
+    | 'default'
+    | 'disagreement'
+    | 'unreliable'
+    | 'collaborative'
+    | 'noisy';
 
 export interface MockConfig {
     scenario: MockScenario;
-    agentId?: string;          // Different agents get different responses
-    failureRate?: number;      // 0-1, probability of simulated failure
-    confidenceRange?: [number, number];  // Min/max confidence for randomization
-    seed?: number;             // For reproducible randomization
+    agentId?: string;
+    failureRate?: number;
+    confidenceRange?: [number, number];
+    seed?: number;
 }
 
-// ─── Seeded Random ────────────────────────────────────────────────────────────
+type ExtractedFact = {
+    key: string;
+    value: unknown;
+    summary: string;
+    confidence: number;
+};
+
+type DetectedEntity = {
+    type: string;
+    name: string;
+    id_guess: string;
+    confidence: number;
+    evidence: string;
+    start?: number;
+    end?: number;
+};
 
 function seededRandom(seed: number): () => number {
     let s = seed;
@@ -29,7 +40,308 @@ function seededRandom(seed: number): () => number {
     };
 }
 
-// ─── Response Banks ───────────────────────────────────────────────────────────
+function heuristicEntityId(name: string): string {
+    return name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '');
+}
+
+function extractBlock(message: string, startLabel: string, endLabels: string[] = []): string {
+    const lower = message.toLowerCase();
+    const start = lower.indexOf(startLabel.toLowerCase());
+    if (start < 0) {
+        return '';
+    }
+
+    let content = message.slice(start + startLabel.length);
+    let end = content.length;
+    for (const label of endLabels) {
+        const idx = content.toLowerCase().indexOf(label.toLowerCase());
+        if (idx >= 0 && idx < end) {
+            end = idx;
+        }
+    }
+
+    content = content.slice(0, end).trim();
+    return content.replace(/^"+|"+$/g, '').trim();
+}
+
+function titleCase(value: string): string {
+    return value
+        .trim()
+        .split(/\s+/)
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+        .join(' ');
+}
+
+function summarizeFact(key: string, value: unknown): string {
+    if (key === 'hq_city' && typeof (value as { city?: unknown })?.city === 'string') {
+        return `Headquartered in ${(value as { city: string }).city}.`;
+    }
+    if (key === 'team_size' && typeof (value as { count?: unknown })?.count === 'number') {
+        return `Team size is ${(value as { count: number }).count}.`;
+    }
+    if (key === 'runway_months' && typeof (value as { months?: unknown })?.months === 'number') {
+        return `Runway is ${(value as { months: number }).months} months.`;
+    }
+    if (key === 'pilot_count' && typeof (value as { count?: unknown })?.count === 'number') {
+        return `Pilot count is ${(value as { count: number }).count}.`;
+    }
+    if (key === 'publication_count' && typeof (value as { count?: unknown })?.count === 'number') {
+        return `Has published ${(value as { count: number }).count} papers.`;
+    }
+    if (key === 'budget') {
+        const budget = value as { amount?: unknown; currency?: unknown };
+        if (typeof budget.amount === 'number' && typeof budget.currency === 'string') {
+            return `Budget is ${budget.amount.toLocaleString('en-US')} ${budget.currency}.`;
+        }
+    }
+    if (key === 'affiliation') {
+        const affiliation = value as { institution?: unknown };
+        if (typeof affiliation.institution === 'string') {
+            return `Affiliated with ${affiliation.institution}.`;
+        }
+    }
+    if (key === 'research_focus') {
+        const focus = value as { primary?: unknown };
+        if (typeof focus.primary === 'string') {
+            return `Primary research focus is ${focus.primary}.`;
+        }
+    }
+    if (key === 'favorite_city') {
+        const city = value as { city?: unknown };
+        if (typeof city.city === 'string') {
+            return `Favorite city is ${city.city}.`;
+        }
+    }
+    return `${key}: ${JSON.stringify(value)}`;
+}
+
+function extractFactsFromText(text: string): ExtractedFact[] {
+    const facts: ExtractedFact[] = [];
+    const trimmed = text.trim();
+    if (!trimmed || /no durable facts/i.test(trimmed)) {
+        return facts;
+    }
+
+    const pushFact = (fact: ExtractedFact) => {
+        if (!facts.some((existing) => existing.key === fact.key)) {
+            facts.push(fact);
+        }
+    };
+
+    const cityMatch = trimmed.match(/\b(?:currently\s+)?operates in\s+([A-Za-z][A-Za-z\s-]+?)(?:[.!,]|$)/i);
+    if (cityMatch) {
+        const city = titleCase(cityMatch[1]);
+        pushFact({
+            key: 'hq_city',
+            value: { city },
+            summary: `Headquartered in ${city}.`,
+            confidence: 96,
+        });
+    }
+
+    const teamMatch = trimmed.match(/\bhas\s+(\d+)\s+employees\b/i);
+    if (teamMatch) {
+        pushFact({
+            key: 'team_size',
+            value: { count: Number(teamMatch[1]) },
+            summary: `Team size is ${teamMatch[1]}.`,
+            confidence: 95,
+        });
+    }
+
+    const runwayMatch = trimmed.match(/\bhas\s+(\d+)\s+months?\s+of\s+runway\b/i);
+    if (runwayMatch) {
+        pushFact({
+            key: 'runway_months',
+            value: { months: Number(runwayMatch[1]) },
+            summary: `Runway is ${runwayMatch[1]} months.`,
+            confidence: 93,
+        });
+    }
+
+    const pilotMatch = trimmed.match(/\bhas\s+(\d+)\s+pilots?\b/i);
+    if (pilotMatch) {
+        pushFact({
+            key: 'pilot_count',
+            value: { count: Number(pilotMatch[1]) },
+            summary: `Pilot count is ${pilotMatch[1]}.`,
+            confidence: 95,
+        });
+    }
+
+    const expansionMatch = trimmed.match(/\bcould be expanding into\s+([a-z][a-z\s-]+?)(?:\s+next year|[.!,]|$)/i);
+    if (expansionMatch) {
+        pushFact({
+            key: 'expansion_target',
+            value: { market: heuristicEntityId(expansionMatch[1]).replace(/_/g, ' ') },
+            summary: `May expand into ${expansionMatch[1].trim()}.`,
+            confidence: 38,
+        });
+    }
+
+    const budgetMatch = trimmed.match(/\bbudget of\s+(\d[\d,]*)\s*(usd|eur|gbp)\b/i);
+    if (budgetMatch) {
+        pushFact({
+            key: 'budget',
+            value: {
+                amount: Number(budgetMatch[1].replace(/,/g, '')),
+                currency: budgetMatch[2].toUpperCase(),
+            },
+            summary: `Budget is ${budgetMatch[1]} ${budgetMatch[2].toUpperCase()}.`,
+            confidence: 91,
+        });
+    }
+
+    const publicationsMatch = trimmed.match(/\bhas\s+(\d+)\s+publications?\b/i);
+    if (publicationsMatch) {
+        pushFact({
+            key: 'publication_count',
+            value: { count: Number(publicationsMatch[1]) },
+            summary: `Has published ${publicationsMatch[1]} papers.`,
+            confidence: 93,
+        });
+    }
+
+    const professorMatch = trimmed.match(/\bis a professor at\s+([A-Za-z][A-Za-z\s().-]+?)(?:[.!,]|$)/i);
+    if (professorMatch) {
+        const institution = professorMatch[1].trim();
+        pushFact({
+            key: 'affiliation',
+            value: { institution },
+            summary: `Affiliated with ${institution}.`,
+            confidence: 92,
+        });
+    }
+
+    const focusMatch = trimmed.match(/\bresearch focus:\s*([A-Za-z][A-Za-z\s-]+?)(?:[.!,]|$)/i);
+    if (focusMatch) {
+        const primary = focusMatch[1].trim().toLowerCase();
+        pushFact({
+            key: 'research_focus',
+            value: { primary },
+            summary: `Primary research focus is ${primary}.`,
+            confidence: 88,
+        });
+    }
+
+    const favoriteCityMatch = trimmed.match(/\bfavorite city is\s+([A-Za-z][A-Za-z\s-]+?)(?:[.!,]|$)/i);
+    if (favoriteCityMatch) {
+        const city = titleCase(favoriteCityMatch[1]);
+        pushFact({
+            key: 'favorite_city',
+            value: { city },
+            summary: `Favorite city is ${city}.`,
+            confidence: 92,
+        });
+    }
+
+    return facts;
+}
+
+function detectEntities(text: string): DetectedEntity[] {
+    const candidates: DetectedEntity[] = [];
+    const seen = new Set<string>();
+
+    const add = (candidate: DetectedEntity) => {
+        const key = `${candidate.type}/${candidate.id_guess}`;
+        if (seen.has(key)) {
+            return;
+        }
+        seen.add(key);
+        candidates.push(candidate);
+    };
+
+    for (const match of text.matchAll(/\b([a-z][a-z0-9_]*)\/([A-Za-z0-9][A-Za-z0-9_\-]{1,80})\b/g)) {
+        add({
+            type: match[1],
+            name: match[2].replace(/_/g, ' '),
+            id_guess: heuristicEntityId(match[2]),
+            confidence: 0.95,
+            evidence: match[0],
+            start: typeof match.index === 'number' ? match.index : undefined,
+            end: typeof match.index === 'number' ? match.index + match[0].length : undefined,
+        });
+    }
+
+    for (const match of text.matchAll(/\bProject\s+([A-Z0-9][A-Za-z0-9_\-]*(?:\s+[A-Z0-9][A-Za-z0-9_\-]*){0,4})\b/g)) {
+        const name = `Project ${match[1]}`.trim();
+        add({
+            type: 'project',
+            name,
+            id_guess: `project_${heuristicEntityId(match[1])}`,
+            confidence: 0.88,
+            evidence: name,
+            start: typeof match.index === 'number' ? match.index : undefined,
+            end: typeof match.index === 'number' ? match.index + name.length : undefined,
+        });
+    }
+
+    if (/\b(my|our|we)\b/i.test(text)) {
+        add({
+            type: 'user',
+            name: 'main',
+            id_guess: 'main',
+            confidence: 0.84,
+            evidence: /\bmy\b/i.test(text) ? 'my' : /\bour\b/i.test(text) ? 'our' : 'we',
+        });
+    }
+
+    return candidates;
+}
+
+function classifyMemoryNeed(message: string): { needsMemory: boolean; confidence: number; reason: string } {
+    const normalized = message.trim().toLowerCase();
+    if (!normalized) {
+        return { needsMemory: false, confidence: 0.51, reason: 'no_latest_message' };
+    }
+    if (/^\s*(hi|hello|hey|yo|thanks|thank you|cool|great)\b/.test(normalized)) {
+        return { needsMemory: false, confidence: 0.96, reason: 'simple_greeting_or_ack' };
+    }
+    if (/\b(my|our|we|remember|earlier|previous|again|favorite|favourite)\b/.test(normalized)) {
+        return { needsMemory: true, confidence: 0.93, reason: 'memory_reference_detected' };
+    }
+    if (normalized.includes('?')) {
+        return { needsMemory: false, confidence: 0.64, reason: 'generic_question_without_memory_signal' };
+    }
+    return { needsMemory: false, confidence: 0.58, reason: 'generic_statement_without_memory_signal' };
+}
+
+function normalizeTokens(text: string): Set<string> {
+    return new Set(
+        text
+            .toLowerCase()
+            .replace(/[^a-z0-9\s]+/g, ' ')
+            .split(/\s+/)
+            .map((token) => token.trim())
+            .filter((token) => token.length > 2),
+    );
+}
+
+function chooseRelevantEntries(task: string, entriesBlock: string): string {
+    const taskTokens = normalizeTokens(task);
+    const matches: number[] = [];
+
+    for (const line of entriesBlock.split('\n')) {
+        const match = line.match(/^\s*(\d+)\.\s+(.+)$/);
+        if (!match) continue;
+        const index = Number(match[1]);
+        const lineTokens = normalizeTokens(match[2]);
+        let overlap = 0;
+        for (const token of lineTokens) {
+            if (taskTokens.has(token)) {
+                overlap += 1;
+            }
+        }
+        if (overlap > 0) {
+            matches.push(index);
+        }
+    }
+
+    return matches.length > 0 ? matches.join(',') : 'none';
+}
 
 const TASK_INFERENCES: Record<string, string[]> = {
     default: [
@@ -59,18 +371,10 @@ const CONFLICT_RESOLUTIONS = {
     ESCALATE: 'ESCALATE: Both sources have comparable authority and the values are genuinely contradictory.',
 };
 
-const EXTRACTION_RESPONSES: Record<string, string> = {
-    default: '[{"key":"affiliation","value":{"institution":"Carnegie Mellon University"},"summary":"Affiliated with Carnegie Mellon University.","confidence":95},{"key":"publication_count","value":{"count":31},"summary":"Has published 31 papers.","confidence":93},{"key":"previous_employer","value":{"institution":"Google DeepMind","from":2019,"to":2022},"summary":"Previously worked at Google DeepMind from 2019 to 2022.","confidence":91},{"key":"research_focus","value":{"primary":"reinforcement learning","secondary":"robotics"},"summary":"Primary research focus is reinforcement learning with secondary interest in robotics.","confidence":88}]',
-    disagreement: '[{"key":"affiliation","value":{"institution":"MIT"},"summary":"Affiliated with MIT.","confidence":86},{"key":"publication_count","value":{"count":28},"summary":"Has published 28 papers.","confidence":82}]',
-    collaborative: '[{"key":"h_index","value":{"score":12},"summary":"H-index of 12.","confidence":84},{"key":"cited_by","value":{"count":450},"summary":"Cited by 450 papers.","confidence":83}]',
-};
-
-// ─── Mock Provider ────────────────────────────────────────────────────────────
-
 class MockProvider implements LLMProvider {
     private config: MockConfig;
     private rand: () => number;
-    private callCount: number = 0;
+    private callCount = 0;
 
     constructor(config: MockConfig = { scenario: 'default' }) {
         this.config = config;
@@ -84,37 +388,41 @@ class MockProvider implements LLMProvider {
     }
 
     async complete(messages: LLMMessage[], options?: CompleteOptions): Promise<LLMResponse> {
-        this.callCount++;
-        const lastMessage = messages[messages.length - 1].content.toLowerCase();
+        this.callCount += 1;
+        const lastMessage = messages[messages.length - 1].content;
+        const lower = lastMessage.toLowerCase();
         const scenario = this.config.scenario;
         const model = options?.model ?? 'mock';
 
-        // Simulate failure rate
         const failureRate = this.config.failureRate ?? 0;
         if (failureRate > 0 && this.rand() < failureRate) {
             throw new Error(`[mock] Simulated provider failure (rate: ${failureRate})`);
         }
 
-        // Task inference
-        if (lastMessage.includes('specific type of task')) {
+        if (lower.includes('return only valid json with this exact shape:') && lower.includes('"needsmemory"')) {
+            const latestMessage = extractBlock(lastMessage, 'Latest user message:', ['Recent context excerpt:']);
+            return this.respond(JSON.stringify(classifyMemoryNeed(latestMessage)), model);
+        }
+
+        if (lower.includes('extract explicitly named entities from the text')) {
+            const text = extractBlock(lastMessage, 'Text:');
+            return this.respond(JSON.stringify(detectEntities(text)), model);
+        }
+
+        if (lower.includes('specific type of task')) {
             const options = TASK_INFERENCES[scenario] ?? TASK_INFERENCES.default;
             const idx = Math.floor(this.rand() * options.length);
             return this.respond(options[idx], model);
         }
 
-        // Relevance filtering
-        if (lastMessage.includes('directly relevant')) {
-            if (scenario === 'noisy') {
-                // Sometimes return nothing relevant
-                return this.respond(this.rand() > 0.5 ? 'none' : '1,2', model);
-            }
-            return this.respond('none', model);
+        if (lower.includes('return only the numbers of entries that are directly relevant')) {
+            const task = extractBlock(lastMessage, 'Agent task:', ['Available knowledge entries:']);
+            const entries = extractBlock(lastMessage, 'Available knowledge entries:');
+            return this.respond(chooseRelevantEntries(task, entries), model);
         }
 
-        // Conflict resolution
-        if (lastMessage.includes('genuinely contradictory') || lastMessage.includes('keep_existing')) {
+        if (lower.includes('genuinely contradictory') || lower.includes('keep_existing')) {
             if (scenario === 'disagreement') {
-                // Disagreement scenario escalates more
                 const r = this.rand();
                 if (r < 0.4) return this.respond(CONFLICT_RESOLUTIONS.KEEP_EXISTING, model);
                 if (r < 0.7) return this.respond(CONFLICT_RESOLUTIONS.KEEP_INCOMING, model);
@@ -123,58 +431,23 @@ class MockProvider implements LLMProvider {
             return this.respond(CONFLICT_RESOLUTIONS.KEEP_EXISTING, model);
         }
 
-        // Extraction / chunking
         if (
-            lastMessage.includes('extract only distinct facts')
-            || lastMessage.includes('extract every distinct')
-            || lastMessage.includes('extracting structured facts')
-            || lastMessage.includes('atomic facts')
+            lower.includes('extract only distinct facts')
+            || lower.includes('extract every distinct')
+            || lower.includes('extracting structured facts')
+            || lower.includes('atomic facts')
         ) {
-            if (lastMessage.includes('avalon spectrum currently operates in lisbon')) {
-                return this.respond(
-                    '[{"key":"hq_city","value":{"city":"Lisbon"},"summary":"Headquartered in Lisbon.","confidence":96},{"key":"team_size","value":{"count":42},"summary":"Team size is 42.","confidence":95},{"key":"runway_months","value":{"months":18},"summary":"Runway is 18 months.","confidence":93}]',
-                    model
-                );
-            }
-            if (lastMessage.includes('might be preparing for a beta launch') || lastMessage.includes('possibly exploring a seed extension')) {
-                return this.respond(
-                    '[{"key":"launch_phase","value":{"phase":"beta"},"summary":"Possibly preparing for a beta launch.","confidence":42},{"key":"fundraising_plan","value":{"type":"seed_extension"},"summary":"May be exploring a seed extension.","confidence":34}]',
-                    model
-                );
-            }
-            if (lastMessage.includes('helios array has 12 pilots') || lastMessage.includes('could be expanding into ocean freight')) {
-                return this.respond(
-                    '[{"key":"pilot_count","value":{"count":12},"summary":"Pilot count is 12.","confidence":95},{"key":"expansion_target","value":{"market":"ocean_freight"},"summary":"May expand into ocean freight.","confidence":38}]',
-                    model
-                );
-            }
-            if (lastMessage.includes('rain over the harbor looked dramatic') || lastMessage.includes('no durable facts')) {
-                return this.respond('[]', model);
-            }
-            if (lastMessage.includes('northwind lattice has a budget of 50000')) {
-                return this.respond(
-                    '[{"key":"budget","value":{"amount":50000,"currency":"USD"},"summary":"Budget is 50,000 USD.","confidence":95}]',
-                    model
-                );
-            }
-            if (lastMessage.includes('northwind lattice has a budget of 75000')) {
-                return this.respond(
-                    '[{"key":"budget","value":{"amount":75000,"currency":"USD"},"summary":"Budget is 75,000 USD.","confidence":91}]',
-                    model
-                );
-            }
-            const response = EXTRACTION_RESPONSES[scenario] ?? EXTRACTION_RESPONSES.default;
-            return this.respond(response, model);
+            const text = extractBlock(lastMessage, 'Text to chunk:', ['Extract only distinct facts', 'Return ONLY a valid JSON array', 'If no facts can be extracted']);
+            const facts = extractFactsFromText(text);
+            return this.respond(JSON.stringify(facts), model);
         }
 
-        // Summarization
-        if (lastMessage.includes('compress') || lastMessage.includes('summarize')) {
+        if (lower.includes('compress') || lower.includes('summarize')) {
             return this.respond('Compressed working memory summary for current task context.', model);
         }
 
-        // Default — generic agent response
         return this.respond(
-            `I have completed my analysis. Based on my research:\n\n` +
+            `I have completed my analysis.\n\n` +
             `{\n` +
             `  "name": "Sample Researcher",\n` +
             `  "affiliation": "MIT",\n` +
@@ -183,11 +456,11 @@ class MockProvider implements LLMProvider {
             `  "notable_contribution": "Foundational work in neural networks",\n` +
             `  "confidence": 85\n` +
             `}`,
-            model
+            model,
         );
     }
 
-    private respond(text: string, model: string = 'mock'): LLMResponse {
+    private respond(text: string, model: string): LLMResponse {
         return { text, model, provider: 'mock' };
     }
 
@@ -199,8 +472,6 @@ class MockProvider implements LLMProvider {
         this.callCount = 0;
     }
 }
-
-// ─── Singleton + Config Export ────────────────────────────────────────────────
 
 const mockProvider = new MockProvider();
 

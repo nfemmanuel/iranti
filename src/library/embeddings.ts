@@ -1,4 +1,28 @@
 const DEFAULT_DIMENSIONS = 256;
+const TOKEN_SYNONYMS: Record<string, string[]> = {
+    hq: ['headquarters', 'location', 'city'],
+    headquarters: ['hq', 'location', 'city'],
+    location: ['city', 'headquarters', 'hq'],
+    city: ['location', 'hq', 'headquarters'],
+    capital: ['city', 'location'],
+    employee: ['employees', 'staff', 'team', 'headcount'],
+    employees: ['employee', 'staff', 'team', 'headcount'],
+    staff: ['employees', 'team', 'headcount'],
+    team: ['staff', 'employees', 'headcount'],
+    size: ['count', 'headcount', 'team'],
+    count: ['size', 'total', 'number'],
+    headcount: ['employees', 'team', 'staff', 'count'],
+    runway: ['cash', 'months', 'burn'],
+    months: ['runway', 'duration'],
+    budget: ['funding', 'funds', 'spend'],
+    blocker: ['issue', 'problem', 'risk'],
+    issue: ['blocker', 'problem', 'risk'],
+    problem: ['issue', 'blocker', 'risk'],
+    launch: ['release', 'ship', 'rollout'],
+    release: ['launch', 'ship', 'rollout'],
+    favorite: ['preferred', 'likes', 'preference'],
+    preferred: ['favorite', 'preference'],
+};
 
 function clampDimensions(raw: string | undefined): number {
     const parsed = Number.parseInt(raw ?? '', 10);
@@ -11,12 +35,23 @@ function clampDimensions(raw: string | undefined): number {
 export const EMBEDDING_DIMENSIONS = clampDimensions(process.env.IRANTI_EMBEDDING_DIM);
 
 function normalizeText(text: string): string[] {
-    return text
+    const baseTokens = text
         .toLowerCase()
         .replace(/[^a-z0-9\s]+/g, ' ')
         .split(/\s+/)
         .map((token) => token.trim())
         .filter(Boolean);
+
+    const expanded: string[] = [];
+    for (const token of baseTokens) {
+        expanded.push(token);
+        const synonyms = TOKEN_SYNONYMS[token];
+        if (synonyms) {
+            expanded.push(...synonyms);
+        }
+    }
+
+    return expanded;
 }
 
 function fnv1a(input: string): number {
@@ -35,6 +70,30 @@ function l2Normalize(values: number[]): number[] {
     }
     const norm = Math.sqrt(sumSquares);
     return values.map((value) => value / norm);
+}
+
+export function cosineSimilarity(left: number[], right: number[]): number {
+    if (left.length === 0 || right.length === 0 || left.length !== right.length) {
+        return 0;
+    }
+
+    let dot = 0;
+    let leftMagnitude = 0;
+    let rightMagnitude = 0;
+
+    for (let index = 0; index < left.length; index += 1) {
+        const leftValue = left[index];
+        const rightValue = right[index];
+        dot += leftValue * rightValue;
+        leftMagnitude += leftValue * leftValue;
+        rightMagnitude += rightValue * rightValue;
+    }
+
+    if (leftMagnitude === 0 || rightMagnitude === 0) {
+        return 0;
+    }
+
+    return dot / (Math.sqrt(leftMagnitude) * Math.sqrt(rightMagnitude));
 }
 
 export function buildEmbeddingText(key: string, summary: string, valueRaw: unknown): string {

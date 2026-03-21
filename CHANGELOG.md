@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.13 - 2026-03-21
+
+### Changed
+
+- Hybrid search now falls back to deterministic in-process semantic scoring when pgvector is unavailable, instead of collapsing to lexical-only ranking.
+- TypeScript and Python clients now default `entityHints` from `IRANTI_MEMORY_ENTITY` when callers do not provide explicit hints.
+- Mock-provider behavior is now contract-faithful for structured extraction, entity detection, memory classification, and relevance filtering.
+
+### Fixed
+
+- `attend()` no longer defaults ambiguous prompts to `memory_not_needed` so aggressively, and can now recover personal-memory facts like `user/main` without manual entity hints.
+- Hybrid search no longer returns zero-signal lexical rows so readily, and external vector backends now receive the metadata needed for filtered searches.
+- Python relationship documentation now matches the actual response shape, and the Python smoke test now covers relationship readback.
+- The Python smoke script no longer crashes on Windows console encoding when maintenance errors contain non-ASCII characters.
+
 ## 0.2.12 - 2026-03-20
 
 ### Added

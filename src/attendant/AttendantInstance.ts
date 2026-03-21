@@ -249,17 +249,6 @@ function heuristicMemoryNeed(message: string): MemoryDecisionHeuristic {
         };
     }
 
-    const hasQuestion = normalized.includes('?');
-    const hasPersonalReference = /\b(my|our|we)\b/i.test(normalized);
-
-    if (!hasQuestion && !hasPersonalReference) {
-        return {
-            needed: false,
-            confidence: 0.8,
-            explanation: 'general_statement_without_memory_signal',
-        };
-    }
-
     return {
         needed: null,
         confidence: 0.55,
@@ -400,6 +389,8 @@ export class AttendantInstance {
         const currentContext = input.currentContext ?? '';
         const latestMessage = normalizeMessage(input.latestMessage);
         const forceInject = input.forceInject === true;
+        const effectiveEntityHints = this.resolveAttendEntityHints(input.entityHints, latestMessage);
+        const observationContext = currentContext.trim().length > 0 ? currentContext : latestMessage;
 
         const decision = await this.decideMemoryNeed({
             currentContext,
@@ -424,7 +415,7 @@ export class AttendantInstance {
                     detectionWindowChars: Math.min(currentContext.length, ENTITY_DETECTION_WINDOW_CHARS),
                     detectedCandidates: 0,
                     keptCandidates: 0,
-                    hintsProvided: input.entityHints?.length ?? 0,
+                    hintsProvided: effectiveEntityHints.length,
                     hintsResolved: 0,
                     dropped: [{ name: latestMessage || '(none)', reason: 'memory_not_needed' }],
                 },
@@ -432,9 +423,9 @@ export class AttendantInstance {
         }
 
         const observed = await this.observe({
-            currentContext,
+            currentContext: observationContext,
             maxFacts: input.maxFacts,
-            entityHints: input.entityHints,
+            entityHints: effectiveEntityHints,
         });
 
         let reason: AttendResult['reason'] = 'memory_needed_injected';
@@ -858,6 +849,26 @@ Rules:
             method: 'heuristic',
             explanation: 'classification_parse_failed_default_false',
         };
+    }
+
+    private resolveAttendEntityHints(entityHints: string[] | undefined, latestMessage: string): string[] {
+        const explicit = Array.isArray(entityHints)
+            ? entityHints.filter((hint) => typeof hint === 'string' && hint.trim().length > 0)
+            : [];
+
+        if (explicit.length > 0) {
+            return explicit;
+        }
+
+        if (/\b(my|our|we)\b/i.test(latestMessage)) {
+            const configured = process.env.IRANTI_MEMORY_ENTITY?.trim();
+            if (configured && configured.includes('/')) {
+                return [configured];
+            }
+            return ['user/main'];
+        }
+
+        return [];
     }
 
     private parseMemoryDecision(raw: string): { needsMemory: boolean; confidence: number; reason: string } | null {

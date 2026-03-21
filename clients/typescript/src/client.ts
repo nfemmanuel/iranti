@@ -64,6 +64,21 @@ function buildQuery(params: Record<string, string | number | boolean | undefined
     return encoded ? `?${encoded}` : '';
 }
 
+function defaultEntityHints(entityHints?: string[]): string[] | undefined {
+    if (Array.isArray(entityHints) && entityHints.length > 0) {
+        return entityHints;
+    }
+
+    if (typeof process !== 'undefined') {
+        const configured = process.env?.IRANTI_MEMORY_ENTITY?.trim();
+        if (configured && configured.includes('/')) {
+            return [configured];
+        }
+    }
+
+    return undefined;
+}
+
 async function parseResponseBody(response: Response): Promise<unknown> {
     const text = await response.text();
     if (!text) return null;
@@ -330,7 +345,7 @@ export class IrantiClient {
                 agentId: params.agentId,
                 currentContext: params.currentContext,
                 maxFacts: params.maxFacts,
-                entityHints: params.entityHints,
+                entityHints: defaultEntityHints(params.entityHints),
             },
         });
     }
@@ -342,7 +357,7 @@ export class IrantiClient {
                 currentContext: params.currentContext,
                 latestMessage: params.latestMessage,
                 maxFacts: params.maxFacts,
-                entityHints: params.entityHints,
+                entityHints: defaultEntityHints(params.entityHints),
                 forceInject: params.forceInject ?? false,
             },
         });

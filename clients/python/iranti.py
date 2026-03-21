@@ -28,7 +28,18 @@ import requests
 from typing import Any, Optional
 from dataclasses import dataclass, field
 
-__version__ = "0.2.12"
+__version__ = "0.2.13"
+
+
+def _default_entity_hints(entity_hints: Optional[list[str]]) -> Optional[list[str]]:
+    if entity_hints:
+        return entity_hints
+
+    configured = os.getenv('IRANTI_MEMORY_ENTITY', '').strip()
+    if configured and '/' in configured:
+        return [configured]
+
+    return None
 
 
 # ─── Types ────────────────────────────────────────────────────────────────────
@@ -617,8 +628,9 @@ class IrantiClient:
             'currentContext': current_context,
             'maxFacts': max_facts,
         }
-        if entity_hints:
-            payload['entityHints'] = entity_hints
+        effective_hints = _default_entity_hints(entity_hints)
+        if effective_hints:
+            payload['entityHints'] = effective_hints
         return self._post('/memory/observe', payload)
 
     def attend(
@@ -642,8 +654,9 @@ class IrantiClient:
         }
         if latest_message is not None:
             payload['latestMessage'] = latest_message
-        if entity_hints:
-            payload['entityHints'] = entity_hints
+        effective_hints = _default_entity_hints(entity_hints)
+        if effective_hints:
+            payload['entityHints'] = effective_hints
         return self._post('/memory/attend', payload)
 
     # ── Helpers ───────────────────────────────────────────────────────────────

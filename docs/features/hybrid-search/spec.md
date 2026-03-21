@@ -29,17 +29,18 @@ Hybrid search adds ranked fact discovery when exact keys are unknown by combinin
 ## Decision Tree / Flow
 1. Validate input and normalize weights.
 2. Compute deterministic embedding for the query text.
-3. If vector support is unavailable, run lexical-only ranking.
+3. If vector support is unavailable, compute a deterministic in-process semantic fallback by embedding the query and candidate fact text at read time.
 4. If vector support is available, build lexical and vector candidate sets.
 5. Score candidates with weighted lexical + vector formula.
-6. Filter by `minScore`, sort descending, and return top `limit`.
+6. Filter by `minScore`, drop zero-signal lexical rows, sort descending, and return top `limit`.
 
 ## Edge Cases
 - Empty query: request is rejected.
 - `lexicalWeight + vectorWeight <= 0`: request is rejected.
-- Missing pgvector support at runtime: automatic lexical fallback.
+- Missing pgvector support at runtime: automatic in-process semantic fallback.
 - Entries without embeddings: vector score contributes `0` for those rows.
 - Protected entries: always excluded from results.
+- External vector backends must store entity metadata (`entityType`, `entityId`, `key`) so filtered search can work correctly.
 
 ## Test Results
 - TypeScript build passes with schema generation (`npm.cmd run build`).

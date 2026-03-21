@@ -27,6 +27,7 @@ async function main(): Promise<void> {
     const entity = `project/${uniqueId('ts_client_project')}`;
     const team = `team/${uniqueId('ts_client_team')}`;
     const searchNeedle = uniqueId('typescript_smoke');
+    process.env.IRANTI_MEMORY_ENTITY = 'user/main';
 
     const health = await client.health();
     expect(health.status === 'ok', `Expected health status ok, got ${health.status}`);
@@ -69,6 +70,26 @@ async function main(): Promise<void> {
     });
     expect(search.some((result) => result.entity === entity && result.key === 'status'), 'Expected search() to return the written fact.');
 
+    await client.write({
+        entity,
+        key: 'team_size',
+        value: { count: 42 },
+        summary: 'Team size is 42 employees.',
+        confidence: 89,
+        source: 'typescript_smoke',
+        agent: agentId,
+    });
+
+    const semanticSearch = await client.search({
+        query: 'employee headcount',
+        limit: 5,
+        entityType: 'project',
+    });
+    expect(
+        semanticSearch.some((result) => result.entity === entity && result.key === 'team_size' && result.vectorScore > 0),
+        'Expected semantic search() to produce a positive vector score for the written team_size fact.'
+    );
+
     const relate = await client.relate({
         fromEntity: entity,
         relationshipType: 'MEMBER_OF',
@@ -97,12 +118,23 @@ async function main(): Promise<void> {
     });
     expect(Array.isArray(observe.facts), 'Expected observe() to return a facts array.');
 
+    await client.write({
+        entity: 'user/main',
+        key: 'favorite_city',
+        value: { city: 'Lisbon' },
+        summary: 'Favorite city is Lisbon.',
+        confidence: 91,
+        source: 'typescript_smoke',
+        agent: agentId,
+    });
+
     const attend = await client.attend({
         agentId,
         currentContext: 'User: hello\nAssistant:',
-        latestMessage: 'hello',
+        latestMessage: 'What is my favorite city?',
     });
-    expect(typeof attend.shouldInject === 'boolean', 'Expected attend() to return shouldInject.');
+    expect(attend.shouldInject === true, 'Expected attend() to inject favorite city memory.');
+    expect(attend.facts.some((fact) => fact.entityKey === 'user/main/favorite_city'), 'Expected attend() facts to include user/main/favorite_city.');
 
     console.log('TypeScript client smoke test');
     console.log('---------------------------');
@@ -111,6 +143,7 @@ async function main(): Promise<void> {
     console.log(`entity: ${entity}`);
     console.log(`write: ${write.action}`);
     console.log(`search matches: ${search.length}`);
+    console.log(`semantic search matches: ${semanticSearch.length}`);
     console.log(`related count: ${related.length}`);
     console.log(`attend: shouldInject=${attend.shouldInject} reason=${attend.reason}`);
 }

@@ -3,28 +3,35 @@ Quick smoke test for the Iranti Python client.
 Requires the API server to be running: npm run api
 """
 
+import os
 import sys
 import time
 from iranti import IrantiClient, IrantiError
+
+
+def console_safe(value):
+    text = str(value)
+    return text.encode('ascii', 'replace').decode('ascii')
+
 
 def test():
     print('\nTesting Iranti Python Client...\n')
 
     client = IrantiClient(
-        base_url='http://localhost:3001',
-        api_key='dev_test_key_12345'   # match IRANTI_API_KEY in .env
+        base_url=os.getenv('IRANTI_URL', 'http://localhost:3001'),
+        api_key=os.getenv('IRANTI_API_KEY', 'dev_test_key_12345')
     )
 
     ts = int(time.time())
     entity = f'researcher/py_test_{ts}'
 
     # Health
-    print('Test 1 — health check:')
+    print('Test 1 - health check:')
     health = client.health()
     print(f'  status: {health["status"]}, provider: {health["provider"]}')
 
     # Write
-    print('\nTest 2 — write:')
+    print('\nTest 2 - write:')
     result = client.write(
         entity=entity,
         key='affiliation',
@@ -37,7 +44,7 @@ def test():
     print(f'  {result.action} | {result.reason}')
 
     # Query
-    print('\nTest 3 — query:')
+    print('\nTest 3 - query:')
     q = client.query(entity, 'affiliation')
     print(f'  found: {q.found}')
     if q.found:
@@ -45,7 +52,7 @@ def test():
         print(f'  confidence: {q.confidence}')
 
     # Ingest
-    print('\nTest 4 — ingest:')
+    print('\nTest 4 - ingest:')
     result = client.ingest(
         entity=f'researcher/py_ingest_{ts}',
         content='Dr. Alex Kim has 22 publications and is a professor at Cambridge. Research focus: quantum computing.',
@@ -56,7 +63,7 @@ def test():
     print(f'  written: {result.written}, rejected: {result.rejected}')
 
     # Register agent
-    print('\nTest 5 — register agent:')
+    print('\nTest 5 - register agent:')
     client.register_agent(
         agent_id=f'py_agent_{ts}',
         name='Python Agent',
@@ -68,7 +75,7 @@ def test():
     print(f'  registered: {agent.profile["name"]}')
 
     # Handshake
-    print('\nTest 6 — handshake:')
+    print('\nTest 6 - handshake:')
     brief = client.handshake(
         agent=f'py_agent_{ts}',
         task='Research publication history',
@@ -77,13 +84,29 @@ def test():
     print(f'  task inferred: {brief.inferred_task_type}')
     print(f'  working memory: {len(brief.working_memory)} entries')
 
+    # Relationships
+    print('\nTest 7 - relationships:')
+    team = f'lab/py_team_{ts}'
+    client.relate(
+        from_entity=entity,
+        relationship_type='MEMBER_OF',
+        to_entity=team,
+        created_by='py_agent_001'
+    )
+    related = client.get_related(entity)
+    print(f'  related count: {len(related)}')
+    if related:
+        first = related[0]
+        print(f'  first related: {first["relationshipType"]} {first["direction"]} {first["entityType"]}/{first["entityId"]}')
+
     # Maintenance
-    print('\nTest 7 — maintenance:')
+    print('\nTest 8 - maintenance:')
     report = client.run_maintenance()
     print(f'  expired archived: {report.expired_archived}')
-    print(f'  errors: {report.errors or "none"}')
+    print(f'  errors: {console_safe(report.errors or "none")}')
 
     print('\n=== Python client test complete ===\n')
+
 
 if __name__ == '__main__':
     try:
