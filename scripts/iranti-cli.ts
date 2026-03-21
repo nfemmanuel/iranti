@@ -2515,14 +2515,43 @@ function canScheduleWindowsGlobalNpmSelfUpgrade(context: ReturnType<typeof detec
     return process.platform === 'win32' && context.runningFromGlobalNpmInstall;
 }
 
+function escapeForSingleQuotedPowerShell(value: string): string {
+    return value.replace(/'/g, "''");
+}
+
+function resolveDetachedUpgradeCwd(command: UpgradeCommand): string {
+    const desired = command.cwd?.trim();
+    if (!desired) {
+        return os.homedir();
+    }
+    const normalized = path.resolve(desired);
+    const lower = normalized.toLowerCase();
+    const globalNpmRoot = detectGlobalNpmRoot()?.toLowerCase();
+    if (globalNpmRoot && (lower === globalNpmRoot || lower.startsWith(`${globalNpmRoot}${path.sep}`))) {
+        return os.homedir();
+    }
+    return normalized;
+}
+
 function scheduleDetachedWindowsGlobalNpmUpgrade(command: UpgradeCommand): void {
-    const shell = process.env.ComSpec ?? 'cmd.exe';
-    const commandLine = `ping 127.0.0.1 -n 3 >nul & ${command.display}`;
-    const child = spawn(shell, ['/d', '/c', commandLine], {
+    const neutralCwd = resolveDetachedUpgradeCwd(command);
+    const parentPid = process.pid;
+    const powershell = 'powershell.exe';
+    const escapedCwd = escapeForSingleQuotedPowerShell(neutralCwd);
+    const escapedExecutable = escapeForSingleQuotedPowerShell(command.executable);
+    const escapedArgs = command.args.map((arg) => `'${escapeForSingleQuotedPowerShell(arg)}'`).join(', ');
+    const script = [
+        `$parentPid = ${parentPid}`,
+        'while (Get-Process -Id $parentPid -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 500 }',
+        `Set-Location -LiteralPath '${escapedCwd}'`,
+        `& '${escapedExecutable}' @(${escapedArgs})`,
+        'exit $LASTEXITCODE',
+    ].join('; ');
+    const child = spawn(powershell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], {
         detached: true,
         stdio: 'ignore',
         windowsHide: true,
-        cwd: command.cwd,
+        cwd: neutralCwd,
         env: process.env,
     });
     child.unref();

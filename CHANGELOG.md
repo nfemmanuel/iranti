@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.14 - 2026-03-21
+
+### Fixed
+
+- On Windows, the detached `npm-global` self-update path now waits for the current `iranti` process to exit before running `npm install -g iranti@latest`, instead of racing the live CLI and hitting `EBUSY`.
+- The detached Windows updater now launches from a neutral working directory instead of the active global install folder, which prevents npm from trying to replace a directory that is still in use by the running CLI.
+
 ## 0.2.13 - 2026-03-21
 
 ### Changed
