@@ -31,17 +31,19 @@ Iranti's `ingest()` path is a single-entity preprocessing flow for raw text. The
 2. `chunkContent()` calls the routed `extraction` model with a prompt scoped to exactly one entity.
 3. The extractor must output a JSON array of objects containing `key`, `value`, `summary`, and `confidence`.
 4. Invalid or malformed items are skipped; parse failure returns zero writes with a reason.
-5. For each valid extracted fact:
+5. If the first pass yields no usable facts and the passage looks like prose, the chunker retries on sentence-sized segments before giving up.
+6. For each valid extracted fact:
    - the target entity stays caller-supplied
    - confidence is blended from extractor confidence and caller confidence
    - source stays the original source label
    - ingest provenance is attached in `properties.ingest`
-6. Each fact is written through `librarianWrite()` so normal conflict handling, escalation, and source weighting still apply.
-7. `librarianIngest()` returns aggregate counts plus per-fact outcomes.
+7. Each fact is written through `librarianWrite()` so normal conflict handling, escalation, and source weighting still apply.
+8. `librarianIngest()` returns aggregate counts plus per-fact outcomes.
 
 ## Edge Cases
 - No usable facts: returns zero writes with `reason = "No facts extracted"`.
 - Malformed JSON from the extractor: returns zero writes with a parse-failure reason; caller flow does not crash.
+- Prose passages that produce no facts on the first pass: retry sentence-by-sentence before returning zero.
 - Mixed explicit and implied facts: implied facts receive lower per-fact confidence than directly stated facts.
 - Conflicting extracted fact: handled by the existing Librarian conflict path; ingest does not bypass write semantics.
 - Provenance: extracted facts keep the original `source` for reliability scoring and attach extraction metadata in `properties.ingest`.
@@ -54,6 +56,7 @@ Covered cases:
 - direct facts scoring above implied facts
 - no-usable-facts returning zero writes cleanly
 - contradiction against an existing KB fact routing through Librarian conflict handling
+- sentence-level fallback for prose passages that initially return no facts
 
 ## Related
 - [chunker.ts](/c:/Users/NF/Documents/Projects/iranti/src/librarian/chunker.ts)

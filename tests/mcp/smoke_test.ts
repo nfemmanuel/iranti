@@ -56,9 +56,17 @@ async function main(): Promise<void> {
     try {
         await client.connect(transport);
 
-        const tools = await client.listTools();
+        const allTools: Array<{ name: string; description?: string }> = [];
+        let cursor: string | undefined;
+        do {
+            const page = await client.listTools(cursor ? { cursor } : undefined);
+            allTools.push(...page.tools);
+            cursor = page.nextCursor;
+        } while (cursor);
+
+        const tools = { tools: allTools };
         const toolNames = tools.tools.map((tool: { name: string }) => tool.name);
-        for (const required of ['iranti_handshake', 'iranti_attend', 'iranti_query', 'iranti_search', 'iranti_write']) {
+        for (const required of ['iranti_handshake', 'iranti_attend', 'iranti_query', 'iranti_search', 'iranti_write', 'iranti_related', 'iranti_related_deep']) {
             expect(toolNames.includes(required), `Expected MCP tool ${required} to be listed.`);
         }
 
@@ -87,6 +95,8 @@ full visible context when available.`,
 Call this at session start or when a new task begins, passing the task and
 recent messages. Returns operating rules plus prioritized relevant memory
 for that task. Do not use this as a per-turn retrieval tool; use iranti_attend.`,
+            iranti_related: 'Read directly related entities (1 hop) for a given entity.',
+            iranti_related_deep: 'Read related entities up to N hops deep for a given entity.',
         };
 
         for (const tool of tools.tools as Array<{ name: string; description?: string }>) {
@@ -99,6 +109,7 @@ for that task. Do not use this as a per-turn retrieval tool; use iranti_attend.`
         }
 
         const entity = `project/mcp_smoke_${Date.now()}`;
+        const relatedEntity = `team/mcp_smoke_team_${Date.now()}`;
 
         const handshake = await client.callTool({
             name: 'iranti_handshake',
@@ -120,6 +131,16 @@ for that task. Do not use this as a per-turn retrieval tool; use iranti_attend.`
             },
         });
         expect(!write.isError, 'Expected iranti_write to succeed.');
+
+        const relate = await client.callTool({
+            name: 'iranti_relate',
+            arguments: {
+                fromEntity: entity,
+                relationshipType: 'MEMBER_OF',
+                toEntity: relatedEntity,
+            },
+        });
+        expect(!relate.isError, 'Expected iranti_relate to succeed.');
 
         const query = await client.callTool({
             name: 'iranti_query',
@@ -146,6 +167,27 @@ for that task. Do not use this as a per-turn retrieval tool; use iranti_attend.`
             JSON.stringify(search.structuredContent).includes(entity),
             'Expected iranti_search to surface the written entity.'
         );
+
+        const related = await client.callTool({
+            name: 'iranti_related',
+            arguments: {
+                entity,
+            },
+        });
+        expect(!related.isError, 'Expected iranti_related to succeed.');
+        expect(
+            JSON.stringify(related.structuredContent).includes(relatedEntity.split('/')[1]),
+            'Expected iranti_related to surface the created relationship.'
+        );
+
+        const relatedDeep = await client.callTool({
+            name: 'iranti_related_deep',
+            arguments: {
+                entity,
+                depth: 2,
+            },
+        });
+        expect(!relatedDeep.isError, 'Expected iranti_related_deep to succeed.');
 
         const attend = await client.callTool({
             name: 'iranti_attend',

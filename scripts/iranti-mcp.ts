@@ -125,7 +125,7 @@ async function main(): Promise<void> {
 
     const server = new McpServer({
         name: 'iranti-mcp',
-        version: '0.2.14',
+        version: '0.2.15',
     });
 
     server.registerTool('iranti_handshake', {
@@ -302,6 +302,27 @@ and may be resolved or escalated.`,
             properties: (properties ?? {}) as JsonRecord,
         });
         return textResult({ ok: true, result });
+    });
+
+    server.registerTool('iranti_related', {
+        description: 'Read directly related entities (1 hop) for a given entity.',
+        inputSchema: {
+            entity: z.string().min(1).describe('Entity in entityType/entityId format.'),
+        },
+    }, async ({ entity }) => {
+        const result = await iranti.getRelated(entity);
+        return textResult(result);
+    });
+
+    server.registerTool('iranti_related_deep', {
+        description: 'Read related entities up to N hops deep for a given entity.',
+        inputSchema: {
+            entity: z.string().min(1).describe('Entity in entityType/entityId format.'),
+            depth: z.number().int().min(1).max(5).optional().describe('Traversal depth.'),
+        },
+    }, async ({ entity, depth }) => {
+        const result = await iranti.getRelatedDeep(entity, depth ?? 2);
+        return textResult(result);
     });
 
     server.registerTool('iranti_who_knows', {

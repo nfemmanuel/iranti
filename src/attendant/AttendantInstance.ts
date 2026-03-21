@@ -216,6 +216,27 @@ function extractFallbackCandidates(text: string): EntityCandidate[] {
         });
     }
 
+    // Bare technical slug identifiers, e.g. lunar_api_v3
+    const slugRegex = /\b([a-z][a-z0-9]+(?:_[a-z0-9]+)+)\b/g;
+    for (const match of text.matchAll(slugRegex)) {
+        const slug = match[1];
+        if (!slug || slug.includes('/')) continue;
+        const idGuess = heuristicEntityId(slug);
+        if (!idGuess) continue;
+        const key = `project/${idGuess}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        candidates.push({
+            type: 'project',
+            name: slug.replace(/_/g, ' '),
+            id_guess: idGuess,
+            confidence: 0.82,
+            evidence: slug,
+            start: typeof match.index === 'number' ? match.index : undefined,
+            end: typeof match.index === 'number' ? match.index + slug.length : undefined,
+        });
+    }
+
     return candidates;
 }
 

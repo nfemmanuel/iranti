@@ -33,6 +33,7 @@ Hybrid search adds ranked fact discovery when exact keys are unknown by combinin
 4. If vector support is available, build lexical and vector candidate sets.
 5. Score candidates with weighted lexical + vector formula.
 6. Filter by `minScore`, drop zero-signal lexical rows, sort descending, and return top `limit`.
+7. If a vector backend is present but returns a malformed payload, fall back to lexical-only scoring instead of crashing.
 
 ## Edge Cases
 - Empty query: request is rejected.
@@ -41,6 +42,7 @@ Hybrid search adds ranked fact discovery when exact keys are unknown by combinin
 - Entries without embeddings: vector score contributes `0` for those rows.
 - Protected entries: always excluded from results.
 - External vector backends must store entity metadata (`entityType`, `entityId`, `key`) so filtered search can work correctly.
+- Malformed vector backend responses are treated as a backend failure and trigger the lexical-only fallback path.
 
 ## Test Results
 - TypeScript build passes with schema generation (`npm.cmd run build`).

@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.15 - Unreleased
+
+### Added
+
+- Pending release notes.
+
 ## 0.2.14 - 2026-03-21
 
 ### Fixed

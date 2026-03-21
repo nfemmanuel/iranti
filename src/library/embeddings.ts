@@ -24,6 +24,8 @@ const TOKEN_SYNONYMS: Record<string, string[]> = {
     preferred: ['favorite', 'preference'],
 };
 
+const SAFE_TOKEN_SYNONYMS: Record<string, string[]> = Object.assign(Object.create(null), TOKEN_SYNONYMS);
+
 function clampDimensions(raw: string | undefined): number {
     const parsed = Number.parseInt(raw ?? '', 10);
     if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -35,7 +37,7 @@ function clampDimensions(raw: string | undefined): number {
 export const EMBEDDING_DIMENSIONS = clampDimensions(process.env.IRANTI_EMBEDDING_DIM);
 
 function normalizeText(text: string): string[] {
-    const baseTokens = text
+    const baseTokens = String(text ?? '')
         .toLowerCase()
         .replace(/[^a-z0-9\s]+/g, ' ')
         .split(/\s+/)
@@ -45,8 +47,8 @@ function normalizeText(text: string): string[] {
     const expanded: string[] = [];
     for (const token of baseTokens) {
         expanded.push(token);
-        const synonyms = TOKEN_SYNONYMS[token];
-        if (synonyms) {
+        const synonyms = SAFE_TOKEN_SYNONYMS[token];
+        if (Array.isArray(synonyms)) {
             expanded.push(...synonyms);
         }
     }

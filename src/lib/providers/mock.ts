@@ -279,6 +279,19 @@ function detectEntities(text: string): DetectedEntity[] {
         });
     }
 
+    for (const match of text.matchAll(/\b([a-z][a-z0-9]+(?:_[a-z0-9]+)+)\b/g)) {
+        const slug = match[1];
+        add({
+            type: 'project',
+            name: slug.replace(/_/g, ' '),
+            id_guess: heuristicEntityId(slug),
+            confidence: 0.86,
+            evidence: slug,
+            start: typeof match.index === 'number' ? match.index : undefined,
+            end: typeof match.index === 'number' ? match.index + slug.length : undefined,
+        });
+    }
+
     if (/\b(my|our|we)\b/i.test(text)) {
         add({
             type: 'user',

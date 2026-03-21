@@ -488,10 +488,11 @@ export async function searchEntriesHybrid(input: HybridSearchInput, db?: DbClien
     }
 
     try {
-        const [lexicalIds, vectorResults] = await Promise.all([
+        const [lexicalIds, vectorResultsRaw] = await Promise.all([
             fetchLexicalCandidateIds(normalizedInput, client, 200),
             backend.search(generateEmbedding(query), 200, buildVectorFilter(normalizedInput)),
         ]);
+        const vectorResults = Array.isArray(vectorResultsRaw) ? vectorResultsRaw : [];
 
         const vectorScores = new Map<number, number>();
         for (const result of vectorResults) {
@@ -502,10 +503,7 @@ export async function searchEntriesHybrid(input: HybridSearchInput, db?: DbClien
             }
         }
 
-        const candidateIds = Array.from(new Set([
-            ...lexicalIds,
-            ...vectorScores.keys(),
-        ]));
+        const candidateIds = Array.from(new Set<number>(lexicalIds.concat(Array.from(vectorScores.keys()))));
 
         const rows = await scoreHybridCandidates(candidateIds, normalizedInput, client);
         const scored = rows

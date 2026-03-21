@@ -51,20 +51,60 @@ function blendConfidence(extractedConfidence: number, inputConfidence: number): 
     return clampConfidence((extractedConfidence * 0.7) + (inputConfidence * 0.3));
 }
 
-// ─── Chunker ─────────────────────────────────────────────────────────────────
+function splitExtractionFallbackSegments(rawContent: string): string[] {
+    const paragraphs = rawContent
+        .replace(/\r\n/g, '\n')
+        .split(/\n{2,}/)
+        .map((block) => block.trim())
+        .filter(Boolean);
 
-export async function chunkContent(input: ChunkInput): Promise<ChunkResult> {
+    const segments: string[] = [];
+    for (const paragraph of paragraphs) {
+        const sentenceLike = paragraph.match(/[^.!?]+[.!?]+|[^.!?]+$/g) ?? [paragraph];
+        for (const sentence of sentenceLike) {
+            const trimmed = sentence.trim().replace(/^[-*•]\s*/, '').trim();
+            if (trimmed.length > 0) {
+                segments.push(trimmed);
+            }
+        }
+    }
+
+    return segments;
+}
+
+function shouldAttemptSentenceFallback(rawContent: string): boolean {
+    return splitExtractionFallbackSegments(rawContent).length > 1;
+}
+
+function dedupeChunksByKey(chunks: EntryInput[]): EntryInput[] {
+    const seen = new Set<string>();
+    const deduped: EntryInput[] = [];
+    for (const chunk of chunks) {
+        if (seen.has(chunk.key)) {
+            continue;
+        }
+        seen.add(chunk.key);
+        deduped.push(chunk);
+    }
+    return deduped;
+}
+
+async function runExtractionPass(input: ChunkInput, text: string, retryLabel?: string): Promise<ChunkResult> {
+    const prefix = retryLabel
+        ? `This is a ${retryLabel}. Treat this excerpt independently and extract any fact directly stated here.\n\n`
+        : '';
+
     const response = await route('extraction', [
         {
             role: 'user',
-            content: `You are extracting structured facts about exactly one entity.
+            content: `${prefix}You are extracting structured facts about exactly one entity.
 
 Entity type: ${input.entityType}
 Entity ID: ${input.entityId}
 Source: ${input.source}
 
 Text to chunk:
-"${input.rawContent}"
+"${text}"
 
 Extract only distinct facts that clearly belong to this entity and can be represented as a concrete key/value pair.
 Each fact must have:
@@ -78,6 +118,7 @@ Rules:
 - If a fact is only weakly implied, either omit it or assign it a lower confidence than directly stated facts
 - Do not invent keys or values that are not grounded in the text
 - If you cannot express something as a clear key/value fact for this entity, discard it
+- If the full passage was too broad and returned nothing, this retry is allowed to extract sentence-level facts from this excerpt
 
 Return ONLY a valid JSON array. No explanation, no markdown, no backticks.
 Example:
@@ -138,5 +179,41 @@ If no facts can be extracted, return an empty array: []`,
         chunks,
         extractedCandidates: parsed.length,
         skipped: parsed.length - extractedFacts.length,
+    };
+}
+
+// ─── Chunker ─────────────────────────────────────────────────────────────────
+
+export async function chunkContent(input: ChunkInput): Promise<ChunkResult> {
+    const primary = await runExtractionPass(input, input.rawContent);
+    if (primary.chunks.length > 0) {
+        return primary;
+    }
+
+    if (!shouldAttemptSentenceFallback(input.rawContent)) {
+        return primary;
+    }
+
+    const segments = splitExtractionFallbackSegments(input.rawContent);
+    const segmentChunks: EntryInput[] = [];
+    let extractedCandidates = primary.extractedCandidates;
+    let skipped = primary.skipped;
+
+    for (let i = 0; i < segments.length; i += 1) {
+        const segmentResult = await runExtractionPass(input, segments[i], `sentence-level retry ${i + 1} of ${segments.length}`);
+        extractedCandidates += segmentResult.extractedCandidates;
+        skipped += segmentResult.skipped;
+        segmentChunks.push(...segmentResult.chunks);
+    }
+
+    const deduped = dedupeChunksByKey(segmentChunks);
+    if (deduped.length === 0) {
+        return primary;
+    }
+
+    return {
+        chunks: deduped,
+        extractedCandidates,
+        skipped,
     };
 }

@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { handshake, reconvene, getAttendant } from '../src/attendant';
 import { bootstrapHarness } from './harness';
 import { configureMock } from '../src/lib/providers/mock';
+import { librarianWrite } from '../src/librarian';
 
 async function test() {
     process.env.LLM_PROVIDER = 'mock';
@@ -66,6 +67,26 @@ async function test() {
     console.log('  reason:', attendResult.reason);
     console.log('  decision:', `${attendResult.decision.method} / ${attendResult.decision.confidence}`);
     console.log('  facts returned:', attendResult.facts.length);
+
+    // Test 5 — observe auto-detects bare technical slug ids
+    console.log('\nTest 5 — observe slug autodetection:');
+    await librarianWrite({
+        entityType: 'project',
+        entityId: 'lunar_api_v3',
+        key: 'database_engine',
+        valueRaw: { engine: 'PostgreSQL 16' },
+        valueSummary: 'Database engine is PostgreSQL 16.',
+        confidence: 95,
+        source: 'attendant_test',
+        createdBy: 'research_agent_001',
+    });
+    const observeResult = await attendant.observe({
+        currentContext: 'We are planning the lunar_api_v3 deployment and need to remember the database choice.',
+        maxFacts: 3,
+    });
+    console.log('  detected candidates:', observeResult.debug?.detectedCandidates ?? 0);
+    console.log('  entities detected:', observeResult.entitiesDetected.join(', ') || '(none)');
+    console.log('  facts returned:', observeResult.facts.length);
 
     process.exit(0);
 }

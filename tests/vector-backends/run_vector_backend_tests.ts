@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { bootstrapHarness } from '../../scripts/harness';
 import { createVectorBackend } from '../../src/library/backends';
 import { createEntry, deleteEntryById } from '../../src/library/queries';
+import { searchEntriesHybrid } from '../../src/library/queries';
 import { generateEmbedding } from '../../src/library/embeddings';
 
 type CaseResult = {
@@ -221,12 +222,81 @@ async function testChromaBackend(): Promise<void> {
     });
 }
 
+async function testHybridSearchCandidateMerge(): Promise<void> {
+    const backends = require('../../src/library/backends');
+    const originalCreateVectorBackend = backends.createVectorBackend;
+    const lexicalRows = [{ id: 77 }];
+    const scoredRows = [{
+        id: 77,
+        entityType: 'project',
+        entityId: 'vector_merge_case',
+        key: 'summary',
+        valueRaw: { text: 'luminous harbor analytics' },
+        valueSummary: 'Luminous Harbor analytics platform',
+        confidence: 91,
+        source: 'vector_merge_test',
+        validUntil: null,
+        lexicalScore: 0.8,
+        vectorScore: 0,
+        score: 0,
+    }];
+
+    const fakeDb = {
+        knowledgeEntry: {
+            findMany: async () => scoredRows,
+        },
+        $queryRaw: async (_sql: unknown) => {
+            if ((fakeDb as any).__calls === 0) {
+                (fakeDb as any).__calls += 1;
+                return lexicalRows;
+            }
+            return scoredRows;
+        },
+        __calls: 0,
+    } as any;
+
+    backends.createVectorBackend = () => ({
+        upsert: async () => undefined,
+        delete: async () => undefined,
+        search: async () => [{
+            entityType: 'project',
+            entityId: 'vector_merge_case',
+            key: 'summary',
+            score: 0.95,
+            metadata: { id: 77, entityType: 'project', entityId: 'vector_merge_case', key: 'summary' },
+        }],
+        ping: async () => true,
+    });
+
+    try {
+        const results = await searchEntriesHybrid({
+            query: 'luminous harbor analytics',
+            limit: 5,
+        }, fakeDb);
+
+        expect(results.length === 1, 'Expected one merged hybrid search result.');
+        expect(results[0].id === 77, 'Expected the merged candidate id to survive assembly.');
+        expect(results[0].vectorScore > 0, 'Expected vector score to be preserved.');
+    } finally {
+        backends.createVectorBackend = originalCreateVectorBackend;
+    }
+}
+
+async function testEmbeddingNormalizationAvoidsPrototypeTrap(): Promise<void> {
+    const vector = generateEmbedding('constructor prototype toString valueOf');
+    expect(Array.isArray(vector), 'Expected generateEmbedding() to return an array.');
+    expect(vector.length > 0, 'Expected generated embedding to have dimensions.');
+    expect(vector.every((value) => Number.isFinite(value)), 'Expected embedding values to remain finite.');
+}
+
 async function main(): Promise<void> {
     const results = [
         await runCase('pgvector backend returns stored fact from vector search', testPgvectorBackend),
         await runCase('backend factory selects and validates backends', testFactorySelection),
         await runCase('qdrant backend maps REST responses correctly', testQdrantBackend),
         await runCase('chroma backend maps REST responses correctly', testChromaBackend),
+        await runCase('hybrid search merges lexical and vector candidates without crashing', testHybridSearchCandidateMerge),
+        await runCase('embedding normalization avoids object-prototype synonym traps', testEmbeddingNormalizationAvoidsPrototypeTrap),
     ];
 
     console.log('Vector backend tests');
