@@ -8,7 +8,7 @@ import { spawn, spawnSync } from 'child_process';
 import readline from 'readline/promises';
 import { Writable } from 'stream';
 import net from 'net';
-import { initDb } from '../src/library/client';
+import { disconnectDb, initDb } from '../src/library/client';
 import { createOrRotateApiKey, formatApiKeyToken, generateApiKeySecret, listApiKeys, revokeApiKey } from '../src/security/apiKeys';
 import { getEscalationPaths } from '../src/lib/escalationPaths';
 import { loadRuntimeEnv } from '../src/lib/runtimeEnv';
@@ -897,6 +897,8 @@ type SetupExecutionPlan = {
     codexAgent?: string;
     codex?: boolean;
     bootstrapDatabase?: boolean;
+    dockerContainerName?: string;
+    databaseProvisioned?: boolean;
 };
 
 type SetupExecutionResult = {
@@ -1666,10 +1668,12 @@ async function executeSetupPlan(plan: SetupExecutionPlan): Promise<SetupExecutio
 
     if (plan.bootstrapDatabase) {
         try {
-            if (plan.databaseMode === 'docker') {
+            if (plan.databaseMode === 'docker' && !plan.databaseProvisioned) {
                 const parsed = parsePostgresConnectionString(plan.databaseUrl);
                 await runDockerPostgresContainer({
-                    containerName: sanitizeIdentifier(`iranti_${plan.instanceName}_db`, `iranti_${plan.instanceName}_db`),
+                    containerName: plan.dockerContainerName
+                        ? sanitizeIdentifier(plan.dockerContainerName, `iranti_${plan.instanceName}_db`)
+                        : sanitizeIdentifier(`iranti_${plan.instanceName}_db`, `iranti_${plan.instanceName}_db`),
                     hostPort: Number.parseInt(parsed.port || '5432', 10),
                     password: decodeURIComponent(parsed.password || 'postgres'),
                     database: postgresDatabaseName(plan.databaseUrl),
@@ -3811,6 +3815,8 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
         const psqlAvailable = hasCommandInstalled('psql');
         let dbUrl = '';
         let bootstrapDatabase = false;
+        let databaseProvisioned = false;
+        let dockerContainerName: string | undefined;
         let databaseMode: DatabaseSetupMode = recommendedDatabaseMode;
         while (true) {
             const defaultMode = recommendedDatabaseMode;
@@ -3857,6 +3863,7 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
                     await promptNonEmpty(prompt, 'Docker container name', `iranti_${instanceName}_db`),
                     `iranti_${instanceName}_db`
                 );
+                dockerContainerName = containerName;
                 dbUrl = `postgresql://postgres:${dbPassword}@localhost:${dbHostPort}/${dbName}`;
 
                 console.log(`${infoLabel()} Docker will be used only for PostgreSQL. Iranti itself does not require Docker once a PostgreSQL database is available.`);
@@ -3868,10 +3875,9 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
                         database: dbName,
                     });
                     console.log(`${okLabel()} Docker PostgreSQL ready at localhost:${dbHostPort}`);
-                    bootstrapDatabase = true;
-                } else {
-                    bootstrapDatabase = await promptYesNo(prompt, 'Will you start PostgreSQL separately before first run?', false);
+                    databaseProvisioned = true;
                 }
+                bootstrapDatabase = await promptYesNo(prompt, 'Run migrations and seed the database now?', true);
                 break;
             }
 
@@ -3984,6 +3990,8 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
             codex,
             codexAgent: projects[0]?.agentId,
             bootstrapDatabase,
+            dockerContainerName,
+            databaseProvisioned,
         });
     });
 
@@ -4028,6 +4036,7 @@ async function doctorCommand(args: ParsedArgs): Promise<void> {
     const version = getPackageVersion();
     const pushEnvironmentChecks = async (env: Record<string, string>, prefix = ''): Promise<void> => {
         const databaseUrl = env.DATABASE_URL;
+        let databaseInitializedForDoctor = false;
         checks.push(detectPlaceholder(databaseUrl)
             ? {
                 name: `${prefix}database configuration`,
@@ -4054,6 +4063,10 @@ async function doctorCommand(args: ParsedArgs): Promise<void> {
         });
 
         try {
+            if (!detectPlaceholder(databaseUrl)) {
+                initDb(databaseUrl);
+                databaseInitializedForDoctor = true;
+            }
             const backendName = resolveVectorBackendName({
                 vectorBackend: env.IRANTI_VECTOR_BACKEND,
                 qdrantUrl: env.IRANTI_QDRANT_URL,
@@ -4091,6 +4104,10 @@ async function doctorCommand(args: ParsedArgs): Promise<void> {
                 status: 'fail',
                 detail: error instanceof Error ? error.message : String(error),
             });
+        } finally {
+            if (databaseInitializedForDoctor) {
+                await disconnectDb();
+            }
         }
     };
 

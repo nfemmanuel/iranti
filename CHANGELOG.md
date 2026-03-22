@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.21 - 2026-03-22
+
+### Changed
+
+- `iranti setup` now asks the Docker bootstrap question in the correct order: optional container provisioning first, then a separate migrate/seed decision.
+
+### Fixed
+
+- Interactive Docker setup no longer tries to create/start the same PostgreSQL container twice after you choose to start or reuse it during the wizard.
+- `iranti doctor --instance ... --root ...` now initializes the target instance database before pinging pgvector, so healthy pgvector-backed installs no longer show a false unreachable warning.
+
 ## 0.2.20 - 2026-03-21
 
 ### Changed
