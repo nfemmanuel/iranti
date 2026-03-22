@@ -5,17 +5,37 @@ import path from 'path';
 import { getDb, initDb, disconnectDb } from '../src/library/client';
 import { ensureEscalationFolders } from '../src/lib/escalationPaths';
 
-const PACKAGE_ROOT = path.resolve(__dirname, '..');
+function resolvePackageRoot(): string {
+    let dir = __dirname;
+    for (let i = 0; i < 8; i += 1) {
+        const pkgPath = path.join(dir, 'package.json');
+        const prismaSchema = path.join(dir, 'prisma', 'schema.prisma');
+        if (fs.existsSync(pkgPath) && fs.existsSync(prismaSchema)) {
+            return dir;
+        }
+        const parent = path.dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
+    }
+    throw new Error(`Could not resolve Iranti package root from ${__dirname}`);
+}
+
+const PACKAGE_ROOT = resolvePackageRoot();
+const PRISMA_SCHEMA = path.join(PACKAGE_ROOT, 'prisma', 'schema.prisma');
+const BASE_ENV = { ...process.env };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function run(command: string, label: string): void {
+function run(command: string, label: string, extraEnv?: Record<string, string | undefined>): void {
     console.log(`  Running: ${label}...`);
     try {
         execSync(command, {
             stdio: 'inherit',
             cwd: PACKAGE_ROOT,
-            env: process.env,
+            env: {
+                ...BASE_ENV,
+                ...extraEnv,
+            },
         });
     } catch {
         console.error(`  Failed: ${label}`);
@@ -24,7 +44,7 @@ function run(command: string, label: string): void {
 }
 
 function scriptCommand(distScriptName: string, sourceScriptPath: string): string {
-    const distScriptPath = path.resolve(__dirname, '..', 'dist', 'scripts', distScriptName);
+    const distScriptPath = path.join(PACKAGE_ROOT, 'dist', 'scripts', distScriptName);
     if (fs.existsSync(distScriptPath)) {
         return `node ${JSON.stringify(distScriptPath)}`;
     }
@@ -57,15 +77,20 @@ async function setup() {
         process.env.DATABASE_URL = dbUrl;
         initDb(dbUrl);
     }
+    const runtimeEnv = dbUrl
+        ? {
+            DATABASE_URL: dbUrl,
+        }
+        : undefined;
 
     // 1. Run migrations
     console.log('Step 1 — Running database migrations...');
-    run('npx prisma migrate deploy', 'prisma migrate deploy');
+    run(`npx prisma migrate deploy --schema ${JSON.stringify(PRISMA_SCHEMA)}`, 'prisma migrate deploy', runtimeEnv);
     console.log('  ✓ Migrations complete\n');
 
     // 2. Generate Prisma client
     console.log('Step 2 — Generating Prisma client...');
-    run('npx prisma generate', 'prisma generate');
+    run(`npx prisma generate --schema ${JSON.stringify(PRISMA_SCHEMA)}`, 'prisma generate', runtimeEnv);
     console.log('  ✓ Client generated\n');
 
     // 3. Seed Staff Namespace if not already seeded

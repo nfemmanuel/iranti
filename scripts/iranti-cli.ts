@@ -367,6 +367,21 @@ function builtScriptPath(scriptName: string): string {
 
 function formatSetupBootstrapFailure(error: unknown): Error {
     const reason = error instanceof Error ? error.message : String(error);
+    if (/Could not find Prisma Schema/i.test(reason)) {
+        return new Error(
+            `Database bootstrap failed because Prisma could not locate prisma/schema.prisma from the active package. ` +
+            `This usually means the installed CLI bundle or working-directory handoff is wrong. ` +
+            `Underlying error: ${reason}`
+        );
+    }
+    if (/extension "vector" is not available|pgvector extension is not installed|does not have the pgvector extension installed/i.test(reason)) {
+        return new Error(
+            `Database bootstrap failed because the target PostgreSQL server does not provide pgvector. ` +
+            `Iranti currently requires pgvector-capable PostgreSQL for schema bootstrap. ` +
+            `Install pgvector on that server, or rerun setup with --db-mode docker or a managed pgvector-capable database. ` +
+            `Underlying error: ${reason}`
+        );
+    }
     return new Error(
         `Database bootstrap failed after instance configuration. ` +
         `Common causes are a non-empty database that Prisma has not baselined yet, or a PostgreSQL server without the pgvector extension installed. ` +
@@ -1024,9 +1039,10 @@ function inferProjectMode(projectPath: string, instanceEnvFile?: string): Projec
 
 function recommendDatabaseMode(checks: DependencyCheck[]): DatabaseSetupMode {
     const reachableLocal = checks.find((check) => check.name === 'localhost:5432')?.status === 'pass';
-    const docker = checks.find((check) => check.name === 'docker')?.status === 'pass';
-    if (reachableLocal) return 'local';
+    const docker = checks.find((check) => check.name === 'docker daemon')?.status === 'pass';
+    if (reachableLocal && !docker) return 'local';
     if (docker) return 'docker';
+    if (reachableLocal) return 'local';
     return 'managed';
 }
 
@@ -1034,18 +1050,18 @@ function quickInstallGuidanceLines(): string[] {
     if (process.platform === 'win32') {
         return [
             'Docker: winget install Docker.DockerDesktop',
-            'PostgreSQL: winget install PostgreSQL.PostgreSQL.17',
+            'PostgreSQL: install PostgreSQL 17 and a pgvector-capable build or extension package.',
         ];
     }
     if (process.platform === 'darwin') {
         return [
             'Docker: brew install --cask docker',
-            'PostgreSQL: brew install postgresql@17',
+            'PostgreSQL: brew install postgresql@17 plus pgvector for that server.',
         ];
     }
     return [
         'Docker: install Docker Engine using your distro package manager or the official Docker instructions.',
-        'PostgreSQL: install PostgreSQL 16+ using your distro package manager.',
+        'PostgreSQL: install PostgreSQL 16+ and the pgvector extension using your distro package manager.',
     ];
 }
 
@@ -1480,6 +1496,37 @@ function hasDockerInstalled(): boolean {
     }
 }
 
+function inspectDockerAvailability(): {
+    installed: boolean;
+    daemonReachable: boolean;
+    detail: string;
+} {
+    if (!hasDockerInstalled()) {
+        return {
+            installed: false,
+            daemonReachable: false,
+            detail: 'Docker is not installed or not on PATH.',
+        };
+    }
+    const proc = runCommandCapture('docker', ['info', '--format', '{{.ServerVersion}}']);
+    if (proc.status === 0) {
+        const version = proc.stdout.trim();
+        return {
+            installed: true,
+            daemonReachable: true,
+            detail: version
+                ? `Docker daemon is reachable (server ${version}).`
+                : 'Docker daemon is reachable.',
+        };
+    }
+    const reason = (proc.stderr || proc.stdout).trim() || 'Docker daemon did not respond.';
+    return {
+        installed: true,
+        daemonReachable: false,
+        detail: `Docker CLI is installed, but the daemon is not reachable. ${reason}`,
+    };
+}
+
 async function isPortAvailable(port: number, host: string = '127.0.0.1'): Promise<boolean> {
     return await new Promise<boolean>((resolve) => {
         const server = net.createServer();
@@ -1552,9 +1599,20 @@ async function runDockerPostgresContainer(options: {
     password: string;
     database: string;
 }): Promise<void> {
+    const docker = inspectDockerAvailability();
+    if (!docker.installed) {
+        throw new Error('Docker CLI is not installed or not on PATH. Install Docker Desktop or Docker Engine before using --db-mode docker.');
+    }
+    if (!docker.daemonReachable) {
+        throw new Error(`Docker daemon is not reachable. Start Docker Desktop or Docker Engine, then retry. ${docker.detail}`);
+    }
+
     const inspect = process.platform === 'win32'
         ? spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/c', `docker ps -a --format "{{.Names}}"`], { encoding: 'utf8' })
         : spawnSync('docker', ['ps', '-a', '--format', '{{.Names}}'], { encoding: 'utf8' });
+    if (inspect.status !== 0) {
+        throw new Error(`Failed to inspect Docker containers. ${(inspect.stderr ?? inspect.stdout ?? '').trim() || 'docker ps returned a non-zero exit code.'}`);
+    }
     const names = (inspect.stdout ?? '').split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
 
     if (names.includes(options.containerName)) {
@@ -1619,12 +1677,16 @@ async function executeSetupPlan(plan: SetupExecutionPlan): Promise<SetupExecutio
             }
             if (plan.databaseMode === 'local') {
                 await ensurePostgresDatabaseExists(plan.databaseUrl);
+                await ensureLocalPostgresPgvectorAvailable(plan.databaseUrl);
             }
             await runBundledScript('setup', [], {
                 DATABASE_URL: plan.databaseUrl,
                 IRANTI_ESCALATION_DIR: path.join(configured.instanceDir, 'escalation'),
             });
         } catch (error) {
+            if (plan.databaseMode === 'docker' && error instanceof Error && /Docker daemon is not reachable|Docker CLI is not installed/i.test(error.message)) {
+                throw error;
+            }
             throw formatSetupBootstrapFailure(error);
         }
     }
@@ -1756,7 +1818,7 @@ function defaultsSetupPlan(args: ParsedArgs): SetupExecutionPlan {
         const explicit = getFlag(args, 'db-mode')?.trim().toLowerCase();
         if (!explicit) {
             if (hasCommandInstalled('psql')) return 'local';
-            if (hasDockerInstalled()) return 'docker';
+            if (inspectDockerAvailability().daemonReachable) return 'docker';
             return 'managed';
         }
         if (explicit === 'existing' || explicit === 'local') return 'local';
@@ -2040,7 +2102,7 @@ type DependencyCheck = {
 };
 
 async function collectDependencyChecks(): Promise<DependencyCheck[]> {
-    const docker = hasDockerInstalled();
+    const docker = inspectDockerAvailability();
     const psql = hasCommandInstalled('psql');
     const pgIsReady = hasCommandInstalled('pg_isready');
     const postgresPort = await canConnectTcp(5432);
@@ -2048,8 +2110,13 @@ async function collectDependencyChecks(): Promise<DependencyCheck[]> {
     const checks: DependencyCheck[] = [
         {
             name: 'docker',
-            status: docker ? 'pass' : 'warn',
-            detail: docker ? 'Docker is installed.' : 'Docker is not installed or not on PATH.',
+            status: docker.installed ? 'pass' : 'warn',
+            detail: docker.installed ? 'Docker CLI is installed.' : docker.detail,
+        },
+        {
+            name: 'docker daemon',
+            status: docker.daemonReachable ? 'pass' : 'warn',
+            detail: docker.detail,
         },
         {
             name: 'psql',
@@ -2324,6 +2391,49 @@ async function ensurePostgresDatabaseExists(databaseUrl: string): Promise<void> 
             return;
         }
         throw new Error(`Failed to create local PostgreSQL database '${databaseName}'. ${create.stderr?.trim() || create.stdout?.trim() || 'psql returned a non-zero exit code.'}`);
+    }
+}
+
+async function ensureLocalPostgresPgvectorAvailable(databaseUrl: string): Promise<void> {
+    const parsed = parsePostgresConnectionString(databaseUrl);
+    if (!isLocalPostgresHost(parsed.hostname)) {
+        return;
+    }
+    if (!hasCommandInstalled('psql')) {
+        return;
+    }
+
+    const adminDatabase = parsed.searchParams.get('admin_db')?.trim() || 'postgres';
+    const host = parsed.hostname;
+    const port = parsed.port || '5432';
+    const user = decodeURIComponent(parsed.username || 'postgres');
+    const password = decodeURIComponent(parsed.password || '');
+    const extraEnv = password ? { PGPASSWORD: password } : undefined;
+    const probe = spawnSync('psql', [
+        '-h',
+        host,
+        '-p',
+        port,
+        '-U',
+        user,
+        '-d',
+        adminDatabase,
+        '-tAc',
+        "SELECT 1 FROM pg_available_extensions WHERE name = 'vector';",
+    ], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: {
+            ...process.env,
+            ...extraEnv,
+        },
+    });
+
+    if (probe.status !== 0) {
+        throw new Error(`Failed to inspect local PostgreSQL for pgvector availability. ${probe.stderr?.trim() || probe.stdout?.trim() || 'psql returned a non-zero exit code.'}`);
+    }
+    if ((probe.stdout ?? '').trim() !== '1') {
+        throw new Error('Local PostgreSQL server does not have the pgvector extension installed.');
     }
 }
 
@@ -2691,6 +2801,31 @@ function escapeForSingleQuotedPowerShell(value: string): string {
     return value.replace(/'/g, "''");
 }
 
+function resolveWindowsDetachedExecutable(executable: string): string {
+    if (path.isAbsolute(executable)) {
+        return executable;
+    }
+    const candidates = executable.toLowerCase().endsWith('.cmd') || executable.toLowerCase().endsWith('.exe')
+        ? [executable]
+        : [`${executable}.cmd`, `${executable}.exe`, executable];
+    for (const candidate of candidates) {
+        const probe = spawnSync('where', [candidate], { encoding: 'utf8' });
+        if (probe.status === 0) {
+            const resolved = (probe.stdout ?? '').split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+            if (resolved) {
+                if (!path.extname(resolved)) {
+                    const cmdVariant = `${resolved}.cmd`;
+                    const exeVariant = `${resolved}.exe`;
+                    if (fs.existsSync(cmdVariant)) return cmdVariant;
+                    if (fs.existsSync(exeVariant)) return exeVariant;
+                }
+                return resolved;
+            }
+        }
+    }
+    return executable;
+}
+
 function resolveDetachedUpgradeCwd(command: UpgradeCommand): string {
     const desired = command.cwd?.trim();
     if (!desired) {
@@ -2705,12 +2840,31 @@ function resolveDetachedUpgradeCwd(command: UpgradeCommand): string {
     return normalized;
 }
 
+function launchDetachedWindowsPowerShellFile(scriptPath: string, cwd: string): void {
+    const command = [
+        'Start-Process',
+        '-WindowStyle Hidden',
+        `-WorkingDirectory '${escapeForSingleQuotedPowerShell(cwd)}'`,
+        "-FilePath 'powershell.exe'",
+        `-ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','${escapeForSingleQuotedPowerShell(scriptPath)}')`,
+    ].join(' ');
+    const proc = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command], {
+        encoding: 'utf8',
+        cwd,
+        env: process.env,
+        windowsHide: true,
+    });
+    if (proc.status !== 0) {
+        throw new Error(`Failed to schedule detached PowerShell handoff. ${(proc.stderr || proc.stdout).trim() || 'powershell returned a non-zero exit code.'}`);
+    }
+}
+
 function scheduleDetachedWindowsGlobalNpmUpgrade(command: UpgradeCommand, postCommand?: string): void {
     const neutralCwd = resolveDetachedUpgradeCwd(command);
     const parentPid = process.pid;
-    const powershell = 'powershell.exe';
     const escapedCwd = escapeForSingleQuotedPowerShell(neutralCwd);
-    const escapedExecutable = escapeForSingleQuotedPowerShell(command.executable);
+    const detachedExecutable = resolveWindowsDetachedExecutable(command.executable);
+    const escapedExecutable = escapeForSingleQuotedPowerShell(detachedExecutable);
     const escapedArgs = command.args.map((arg) => `'${escapeForSingleQuotedPowerShell(arg)}'`).join(', ');
     const script = [
         `$parentPid = ${parentPid}`,
@@ -2719,15 +2873,9 @@ function scheduleDetachedWindowsGlobalNpmUpgrade(command: UpgradeCommand, postCo
         `& '${escapedExecutable}' @(${escapedArgs})`,
         ...(postCommand ? [`if ($LASTEXITCODE -eq 0) { ${postCommand} }`] : []),
         'exit $LASTEXITCODE',
-    ].join('; ');
-    const child = spawn(powershell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], {
-        detached: true,
-        stdio: 'ignore',
-        windowsHide: true,
-        cwd: neutralCwd,
-        env: process.env,
-    });
-    child.unref();
+    ].join(';\r\n');
+    const scriptPath = writeDetachedWindowsScript('iranti-upgrade', `${script};\r\n`);
+    launchDetachedWindowsPowerShellFile(scriptPath, neutralCwd);
 }
 
 function verifyPythonInstall(command: UpgradeCommand): { status: 'pass' | 'warn' | 'fail'; detail: string } {
@@ -3116,10 +3264,13 @@ function buildDetachedWindowsUninstallScript(options: {
     removeCodex: boolean;
     python?: UpgradeCommand | null;
     removeGlobalNpm: boolean;
+    npmExecutable?: string;
+    codexExecutable?: string;
     runtimeRoots: string[];
     artifactFiles: string[];
 }): string {
     const lines = [
+        "$ErrorActionPreference = 'SilentlyContinue'",
         `$parentPid = ${options.parentPid}`,
         'while (Get-Process -Id $parentPid -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 500 }',
     ];
@@ -3128,15 +3279,20 @@ function buildDetachedWindowsUninstallScript(options: {
         lines.push(`taskkill /PID ${pid} /T /F > $null 2>&1`);
     }
     if (options.removeCodex) {
-        lines.push("$codexGet = Get-Command codex -ErrorAction SilentlyContinue");
-        lines.push("if ($codexGet) { codex mcp get iranti --json > $null 2>&1; if ($LASTEXITCODE -eq 0) { codex mcp remove iranti > $null 2>&1 } }");
+        const codexExecutable = escapeForSingleQuotedPowerShell(options.codexExecutable ?? resolveWindowsDetachedExecutable('codex'));
+        lines.push(`$codexExe = '${codexExecutable}'`);
+        lines.push("if (Test-Path -LiteralPath $codexExe) { & $codexExe mcp get iranti --json > $null 2>&1; if ($LASTEXITCODE -eq 0) { & $codexExe mcp remove iranti > $null 2>&1 } }");
     }
     if (options.removeGlobalNpm) {
-        lines.push('& npm uninstall -g iranti');
+        const npmExecutable = escapeForSingleQuotedPowerShell(options.npmExecutable ?? resolveWindowsDetachedExecutable('npm'));
+        lines.push(`$npmExe = '${npmExecutable}'`);
+        lines.push("if (Test-Path -LiteralPath $npmExe) { & $npmExe uninstall -g iranti > $null 2>&1 }");
     }
     if (options.python) {
         const args = options.python.args.map((arg) => `'${escapeForSingleQuotedPowerShell(arg)}'`).join(', ');
-        lines.push(`& '${escapeForSingleQuotedPowerShell(options.python.executable)}' @(${args})`);
+        const pythonExecutable = escapeForSingleQuotedPowerShell(resolveWindowsDetachedExecutable(options.python.executable));
+        lines.push(`$pythonExe = '${pythonExecutable}'`);
+        lines.push(`if (Test-Path -LiteralPath $pythonExe) { & $pythonExe @(${args}) > $null 2>&1 }`);
     }
     for (const filePath of options.artifactFiles) {
         lines.push(`if (Test-Path -LiteralPath '${escapeForSingleQuotedPowerShell(filePath)}') { Remove-Item -LiteralPath '${escapeForSingleQuotedPowerShell(filePath)}' -Force }`);
@@ -3145,7 +3301,14 @@ function buildDetachedWindowsUninstallScript(options: {
         lines.push(`if (Test-Path -LiteralPath '${escapeForSingleQuotedPowerShell(dirPath)}') { Remove-Item -LiteralPath '${escapeForSingleQuotedPowerShell(dirPath)}' -Recurse -Force }`);
     }
     lines.push('exit 0');
-    return lines.join('; ');
+    return `${lines.join(';\r\n')};\r\n`;
+}
+
+function writeDetachedWindowsScript(prefix: string, scriptContents: string): string {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}-`));
+    const scriptPath = path.join(tempDir, `${prefix}.ps1`);
+    fs.writeFileSync(scriptPath, scriptContents, 'utf8');
+    return scriptPath;
 }
 
 async function uninstallCommand(args: ParsedArgs): Promise<void> {
@@ -3224,17 +3387,13 @@ async function uninstallCommand(args: ParsedArgs): Promise<void> {
                 removeCodex: actions.removeCodexRegistration,
                 python: actions.removePython ? pythonCommand : null,
                 removeGlobalNpm: actions.removeGlobalNpm,
+                npmExecutable: resolveWindowsDetachedExecutable('npm'),
+                codexExecutable: resolveWindowsDetachedExecutable('codex'),
                 runtimeRoots: actions.removeRuntimeRoots ? runtimeRoots.map((entry) => entry.path) : [],
                 artifactFiles,
             });
-            const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], {
-                detached: true,
-                stdio: 'ignore',
-                windowsHide: true,
-                cwd: os.homedir(),
-                env: process.env,
-            });
-            child.unref();
+            const scriptPath = writeDetachedWindowsScript('iranti-uninstall', script);
+            launchDetachedWindowsPowerShellFile(scriptPath, os.homedir());
             execution.push({
                 label: 'detached-uninstall',
                 status: 'warn',
@@ -3586,7 +3745,7 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
     const dependencyChecks = await collectDependencyChecks();
     printDependencyChecks(dependencyChecks);
     const recommendedDatabaseMode = recommendDatabaseMode(dependencyChecks);
-    console.log(`${infoLabel()} Recommended database path: ${recommendedDatabaseMode === 'local' ? 'local PostgreSQL' : recommendedDatabaseMode === 'docker' ? 'Docker-hosted PostgreSQL' : 'managed PostgreSQL'}`);
+    console.log(`${infoLabel()} Recommended database path: ${recommendedDatabaseMode === 'local' ? 'local PostgreSQL (pgvector required)' : recommendedDatabaseMode === 'docker' ? 'Docker-hosted PostgreSQL' : 'managed PostgreSQL'}`);
     if (recommendedDatabaseMode === 'managed' && dependencyChecks.every((check) => check.status === 'warn')) {
         printQuickInstallGuidance();
     }
@@ -3647,7 +3806,8 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
         const existingPort = Number.parseInt(existingInstance?.env.IRANTI_PORT ?? '3001', 10);
         const port = await chooseAvailablePort(prompt, 'API port', existingPort, Boolean(existingInstance));
 
-        const dockerAvailable = hasDockerInstalled();
+        const dockerStatus = inspectDockerAvailability();
+        const dockerAvailable = dockerStatus.daemonReachable;
         const psqlAvailable = hasCommandInstalled('psql');
         let dbUrl = '';
         let bootstrapDatabase = false;
@@ -3687,7 +3847,7 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
             if (dbMode === 'docker') {
                 databaseMode = 'docker';
                 if (!dockerAvailable) {
-                    console.log(`${warnLabel()} Docker is not installed or not on PATH. Choose local or managed instead.`);
+                    console.log(`${warnLabel()} ${dockerStatus.detail}`);
                     continue;
                 }
                 const dbHostPort = await chooseAvailablePort(prompt, 'Docker PostgreSQL host port', 5432, false);

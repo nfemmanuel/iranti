@@ -67,7 +67,8 @@ What setup does:
 - creates a usable Iranti client API key
 - optionally binds a project
 
-If local PostgreSQL is reachable and `psql` is installed, setup can create the target localhost database automatically before bootstrap.
+If local PostgreSQL is reachable, `psql` is installed, and the server provides `pgvector`, setup can create the target localhost database automatically before bootstrap.
+If the server does not provide `pgvector`, setup now fails early with a direct recommendation to switch to Docker or a managed pgvector-capable database.
 
 ---
 

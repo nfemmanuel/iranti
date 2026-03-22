@@ -9,10 +9,10 @@
 
 Iranti gives agents persistent, identity-based memory. Facts written by one agent are retrievable by any other agent through exact entity+key lookup. Iranti also supports hybrid search (lexical + vector) when exact keys are unknown. Memory persists across sessions and survives context window limits.
 
-**Latest release:** [`v0.2.19`](https://github.com/nfemmanuel/iranti/releases/tag/v0.2.19)  
+**Latest release:** [`v0.2.20`](https://github.com/nfemmanuel/iranti/releases/tag/v0.2.20)  
 Published packages:
-- `iranti@0.2.19`
-- `@iranti/sdk@0.2.19`
+- `iranti@0.2.20`
+- `@iranti/sdk@0.2.20`
 
 ---
 
@@ -173,7 +173,7 @@ The next leverage is still product simplicity: setup, operations, and day-to-day
 
 ## Quickstart
 
-**Requirements**: Node.js 18+, PostgreSQL, Python 3.8+
+**Requirements**: Node.js 18+, PostgreSQL with pgvector support, Python 3.8+
 
 Docker is optional. It is one local way to run PostgreSQL if you do not already have a database. Iranti still requires PostgreSQL; the setup improvement is smarter bootstrap and clearer guidance, not a second storage backend.
 
@@ -190,7 +190,7 @@ iranti run --instance local
 
 `iranti setup` now defaults to an isolated per-project runtime. Shared machine-level instances are still supported, but they are now an explicit choice rather than the default.
 
-If local PostgreSQL is available, setup can bootstrap a localhost database for you. If local PostgreSQL is not available, setup recommends Docker when Docker is installed, and otherwise steers you to managed PostgreSQL with concrete install guidance.
+If local PostgreSQL is available and pgvector-capable, setup can bootstrap a localhost database for you. If Docker is available, setup now prefers the Docker path over a plain local listener because it guarantees pgvector. If local PostgreSQL is reachable but does not provide pgvector, setup now fails early with a direct action path instead of a late Prisma migration error.
 
 Long-running agents can now checkpoint and recover interrupted work. Programmatic session lifecycle methods are available through the SDK and REST API:
 - `checkpoint()`

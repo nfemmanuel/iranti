@@ -246,7 +246,7 @@ function assertApiDocsContract(): void {
 
 function assertPackageMainPointsToBuiltFile(): void {
     const filePath = 'package.json';
-    const packageJson = JSON.parse(readFile(filePath)) as { main?: string };
+    const packageJson = JSON.parse(readFile(filePath)) as { main?: string; files?: string[] };
     if (!packageJson.main) {
         fail('package.json has main field', 'package.json main field is missing');
         return;
@@ -259,6 +259,13 @@ function assertPackageMainPointsToBuiltFile(): void {
     }
 
     pass('package.json main points to existing build output');
+
+    if (!Array.isArray(packageJson.files) || !packageJson.files.includes('prisma.config.ts')) {
+        fail('package.json ships prisma.config.ts', 'package.json files[] must include prisma.config.ts so packaged setup can run Prisma migrations.');
+        return;
+    }
+
+    pass('package.json ships prisma.config.ts');
 }
 
 function printSummaryAndExit(): never {

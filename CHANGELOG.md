@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.20 - 2026-03-21
+
+### Changed
+
+- `iranti setup` now prefers Docker over a plain localhost PostgreSQL listener when Docker is available, because the Docker path guarantees pgvector.
+- Setup and quickstart docs now state the local PostgreSQL requirement honestly: local bootstrap needs a pgvector-capable server.
+
+### Fixed
+
+- The published npm package now ships `prisma.config.ts`, so packaged bootstrap can run Prisma migrations instead of failing with a missing datasource config path.
+- Packaged setup now preserves `DATABASE_URL` explicitly through the Prisma migration and generate steps.
+- Docker setup now fails immediately with a daemon-unreachable error instead of collapsing into a generic bootstrap failure.
+- Local PostgreSQL bootstrap now checks pgvector availability up front and fails with a direct remediation path instead of a late Prisma migration stack.
+- Windows `iranti uninstall` now completes its global npm self-removal handoff correctly instead of reporting success while leaving the install in place.
+- Contract coverage now asserts that `prisma.config.ts` is included in the published npm package.
+
 ## 0.2.19 - 2026-03-21
 
 ### Fixed
