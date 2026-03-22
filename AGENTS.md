@@ -300,7 +300,8 @@ iranti/
 â”œâ”€â”€ docs/
 â”‚   â”œâ”€â”€ engineering/            â€” CODE_STANDARDS.md, COMMENTING_GUIDELINES.md
 â”‚   â”œâ”€â”€ decisions/              â€” One file per architectural decision
-â”‚   â””â”€â”€ features/               â€” One subfolder per feature, including ontology-evolution
+â”‚   â”œâ”€â”€ features/               â€” One subfolder per feature, including ontology-evolution and compatibility-contracts
+â”‚   â””â”€â”€ internal/               â€” Internal design notes, validation artifacts, and compatibility backlog
 +-- clients/
 ¦   +-- python/
 ¦       +-- iranti.py           — Python HTTP client for REST API
@@ -331,6 +332,7 @@ iranti/
 ¦       +-- run_consistency_tests.ts — Empirical validation for write serialization, read-after-write, escalation visibility, and observe isolation
 ¦   +-- session-recovery/
 ¦   ¦   +-- run_session_recovery_tests.ts — Stubbed attendant recovery validation without a live DB
+¦   +-- memory-retrieval-regressions.ts — Slash-value retrieval and explicit-hint isolation regressions
 +-- AGENTS.md                   — This file
 â”œâ”€â”€ docker-compose.yml          â€” PostgreSQL for local dev
 â””â”€â”€ .env                        â€” Local environment (never committed)
@@ -517,6 +519,8 @@ Entity format: `"entityType/entityId"` e.g. `"researcher/jane_smith"`
 - LLM provider fallback is automatic â€” configure via `LLM_PROVIDER_FALLBACK` env var,
   mock is always used as final safety net
 - Follow CODE_STANDARDS.md in docs/engineering/
+- Treat backward compatibility as a product requirement across CLI, API, SDK, config, and runtime metadata surfaces
+- If a public or automation-facing surface changes, update the compatibility docs and add or adjust contract coverage
 - When adding a new component or method, update this file
 
 ### For Humans
@@ -544,6 +548,7 @@ Entity format: `"entityType/entityId"` e.g. `"researcher/jane_smith"`
   covering inputs, outputs, decision tree, edge cases, and test results.
 - **docs/engineering/** â€” Internal standards for contributors.
   `CODE_STANDARDS.md`, `COMMENTING_GUIDELINES.md`.
+- **docs/internal/** â€” Internal design notes, validation artifacts, and release/backward-compatibility backlogs.
 - **README.md** â€” Public-facing overview. Updated only when public API or
   onboarding flow changes.
 - **AGENTS.md** â€” System context for AI agents and contributors. Updated
@@ -562,6 +567,7 @@ Entity format: `"entityType/entityId"` e.g. `"researcher/jane_smith"`
 | Architectural decision | Create `docs/decisions/NNN-title.md` |
 | Schema change | Update AGENTS.md schema section, update `docs/features/` spec if relevant |
 | Breaking API change | Update README.md, `docs/guides/quickstart.md`, `clients/python/iranti.py` docstrings, bump version in `package.json` |
+| Compatibility or deprecation policy change | Update `docs/decisions/007-compatibility-policy.md`, `docs/features/compatibility-contracts/spec.md`, and `docs/internal/compatibility_backlog.md` |
 | New benchmark suite | Update AGENTS.md file structure and add methodology under `docs/internal/` |
 
 ### ADR Format
@@ -623,6 +629,7 @@ Before committing any change, verify:
 - [ ] If a new feature was added, does `docs/features/` have a spec?
 - [ ] If an architectural decision was made, does `docs/decisions/` have an ADR?
 - [ ] If the public API changed, is README.md updated?
+- [ ] If a compatibility surface changed, were compatibility docs and contract tests updated?
 - [ ] If a new provider was added, is `docs/guides/providers.md` updated?
 - [ ] If onboarding steps changed, is `docs/guides/quickstart.md` updated?
 - [ ] Is the Living Document updated with implementation notes?

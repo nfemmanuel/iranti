@@ -31,6 +31,7 @@
 
 ## Internal
 
+- [Compatibility Backlog](internal/compatibility_backlog.md) - Compatibility gates, migration coverage, and release follow-ups
 - [Fixes Applied](internal/FIXES_APPLIED.md) - P0/P1 infrastructure fixes
 - [Implementation Summary](internal/IMPLEMENTATION_SUMMARY.md) - Architecture overview
 - [Testing Guide](internal/TESTING.md) - Running tests
@@ -46,13 +47,16 @@
 - [001: AGPL License](decisions/001-agpl-license.md)
 - [002: Per-Agent Attendants](decisions/002-per-agent-attendants.md)
 - [003: Flat KB with Relationships](decisions/003-flat-kb-with-relationships.md)
+- [005: Isolated Onboarding Default](decisions/005-isolated-onboarding-default.md)
 - [006: Runtime Lifecycle Safety](decisions/006-runtime-lifecycle-safety.md)
+- [007: Compatibility Policy](decisions/007-compatibility-policy.md)
 
 ### Features
 
 - [Chat](features/chat/) - Native CLI chat session
 - [CLI Attendant Debug](features/cli-attendant-debug/) - Manual handshake/attend inspection commands
 - [Chunking](features/chunking/) - Auto-chunking raw content into facts
+- [Compatibility Contracts](features/compatibility-contracts/) - Stability rules, deprecation discipline, and release-gate expectations
 - [Conflict Resolution](features/conflict-resolution/) - Librarian conflict handling
 - [Interrupted Session Recovery](features/interrupted-session-recovery/) - Checkpointed mid-task recovery on return
 - [Resolutionist](features/resolutionist/) - Human escalation review workflow

@@ -9,15 +9,19 @@ All notable changes to this project are documented in this file.
 - Durable interrupted-session recovery with checkpoint, resume, complete, and abandon flows across the SDK, REST API, and published clients.
 - Runtime lifecycle tracking for instance-backed API servers, including persisted runtime metadata, `/health` runtime state, and CLI visibility into running versus stale instances.
 - New feature specs and ADR coverage for runtime upgrades and interrupted session recovery.
+- Benchmark-backed evidence for session recovery and upgrade durability, plus rerun validation across ingest, relationships, search, observe, attend, persistence, and exact lookup.
 
 ### Changed
 
 - `iranti upgrade` can now coordinate a restart for a named running instance with `--restart --instance <name>` after installing a new version.
 - Operator docs, quickstart guidance, API docs, and client READMEs now describe checkpointed recovery and runtime lifecycle behavior.
+- Iranti's product boundary is now documented more narrowly and honestly: structured memory infrastructure is the strong claim; full semantic-paraphrase retrieval and fully autonomous extraction are not yet.
 
 ### Fixed
 
 - The release bump helper now updates the API server version constant correctly after the runtime lifecycle refactor.
+- `iranti_ingest` prose extraction is now benchmark-confirmed working in `v0.2.16`.
+- Relationship traversal is now benchmark-confirmed working end-to-end through write, read, and depth traversal paths.
 
 ## 0.2.15 - 2026-03-21
 

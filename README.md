@@ -50,97 +50,49 @@ Vector databases answer "what's similar to X?" Iranti answers "what do we know a
 
 ---
 
-## Validated Results
+## Benchmark Summary
 
-All five goals validated with fictional entities and invented facts that GPT-4o-mini cannot know from training data.
+Iranti has now been rerun against a broader benchmark program covering 13 capability tracks. The current picture is stronger and narrower than the early validation story: exact, durable, shared memory is benchmark-backed; broad semantic-memory claims still need tighter boundaries.
 
-| Goal | Experiment | Score | Status |
-|---|---|---|---|
-| **1. Easy Integration** | Raw HTTP (9 lines) | 3/3 facts | ✓ PASSED |
-| **2. Context Persistence** | observe() API | 6/6 injected | ✓ PASSED |
-| **3. Working Retrieval** | Cross-agent query | 5/5 facts | ✓ PASSED |
-| **4. Per-Agent Persistence** | Cross-process | 5/5 facts | ✓ PASSED |
-| **5. Response Quality** | Memory injection | 0/2 → 2/2 | ✓ PASSED |
+### Confirmed Strengths
 
-### Framework Compatibility
+- **Exact lookup (`iranti_query`)**: O(1) retrieval confirmed up to 276k-token haystacks, with a positive differential over baseline at large context size.
+- **Persistence**: Facts survive across sessions and across version upgrades with no observed data loss.
+- **Conflict handling**: Reliable when confidence differentials are large and explicit.
+- **Multi-agent coordination**: Agents can share memory with correct separation and attribution.
+- **Provenance**: `agentId` attribution is preserved correctly.
+- **Relationships**: Relationship writes, reads, and depth traversal are working.
+- **Ingest**: Prose extraction is working and benchmark-confirmed in `v0.2.16`.
+- **Search**: Effective for structured attribute-value retrieval.
+- **Observe / Attend**: Automatic detection and injection behavior improved materially and now works in realistic benchmark conditions.
+- **Session recovery**: Interrupted-session recovery now performs substantially better than baseline.
+- **Upgrade safety**: Memory durability was preserved across three version upgrades.
 
-Validated with multiple agent frameworks:
+### Current Limits
 
-| Framework | Entity | Facts | Score | Time |
-|---|---|---|---|---|
-| **Raw OpenAI API** | project/void_runner | 5 | 5/5 ✓ | 14.0s |
-| **LangChain** | project/stellar_drift | 5 | 5/5 ✓ | 2.9s |
-| **CrewAI** | project/nexus_prime | 6 | 6/6 ✓ | 60s |
+- **Search is not yet full semantic paraphrase retrieval.**
+- **Observe still performs better with hints than without them.**
+- Two product defects remain under review:
+  - silent retrieval drop when `/` appears inside certain fact values
+  - `user/main` noise from benchmark smoke artifacts
 
-**Total: 16/16 facts transferred (100%)**
+### Practical Position
 
-Full validation report: [`docs/internal/validation_results.md`](docs/internal/validation_results.md) | Multi-framework details: [`docs/internal/MULTI_FRAMEWORK_VALIDATION.md`](docs/internal/MULTI_FRAMEWORK_VALIDATION.md)
+Iranti is strongest today as **structured memory infrastructure for multi-agent systems**:
+- exact entity/key lookup
+- durable shared memory
+- provenance-aware writes
+- conflict-aware storage
+- session-aware recovery
+- upgrade-safe persistence
 
-### Conflict Benchmark Baseline
+It should not yet be described as a fully general semantic-memory or autonomous-extraction system.
 
-Iranti now also has an adversarial conflict benchmark that measures contradiction handling rather than basic retrieval.
-
-| Suite | Score | Notes |
-|---|---|---|
-| **Direct contradiction** | `4/4` | Same entity+key conflicts are explicitly resolved or escalated |
-| **Temporal conflict** | `4/4` | Equal-score ties now use deterministic temporal tie-breaks |
-| **Cascading conflict** | `4/4` | Deterministic same-entity cross-key contradiction checks |
-| **Multi-hop conflict** | `4/4` | Narrow relationship-aware contradiction checks across related entities |
-| **Total** | `16/16 (100%)` | Current benchmark coverage for the Librarian |
-
-Conflict benchmark methodology: [`docs/internal/conflict_benchmark.md`](docs/internal/conflict_benchmark.md)
-
-### Consistency Validation
-
-Iranti also now documents and validates its consistency model empirically:
-
-| Check | Result |
-|---|---|
-| Concurrent write serialization | `PASS` |
-| Read-after-write visibility | `PASS` |
-| Escalation state integrity | `PASS` |
-| Observe isolation from uncommitted writes | `PASS` |
-| **Total** | `4/4` |
-
-Consistency model and validation: [`docs/internal/consistency_model.md`](docs/internal/consistency_model.md)
-
-### Goal 1: Easy Integration
-
-- **Entity**: `project/quantum_bridge`
-- **Test**: Integrate Iranti with raw HTTP in under 20 lines of Python
-- **Result**: 9 lines of code, 3/3 facts written and retrieved
-- **Conclusion**: No SDK or framework dependencies required, just standard `requests` library
-
-### Goal 2: Context Persistence
-
-- **Entity**: `project/nexus_prime`
-- **Control**: Facts already in context → `observe()` returns 0 to inject (correct, avoids duplication)
-- **Treatment**: Facts missing from context → `observe()` returns 6/6 facts for injection
-- **Result**: 100% recovery rate when facts fall out of context window
-
-### Goal 3: Working Retrieval
-
-- **Entity**: `project/photon_cascade`
-- **Test**: Agent 2 retrieves facts written by Agent 1 with zero shared context
-- **Result**: 5/5 facts retrieved via identity-based lookup (entity+key)
-- **Conclusion**: Facts accessible across agents with no context window dependency
-
-### Goal 4: Per-Agent Knowledge Persistence
-
-- **Entity**: `project/resonance_field`
-- **Test**: Process 1 writes facts and exits, Process 2 reads in new process
-- **Result**: 5/5 facts retrieved with no shared state between processes
-- **Conclusion**: PostgreSQL storage validated, facts survive across sessions
-
-### Goal 5: Response Quality
-
-- **Entity**: `project/meridian_core`
-- **Test**: Ask LLM question requiring facts from earlier in long conversation
-- **Control**: Without Iranti → 0/2 facts correct (hallucinated answers)
-- **Treatment**: With Iranti memory injection → 2/2 facts correct (accurate answers)
-- **Conclusion**: Memory injection eliminates hallucination, improves response accuracy
-
-Full validation report: [`docs/internal/validation_results.md`](docs/internal/validation_results.md)
+Historical benchmark material remains available here:
+- [`docs/internal/validation_results.md`](docs/internal/validation_results.md)
+- [`docs/internal/MULTI_FRAMEWORK_VALIDATION.md`](docs/internal/MULTI_FRAMEWORK_VALIDATION.md)
+- [`docs/internal/conflict_benchmark.md`](docs/internal/conflict_benchmark.md)
+- [`docs/internal/consistency_model.md`](docs/internal/consistency_model.md)
 
 ## Gap Analysis
 
@@ -210,17 +162,14 @@ The current landscape splits into three buckets:
 
 ### Current Position
 
-Iranti is strongest today as infrastructure for developers building multi-agent systems who need shared, structured, queryable memory rather than pure semantic recall. The current evidence base is now more concrete than a positioning claim alone:
+Iranti is strongest today as infrastructure for developers building multi-agent systems who need shared, structured, queryable memory rather than pure semantic recall. The current benchmark base now supports a more concrete product claim:
 
-- `16/16` fictional-fact transfer in retrieval validation
-- `16/16 (100%)` on the current adversarial conflict benchmark
-- `4/4` on empirical consistency validation for serialized writes and read visibility
-
-That is not a claim that multi-agent memory is solved. It is a claim that Iranti now has reproducible evidence for three things at once:
-
-- exact cross-agent fact transfer works
+- exact cross-agent fact transfer works at meaningful context scales
+- facts survive session loss and version upgrades
 - same-key conflicting writes are serialized and observable
-- conflict handling quality is measurable, including clearly documented failure modes
+- relationship traversal, prose ingest, and attended recovery are usable surfaces
+
+That is still not a claim that multi-agent memory is solved. It is a claim that Iranti now has broader evidence for durable, structured, attribution-aware memory with recovery and upgrade safety.
 
 The next leverage is still product simplicity: setup, operations, and day-to-day inspection need to be simple enough that real users keep Iranti in the loop.
 

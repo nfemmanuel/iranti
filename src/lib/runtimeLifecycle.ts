@@ -80,28 +80,61 @@ export async function waitForPidExit(pid: number, timeoutMs: number, pollMs: num
     return !isPidAlive(pid);
 }
 
+function asString(value: unknown): string | null {
+    return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
+function asNumber(value: unknown): number | null {
+    return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function normalizeRuntimeStatus(value: unknown): InstanceRuntimeStatus {
+    return value === 'starting' || value === 'running' || value === 'stopping' || value === 'stopped'
+        ? value
+        : 'running';
+}
+
 export function readInstanceRuntime(runtimeFile: string): InstanceRuntimeMetadata | null {
     if (!fs.existsSync(runtimeFile)) return null;
     try {
         const raw = fs.readFileSync(runtimeFile, 'utf8');
         const parsed = JSON.parse(raw) as Partial<InstanceRuntimeMetadata>;
-        if (
-            typeof parsed.instanceName !== 'string' ||
-            typeof parsed.instanceDir !== 'string' ||
-            typeof parsed.envFile !== 'string' ||
-            typeof parsed.runtimeFile !== 'string' ||
-            typeof parsed.version !== 'string' ||
-            typeof parsed.pid !== 'number' ||
-            typeof parsed.ppid !== 'number' ||
-            typeof parsed.port !== 'number' ||
-            typeof parsed.startedAt !== 'string' ||
-            typeof parsed.lastHeartbeatAt !== 'string' ||
-            typeof parsed.updatedAt !== 'string' ||
-            typeof parsed.status !== 'string'
-        ) {
+        const inferredInstanceDir = path.dirname(runtimeFile);
+        const instanceDir = asString(parsed.instanceDir) ?? inferredInstanceDir;
+        const instanceName = asString(parsed.instanceName) ?? path.basename(instanceDir);
+        const envFile = asString(parsed.envFile) ?? path.join(instanceDir, '.env');
+        const normalizedRuntimeFile = asString(parsed.runtimeFile) ?? runtimeFile;
+        const version = asString(parsed.version);
+        const pid = asNumber(parsed.pid);
+        const port = asNumber(parsed.port);
+        const startedAt = asString(parsed.startedAt);
+
+        if (!version || pid === null || port === null || !startedAt) {
             return null;
         }
-        return parsed as InstanceRuntimeMetadata;
+
+        const lastHeartbeatAt = asString(parsed.lastHeartbeatAt) ?? startedAt;
+        const updatedAt = asString(parsed.updatedAt) ?? lastHeartbeatAt;
+
+        return {
+            instanceName,
+            instanceDir,
+            envFile,
+            runtimeFile: normalizedRuntimeFile,
+            version,
+            pid,
+            ppid: asNumber(parsed.ppid) ?? 0,
+            port,
+            startedAt,
+            lastHeartbeatAt,
+            updatedAt,
+            status: normalizeRuntimeStatus(parsed.status),
+            healthUrl: asString(parsed.healthUrl) ?? undefined,
+            exitCode: parsed.exitCode ?? undefined,
+            exitSignal: asString(parsed.exitSignal) ?? undefined,
+            requestLogFile: asString(parsed.requestLogFile) ?? undefined,
+            packageRoot: asString(parsed.packageRoot) ?? undefined,
+        };
     } catch {
         return null;
     }

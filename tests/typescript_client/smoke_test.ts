@@ -27,7 +27,7 @@ async function main(): Promise<void> {
     const entity = `project/${uniqueId('ts_client_project')}`;
     const team = `team/${uniqueId('ts_client_team')}`;
     const searchNeedle = uniqueId('typescript_smoke');
-    process.env.IRANTI_MEMORY_ENTITY = 'user/main';
+    const personalEntity = `person/${uniqueId('ts_client_person')}`;
 
     const health = await client.health();
     expect(health.status === 'ok', `Expected health status ok, got ${health.status}`);
@@ -163,7 +163,7 @@ async function main(): Promise<void> {
     expect(Array.isArray(observe.facts), 'Expected observe() to return a facts array.');
 
     await client.write({
-        entity: 'user/main',
+        entity: personalEntity,
         key: 'favorite_city',
         value: { city: 'Lisbon' },
         summary: 'Favorite city is Lisbon.',
@@ -176,9 +176,41 @@ async function main(): Promise<void> {
         agentId,
         currentContext: 'User: hello\nAssistant:',
         latestMessage: 'What is my favorite city?',
+        entityHints: [personalEntity],
     });
     expect(attend.shouldInject === true, 'Expected attend() to inject favorite city memory.');
-    expect(attend.facts.some((fact) => fact.entityKey === 'user/main/favorite_city'), 'Expected attend() facts to include user/main/favorite_city.');
+    expect(attend.facts.some((fact) => fact.entityKey === `${personalEntity}/favorite_city`), 'Expected attend() facts to include the isolated personal entity favorite_city.');
+
+    const slashEntity = `project/${uniqueId('ts_client_slash_project')}`;
+    const slashValue = {
+        url: 'https://example.com/a/b',
+        ratio: '3/4',
+        label: 'A/B test path',
+    };
+    await client.write({
+        entity: slashEntity,
+        key: 'slash_value',
+        value: slashValue,
+        summary: 'Slash payload A/B https://example.com/a/b 3/4',
+        confidence: 90,
+        source: 'typescript_smoke',
+        agent: agentId,
+    });
+    const slashQuery = await client.query(slashEntity, 'slash_value');
+    expect(slashQuery.found === true, 'Expected slash-bearing fact to remain queryable.');
+    expect(
+        JSON.stringify(slashQuery.value).includes('https://example.com/a/b'),
+        'Expected slash-bearing query value to preserve URLs and ratios.'
+    );
+    const slashSearch = await client.search({
+        query: 'A/B https://example.com/a/b 3/4',
+        limit: 5,
+        entityType: 'project',
+    });
+    expect(
+        slashSearch.some((result) => result.entity === slashEntity && result.key === 'slash_value'),
+        'Expected slash-bearing fact to remain searchable.'
+    );
 
     console.log('TypeScript client smoke test');
     console.log('---------------------------');
@@ -188,6 +220,7 @@ async function main(): Promise<void> {
     console.log(`write: ${write.action}`);
     console.log(`search matches: ${search.length}`);
     console.log(`semantic search matches: ${semanticSearch.length}`);
+    console.log(`slash search matches: ${slashSearch.length}`);
     console.log(`related count: ${related.length}`);
     console.log(`attend: shouldInject=${attend.shouldInject} reason=${attend.reason}`);
 }

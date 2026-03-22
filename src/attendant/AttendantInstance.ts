@@ -886,9 +886,10 @@ export class AttendantInstance {
             : currentContext.slice(-ENTITY_DETECTION_WINDOW_CHARS);
         const droppedCandidates: Array<{ name: string; reason: string }> = [];
 
-        // Step 1 — extract entity mentions from context (if any text is available)
+        // Step 1 - extract entity mentions only when the caller did not already
+        // provide deterministic entity hints. Explicit hints should be authoritative.
         let parsedCandidates: EntityCandidate[] = [];
-        if (detectionWindow.trim().length > 0) {
+        if (detectionWindow.trim().length > 0 && entityHints.length === 0) {
             const entityResponse = await route('extraction', [
                 {
                     role: 'user',
@@ -975,13 +976,13 @@ ${detectionWindow}`,
                     }
                 }
             } catch {
-                droppedCandidates.push({ name: 'parse_error', reason: 'invalid_json' });
+                droppedCandidates.push({ name: 'entity_extraction_parse_error', reason: 'invalid_json' });
             }
 
             if (parsedCandidates.length === 0) {
                 parsedCandidates = extractFallbackCandidates(detectionWindow);
                 if (parsedCandidates.length > 0) {
-                    droppedCandidates.push({ name: 'fallback_extraction', reason: 'heuristic_used' });
+                    droppedCandidates.push({ name: 'entity_extraction_fallback', reason: 'heuristic_used' });
                 }
             }
         }
@@ -1454,3 +1455,4 @@ If nothing is relevant, return: none`,
         return state;
     }
 }
+

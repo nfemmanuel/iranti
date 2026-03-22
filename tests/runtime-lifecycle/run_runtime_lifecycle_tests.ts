@@ -3,6 +3,8 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { spawnSync } from 'child_process';
+import { readInstanceRuntime } from '../../src/lib/runtimeLifecycle';
+import { loadRuntimeEnv } from '../../src/lib/runtimeEnv';
 
 type CliRun = {
     status: number | null;
@@ -42,6 +44,24 @@ function writeJson(filePath: string, value: unknown): void {
 function writeText(filePath: string, value: string): void {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, value, 'utf8');
+}
+
+function withCleanEnv<T>(fn: () => T): T {
+    const snapshot = { ...process.env };
+    try {
+        return fn();
+    } finally {
+        for (const key of Object.keys(process.env)) {
+            if (!(key in snapshot)) delete process.env[key];
+        }
+        for (const [key, value] of Object.entries(snapshot)) {
+            if (typeof value === 'undefined') {
+                delete process.env[key];
+            } else {
+                process.env[key] = value;
+            }
+        }
+    }
 }
 
 function main(): void {
@@ -132,6 +152,46 @@ function main(): void {
         assert.strictEqual(upgradePayload.runtimeInstances.length, 1);
         assert.strictEqual(upgradePayload.runningRuntimeInstances.length, 0);
         assert.strictEqual(upgradePayload.restartRequiredInstances.length, 0);
+
+        const legacyRuntimeFile = path.join(instanceDir, 'legacy-runtime.json');
+        writeJson(legacyRuntimeFile, {
+            instanceName: 'legacy-local',
+            version: '0.2.14',
+            pid: 424242,
+            port: 3050,
+            startedAt: now,
+        });
+
+        const legacyRuntime = readInstanceRuntime(legacyRuntimeFile);
+        assert.ok(legacyRuntime, 'legacy runtime metadata should still parse');
+        assert.strictEqual(legacyRuntime?.instanceDir, instanceDir);
+        assert.strictEqual(legacyRuntime?.envFile, envFile);
+        assert.strictEqual(legacyRuntime?.runtimeFile, legacyRuntimeFile);
+        assert.strictEqual(legacyRuntime?.ppid, 0);
+        assert.strictEqual(legacyRuntime?.lastHeartbeatAt, now);
+        assert.strictEqual(legacyRuntime?.updatedAt, now);
+        assert.strictEqual(legacyRuntime?.status, 'running');
+
+        const projectDir = path.join(root, 'project');
+        const projectEnvFile = path.join(projectDir, '.env.iranti');
+        writeText(projectEnvFile, [
+            'IRANTI_URL=http://localhost:3050',
+            'IRANTI_API_KEY=project_key',
+            `IRANTI_INSTANCE_ENV=${envFile}`,
+            '',
+        ].join('\n'));
+
+        withCleanEnv(() => {
+            const runtimeEnvResult = loadRuntimeEnv({ cwd: projectDir });
+            assert.strictEqual(runtimeEnvResult.projectEnvFile, projectEnvFile);
+            assert.strictEqual(runtimeEnvResult.instanceEnvFile, envFile);
+            assert.ok(runtimeEnvResult.loadedFiles.includes(projectEnvFile));
+            assert.ok(runtimeEnvResult.loadedFiles.includes(envFile));
+            assert.strictEqual(process.env.IRANTI_URL, 'http://localhost:3050');
+            assert.strictEqual(process.env.IRANTI_API_KEY, 'project_key');
+            assert.strictEqual(process.env.DATABASE_URL, 'postgresql://postgres:postgres@localhost:5432/iranti_local');
+            assert.strictEqual(process.env.LLM_PROVIDER, 'mock');
+        });
 
         const restartRun = runCli(['instance', 'restart', 'local', '--root', root], repoRoot);
         assert.notStrictEqual(restartRun.status, 0, 'restart unexpectedly succeeded');
