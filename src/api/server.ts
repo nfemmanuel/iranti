@@ -45,7 +45,7 @@ const INSTANCE_DIR = process.env.IRANTI_INSTANCE_DIR?.trim()
 const INSTANCE_RUNTIME_FILE = process.env.IRANTI_INSTANCE_RUNTIME_FILE?.trim()
     || (INSTANCE_DIR ? runtimeFileForInstance(INSTANCE_DIR) : null);
 const INSTANCE_NAME = process.env.IRANTI_INSTANCE_NAME?.trim() || (INSTANCE_DIR ? path.basename(INSTANCE_DIR) : 'adhoc');
-const VERSION = '0.2.18';
+const VERSION = '0.2.19';
 
 try {
     fs.mkdirSync(path.dirname(REQUEST_LOG_FILE), { recursive: true });

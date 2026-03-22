@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.19 - 2026-03-21
+
+### Fixed
+
+- Corrected `clients/python/pyproject.toml` line endings after the `0.2.18` release prep corrupted one TOML newline and broke Python package builds in CI.
+- `v0.2.19` supersedes the failed Python packaging leg from `v0.2.18` without changing the CLI/runtime feature surface introduced there.
+
 ## 0.2.18 - 2026-03-21
 
 ### Added
