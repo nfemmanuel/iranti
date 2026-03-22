@@ -5,12 +5,18 @@ import path from 'path';
 import { getDb, initDb, disconnectDb } from '../src/library/client';
 import { ensureEscalationFolders } from '../src/lib/escalationPaths';
 
+const PACKAGE_ROOT = path.resolve(__dirname, '..');
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function run(command: string, label: string): void {
     console.log(`  Running: ${label}...`);
     try {
-        execSync(command, { stdio: 'inherit' });
+        execSync(command, {
+            stdio: 'inherit',
+            cwd: PACKAGE_ROOT,
+            env: process.env,
+        });
     } catch {
         console.error(`  Failed: ${label}`);
         process.exit(1);
@@ -48,6 +54,7 @@ async function setup() {
     console.log('\n🔧 Iranti Setup\n');
     const dbUrl = process.env.DATABASE_URL;
     if (dbUrl) {
+        process.env.DATABASE_URL = dbUrl;
         initDb(dbUrl);
     }
 
