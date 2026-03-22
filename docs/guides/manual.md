@@ -455,6 +455,11 @@ If provider calls fail:
 - confirm the correct provider key exists
 - confirm `LLM_PROVIDER` is what you expect
 
+If ambiguous writes fail under load:
+- set `IRANTI_CONFLICT_RESOLUTION_TIMEOUT_MS` below `IRANTI_TX_TIMEOUT_MS`
+- optionally tune `IRANTI_TX_MAX_WAIT_MS`
+- rerun the write so Iranti escalates cleanly instead of hitting the interactive transaction ceiling
+
 If upgrade behaves strangely on Windows:
 - rerun `iranti upgrade --check`
 - open a fresh shell after global npm upgrades

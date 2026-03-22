@@ -114,10 +114,14 @@ export async function route(
     maxTokens?: number
 ): Promise<LLMResponse & { taskType: TaskType; modelProfile: ModelProfile; providerUsed: string }> {
     const profile = buildModelProfiles()[taskType];
+    const timeoutMs = taskType === 'conflict_resolution'
+        ? resolveTaskTimeoutMs(process.env.IRANTI_CONFLICT_RESOLUTION_TIMEOUT_MS, 10_000)
+        : undefined;
     const response = await completeWithFallback(messages, {
         preferredProvider: profile.provider,
         model: profile.model,
         maxTokens,
+        timeoutMs,
     });
 
     return {
@@ -136,4 +140,9 @@ export function getModelProfile(taskType: TaskType): ModelProfile {
 
 export function getAllProfiles(): Record<TaskType, ModelProfile> {
     return buildModelProfiles();
+}
+
+function resolveTaskTimeoutMs(rawValue: string | undefined, fallback: number): number {
+    const parsed = Number.parseInt(rawValue ?? '', 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }

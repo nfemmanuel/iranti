@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.17 - 2026-03-21
+
+### Added
+
+- A dedicated conflict regression for slow LLM arbitration, proving ambiguous writes now escalate cleanly instead of failing with a broken transaction path.
+
+### Changed
+
+- Conflict-resolution model calls now run under an explicit `IRANTI_CONFLICT_RESOLUTION_TIMEOUT_MS` budget.
+- Identity-locked write transactions now use configurable Prisma budgets via `IRANTI_TX_TIMEOUT_MS` and `IRANTI_TX_MAX_WAIT_MS`.
+- Operator docs and the conflict-resolution spec now document how to keep LLM arbitration below the database transaction ceiling.
+
+### Fixed
+
+- Slow LLM-arbitrated writes no longer bubble up as Prisma interactive transaction timeout failures in the normal ambiguous-conflict path; they now fail closed into human escalation.
+
 ## 0.2.16 - 2026-03-21
 
 ### Added

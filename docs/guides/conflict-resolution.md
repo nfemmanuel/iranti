@@ -507,6 +507,12 @@ This provides full audit trail of all challenges to a fact.
 
 4. **Tune models** — Use better models for conflict resolution if quality is poor. See [Providers Guide](./providers.md).
 
+5. **Keep arbitration under the DB lock budget** — If model calls are slow, set:
+   - `IRANTI_CONFLICT_RESOLUTION_TIMEOUT_MS`
+   - `IRANTI_TX_TIMEOUT_MS`
+   - `IRANTI_TX_MAX_WAIT_MS`
+   so the LLM arbitration budget is lower than the interactive transaction timeout.
+
 ### For Humans Resolving Escalations
 
 1. **Be thorough** — Don't guess. Investigate and verify the truth.
@@ -657,6 +663,7 @@ console.log(scores);
 1. Check LLM provider is working (not using mock)
 2. Increase confidence gap threshold (requires code change)
 3. Improve source reliability by resolving escalations
+4. If writes are failing with transaction timeouts, set `IRANTI_CONFLICT_RESOLUTION_TIMEOUT_MS` lower than `IRANTI_TX_TIMEOUT_MS` so ambiguous writes escalate cleanly instead of dying inside the transaction
 
 ### Wrong resolutions
 

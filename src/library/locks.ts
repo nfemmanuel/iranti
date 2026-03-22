@@ -3,6 +3,18 @@ import type { PrismaClient } from '../generated/prisma/client';
 
 type TransactionClient = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
 
+function parsePositiveInt(raw: string | undefined, fallback: number): number {
+    const parsed = Number.parseInt(raw ?? '', 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function transactionBudget() {
+    return {
+        maxWait: parsePositiveInt(process.env.IRANTI_TX_MAX_WAIT_MS, 5_000),
+        timeout: parsePositiveInt(process.env.IRANTI_TX_TIMEOUT_MS, 15_000),
+    };
+}
+
 function isAbortedTransactionError(err: unknown): boolean {
     const msg = err instanceof Error ? err.message : String(err);
     const lower = msg.toLowerCase();
@@ -18,7 +30,7 @@ async function executeWithIdentityLock<T>(
         const lockKey = hashToBigInt(`${identity.entityType}||${identity.entityId}||${identity.key}`);
         await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(${lockKey});`);
         return fn(tx);
-    });
+    }, transactionBudget());
 }
 
 export async function withIdentityLock<T>(

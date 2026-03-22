@@ -30,10 +30,29 @@ export interface LLMResponse {
 export type CompleteOptions = {
     model?: string;
     maxTokens?: number;
+    timeoutMs?: number;
 };
 
 export interface LLMProvider {
     complete(messages: LLMMessage[], options?: CompleteOptions): Promise<LLMResponse>;
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs?: number): Promise<T> {
+    if (!timeoutMs || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+        return promise;
+    }
+
+    let timer: NodeJS.Timeout | null = null;
+    try {
+        return await Promise.race([
+            promise,
+            new Promise<T>((_, reject) => {
+                timer = setTimeout(() => reject(new Error(`LLM request timed out after ${timeoutMs}ms.`)), timeoutMs);
+            }),
+        ]);
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
 }
 
 function titleCaseProvider(provider: string): string {
@@ -172,7 +191,7 @@ async function loadProvider(name: string): Promise<LLMProvider> {
 
 export async function completeWithFallback(
     messages: LLMMessage[],
-    options?: { preferredProvider?: string; model?: string; maxTokens?: number }
+    options?: { preferredProvider?: string; model?: string; maxTokens?: number; timeoutMs?: number }
 ): Promise<LLMResponse & { providerUsed: string }> {
     const chain = options?.preferredProvider 
         ? [options.preferredProvider, ...getFallbackChain().filter(p => p !== options.preferredProvider)]
@@ -194,10 +213,11 @@ export async function completeWithFallback(
                 inc('llm.cache_hit');
             }
             
-            const response = await provider.complete(messages, {
+            const response = await withTimeout(provider.complete(messages, {
                 model: options?.model,
                 maxTokens: options?.maxTokens,
-            });
+                timeoutMs: options?.timeoutMs,
+            }), options?.timeoutMs);
             
             timeEnd('llm.latency_ms', t0);
             

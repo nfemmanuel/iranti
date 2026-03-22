@@ -485,13 +485,20 @@ return {
 
 ### LLM Call Timeout
 
-Set a timeout for LLM calls:
+LLM arbitration now runs with an explicit budget so the write path fails closed into escalation before the surrounding database transaction times out. The effective controls are:
+
+- `IRANTI_CONFLICT_RESOLUTION_TIMEOUT_MS` - maximum time budget for the LLM arbitration call
+- `IRANTI_TX_TIMEOUT_MS` - maximum interactive transaction duration for the identity-locked write path
+- `IRANTI_TX_MAX_WAIT_MS` - maximum wait to acquire the transaction slot
+
+The conflict-resolution timeout should stay lower than the transaction timeout.
+
+Example:
 
 ```typescript
-const response = await Promise.race([
-    route('conflict_resolution', prompt),
-    timeout(30000),  // 30 second timeout
-]);
+process.env.IRANTI_CONFLICT_RESOLUTION_TIMEOUT_MS = '10000';
+process.env.IRANTI_TX_TIMEOUT_MS = '15000';
+process.env.IRANTI_TX_MAX_WAIT_MS = '5000';
 ```
 
 ---

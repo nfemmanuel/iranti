@@ -28,7 +28,7 @@ import requests
 from typing import Any, Optional
 from dataclasses import dataclass, field
 
-__version__ = "0.2.16"
+__version__ = "0.2.17"
 
 
 def _default_entity_hints(entity_hints: Optional[list[str]]) -> Optional[list[str]]:

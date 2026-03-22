@@ -13,6 +13,7 @@ export interface MockConfig {
     failureRate?: number;
     confidenceRange?: [number, number];
     seed?: number;
+    responseDelayMs?: number;
 }
 
 type ExtractedFact = {
@@ -38,6 +39,10 @@ function seededRandom(seed: number): () => number {
         s = (s * 1664525 + 1013904223) & 0xffffffff;
         return (s >>> 0) / 0xffffffff;
     };
+}
+
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function heuristicEntityId(name: string): string {
@@ -406,6 +411,11 @@ class MockProvider implements LLMProvider {
         const lower = lastMessage.toLowerCase();
         const scenario = this.config.scenario;
         const model = options?.model ?? 'mock';
+
+        const responseDelayMs = this.config.responseDelayMs ?? 0;
+        if (responseDelayMs > 0) {
+            await sleep(responseDelayMs);
+        }
 
         const failureRate = this.config.failureRate ?? 0;
         if (failureRate > 0 && this.rand() < failureRate) {
