@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import { route } from '../lib/router';
+import { getStaffEventEmitter } from '../lib/staffEventRegistry';
 import {
     appendConflictLog,
     archiveEntry,
@@ -179,6 +180,18 @@ export async function librarianWrite(input: EntryInput): Promise<{
     if (input.requestId) {
         const receipt = await getWriteReceipt(input.requestId);
         if (receipt) {
+            getStaffEventEmitter().emit({
+                staffComponent: 'Librarian',
+                actionType: 'write_deduplicated',
+                agentId: input.createdBy,
+                source: input.source,
+                entityType: input.entityType,
+                entityId: input.entityId,
+                key: input.key,
+                reason: 'Idempotent replay — requestId already processed.',
+                level: 'debug',
+                metadata: { requestId: input.requestId },
+            });
             timeEnd('librarian.write_ms', t0);
             return {
                 action: receipt.outcome as WriteAction,
@@ -241,6 +254,18 @@ export async function librarianWrite(input: EntryInput): Promise<{
                     }
                     await saveReceipt(input, 'rejected', contextualConflict.matchedEntries[0]?.id ?? null, tx);
                     inc('librarian.rejected');
+                    getStaffEventEmitter().emit({
+                        staffComponent: 'Librarian',
+                        actionType: 'write_rejected',
+                        agentId: input.createdBy,
+                        source: input.source,
+                        entityType: input.entityType,
+                        entityId: input.entityId,
+                        key: input.key,
+                        reason: contextualConflict.reason,
+                        level: 'audit',
+                        metadata: { rejectionReason: 'contextual_conflict' },
+                    });
                     return {
                         action: 'rejected',
                         reason: contextualConflict.reason,
@@ -258,9 +283,36 @@ export async function librarianWrite(input: EntryInput): Promise<{
                 await updateStats(input.createdBy, 'created', input.confidence);
                 await saveReceipt(input, 'created', entry.id, tx);
                 inc('librarian.created');
+                getStaffEventEmitter().emit({
+                    staffComponent: 'Librarian',
+                    actionType: 'write_created',
+                    agentId: input.createdBy,
+                    source: input.source,
+                    entityType: input.entityType,
+                    entityId: input.entityId,
+                    key: input.key,
+                    reason: 'No existing entry found. Created.',
+                    level: 'audit',
+                    metadata: {
+                        confidence: input.confidence,
+                        valuePreview: JSON.stringify(input.valueRaw).slice(0, 200),
+                    },
+                });
                 return { action: 'created', entry, reason: 'No existing entry found. Created.' };
             }
 
+            getStaffEventEmitter().emit({
+                staffComponent: 'Librarian',
+                actionType: 'conflict_detected',
+                agentId: input.createdBy,
+                source: input.source,
+                entityType: input.entityType,
+                entityId: input.entityId,
+                key: input.key,
+                reason: 'Existing entry found. Beginning conflict resolution.',
+                level: 'debug',
+                metadata: { existingConfidence: existing.confidence, incomingConfidence: input.confidence },
+            });
             return resolveConflict(existing, input, tx);
         }
     );
@@ -310,6 +362,22 @@ async function resolveConflict(
             );
             await saveReceipt(candidate, 'updated', entry.id, tx);
             inc('librarian.updated');
+            getStaffEventEmitter().emit({
+                staffComponent: 'Librarian',
+                actionType: 'write_replaced',
+                agentId: candidate.createdBy,
+                source: candidate.source,
+                entityType: candidate.entityType,
+                entityId: candidate.entityId,
+                key: candidate.key,
+                reason: 'Equal confidence same-source update accepted.',
+                level: 'audit',
+                metadata: {
+                    confidence: candidate.confidence,
+                    priorConfidence: existing.confidence,
+                    valuePreview: JSON.stringify(candidate.valueRaw).slice(0, 200),
+                },
+            });
             return { action: 'updated', entry, reason: 'Equal confidence same-source update accepted.' };
         }
 
@@ -328,6 +396,22 @@ async function resolveConflict(
             );
             await saveReceipt(candidate, 'updated', entry.id, tx);
             inc('librarian.updated');
+            getStaffEventEmitter().emit({
+                staffComponent: 'Librarian',
+                actionType: 'write_replaced',
+                agentId: candidate.createdBy,
+                source: candidate.source,
+                entityType: candidate.entityType,
+                entityId: candidate.entityId,
+                key: candidate.key,
+                reason: 'Equal confidence tie broken by newer validFrom.',
+                level: 'audit',
+                metadata: {
+                    confidence: candidate.confidence,
+                    priorConfidence: existing.confidence,
+                    valuePreview: JSON.stringify(candidate.valueRaw).slice(0, 200),
+                },
+            });
             return {
                 action: 'updated',
                 entry,
@@ -349,6 +433,18 @@ async function resolveConflict(
             );
             await saveReceipt(candidate, 'rejected', existing.id, tx);
             inc('librarian.rejected');
+            getStaffEventEmitter().emit({
+                staffComponent: 'Librarian',
+                actionType: 'write_rejected',
+                agentId: candidate.createdBy,
+                source: candidate.source,
+                entityType: candidate.entityType,
+                entityId: candidate.entityId,
+                key: candidate.key,
+                reason: 'Equal confidence tie broken by existing newer validFrom.',
+                level: 'audit',
+                metadata: { rejectionReason: 'temporal_tie_existing_wins' },
+            });
             return {
                 action: 'rejected',
                 reason: 'Equal confidence tie broken by existing newer validFrom.',
@@ -368,6 +464,18 @@ async function resolveConflict(
         if (Math.abs(incomingScore - existingScore) < 1.0) {
             await logDecision(existing.id, 'CONFLICT_ESCALATED', candidate, existingScore, incomingScore, 'Duplicate value with equal scores', false, tx);
             inc('librarian.escalated');
+            getStaffEventEmitter().emit({
+                staffComponent: 'Librarian',
+                actionType: 'conflict_detected',
+                agentId: candidate.createdBy,
+                source: candidate.source,
+                entityType: candidate.entityType,
+                entityId: candidate.entityId,
+                key: candidate.key,
+                reason: 'Duplicate value with equal scores — escalating.',
+                level: 'debug',
+                metadata: { existingScore, incomingScore },
+            });
             return escalateConflict(existing, candidate, tx);
         }
 
@@ -376,6 +484,22 @@ async function resolveConflict(
             await logDecision(entry.id, 'CONFLICT_UPDATED', candidate, existingScore, incomingScore, 'Duplicate value, higher score', false, tx);
             await saveReceipt(candidate, 'updated', entry.id, tx);
             inc('librarian.updated');
+            getStaffEventEmitter().emit({
+                staffComponent: 'Librarian',
+                actionType: 'write_replaced',
+                agentId: candidate.createdBy,
+                source: candidate.source,
+                entityType: candidate.entityType,
+                entityId: candidate.entityId,
+                key: candidate.key,
+                reason: 'Duplicate value. Updated confidence.',
+                level: 'audit',
+                metadata: {
+                    confidence: candidate.confidence,
+                    priorConfidence: existing.confidence,
+                    valuePreview: JSON.stringify(candidate.valueRaw).slice(0, 200),
+                },
+            });
             return {
                 action: 'updated',
                 entry,
@@ -387,6 +511,18 @@ async function resolveConflict(
         await logDecision(existing.id, 'CONFLICT_REJECTED', candidate, existingScore, incomingScore, 'Duplicate value, lower score', false, tx);
         await saveReceipt(candidate, 'rejected', existing.id, tx);
         inc('librarian.rejected');
+        getStaffEventEmitter().emit({
+            staffComponent: 'Librarian',
+            actionType: 'write_rejected',
+            agentId: candidate.createdBy,
+            source: candidate.source,
+            entityType: candidate.entityType,
+            entityId: candidate.entityId,
+            key: candidate.key,
+            reason: 'Duplicate value with lower score.',
+            level: 'audit',
+            metadata: { rejectionReason: 'duplicate_value_lower_score' },
+        });
         return {
             action: 'rejected',
             reason: 'Duplicate value with lower score.',
@@ -403,6 +539,18 @@ async function resolveConflict(
             await logDecision(existing.id, 'CONFLICT_REJECTED', candidate, 0, 0, `Existing from authoritative source (${existing.source})`, false, tx);
             await saveReceipt(candidate, 'rejected', existing.id, tx);
             inc('librarian.rejected');
+            getStaffEventEmitter().emit({
+                staffComponent: 'Librarian',
+                actionType: 'write_rejected',
+                agentId: candidate.createdBy,
+                source: candidate.source,
+                entityType: candidate.entityType,
+                entityId: candidate.entityId,
+                key: candidate.key,
+                reason: `Existing from authoritative source: ${existing.source}`,
+                level: 'audit',
+                metadata: { rejectionReason: 'authoritative_source_existing' },
+            });
             return {
                 action: 'rejected',
                 reason: `Existing from authoritative source: ${existing.source}`,
@@ -415,6 +563,22 @@ async function resolveConflict(
             await logDecision(entry.id, 'CONFLICT_REPLACED', candidate, 0, 0, `Incoming from authoritative source (${candidate.source})`, false, tx);
             await saveReceipt(candidate, 'updated', entry.id, tx);
             inc('librarian.updated');
+            getStaffEventEmitter().emit({
+                staffComponent: 'Librarian',
+                actionType: 'write_replaced',
+                agentId: candidate.createdBy,
+                source: candidate.source,
+                entityType: candidate.entityType,
+                entityId: candidate.entityId,
+                key: candidate.key,
+                reason: `Incoming from authoritative source: ${candidate.source}`,
+                level: 'audit',
+                metadata: {
+                    confidence: candidate.confidence,
+                    priorConfidence: existing.confidence,
+                    valuePreview: JSON.stringify(candidate.valueRaw).slice(0, 200),
+                },
+            });
             return {
                 action: 'updated',
                 entry,
@@ -440,6 +604,22 @@ async function resolveConflict(
             await logDecision(entry.id, 'CONFLICT_REPLACED', candidate, existingScore, incomingScore, `Score gap ${gap.toFixed(1)} >= threshold ${policy.minConfidenceToOverwrite}`, false, tx);
             await saveReceipt(candidate, 'updated', entry.id, tx);
             inc('librarian.updated');
+            getStaffEventEmitter().emit({
+                staffComponent: 'Librarian',
+                actionType: 'write_replaced',
+                agentId: candidate.createdBy,
+                source: candidate.source,
+                entityType: candidate.entityType,
+                entityId: candidate.entityId,
+                key: candidate.key,
+                reason: `Incoming score (${incomingScore.toFixed(1)}) higher than existing (${existingScore.toFixed(1)})`,
+                level: 'audit',
+                metadata: {
+                    confidence: candidate.confidence,
+                    priorConfidence: existing.confidence,
+                    valuePreview: JSON.stringify(candidate.valueRaw).slice(0, 200),
+                },
+            });
             return {
                 action: 'updated',
                 entry,
@@ -451,6 +631,18 @@ async function resolveConflict(
         await logDecision(existing.id, 'CONFLICT_REJECTED', candidate, existingScore, incomingScore, `Score gap ${gap.toFixed(1)} >= threshold, existing wins`, false, tx);
         await saveReceipt(candidate, 'rejected', existing.id, tx);
         inc('librarian.rejected');
+        getStaffEventEmitter().emit({
+            staffComponent: 'Librarian',
+            actionType: 'write_rejected',
+            agentId: candidate.createdBy,
+            source: candidate.source,
+            entityType: candidate.entityType,
+            entityId: candidate.entityId,
+            key: candidate.key,
+            reason: `Existing score (${existingScore.toFixed(1)}) higher than incoming (${incomingScore.toFixed(1)})`,
+            level: 'audit',
+            metadata: { rejectionReason: 'score_gap_existing_wins' },
+        });
         return {
             action: 'rejected',
             reason: `Existing score (${existingScore.toFixed(1)}) higher than incoming (${incomingScore.toFixed(1)})`,
@@ -507,6 +699,18 @@ ESCALATE: <reason>`,
             await logDecision(existing.id, 'CONFLICT_REJECTED', incoming, existingScore, incomingScore, `LLM: ${reason}`, true, tx);
             await saveReceipt(incoming, 'rejected', existing.id, tx);
             inc('librarian.rejected');
+            getStaffEventEmitter().emit({
+                staffComponent: 'Librarian',
+                actionType: 'write_rejected',
+                agentId: incoming.createdBy,
+                source: incoming.source,
+                entityType: incoming.entityType,
+                entityId: incoming.entityId,
+                key: incoming.key,
+                reason: `LLM arbitration: ${reason}`,
+                level: 'audit',
+                metadata: { rejectionReason: 'llm_arbitration_keep_existing' },
+            });
             return {
                 action: 'rejected',
                 reason: `LLM arbitration: ${reason}`,
@@ -520,6 +724,22 @@ ESCALATE: <reason>`,
             await logDecision(entry.id, 'CONFLICT_REPLACED', incoming, existingScore, incomingScore, `LLM: ${reason}`, true, tx);
             await saveReceipt(incoming, 'updated', entry.id, tx);
             inc('librarian.updated');
+            getStaffEventEmitter().emit({
+                staffComponent: 'Librarian',
+                actionType: 'write_replaced',
+                agentId: incoming.createdBy,
+                source: incoming.source,
+                entityType: incoming.entityType,
+                entityId: incoming.entityId,
+                key: incoming.key,
+                reason: `LLM arbitration: ${reason}`,
+                level: 'audit',
+                metadata: {
+                    confidence: incoming.confidence,
+                    priorConfidence: existing.confidence,
+                    valuePreview: JSON.stringify(incoming.valueRaw).slice(0, 200),
+                },
+            });
             return {
                 action: 'updated',
                 entry,
@@ -602,6 +822,25 @@ async function escalateConflict(
     }
 
     await saveReceipt(incoming, 'escalated', current.id, tx, filename);
+
+    getStaffEventEmitter().emit({
+        staffComponent: 'Librarian',
+        actionType: 'write_escalated',
+        agentId: incoming.createdBy,
+        source: incoming.source,
+        entityType: incoming.entityType,
+        entityId: incoming.entityId,
+        key: incoming.key,
+        reason: appendedToExisting
+            ? `Conflict appended to unresolved escalation file ${filePath}. Awaiting human resolution.`
+            : `Conflict escalated to ${filePath}. Awaiting human resolution.`,
+        level: 'audit',
+        metadata: {
+            escalationId: filename,
+            conflictReason: 'confidence_conflict',
+            appendedToExisting,
+        },
+    });
 
     return {
         action: 'escalated',

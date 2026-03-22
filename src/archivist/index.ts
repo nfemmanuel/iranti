@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
+import { getStaffEventEmitter } from '../lib/staffEventRegistry';
 import { getDb } from '../library/client';
 import { archiveEntry, createEntry, findPendingEscalation } from '../library/queries';
 import { complete } from '../lib/llm';
@@ -84,6 +85,22 @@ export async function runArchivist(): Promise<ArchivistReport> {
     await applyMemoryDecay(report);
     await processEscalations(report);
 
+    getStaffEventEmitter().emit({
+        staffComponent: 'Archivist',
+        actionType: 'archive_scan_completed',
+        agentId: 'archivist',
+        source: 'internal',
+        reason: null,
+        level: 'debug',
+        metadata: {
+            expiredArchived: report.expiredArchived,
+            lowConfidenceArchived: report.lowConfidenceArchived,
+            escalationsProcessed: report.escalationsProcessed,
+            errors: report.errors.length,
+            entriesScanned: report.expiredArchived + report.lowConfidenceArchived,
+        },
+    });
+
     return report;
 }
 
@@ -101,6 +118,21 @@ async function archiveExpired(report: ArchivistReport): Promise<void> {
     for (const entry of expired) {
         try {
             await archiveEntry(entry, ArchivedReason.expired);
+            getStaffEventEmitter().emit({
+                staffComponent: 'Archivist',
+                actionType: 'entry_archived',
+                agentId: 'archivist',
+                source: 'internal',
+                entityType: entry.entityType,
+                entityId: entry.entityId,
+                key: entry.key,
+                reason: 'Entry expired (validUntil in past)',
+                level: 'audit',
+                metadata: {
+                    archivedReason: 'expired',
+                    archivedFactId: String(entry.id),
+                },
+            });
             report.expiredArchived++;
         } catch (err) {
             report.errors.push(`Failed to archive expired entry ${entry.id}: ${err}`);
@@ -121,6 +153,21 @@ async function archiveLowConfidence(report: ArchivistReport): Promise<void> {
     for (const entry of lowConfidence) {
         try {
             await archiveEntry(entry, ArchivedReason.expired);
+            getStaffEventEmitter().emit({
+                staffComponent: 'Archivist',
+                actionType: 'entry_archived',
+                agentId: 'archivist',
+                source: 'internal',
+                entityType: entry.entityType,
+                entityId: entry.entityId,
+                key: entry.key,
+                reason: `Confidence below threshold (${entry.confidence} < ${LOW_CONFIDENCE_THRESHOLD})`,
+                level: 'audit',
+                metadata: {
+                    archivedReason: 'low_confidence',
+                    archivedFactId: String(entry.id),
+                },
+            });
             report.lowConfidenceArchived++;
         } catch (err) {
             report.errors.push(`Failed to archive low confidence entry ${entry.id}: ${err}`);
@@ -158,6 +205,23 @@ async function applyMemoryDecay(report: ArchivistReport): Promise<void> {
         try {
             if (newConfidence < decayConfig.threshold) {
                 await archiveEntry(entry, ArchivedReason.expired);
+                getStaffEventEmitter().emit({
+                    staffComponent: 'Archivist',
+                    actionType: 'entry_decayed',
+                    agentId: 'archivist',
+                    source: 'internal',
+                    entityType: entry.entityType,
+                    entityId: entry.entityId,
+                    key: entry.key,
+                    reason: `Confidence decayed to ${newConfidence} — below threshold.`,
+                    level: 'audit',
+                    metadata: {
+                        archivedReason: 'decay',
+                        archivedFactId: String(entry.id),
+                        decayPolicy: 'confidence_threshold',
+                        newConfidence,
+                    },
+                });
                 report.lowConfidenceArchived++;
                 continue;
             }
@@ -283,6 +347,38 @@ async function processEscalationFile(
                 }] as unknown as never[],
             }, tx);
         }
+    });
+
+    getStaffEventEmitter().emit({
+        staffComponent: 'Archivist',
+        actionType: 'escalation_processed',
+        agentId: 'archivist',
+        source: 'internal',
+        entityType: auth.entityType,
+        entityId: auth.entityId,
+        key: auth.key,
+        reason: 'Archivist consumed a Resolutionist resolution from escalation file.',
+        level: 'audit',
+        metadata: {
+            escalationId: filename,
+            winnerSource: originalRetained ? 'existing' : 'challenger',
+        },
+    });
+
+    getStaffEventEmitter().emit({
+        staffComponent: 'Archivist',
+        actionType: 'resolution_consumed',
+        agentId: 'archivist',
+        source: 'internal',
+        entityType: auth.entityType,
+        entityId: auth.entityId,
+        key: auth.key,
+        reason: 'Archive row resolutionState set to resolved.',
+        level: 'audit',
+        metadata: {
+            escalationId: filename,
+            archiveEntryId: String(pending.id),
+        },
     });
 
     // LLM enrichment (non-authoritative)

@@ -1,5 +1,13 @@
 import 'dotenv/config';
 import { initDb } from '../library/client';
+import {
+    IStaffEventEmitter,
+    NoopEventEmitter,
+    StaffEventInput,
+    StaffEvent,
+    buildStaffEvent,
+} from '../lib/staffEventEmitter';
+import { setStaffEventEmitter, getStaffEventEmitter, resetStaffEventEmitter } from '../lib/staffEventRegistry';
 import { librarianWrite, librarianIngest } from '../librarian';
 import type { WorkingMemoryBrief, AttendResult } from '../attendant';
 import { getAttendant, AttendantInstance } from '../attendant/registry';
@@ -17,6 +25,12 @@ import { ArchivedReason, ResolutionOutcome, ResolutionState } from '../generated
 export interface IrantiConfig {
     connectionString?: string;
     llmProvider?: string;
+    /**
+     * Optional event emitter for observability integrations (e.g., the Iranti
+     * Control Plane). Defaults to a no-op emitter if not provided.
+     * The emitter MUST NOT throw — all errors must be caught internally.
+     */
+    staffEventEmitter?: IStaffEventEmitter;
 }
 
 export interface WriteInput {
@@ -309,6 +323,10 @@ export class Iranti {
         if (config.llmProvider) {
             process.env.LLM_PROVIDER = config.llmProvider;
         }
+
+        // Register the emitter once at construction time. All Staff components
+        // read from the module-level registry — no threading required.
+        setStaffEventEmitter(config.staffEventEmitter ?? new NoopEventEmitter());
     }
 
     // ── Write ───────────────────────────────────────────────────────────────
@@ -751,3 +769,11 @@ export class Iranti {
 // ─── Default Export ──────────────────────────────────────────────────────────
 
 export default Iranti;
+
+// ─── Public re-exports for observability consumers ─────────────────────────────────────────────
+// Consumers who build their own emitter (e.g., a DbStaffEventEmitter) need
+// the interface, the noop default, and the registry setter.
+
+export type { IStaffEventEmitter, StaffEventInput, StaffEvent };
+export { NoopEventEmitter, buildStaffEvent };
+export { setStaffEventEmitter, getStaffEventEmitter, resetStaffEventEmitter };
