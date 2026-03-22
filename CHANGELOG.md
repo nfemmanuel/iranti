@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.18 - 2026-03-21
+
+### Added
+
+- `iranti uninstall` as a first-class lifecycle command with dry-run, JSON output, and explicit `--all` teardown for runtime roots plus project integrations.
+- A dedicated CLI uninstall feature spec and temp-root uninstall smoke coverage.
+
+### Changed
+
+- Project cleanup during uninstall now removes only Iranti-owned integration entries from `.mcp.json` and `.claude/settings.local.json`, preserving unrelated MCP servers and Claude settings.
+- Operator and public docs now describe uninstall alongside setup, upgrade, and runtime lifecycle flows.
+
+### Fixed
+
+- Windows global npm installs can now uninstall cleanly through a detached handoff instead of trying to remove the live CLI in place.
+- README benchmark limits no longer describe the retracted slash-value and resolved `user/main` issues as active defects.
+
 ## 0.2.17 - 2026-03-21
 
 ### Added

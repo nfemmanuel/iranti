@@ -87,6 +87,31 @@ type UpgradeExecutionResult = {
     };
 };
 
+type UninstallProjectArtifact = {
+    projectPath: string;
+    bindingFile?: string;
+    mcpFile?: string;
+    claudeSettingsFile?: string;
+};
+
+type UninstallRuntimeRoot = {
+    path: string;
+    source: 'active-root' | 'binding' | 'scan';
+};
+
+type UninstallProcessCandidate = {
+    pid: number;
+    source: 'runtime' | 'process-scan';
+    label: string;
+    command?: string;
+};
+
+type UninstallExecutionResult = {
+    label: string;
+    status: 'pass' | 'warn' | 'fail';
+    detail: string;
+};
+
 type UpgradeTargetStatus = {
     target: Exclude<UpgradeTarget, 'auto'>;
     available: boolean;
@@ -2761,6 +2786,596 @@ async function executeUpgradeTarget(
     return { target, steps, verification };
 }
 
+function resolveUninstallScanRoots(args: ParsedArgs): string[] {
+    const explicit = getFlag(args, 'scan-root');
+    const candidates = explicit
+        ? explicit.split(',').map((value) => path.resolve(value.trim())).filter(Boolean)
+        : [
+            process.cwd(),
+            path.join(os.homedir(), 'Documents', 'Projects'),
+        ].filter((value, index, array) => array.indexOf(value) === index);
+    return candidates.filter((candidate, index, array) =>
+        candidate.length > 0
+        && fs.existsSync(candidate)
+        && array.indexOf(candidate) === index
+    );
+}
+
+function runtimeRootFromInstanceEnv(envFile: string): string | null {
+    const normalized = path.resolve(envFile);
+    const parts = normalized.split(path.sep);
+    const instancesIndex = parts.lastIndexOf('instances');
+    if (instancesIndex <= 0) return null;
+    return parts.slice(0, instancesIndex).join(path.sep);
+}
+
+async function discoverRuntimeRoots(root: string, projectArtifacts: UninstallProjectArtifact[], scanRoots: string[]): Promise<UninstallRuntimeRoot[]> {
+    const discovered = new Map<string, UninstallRuntimeRoot>();
+    const add = (candidate: string | null | undefined, source: UninstallRuntimeRoot['source']) => {
+        if (!candidate) return;
+        const resolved = path.resolve(candidate);
+        if (!fs.existsSync(resolved)) return;
+        if (!discovered.has(resolved)) {
+            discovered.set(resolved, { path: resolved, source });
+        }
+    };
+
+    add(root, 'active-root');
+
+    for (const artifact of projectArtifacts) {
+        if (!artifact.bindingFile || !fs.existsSync(artifact.bindingFile)) continue;
+        try {
+            const binding = await readEnvFile(artifact.bindingFile);
+            add(runtimeRootFromInstanceEnv(binding.IRANTI_INSTANCE_ENV ?? ''), 'binding');
+        } catch {
+            continue;
+        }
+    }
+
+    for (const scanRoot of scanRoots) {
+        const queue: string[] = [scanRoot];
+        while (queue.length > 0) {
+            const current = queue.shift()!;
+            let entries: fs.Dirent[] = [];
+            try {
+                entries = await fsp.readdir(current, { withFileTypes: true });
+            } catch {
+                continue;
+            }
+            for (const entry of entries) {
+                if (!entry.isDirectory()) continue;
+                if (shouldSkipUninstallScanDir(entry.name)) continue;
+                const candidate = path.join(current, entry.name);
+                if ((entry.name === '.iranti' || entry.name === '.iranti-runtime')
+                    && (fs.existsSync(path.join(candidate, 'install.json')) || fs.existsSync(path.join(candidate, 'instances')))) {
+                    add(candidate, 'scan');
+                    continue;
+                }
+                queue.push(candidate);
+            }
+        }
+    }
+
+    return Array.from(discovered.values()).sort((a, b) => a.path.localeCompare(b.path));
+}
+
+async function collectUninstallProcesses(runtimeRoots: UninstallRuntimeRoot[], context: ReturnType<typeof detectUpgradeContext>): Promise<UninstallProcessCandidate[]> {
+    const processes = new Map<number, UninstallProcessCandidate>();
+    for (const runtimeRoot of runtimeRoots) {
+        const instances = await collectRuntimeInstanceSummaries(runtimeRoot.path);
+        for (const instance of instances) {
+            const pid = instance.runtime.state?.pid;
+            if (!instance.runtime.running || !pid || pid === process.pid) continue;
+            processes.set(pid, {
+                pid,
+                source: 'runtime',
+                label: `instance:${instance.name}`,
+                command: instance.runtime.state?.healthUrl,
+            });
+        }
+    }
+
+    const probe = process.platform === 'win32'
+        ? runCommandCapture('powershell', [
+            '-NoProfile',
+            '-Command',
+            'Get-CimInstance Win32_Process | Select-Object ProcessId, CommandLine | ConvertTo-Json -Compress',
+        ])
+        : runCommandCapture('ps', ['-ax', '-o', 'pid=', '-o', 'command=']);
+
+    if (probe.status === 0) {
+        if (process.platform === 'win32') {
+            try {
+                const payload = JSON.parse(probe.stdout) as Array<{ ProcessId?: number; CommandLine?: string }> | { ProcessId?: number; CommandLine?: string };
+                const rows = Array.isArray(payload) ? payload : [payload];
+                const needles = [
+                    context.packageRootPath.toLowerCase(),
+                    context.globalNpmRoot?.toLowerCase(),
+                    'iranti mcp',
+                    'iranti run',
+                    'iranti-cli',
+                    'iranti-mcp',
+                    'claude-code-memory-hook',
+                ].filter((value): value is string => Boolean(value));
+                for (const row of rows) {
+                    const pid = row.ProcessId;
+                    const command = row.CommandLine ?? '';
+                    if (!pid || pid === process.pid || !command) continue;
+                    const lower = command.toLowerCase();
+                    if (!needles.some((needle) => lower.includes(needle))) continue;
+                    processes.set(pid, {
+                        pid,
+                        source: 'process-scan',
+                        label: 'iranti-process',
+                        command,
+                    });
+                }
+            } catch {
+                // best effort only
+            }
+        } else {
+            const needles = [
+                context.packageRootPath.toLowerCase(),
+                context.globalNpmRoot?.toLowerCase(),
+                'iranti mcp',
+                'iranti run',
+                'iranti-cli',
+                'iranti-mcp',
+                'claude-code-memory-hook',
+            ].filter((value): value is string => Boolean(value));
+            for (const line of probe.stdout.split(/\r?\n/)) {
+                const match = line.trim().match(/^(\d+)\s+(.*)$/);
+                if (!match) continue;
+                const pid = Number.parseInt(match[1] ?? '', 10);
+                const command = match[2] ?? '';
+                if (!pid || pid === process.pid) continue;
+                const lower = command.toLowerCase();
+                if (!needles.some((needle) => lower.includes(needle))) continue;
+                processes.set(pid, {
+                    pid,
+                    source: 'process-scan',
+                    label: 'iranti-process',
+                    command,
+                });
+            }
+        }
+    }
+
+    return Array.from(processes.values()).sort((a, b) => a.pid - b.pid);
+}
+
+function detectCodexRegistration(name: string = 'iranti'): boolean {
+    if (!hasCodexInstalled()) return false;
+    const proc = runCommandCapture('codex', ['mcp', 'get', name, '--json']);
+    return proc.status === 0;
+}
+
+function removeIrantiMcpServerFromValue(value: Record<string, unknown>): Record<string, unknown> | null {
+    const mcpServers = value.mcpServers;
+    if (!mcpServers || typeof mcpServers !== 'object' || Array.isArray(mcpServers)) return value;
+    const nextServers = { ...(mcpServers as Record<string, unknown>) };
+    delete nextServers.iranti;
+    if (Object.keys(nextServers).length === 0) {
+        const next = { ...value };
+        delete next.mcpServers;
+        return Object.keys(next).length === 0 ? null : next;
+    }
+    return {
+        ...value,
+        mcpServers: nextServers,
+    };
+}
+
+function removeIrantiClaudeHooksFromValue(value: Record<string, unknown>): Record<string, unknown> | null {
+    const hooks = isClaudeHooksObject(value.hooks) ? value.hooks : null;
+    if (!hooks) return value;
+
+    const nextHooks: Record<string, unknown> = { ...hooks };
+    for (const event of ['SessionStart', 'UserPromptSubmit'] as const) {
+        const entries = hooks[event];
+        if (!Array.isArray(entries)) continue;
+        const filtered = entries.filter((entry) => {
+            if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return true;
+            if (isLegacyIrantiClaudeHookEntry(entry)) return false;
+            const structured = entry as Record<string, unknown>;
+            const nestedHooks = Array.isArray(structured.hooks) ? structured.hooks : [];
+            const remainingNested = nestedHooks.filter((hook) => {
+                if (!hook || typeof hook !== 'object' || Array.isArray(hook)) return true;
+                const command = typeof (hook as Record<string, unknown>).command === 'string'
+                    ? String((hook as Record<string, unknown>).command)
+                    : '';
+                return !command.includes('iranti claude-hook');
+            });
+            if (remainingNested.length !== nestedHooks.length) {
+                if (remainingNested.length === 0) {
+                    return false;
+                }
+                structured.hooks = remainingNested;
+            }
+            return true;
+        });
+        if (filtered.length === 0) {
+            delete nextHooks[event];
+        } else {
+            nextHooks[event] = filtered;
+        }
+    }
+
+    const next = { ...value };
+    if (Object.keys(nextHooks).length === 0) {
+        delete next.hooks;
+    } else {
+        next.hooks = nextHooks;
+    }
+    return Object.keys(next).length === 0 ? null : next;
+}
+
+async function cleanupProjectArtifacts(artifacts: UninstallProjectArtifact[]): Promise<UninstallExecutionResult[]> {
+    const results: UninstallExecutionResult[] = [];
+    for (const artifact of artifacts) {
+        if (artifact.bindingFile && fs.existsSync(artifact.bindingFile)) {
+            await fsp.rm(artifact.bindingFile, { force: true });
+            results.push({
+                label: 'project-binding',
+                status: 'pass',
+                detail: `Removed ${artifact.bindingFile}`,
+            });
+        }
+
+        if (artifact.mcpFile && fs.existsSync(artifact.mcpFile)) {
+            const parsed = readJsonFile<Record<string, unknown>>(artifact.mcpFile);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                const next = removeIrantiMcpServerFromValue(parsed);
+                if (!next) {
+                    await fsp.rm(artifact.mcpFile, { force: true });
+                    results.push({
+                        label: 'project-mcp',
+                        status: 'pass',
+                        detail: `Removed ${artifact.mcpFile}`,
+                    });
+                } else {
+                    await writeText(artifact.mcpFile, `${JSON.stringify(next, null, 2)}\n`);
+                    results.push({
+                        label: 'project-mcp',
+                        status: 'pass',
+                        detail: `Removed Iranti MCP entry from ${artifact.mcpFile}`,
+                    });
+                }
+            } else {
+                results.push({
+                    label: 'project-mcp',
+                    status: 'warn',
+                    detail: `Skipped unreadable JSON file ${artifact.mcpFile}`,
+                });
+            }
+        }
+
+        if (artifact.claudeSettingsFile && fs.existsSync(artifact.claudeSettingsFile)) {
+            const parsed = readJsonFile<Record<string, unknown>>(artifact.claudeSettingsFile);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                const next = removeIrantiClaudeHooksFromValue(parsed);
+                if (!next) {
+                    await fsp.rm(artifact.claudeSettingsFile, { force: true });
+                    results.push({
+                        label: 'project-claude',
+                        status: 'pass',
+                        detail: `Removed ${artifact.claudeSettingsFile}`,
+                    });
+                } else {
+                    await writeText(artifact.claudeSettingsFile, `${JSON.stringify(next, null, 2)}\n`);
+                    results.push({
+                        label: 'project-claude',
+                        status: 'pass',
+                        detail: `Removed Iranti Claude hooks from ${artifact.claudeSettingsFile}`,
+                    });
+                }
+            } else {
+                results.push({
+                    label: 'project-claude',
+                    status: 'warn',
+                    detail: `Skipped unreadable JSON file ${artifact.claudeSettingsFile}`,
+                });
+            }
+        }
+    }
+    return results;
+}
+
+async function runUninstallCommand(step: UpgradeCommand): Promise<UninstallExecutionResult> {
+    const proc = runCommandCapture(step.executable, step.args, step.cwd);
+    if (proc.status === 0) {
+        return {
+            label: step.label,
+            status: 'pass',
+            detail: `${step.display} completed successfully.`,
+        };
+    }
+    return {
+        label: step.label,
+        status: 'warn',
+        detail: `${step.display} exited with status ${proc.status ?? -1}: ${(proc.stderr || proc.stdout).trim() || 'unknown error'}`,
+    };
+}
+
+async function stopUninstallProcesses(processes: UninstallProcessCandidate[]): Promise<UninstallExecutionResult[]> {
+    const results: UninstallExecutionResult[] = [];
+    for (const candidate of processes) {
+        const stopped = await stopRuntimeProcess(candidate.pid, 5000);
+        results.push({
+            label: 'stop-process',
+            status: stopped ? 'pass' : 'warn',
+            detail: `${stopped ? 'Stopped' : 'Could not stop'} pid=${candidate.pid} (${candidate.label})`,
+        });
+    }
+    return results;
+}
+
+function buildDetachedWindowsUninstallScript(options: {
+    parentPid: number;
+    stopPids: number[];
+    removeCodex: boolean;
+    python?: UpgradeCommand | null;
+    removeGlobalNpm: boolean;
+    runtimeRoots: string[];
+    artifactFiles: string[];
+}): string {
+    const lines = [
+        `$parentPid = ${options.parentPid}`,
+        'while (Get-Process -Id $parentPid -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 500 }',
+    ];
+
+    for (const pid of options.stopPids) {
+        lines.push(`taskkill /PID ${pid} /T /F > $null 2>&1`);
+    }
+    if (options.removeCodex) {
+        lines.push("$codexGet = Get-Command codex -ErrorAction SilentlyContinue");
+        lines.push("if ($codexGet) { codex mcp get iranti --json > $null 2>&1; if ($LASTEXITCODE -eq 0) { codex mcp remove iranti > $null 2>&1 } }");
+    }
+    if (options.removeGlobalNpm) {
+        lines.push('& npm uninstall -g iranti');
+    }
+    if (options.python) {
+        const args = options.python.args.map((arg) => `'${escapeForSingleQuotedPowerShell(arg)}'`).join(', ');
+        lines.push(`& '${escapeForSingleQuotedPowerShell(options.python.executable)}' @(${args})`);
+    }
+    for (const filePath of options.artifactFiles) {
+        lines.push(`if (Test-Path -LiteralPath '${escapeForSingleQuotedPowerShell(filePath)}') { Remove-Item -LiteralPath '${escapeForSingleQuotedPowerShell(filePath)}' -Force }`);
+    }
+    for (const dirPath of options.runtimeRoots) {
+        lines.push(`if (Test-Path -LiteralPath '${escapeForSingleQuotedPowerShell(dirPath)}') { Remove-Item -LiteralPath '${escapeForSingleQuotedPowerShell(dirPath)}' -Recurse -Force }`);
+    }
+    lines.push('exit 0');
+    return lines.join('; ');
+}
+
+async function uninstallCommand(args: ParsedArgs): Promise<void> {
+    const scope = normalizeScope(getFlag(args, 'scope'));
+    const root = resolveInstallRoot(args, scope);
+    const json = hasFlag(args, 'json');
+    const dryRun = hasFlag(args, 'dry-run');
+    const executeFlag = hasFlag(args, 'yes');
+    const removeAll = hasFlag(args, 'all');
+    const keepData = hasFlag(args, 'keep-data');
+    const keepProjectBindings = hasFlag(args, 'keep-project-bindings');
+    const scanRoots = resolveUninstallScanRoots(args);
+    const context = detectUpgradeContext(args);
+    const projectArtifacts = removeAll && !keepProjectBindings
+        ? await discoverProjectArtifacts(scanRoots)
+        : [];
+    const runtimeRoots = await discoverRuntimeRoots(root, projectArtifacts, scanRoots);
+    const processes = await collectUninstallProcesses(runtimeRoots, context);
+    const codexRegistration = removeAll && !keepProjectBindings && detectCodexRegistration('iranti');
+    const pythonCommand = context.python
+        ? {
+            ...context.python,
+            label: 'python uninstall',
+            display: `${context.python.executable}${context.python.args[0] === '-3' ? ' -3' : ''} -m pip uninstall -y iranti`,
+            args: (context.python.args[0] === '-3' ? ['-3', '-m', 'pip'] : ['-m', 'pip']).concat(['uninstall', '-y', 'iranti']),
+        }
+        : null;
+    const actions = {
+        stopProcesses: processes.length > 0,
+        removeGlobalNpm: context.globalNpmInstall,
+        removePython: context.pythonVersion !== null && pythonCommand !== null,
+        removeRuntimeRoots: removeAll && !keepData && runtimeRoots.length > 0,
+        removeProjectBindings: removeAll && !keepProjectBindings && projectArtifacts.length > 0,
+        removeCodexRegistration: codexRegistration,
+    };
+
+    let execute = executeFlag;
+    let note: string | null = null;
+    if (!execute && !dryRun && !json && process.stdin.isTTY && process.stdout.isTTY) {
+        await withPromptSession(async (prompt) => {
+            execute = await promptYesNo(prompt, 'Proceed with uninstall using the plan below?', false);
+        });
+        if (!execute) {
+            note = 'Uninstall cancelled.';
+        }
+    } else if (!execute && !dryRun) {
+        note = 'Run with --yes to execute the uninstall, or use --dry-run to inspect the plan safely.';
+    }
+
+    const plannedSteps: string[] = [];
+    if (actions.stopProcesses) plannedSteps.push(`Stop ${processes.length} live Iranti process(es)`);
+    if (actions.removeGlobalNpm) plannedSteps.push('Remove global npm install');
+    if (actions.removePython) plannedSteps.push('Remove Python client');
+    if (actions.removeCodexRegistration) plannedSteps.push('Remove Codex MCP registration');
+    if (actions.removeProjectBindings) plannedSteps.push(`Clean ${projectArtifacts.length} project binding/integration surface(s)`);
+    if (actions.removeRuntimeRoots) plannedSteps.push(`Delete ${runtimeRoots.length} runtime root(s)`);
+
+    const actionLabel = execute ? 'uninstall' : dryRun ? 'dry-run' : 'inspect';
+    const execution: UninstallExecutionResult[] = [];
+
+    const requiresDetachedWindowsSelfUninstall = process.platform === 'win32'
+        && actions.removeGlobalNpm
+        && context.runningFromGlobalNpmInstall
+        && execute
+        && !dryRun;
+
+    if (execute && !dryRun) {
+        if (requiresDetachedWindowsSelfUninstall) {
+            const artifactFiles = projectArtifacts.flatMap((artifact) =>
+                [artifact.bindingFile, artifact.mcpFile, artifact.claudeSettingsFile]
+                    .filter((value): value is string => Boolean(value))
+            );
+            const script = buildDetachedWindowsUninstallScript({
+                parentPid: process.pid,
+                stopPids: processes.map((candidate) => candidate.pid),
+                removeCodex: actions.removeCodexRegistration,
+                python: actions.removePython ? pythonCommand : null,
+                removeGlobalNpm: actions.removeGlobalNpm,
+                runtimeRoots: actions.removeRuntimeRoots ? runtimeRoots.map((entry) => entry.path) : [],
+                artifactFiles,
+            });
+            const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], {
+                detached: true,
+                stdio: 'ignore',
+                windowsHide: true,
+                cwd: os.homedir(),
+                env: process.env,
+            });
+            child.unref();
+            execution.push({
+                label: 'detached-uninstall',
+                status: 'warn',
+                detail: 'Scheduled detached uninstall because the current Windows CLI cannot remove its own live global npm install in place.',
+            });
+            note = 'Wait a few seconds, then open a new shell and verify `iranti` is gone from PATH.';
+        } else {
+            if (actions.stopProcesses) {
+                execution.push(...await stopUninstallProcesses(processes));
+            }
+            if (actions.removeCodexRegistration) {
+                const proc = runCommandCapture('codex', ['mcp', 'remove', 'iranti']);
+                execution.push({
+                    label: 'codex-mcp',
+                    status: proc.status === 0 ? 'pass' : 'warn',
+                    detail: proc.status === 0
+                        ? 'Removed Codex MCP registration.'
+                        : `Could not remove Codex MCP registration: ${(proc.stderr || proc.stdout).trim() || 'unknown error'}`,
+                });
+            }
+            if (actions.removeGlobalNpm) {
+                execution.push(await runUninstallCommand({
+                    label: 'npm uninstall',
+                    display: 'npm uninstall -g iranti',
+                    executable: 'npm',
+                    args: ['uninstall', '-g', 'iranti'],
+                    cwd: context.packageRootPath,
+                }));
+            }
+            if (actions.removePython && pythonCommand) {
+                execution.push(await runUninstallCommand(pythonCommand));
+            }
+            if (actions.removeProjectBindings) {
+                execution.push(...await cleanupProjectArtifacts(projectArtifacts));
+            }
+            if (actions.removeRuntimeRoots) {
+                for (const runtimeRoot of runtimeRoots) {
+                    await fsp.rm(runtimeRoot.path, { recursive: true, force: true });
+                    execution.push({
+                        label: 'runtime-root',
+                        status: 'pass',
+                        detail: `Removed ${runtimeRoot.path}`,
+                    });
+                }
+            }
+        }
+    }
+
+    if (json) {
+        console.log(JSON.stringify({
+            currentVersion: context.currentVersion,
+            runtimeRoot: root,
+            scanRoots,
+            removeAll,
+            keepData,
+            keepProjectBindings,
+            install: {
+                globalNpmVersion: context.globalNpmVersion,
+                pythonVersion: context.pythonVersion,
+                runningFromGlobalNpmInstall: context.runningFromGlobalNpmInstall,
+                codexRegistration,
+            },
+            runtimeRoots,
+            projectArtifacts,
+            processes,
+            actions,
+            plan: plannedSteps,
+            action: actionLabel,
+            execution,
+            note,
+        }, null, 2));
+        return;
+    }
+
+    console.log(sectionTitle('Iranti Uninstall'));
+    console.log(`  current_version       ${context.currentVersion}`);
+    console.log(`  runtime_root          ${root}`);
+    console.log(`  npm_global            ${context.globalNpmVersion ?? paint('not installed', 'gray')}`);
+    console.log(`  python                ${context.pythonVersion ?? paint('not installed', 'gray')}`);
+    console.log(`  codex_registration    ${codexRegistration ? paint('yes', 'green') : paint('no', 'gray')}`);
+    console.log(`  remove_all            ${removeAll ? paint('yes', 'yellow') : paint('no', 'gray')}`);
+    console.log(`  keep_data             ${keepData ? paint('yes', 'yellow') : paint('no', 'gray')}`);
+    console.log(`  keep_project_bindings ${keepProjectBindings ? paint('yes', 'yellow') : paint('no', 'gray')}`);
+    console.log('');
+    console.log(`  scan_roots            ${scanRoots.length > 0 ? scanRoots.join(', ') : '(none)'}`);
+    console.log(`  live_processes        ${processes.length}`);
+    console.log(`  project_artifacts     ${projectArtifacts.length}`);
+    console.log(`  runtime_roots         ${runtimeRoots.length}`);
+    console.log('');
+    if (plannedSteps.length > 0) {
+        console.log('  plan');
+        for (const step of plannedSteps) {
+            console.log(`    - ${step}`);
+        }
+    } else {
+        console.log('  plan');
+        console.log('    - Nothing to remove.');
+    }
+    if (processes.length > 0) {
+        console.log('');
+        console.log('  processes');
+        for (const candidate of processes) {
+            console.log(`    - pid=${candidate.pid} ${candidate.label}${candidate.command ? ` :: ${truncateText(candidate.command, 120)}` : ''}`);
+        }
+    }
+    if (projectArtifacts.length > 0) {
+        console.log('');
+        console.log('  project_artifacts');
+        for (const artifact of projectArtifacts) {
+            console.log(`    - ${artifact.projectPath}`);
+            if (artifact.bindingFile) console.log(`      binding  ${artifact.bindingFile}`);
+            if (artifact.mcpFile) console.log(`      mcp      ${artifact.mcpFile}`);
+            if (artifact.claudeSettingsFile) console.log(`      claude   ${artifact.claudeSettingsFile}`);
+        }
+    }
+    if (runtimeRoots.length > 0) {
+        console.log('');
+        console.log('  runtime_roots');
+        for (const runtimeRoot of runtimeRoots) {
+            console.log(`    - ${runtimeRoot.path} (${runtimeRoot.source})`);
+        }
+    }
+
+    if (execution.length > 0) {
+        console.log('');
+        for (const result of execution) {
+            const marker = result.status === 'pass'
+                ? okLabel('PASS')
+                : result.status === 'warn'
+                    ? warnLabel('WARN')
+                    : failLabel('FAIL');
+            console.log(`${marker} ${result.detail}`);
+        }
+    }
+
+    if (note) {
+        console.log('');
+        console.log(`${infoLabel()} ${note}`);
+    }
+}
+
 async function listProviderKeysCommand(args: ParsedArgs): Promise<void> {
     const target = await resolveProviderKeyTarget(args);
     const currentProvider = normalizeProvider(target.env.LLM_PROVIDER ?? 'mock');
@@ -4555,6 +5170,91 @@ function findClaudeProjects(scanDir: string, recursive: boolean): string[] {
     return Array.from(found).sort((a, b) => a.localeCompare(b));
 }
 
+function shouldSkipUninstallScanDir(name: string): boolean {
+    if (name.startsWith('.git')) return true;
+    return shouldSkipRecursiveClaudeScanDir(name) || [
+        '.venv',
+        'venv',
+    ].includes(name);
+}
+
+function hasIrantiMcpServerConfig(value: unknown): boolean {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const record = value as Record<string, unknown>;
+    const mcpServers = record.mcpServers;
+    if (!mcpServers || typeof mcpServers !== 'object' || Array.isArray(mcpServers)) return false;
+    return Object.prototype.hasOwnProperty.call(mcpServers, 'iranti');
+}
+
+function hasIrantiClaudeHookSettings(value: unknown): boolean {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const record = value as Record<string, unknown>;
+    const hooks = isClaudeHooksObject(record.hooks) ? record.hooks : null;
+    if (!hooks) return false;
+    for (const event of ['SessionStart', 'UserPromptSubmit'] as const) {
+        const entries = hooks[event];
+        if (!Array.isArray(entries)) continue;
+        for (const entry of entries) {
+            if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+            if (isLegacyIrantiClaudeHookEntry(entry)) return true;
+            const structured = entry as Record<string, unknown>;
+            const nestedHooks = Array.isArray(structured.hooks) ? structured.hooks : [];
+            if (nestedHooks.some((hook) => {
+                if (!hook || typeof hook !== 'object' || Array.isArray(hook)) return false;
+                const command = typeof (hook as Record<string, unknown>).command === 'string'
+                    ? String((hook as Record<string, unknown>).command)
+                    : '';
+                return command.includes('iranti claude-hook');
+            })) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+async function discoverProjectArtifacts(scanRoots: string[]): Promise<UninstallProjectArtifact[]> {
+    const projects = new Map<string, UninstallProjectArtifact>();
+    for (const scanRoot of scanRoots) {
+        if (!fs.existsSync(scanRoot)) continue;
+        const queue: string[] = [scanRoot];
+        while (queue.length > 0) {
+            const current = queue.shift()!;
+            let entries: fs.Dirent[] = [];
+            try {
+                entries = await fsp.readdir(current, { withFileTypes: true });
+            } catch {
+                continue;
+            }
+
+            const bindingFile = path.join(current, '.env.iranti');
+            const mcpFile = path.join(current, '.mcp.json');
+            const claudeSettingsFile = path.join(current, '.claude', 'settings.local.json');
+
+            const artifact: UninstallProjectArtifact = { projectPath: current };
+            if (fs.existsSync(bindingFile)) artifact.bindingFile = bindingFile;
+            if (fs.existsSync(mcpFile) && hasIrantiMcpServerConfig(readJsonFile<Record<string, unknown>>(mcpFile))) {
+                artifact.mcpFile = mcpFile;
+            }
+            if (fs.existsSync(claudeSettingsFile) && hasIrantiClaudeHookSettings(readJsonFile<Record<string, unknown>>(claudeSettingsFile))) {
+                artifact.claudeSettingsFile = claudeSettingsFile;
+            }
+
+            if (artifact.bindingFile || artifact.mcpFile || artifact.claudeSettingsFile) {
+                projects.set(current, artifact);
+            }
+
+            for (const entry of entries) {
+                if (!entry.isDirectory()) continue;
+                if (shouldSkipUninstallScanDir(entry.name)) continue;
+                queue.push(path.join(current, entry.name));
+            }
+        }
+    }
+
+    return Array.from(projects.values()).sort((a, b) => a.projectPath.localeCompare(b.projectPath));
+}
+
 async function claudeSetupCommand(args: ParsedArgs): Promise<void> {
     if (hasFlag(args, 'help')) {
         printClaudeSetupHelp();
@@ -4710,6 +5410,7 @@ function printHelp(): void {
         ['iranti doctor [--instance <name>] [--scope user|system] [--env <file>] [--json] [--debug]', 'Run environment and runtime diagnostics.'],
         ['iranti status [--scope user|system] [--json]', 'Show runtime roots, bindings, and known instances.'],
         ['iranti upgrade [--check] [--dry-run] [--yes] [--all] [--target auto|npm-global|npm-repo|python[,python]] [--json]', 'Check or run CLI/runtime/package upgrades.'],
+        ['iranti uninstall [--dry-run] [--yes] [--all] [--keep-data] [--keep-project-bindings] [--scan-root <dir[,dir2]>] [--json]', 'Remove Iranti packages and, with --all, runtime data and project integrations.'],
         ['iranti handshake [--instance <name> | --project-env <file>] [--agent <id>] [--task <text>] [--recent <msg1||msg2>] [--recent-file <path>] [--json]', 'Manually inspect Attendant handshake output.'],
         ['iranti attend [message] [--instance <name> | --project-env <file>] [--agent <id>] [--context <text> | --context-file <path>] [--entity-hint <entity>] [--force] [--max-facts <n>] [--json]', 'Manually inspect turn-level memory injection decisions.'],
         ['iranti chat [--agent <agent-id>] [--provider <provider>] [--model <model>]', 'Open the local interactive chat shell.'],
@@ -4750,6 +5451,15 @@ function printSetupHelp(): void {
     console.log('  Use `--defaults` to build a plan from flags and environment variables without prompts.');
     console.log('  Use `--config <file>` to execute a saved setup plan.');
     console.log('  `--projects` and `--claude-code` apply to the non-interactive defaults flow.');
+}
+
+function printUninstallHelp(): void {
+    console.log(sectionTitle('Uninstall Command'));
+    console.log(`  ${commandText('iranti uninstall [--scope user|system] [--root <path>] [--dry-run] [--yes] [--all] [--keep-data] [--keep-project-bindings] [--scan-root <dir[,dir2]>] [--json]')}`);
+    console.log('');
+    console.log('  Default mode removes installed packages and stops live Iranti processes, but keeps runtime data and project bindings.');
+    console.log('  Add `--all` to also remove discovered runtime roots, `.env.iranti`, `.mcp.json` Iranti entries, and Claude hook settings.');
+    console.log('  Use `--scan-root` to control where project bindings and isolated runtime roots are discovered.');
 }
 
 function printInstanceHelp(): void {
@@ -4935,6 +5645,15 @@ async function main(): Promise<void> {
 
     if (args.command === 'upgrade') {
         await upgradeCommand(args);
+        return;
+    }
+
+    if (args.command === 'uninstall') {
+        if (hasFlag(args, 'help')) {
+            printUninstallHelp();
+            return;
+        }
+        await uninstallCommand(args);
         return;
     }
 

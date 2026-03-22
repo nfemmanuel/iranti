@@ -130,6 +130,18 @@ iranti upgrade --restart --instance local
 
 This is a staged operator flow, not live in-place binary replacement. Clients should reconnect after restart.
 
+If you need to remove Iranti:
+
+```bash
+iranti uninstall --dry-run
+iranti uninstall --all --yes
+```
+
+Notes:
+- plain `iranti uninstall` removes package installs and stops live Iranti processes, but keeps runtime data and project bindings
+- `--all` also removes discovered runtime roots, `.env.iranti`, Iranti MCP entries in `.mcp.json`, Claude hook settings, and Codex MCP registration
+- use `--scan-root` when your projects or isolated `.iranti-runtime` folders live outside the default scan roots
+
 ---
 
 ## Interrupted Sessions

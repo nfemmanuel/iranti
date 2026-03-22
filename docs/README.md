@@ -55,6 +55,7 @@
 
 - [Chat](features/chat/) - Native CLI chat session
 - [CLI Attendant Debug](features/cli-attendant-debug/) - Manual handshake/attend inspection commands
+- [CLI Uninstall](features/cli-uninstall/) - Package removal plus optional runtime/project cleanup
 - [Chunking](features/chunking/) - Auto-chunking raw content into facts
 - [Compatibility Contracts](features/compatibility-contracts/) - Stability rules, deprecation discipline, and release-gate expectations
 - [Conflict Resolution](features/conflict-resolution/) - Librarian conflict handling

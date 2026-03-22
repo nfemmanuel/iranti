@@ -300,7 +300,7 @@ iranti/
 â”œâ”€â”€ docs/
 â”‚   â”œâ”€â”€ engineering/            â€” CODE_STANDARDS.md, COMMENTING_GUIDELINES.md
 â”‚   â”œâ”€â”€ decisions/              â€” One file per architectural decision
-â”‚   â”œâ”€â”€ features/               â€” One subfolder per feature, including ontology-evolution and compatibility-contracts
+â”‚   â”œâ”€â”€ features/               â€” One subfolder per feature, including cli-uninstall, ontology-evolution and compatibility-contracts
 â”‚   â””â”€â”€ internal/               â€” Internal design notes, validation artifacts, and compatibility backlog
 +-- clients/
 ¦   +-- python/

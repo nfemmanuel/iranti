@@ -9,10 +9,10 @@
 
 Iranti gives agents persistent, identity-based memory. Facts written by one agent are retrievable by any other agent through exact entity+key lookup. Iranti also supports hybrid search (lexical + vector) when exact keys are unknown. Memory persists across sessions and survives context window limits.
 
-**Latest release:** [`v0.2.16`](https://github.com/nfemmanuel/iranti/releases/tag/v0.2.16)  
+**Latest release:** [`v0.2.18`](https://github.com/nfemmanuel/iranti/releases/tag/v0.2.18)  
 Published packages:
-- `iranti@0.2.16`
-- `@iranti/sdk@0.2.16`
+- `iranti@0.2.18`
+- `@iranti/sdk@0.2.18`
 
 ---
 
@@ -71,10 +71,8 @@ Iranti has now been rerun against a broader benchmark program covering 13 capabi
 ### Current Limits
 
 - **Search is not yet full semantic paraphrase retrieval.**
-- **Observe still performs better with hints than without them.**
-- Two product defects remain under review:
-  - silent retrieval drop when `/` appears inside certain fact values
-  - `user/main` noise from benchmark smoke artifacts
+- **Observe still performs better on confidence ranking than on broad progress-fact discovery.**
+- **Structured search is operational, but not yet broad semantic paraphrase retrieval.**
 
 ### Practical Position
 
@@ -213,6 +211,15 @@ iranti doctor --debug
 iranti run --instance local --debug
 iranti upgrade --verbose
 ```
+
+If you want to remove Iranti cleanly:
+
+```bash
+iranti uninstall --dry-run
+iranti uninstall --all --yes
+```
+
+Default uninstall keeps runtime data and project bindings. `--all` removes discovered runtime roots plus project-local Iranti integrations.
 
 Advanced/manual path:
 
