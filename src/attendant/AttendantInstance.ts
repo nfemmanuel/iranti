@@ -1,4 +1,5 @@
 import { route } from '../lib/router';
+import { getStaffEventEmitter } from '../lib/staffEventRegistry';
 import { queryEntry, findEntriesByEntity, recordKnowledgeEntryAccess } from '../library/queries';
 import { getRelatedDeep } from '../library/relationships';
 import { parseEntityString, resolveEntity } from '../library/entity-resolution';
@@ -555,6 +556,19 @@ export class AttendantInstance {
         };
 
         await this.persistState();
+        getStaffEventEmitter().emit({
+            staffComponent: 'Attendant',
+            actionType: 'handshake_completed',
+            agentId: this.agentId,
+            source: 'internal', // Source not threaded to AttendantInstance in this PR; follow-up required
+            reason: null,
+            level: 'debug',
+            metadata: {
+                briefSize: this.brief?.workingMemory.length ?? 0,
+                taskSummary: context.task.slice(0, 120),
+                sessionId: this.sessionStarted,
+            },
+        });
         timeEnd('attendant.handshake_ms', t0);
         return this.brief;
     }
@@ -589,6 +603,19 @@ export class AttendantInstance {
                 sessionRecovery: null,
             };
             await this.persistState();
+            getStaffEventEmitter().emit({
+                staffComponent: 'Attendant',
+                actionType: 'reconvene_completed',
+                agentId: this.agentId,
+                source: 'internal',
+                reason: 'Task unchanged — brief timestamp refreshed.',
+                level: 'audit',
+                metadata: {
+                    briefSize: this.brief?.workingMemory.length ?? 0,
+                    sessionId: this.sessionStarted,
+                    contextCallCount: this.contextCallCount,
+                },
+            });
             timeEnd('attendant.reconvene_ms', t0);
             return this.brief;
         }
@@ -606,6 +633,19 @@ export class AttendantInstance {
         };
 
         await this.persistState();
+        getStaffEventEmitter().emit({
+            staffComponent: 'Attendant',
+            actionType: 'reconvene_completed',
+            agentId: this.agentId,
+            source: 'internal',
+            reason: 'Task shifted — working memory rebuilt.',
+            level: 'audit',
+            metadata: {
+                briefSize: this.brief?.workingMemory.length ?? 0,
+                sessionId: this.sessionStarted,
+                contextCallCount: this.contextCallCount,
+            },
+        });
         timeEnd('attendant.reconvene_ms', t0);
         return this.brief;
     }
@@ -644,6 +684,20 @@ export class AttendantInstance {
 
         this.contextCallCount = 0;
         await this.persistState();
+
+        getStaffEventEmitter().emit({
+            staffComponent: 'Attendant',
+            actionType: 'session_expired',
+            agentId: this.agentId,
+            source: 'internal',
+            reason: 'Context window threshold reached. Session archived.',
+            level: 'audit',
+            metadata: {
+                sessionId: this.sessionStarted,
+                contextCallCount: 0,
+                expiryReason: 'context_low',
+            },
+        });
     }
 
     // ── Getters ──────────────────────────────────────────────────────────────
@@ -802,6 +856,20 @@ export class AttendantInstance {
         });
 
         if (!decision.needed) {
+            getStaffEventEmitter().emit({
+                staffComponent: 'Attendant',
+                actionType: 'attend_completed',
+                agentId: this.agentId,
+                source: 'internal',
+                reason: null,
+                level: 'debug',
+                metadata: {
+                    contextCallCount: this.contextCallCount,
+                    sessionId: this.sessionStarted,
+                    shouldInject: false,
+                    attendReason: 'memory_not_needed',
+                },
+            });
             timeEnd('attendant.attend_ms', t0);
             return {
                 shouldInject: false,
@@ -841,13 +909,28 @@ export class AttendantInstance {
             reason = 'forced';
         }
 
-        timeEnd('attendant.attend_ms', t0);
-        return {
+        const attendResult = {
             ...observed,
             shouldInject,
             reason,
             decision,
         };
+        getStaffEventEmitter().emit({
+            staffComponent: 'Attendant',
+            actionType: 'attend_completed',
+            agentId: this.agentId,
+            source: 'internal',
+            reason: null,
+            level: 'debug',
+            metadata: {
+                contextCallCount: this.contextCallCount,
+                sessionId: this.sessionStarted,
+                shouldInject,
+                attendReason: reason,
+            },
+        });
+        timeEnd('attendant.attend_ms', t0);
+        return attendResult;
     }
 
     // Context Window Observation
@@ -861,6 +944,18 @@ export class AttendantInstance {
             : [];
 
         if (currentContext.trim().length === 0 && entityHints.length === 0) {
+            getStaffEventEmitter().emit({
+                staffComponent: 'Attendant',
+                actionType: 'observe_completed',
+                agentId: this.agentId,
+                source: 'internal',
+                reason: null,
+                level: 'debug',
+                metadata: {
+                    observeType: 'empty_context',
+                    sessionId: this.sessionStarted,
+                },
+            });
             timeEnd('attendant.observe_ms', t0);
             return {
                 facts: [],
@@ -1002,6 +1097,18 @@ ${detectionWindow}`,
         }
 
         if (gatedCandidates.length === 0 && entityHints.length === 0) {
+            getStaffEventEmitter().emit({
+                staffComponent: 'Attendant',
+                actionType: 'observe_completed',
+                agentId: this.agentId,
+                source: 'internal',
+                reason: null,
+                level: 'debug',
+                metadata: {
+                    observeType: 'no_candidates',
+                    sessionId: this.sessionStarted,
+                },
+            });
             timeEnd('attendant.observe_ms', t0);
             return {
                 facts: [],
@@ -1161,6 +1268,19 @@ ${detectionWindow}`,
 
         await recordKnowledgeEntryAccess(topFacts.map((fact) => fact.entryId));
 
+        getStaffEventEmitter().emit({
+            staffComponent: 'Attendant',
+            actionType: 'observe_completed',
+            agentId: this.agentId,
+            source: 'internal',
+            reason: null,
+            level: 'debug',
+            metadata: {
+                observeType: 'facts_retrieved',
+                factsCount: topFacts.length,
+                sessionId: this.sessionStarted,
+            },
+        });
         timeEnd('attendant.observe_ms', t0);
         return {
             facts: topFacts.map(({ entityKey, summary, value, confidence, source }) => ({

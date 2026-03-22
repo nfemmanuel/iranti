@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import readline from 'readline/promises';
+import { getStaffEventEmitter } from '../lib/staffEventRegistry';
 
 type EscalationContext = {
     filename: string;
@@ -242,6 +243,21 @@ export async function resolveInteractive(escalationDir: string): Promise<Resolut
 
             if (choice === 'S') {
                 skipped++;
+                getStaffEventEmitter().emit({
+                    staffComponent: 'Resolutionist',
+                    actionType: 'escalation_deferred',
+                    agentId: 'operator',
+                    source: 'cli',
+                    entityType: escalation.entityType,
+                    entityId: escalation.entityId,
+                    key: escalation.key,
+                    reason: 'Operator skipped this escalation.',
+                    level: 'audit',
+                    metadata: {
+                        escalationId: escalation.filename,
+                        deferralReason: 'operator_skip',
+                    },
+                });
                 continue;
             }
 
@@ -280,6 +296,22 @@ export async function resolveInteractive(escalationDir: string): Promise<Resolut
                 const withJson = replaceAuthoritativeJson(original, payload);
                 const resolvedContent = markResolved(withJson);
                 await fs.writeFile(escalation.filePath, resolvedContent, 'utf-8');
+                getStaffEventEmitter().emit({
+                    staffComponent: 'Resolutionist',
+                    actionType: 'resolution_filed',
+                    agentId: 'operator',
+                    source: 'cli',
+                    entityType: escalation.entityType,
+                    entityId: escalation.entityId,
+                    key: escalation.key,
+                    reason: `Resolution filed: ${buildSummary(escalation, payload.value)}`,
+                    level: 'audit',
+                    metadata: {
+                        escalationId: escalation.filename,
+                        winnerSource: choice === '1' ? 'existing' : choice === '2' ? 'challenger' : 'custom',
+                        resolutionNote: typeof payload.notes === 'string' ? payload.notes : null,
+                    },
+                });
                 resolved++;
                 console.log(`Resolved ${escalation.entityType}/${escalation.entityId}/${escalation.key} -> ${formatValue(payload.value)}`);
             } catch (error) {
