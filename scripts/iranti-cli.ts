@@ -11,6 +11,7 @@ import net from 'net';
 import { disconnectDb, initDb } from '../src/library/client';
 import { createOrRotateApiKey, formatApiKeyToken, generateApiKeySecret, listApiKeys, revokeApiKey } from '../src/security/apiKeys';
 import { getEscalationPaths } from '../src/lib/escalationPaths';
+import { parseDockerContainerNames, parsePublishedDockerHostPorts } from '../src/lib/dockerCliParsing';
 import { loadRuntimeEnv } from '../src/lib/runtimeEnv';
 import { resolveInteractive } from '../src/resolutionist';
 import { startChatSession } from '../src/chat';
@@ -940,8 +941,9 @@ async function withPromptSession<T>(run: (session: PromptSession) => Promise<T>)
         secret: async (prompt: string, currentValue?: string) => {
             const placeholder = currentValue ? `${redactSecret(currentValue)} (enter new value to replace)` : 'leave blank to skip';
             const suffix = placeholder ? ` [${placeholder}]` : '';
+            process.stdout.write(`${prompt}${suffix}: `);
             muted = true;
-            const answer = (await rl.question(`${prompt}${suffix}: `)).trim();
+            const answer = (await rl.question('')).trim();
             muted = false;
             process.stdout.write('\n');
             if (!answer || answer === placeholder) return currentValue;
@@ -951,8 +953,9 @@ async function withPromptSession<T>(run: (session: PromptSession) => Promise<T>)
         secretRequired: async (prompt: string, currentValue?: string) => {
             const placeholder = currentValue ? `${redactSecret(currentValue)} (enter new value to replace)` : 'required';
             const suffix = placeholder ? ` [${placeholder}]` : '';
+            process.stdout.write(`${prompt}${suffix}: `);
             muted = true;
-            const answer = (await rl.question(`${prompt}${suffix}: `)).trim();
+            const answer = (await rl.question('')).trim();
             muted = false;
             process.stdout.write('\n');
             if (!answer || answer === placeholder) return currentValue;
@@ -1104,6 +1107,22 @@ async function promptRequiredSecret(session: PromptSession, prompt: string, curr
         const value = (await session.secretRequired(prompt, currentValue) ?? '').trim();
         if (value.length > 0 && !detectPlaceholder(value)) return value;
         console.log(`${warnLabel()} ${prompt} is required.`);
+    }
+}
+
+async function promptSecretWithDefault(
+    session: PromptSession,
+    prompt: string,
+    defaultValue: string,
+): Promise<string> {
+    while (true) {
+        const value = (await session.secret(`${prompt} (blank uses local-dev default)`, undefined) ?? '').trim();
+        if (!value) {
+            console.log(`${infoLabel()} Using the local development default for ${prompt}.`);
+            return defaultValue;
+        }
+        if (!detectPlaceholder(value)) return value;
+        console.log(`${warnLabel()} ${prompt} still looks like a placeholder. Enter a real value or leave it blank to use the local-dev default.`);
     }
 }
 
@@ -1280,6 +1299,82 @@ function resolveAttendMessage(args: ParsedArgs): string {
     const fromPositionals = args.positionals.join(' ').trim();
     if (fromPositionals) return fromPositionals;
     throw new Error('Missing latest message. Usage: iranti attend [message] [--message <text>] [--context <text>] [--json]');
+}
+
+function parseDelimitedList(raw: string | undefined): string[] {
+    if (!raw?.trim()) return [];
+    const delimiter = raw.includes('||') ? '||' : ',';
+    return raw
+        .split(delimiter)
+        .map((item) => item.trim())
+        .filter(Boolean);
+}
+
+function resolveTaskEntity(args: ParsedArgs): string {
+    const entity = (args.subcommand ?? args.positionals[0] ?? getFlag(args, 'entity') ?? '').trim();
+    if (!entity) {
+        throw new Error('Missing task entity. Usage: iranti handoff task/<task_id> --next-step <text> [--json]');
+    }
+    if (!entity.includes('/')) {
+        throw new Error('task entity must use entityType/entityId format.');
+    }
+    return entity;
+}
+
+function buildHandoffSummary(key: string, value: unknown): string {
+    switch (key) {
+        case 'status': {
+            const state = typeof value === 'object' && value && 'state' in value ? String((value as { state: unknown }).state) : 'updated';
+            return `Shared task status is ${state}.`;
+        }
+        case 'current_owner': {
+            const agentId = typeof value === 'object' && value && 'agentId' in value ? String((value as { agentId: unknown }).agentId) : 'unassigned';
+            return `Current owner is ${agentId}.`;
+        }
+        case 'next_step': {
+            const instruction = typeof value === 'object' && value && 'instruction' in value ? String((value as { instruction: unknown }).instruction) : 'Next step updated.';
+            return truncateText(`Next step: ${instruction}`, 140);
+        }
+        case 'blockers': {
+            const count = typeof value === 'object' && value && 'items' in value && Array.isArray((value as { items: unknown[] }).items)
+                ? (value as { items: unknown[] }).items.length
+                : 0;
+            return count === 0 ? 'No blockers recorded.' : `${count} blocker${count === 1 ? '' : 's'} recorded for the shared task.`;
+        }
+        case 'artifacts': {
+            const count = typeof value === 'object' && value && 'files' in value && Array.isArray((value as { files: unknown[] }).files)
+                ? (value as { files: unknown[] }).files.length
+                : 0;
+            return count === 0 ? 'No artifacts recorded.' : `${count} artifact${count === 1 ? '' : 's'} recorded for the shared task.`;
+        }
+        case 'notes': {
+            const text = typeof value === 'object' && value && 'text' in value ? String((value as { text: unknown }).text) : 'Shared handoff notes updated.';
+            return truncateText(`Notes: ${text}`, 140);
+        }
+        case 'active_handoff_task': {
+            const taskEntity = typeof value === 'object' && value && 'taskEntity' in value ? String((value as { taskEntity: unknown }).taskEntity) : 'task';
+            return `Project now points to active handoff ${taskEntity}.`;
+        }
+        default:
+            return 'Shared handoff state updated.';
+    }
+}
+
+function printHandoffResult(
+    target: AttendantCliTarget,
+    taskEntity: string,
+    writes: Array<{ entity: string; key: string; summary: string }>,
+): void {
+    console.log(bold('Iranti handoff'));
+    console.log(`  agent         ${target.agentId}`);
+    console.log(`  env source    ${target.envSource}`);
+    if (target.envFile) console.log(`  env file      ${target.envFile}`);
+    console.log(`  task entity   ${taskEntity}`);
+    console.log(`  writes        ${writes.length}`);
+    console.log('');
+    for (const write of writes) {
+        console.log(`- ${write.entity} :: ${write.key} | ${write.summary}`);
+    }
 }
 
 function printHandshakeResult(target: AttendantCliTarget, task: string, result: Awaited<ReturnType<Iranti['handshake']>>): void {
@@ -1529,7 +1624,7 @@ function inspectDockerAvailability(): {
     };
 }
 
-async function isPortAvailable(port: number, host: string = '127.0.0.1'): Promise<boolean> {
+async function isPortAvailable(port: number, host: string = '0.0.0.0'): Promise<boolean> {
     return await new Promise<boolean>((resolve) => {
         const server = net.createServer();
         server.unref();
@@ -1540,9 +1635,28 @@ async function isPortAvailable(port: number, host: string = '127.0.0.1'): Promis
     });
 }
 
-async function findNextAvailablePort(start: number, host: string = '127.0.0.1', maxSteps: number = 50): Promise<number> {
+function listPublishedDockerHostPorts(): Set<number> {
+    const docker = inspectDockerAvailability();
+    if (!docker.daemonReachable) return new Set();
+
+    const inspect = runCommandCapture('docker', ['ps', '--format', '{{.Ports}}']);
+    if (inspect.status !== 0) return new Set();
+    return parsePublishedDockerHostPorts(inspect.stdout ?? '');
+}
+
+async function isPortUsable(port: number, host: string = '0.0.0.0', dockerPublishedPorts: ReadonlySet<number> = new Set()): Promise<boolean> {
+    if (dockerPublishedPorts.has(port)) return false;
+    return isPortAvailable(port, host);
+}
+
+async function findNextAvailablePort(
+    start: number,
+    host: string = '0.0.0.0',
+    maxSteps: number = 50,
+    dockerPublishedPorts: ReadonlySet<number> = new Set(),
+): Promise<number> {
     for (let port = start; port < start + maxSteps; port += 1) {
-        if (await isPortAvailable(port, host)) {
+        if (await isPortUsable(port, host, dockerPublishedPorts)) {
             return port;
         }
     }
@@ -1550,9 +1664,10 @@ async function findNextAvailablePort(start: number, host: string = '127.0.0.1', 
 }
 
 async function chooseAvailablePort(session: PromptSession, promptText: string, preferredPort: number, allowOccupiedCurrent: boolean = false): Promise<number> {
+    const dockerPublishedPorts = listPublishedDockerHostPorts();
     let suggested = preferredPort;
-    if (!allowOccupiedCurrent && !(await isPortAvailable(preferredPort))) {
-        suggested = await findNextAvailablePort(preferredPort + 1);
+    if (!allowOccupiedCurrent && !(await isPortUsable(preferredPort, '0.0.0.0', dockerPublishedPorts))) {
+        suggested = await findNextAvailablePort(preferredPort + 1, '0.0.0.0', 50, dockerPublishedPorts);
         console.log(`${warnLabel()} Port ${preferredPort} is already in use. A good next option is ${suggested}.`);
     }
 
@@ -1566,10 +1681,10 @@ async function chooseAvailablePort(session: PromptSession, promptText: string, p
         if (allowOccupiedCurrent && parsed === preferredPort) {
             return parsed;
         }
-        if (await isPortAvailable(parsed)) {
+        if (await isPortUsable(parsed, '0.0.0.0', dockerPublishedPorts)) {
             return parsed;
         }
-        const next = await findNextAvailablePort(parsed + 1);
+        const next = await findNextAvailablePort(parsed + 1, '0.0.0.0', 50, dockerPublishedPorts);
         console.log(`${warnLabel()} Port ${parsed} is already in use. Try ${next} instead.`);
         suggested = next;
     }
@@ -1609,17 +1724,15 @@ async function runDockerPostgresContainer(options: {
         throw new Error(`Docker daemon is not reachable. Start Docker Desktop or Docker Engine, then retry. ${docker.detail}`);
     }
 
-    const inspect = process.platform === 'win32'
-        ? spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/c', `docker ps -a --format "{{.Names}}"`], { encoding: 'utf8' })
-        : spawnSync('docker', ['ps', '-a', '--format', '{{.Names}}'], { encoding: 'utf8' });
+    const inspect = runCommandCapture('docker', ['ps', '-a', '--format', '{{.Names}}']);
     if (inspect.status !== 0) {
         throw new Error(`Failed to inspect Docker containers. ${(inspect.stderr ?? inspect.stdout ?? '').trim() || 'docker ps returned a non-zero exit code.'}`);
     }
-    const names = (inspect.stdout ?? '').split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+    const names = parseDockerContainerNames(inspect.stdout ?? '');
 
     if (names.includes(options.containerName)) {
         const start = process.platform === 'win32'
-            ? spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/c', `docker start ${options.containerName}`], { stdio: 'inherit' })
+            ? spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/c', [ 'docker', 'start', options.containerName ].map(quoteForCmd).join(' ')], { stdio: 'inherit' })
             : spawnSync('docker', ['start', options.containerName], { stdio: 'inherit' });
         if (start.status !== 0) {
             throw new Error(`Failed to start existing Docker container '${options.containerName}'.`);
@@ -3858,7 +3971,7 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
                 }
                 const dbHostPort = await chooseAvailablePort(prompt, 'Docker PostgreSQL host port', 5432, false);
                 const dbName = sanitizeIdentifier(await promptNonEmpty(prompt, 'Docker PostgreSQL database name', `iranti_${instanceName}`), `iranti_${instanceName}`);
-                const dbPassword = await promptRequiredSecret(prompt, 'Docker PostgreSQL password');
+                const dbPassword = await promptSecretWithDefault(prompt, 'Docker PostgreSQL password', 'postgres');
                 const containerName = sanitizeIdentifier(
                     await promptNonEmpty(prompt, 'Docker container name', `iranti_${instanceName}_db`),
                     `iranti_${instanceName}_db`
@@ -5276,6 +5389,120 @@ async function attendCommand(args: ParsedArgs): Promise<void> {
     console.log(`${infoLabel()} This is a manual Attendant inspection tool. Claude Code should still use hooks + MCP in normal operation.`);
 }
 
+async function handoffCommand(args: ParsedArgs): Promise<void> {
+    const json = hasFlag(args, 'json');
+    const target = await resolveAttendantCliTarget(args);
+    const taskEntity = resolveTaskEntity(args);
+    const projectEntity = getFlag(args, 'project-entity')?.trim();
+    if (projectEntity && !projectEntity.includes('/')) {
+        throw new Error('project-entity must use entityType/entityId format.');
+    }
+
+    const nextStep = getFlag(args, 'next-step')?.trim();
+    if (!nextStep) {
+        throw new Error('Missing --next-step. A standardized handoff must record the receiver action.');
+    }
+
+    const status = getFlag(args, 'status')?.trim() || 'ready_for_handoff';
+    const owner = getFlag(args, 'owner')?.trim();
+    const blockers = parseDelimitedList(getFlag(args, 'blockers'));
+    const artifacts = parseDelimitedList(getFlag(args, 'artifacts'));
+    const notes = getFlag(args, 'notes')?.trim();
+    const source = getFlag(args, 'source')?.trim() || 'CLIHandoff';
+    const confidence = parsePositiveInteger(getFlag(args, 'confidence'), 'confidence') ?? 95;
+    if (confidence > 100) {
+        throw new Error('confidence must be <= 100.');
+    }
+
+    const writes: Array<{ entity: string; key: string; value: unknown; summary: string }> = [];
+    writes.push({
+        entity: taskEntity,
+        key: 'status',
+        value: { state: status },
+        summary: buildHandoffSummary('status', { state: status }),
+    });
+    writes.push({
+        entity: taskEntity,
+        key: 'next_step',
+        value: { instruction: nextStep },
+        summary: buildHandoffSummary('next_step', { instruction: nextStep }),
+    });
+    if (owner) {
+        writes.push({
+            entity: taskEntity,
+            key: 'current_owner',
+            value: { agentId: owner },
+            summary: buildHandoffSummary('current_owner', { agentId: owner }),
+        });
+    }
+    if (blockers.length > 0) {
+        writes.push({
+            entity: taskEntity,
+            key: 'blockers',
+            value: { items: blockers },
+            summary: buildHandoffSummary('blockers', { items: blockers }),
+        });
+    }
+    if (artifacts.length > 0) {
+        writes.push({
+            entity: taskEntity,
+            key: 'artifacts',
+            value: { files: artifacts },
+            summary: buildHandoffSummary('artifacts', { files: artifacts }),
+        });
+    }
+    if (notes) {
+        writes.push({
+            entity: taskEntity,
+            key: 'notes',
+            value: { text: notes },
+            summary: buildHandoffSummary('notes', { text: notes }),
+        });
+    }
+    if (projectEntity) {
+        writes.push({
+            entity: projectEntity,
+            key: 'active_handoff_task',
+            value: {
+                taskEntity,
+                owner: owner ?? null,
+                status,
+                updatedBy: target.agentId,
+            },
+            summary: buildHandoffSummary('active_handoff_task', { taskEntity }),
+        });
+    }
+
+    for (const write of writes) {
+        await target.iranti.write({
+            entity: write.entity,
+            key: write.key,
+            value: write.value,
+            summary: write.summary,
+            confidence,
+            source,
+            agent: target.agentId,
+        });
+    }
+
+    if (json) {
+        console.log(JSON.stringify({
+            agent: target.agentId,
+            envSource: target.envSource,
+            envFile: target.envFile,
+            source,
+            confidence,
+            writes,
+        }, null, 2));
+        process.exit(0);
+    }
+
+    printHandoffResult(target, taskEntity, writes);
+    console.log('');
+    console.log(`${infoLabel()} Handoffs are shared-memory facts. Pair this with checkpoint() if the sender also needs agent-local recovery.`);
+    process.exit(0);
+}
+
 function printClaudeSetupHelp(): void {
     console.log([
         'Scaffold Claude Code MCP and hook files for the current project.',
@@ -5590,6 +5817,7 @@ function printHelp(): void {
         ['iranti uninstall [--dry-run] [--yes] [--all] [--keep-data] [--keep-project-bindings] [--scan-root <dir[,dir2]>] [--json]', 'Remove Iranti packages and, with --all, runtime data and project integrations.'],
         ['iranti handshake [--instance <name> | --project-env <file>] [--agent <id>] [--task <text>] [--recent <msg1||msg2>] [--recent-file <path>] [--json]', 'Manually inspect Attendant handshake output.'],
         ['iranti attend [message] [--instance <name> | --project-env <file>] [--agent <id>] [--context <text> | --context-file <path>] [--entity-hint <entity>] [--force] [--max-facts <n>] [--json]', 'Manually inspect turn-level memory injection decisions.'],
+        ['iranti handoff task/<task_id> [--instance <name> | --project-env <file>] [--agent <id>] --next-step <text> [--status <state>] [--owner <agent-id>] [--blockers <a||b>] [--artifacts <path1||path2>] [--project-entity <entity>] [--notes <text>] [--source <label>] [--confidence <n>] [--json]', 'Write a standardized shared-memory handoff for Claude/Codex collaboration.'],
         ['iranti chat [--agent <agent-id>] [--provider <provider>] [--model <model>]', 'Open the local interactive chat shell.'],
         ['iranti resolve [--dir <escalation-dir>]', 'Walk through pending escalation files.'],
     ]);
@@ -5841,6 +6069,11 @@ async function main(): Promise<void> {
 
     if (args.command === 'attend') {
         await attendCommand(args);
+        return;
+    }
+
+    if (args.command === 'handoff') {
+        await handoffCommand(args);
         return;
     }
 

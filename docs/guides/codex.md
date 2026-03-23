@@ -58,14 +58,16 @@ What it does:
 - verifies `codex` is installed
 - replaces any existing MCP entry named `iranti`
 - registers the global installed CLI path `iranti mcp`
-- if `.env.iranti` exists in the current working directory, stores it as `IRANTI_PROJECT_ENV`
 - stores only safe defaults like default agent/source in Codex config
+- does not pin `IRANTI_PROJECT_ENV` unless you explicitly pass `--project-env`
 
 Optional overrides:
 
 ```bash
 iranti codex-setup --name iranti --agent codex_code_main --source Codex --provider openai --project-env C:/path/to/project/.env.iranti
 ```
+
+Use `--project-env` only when you deliberately want the global Codex MCP registration pinned to one project binding.
 
 Use `--local-script` only if you deliberately want Codex bound to a repo checkout build instead of the installed package.
 
@@ -79,7 +81,8 @@ codex mcp get iranti
 You want the registration to show:
 - command: `iranti`
 - args: `mcp`
-- env: includes `IRANTI_PROJECT_ENV` when the project binding was detected or specified
+- env: includes safe defaults such as agent/source
+- `IRANTI_PROJECT_ENV` only when you explicitly pinned a project with `--project-env`
 
 ## 4. Launch Codex in the bound project
 
@@ -89,7 +92,7 @@ Open Codex in the project that contains `.env.iranti`:
 codex -C /path/to/your/project
 ```
 
-This matters because `iranti mcp` resolves the project binding from `IRANTI_PROJECT_ENV` first, then falls back to the current working directory.
+This matters because `iranti mcp` resolves the project binding from `IRANTI_PROJECT_ENV` first when explicitly pinned, and otherwise falls back to the current working directory.
 
 ## 5. Verification
 
@@ -113,6 +116,8 @@ Use the integration like this:
 - `iranti_ingest` only for stable content worth chunking
 
 Do not auto-save every turn. That degrades retrieval quality quickly.
+
+If Codex is receiving work from Claude Code, treat the handoff as shared durable memory, not as Claude session recovery. Read the shared `task/...` facts with `query()` or `attend()` plus explicit `entityHints`, then write your pickup/progress back to the same task entity.
 
 ## 7. Troubleshooting
 
@@ -159,3 +164,4 @@ iranti doctor --instance local
 - `scripts/iranti-mcp.ts`
 - `src/lib/runtimeEnv.ts`
 - `docs/features/codex-mcp/spec.md`
+- `docs/guides/cross-tool-handoffs.md`

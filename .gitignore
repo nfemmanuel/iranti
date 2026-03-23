@@ -38,6 +38,7 @@ experiments/*.json
 /api_runtime.log
 /api_runtime_verify.log
 /iranti.log
+/.iranti-runtime
 /context_degradation_results_*.json
 /crewai_experiment_results_*.json
 /experiment_results_*.json

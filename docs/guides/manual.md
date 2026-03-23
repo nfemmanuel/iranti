@@ -69,6 +69,7 @@ What setup does:
 
 If local PostgreSQL is reachable, `psql` is installed, and the server provides `pgvector`, setup can create the target localhost database automatically before bootstrap.
 If the server does not provide `pgvector`, setup now fails early with a direct recommendation to switch to Docker or a managed pgvector-capable database.
+If you choose Docker PostgreSQL during setup and leave the password blank, Iranti now uses the local-development default password `postgres` instead of forcing a custom value.
 
 ---
 
@@ -164,6 +165,31 @@ On the next handshake or checkpoint cycle, the Attendant can surface interrupted
 - the last saved checkpoint payload
 
 This preserves task continuity better, but it is not a workflow engine. Only what has been checkpointed or written through the Librarian is durable.
+
+---
+
+## Cross-Tool Handoffs
+
+Use shared `task/...` entities when Claude Code needs to hand work to Codex or vice versa. Do not treat one tool's session checkpoint as if the other tool can resume it directly.
+
+Recommended pattern:
+- write shared task facts such as `status`, `next_step`, `blockers`, `artifacts`, and `current_owner`
+- checkpoint the sender only if the sender also needs its own recovery state
+- have the receiver query, observe, or attend against the same `task/...` entity
+
+CLI helper:
+
+```bash
+iranti handoff task/runtime_verification_pass \
+  --agent claude_code_main \
+  --owner codex_code_main \
+  --status ready_for_codex \
+  --next-step "Implement the CLI runtime verification pass." \
+  --blockers "Preserve compatibility docs." \
+  --artifacts "docs/guides/codex.md||docs/guides/claude-code.md"
+```
+
+This command writes standardized shared-memory facts. It does not orchestrate either tool. For the full collaboration pattern, see [Cross-Tool Handoffs](./cross-tool-handoffs.md).
 
 ---
 
@@ -493,6 +519,7 @@ If upgrade behaves strangely on Windows:
 | Reconfigure project | `iranti configure project ...` |
 | Scaffold Claude Code | `iranti claude-setup ...` |
 | Register Codex | `iranti codex-setup` |
+| Write shared Codex/Claude handoff state | `iranti handoff task/<task_id> ...` |
 | Open local operator chat | `iranti chat` |
 | Resolve conflicts | `iranti resolve` |
 | Inspect Attendant state | `iranti handshake`, `iranti attend` |
@@ -503,6 +530,7 @@ If upgrade behaves strangely on Windows:
 ## Related Guides
 
 - [Quickstart](./quickstart.md)
+- [Cross-Tool Handoffs](./cross-tool-handoffs.md)
 - [Claude Code](./claude-code.md)
 - [Codex](./codex.md)
 - [Chat Guide](./chat.md)

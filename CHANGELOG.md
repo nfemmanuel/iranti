@@ -2,6 +2,26 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.22 - Unreleased
+
+### Added
+
+- `iranti handoff` for writing standardized shared-memory handoff state between Claude Code, Codex, and other tool-driven agent workflows.
+- Cross-tool handoff guide, feature spec, and regression coverage for the new CLI handoff flow.
+
+### Changed
+
+- `iranti codex-setup` no longer pins one project binding globally by default; Codex now resolves `.env.iranti` from the active workspace unless `--project-env` is explicitly supplied.
+- README and operator docs now reflect the narrower benchmark-backed product position from the `v0.2.21` rerun.
+- Docker setup now allows a blank PostgreSQL password input and uses the local-dev default `postgres` instead of forcing a custom secret during interactive bootstrap.
+
+### Fixed
+
+- Runtime env loading now lets the bound instance env override stale app-local `.env` values, preventing MCP/CLI startup from inheriting the wrong `DATABASE_URL`.
+- Windows interactive secret prompts now render correctly instead of appearing to hang until the user presses Enter.
+- Docker-backed setup now treats published Docker host ports as occupied when suggesting or validating PostgreSQL host ports.
+- Docker container inspection and reuse during setup now use the same subprocess/quoting path as the rest of the CLI, fixing container-name reuse failures on Windows.
+
 ## 0.2.21 - 2026-03-22
 
 ### Changed

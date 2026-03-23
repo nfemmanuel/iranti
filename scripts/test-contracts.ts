@@ -244,6 +244,21 @@ function assertApiDocsContract(): void {
     }
 }
 
+function assertCliGuideContracts(): void {
+    const cliFilePath = 'scripts/iranti-cli.ts';
+    const cliContent = readFile(cliFilePath);
+    expectIncludes(cliFilePath, cliContent, 'iranti handoff task/<task_id>', 'CLI help includes iranti handoff');
+
+    const quickstartPath = 'docs/guides/quickstart.md';
+    const quickstartContent = readFile(quickstartPath);
+    expectIncludes(quickstartPath, quickstartContent, 'iranti handoff task/runtime_verification_pass', 'Quickstart documents iranti handoff');
+
+    const manualPath = 'docs/guides/manual.md';
+    const manualContent = readFile(manualPath);
+    expectIncludes(manualPath, manualContent, 'Write shared Codex/Claude handoff state', 'Manual command table includes iranti handoff');
+    expectIncludes(manualPath, manualContent, '[Cross-Tool Handoffs](./cross-tool-handoffs.md)', 'Manual links to cross-tool handoff guide');
+}
+
 function assertPackageMainPointsToBuiltFile(): void {
     const filePath = 'package.json';
     const packageJson = JSON.parse(readFile(filePath)) as { main?: string; files?: string[] };
@@ -301,6 +316,7 @@ function main(): void {
     assertTypeScriptSdkSurface();
     assertTypeScriptHttpClientContract();
     assertApiDocsContract();
+    assertCliGuideContracts();
     assertPackageMainPointsToBuiltFile();
     printSummaryAndExit();
 }

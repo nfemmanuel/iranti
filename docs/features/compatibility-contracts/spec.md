@@ -34,6 +34,7 @@ Compatibility contracts define which Iranti surfaces are considered stable withi
 4. For the affected surface, apply the contract rules:
    - CLI:
      - Existing commands and flags are compatibility surfaces.
+     - New commands should be additive, documented in the guides, and covered by at least one contract or drift check.
      - Human-readable output may improve.
      - `--json` output is automation-facing and should remain stable within the same major version.
    - REST API:

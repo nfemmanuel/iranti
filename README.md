@@ -9,10 +9,10 @@
 
 Iranti gives agents persistent, identity-based memory. Facts written by one agent are retrievable by any other agent through exact entity+key lookup. Iranti also supports hybrid search (lexical + vector) when exact keys are unknown. Memory persists across sessions and survives context window limits.
 
-**Latest release:** [`v0.2.20`](https://github.com/nfemmanuel/iranti/releases/tag/v0.2.20)  
+**Latest release:** [`v0.2.21`](https://github.com/nfemmanuel/iranti/releases/tag/v0.2.21)  
 Published packages:
-- `iranti@0.2.20`
-- `@iranti/sdk@0.2.20`
+- `iranti@0.2.21`
+- `@iranti/sdk@0.2.21`
 
 ---
 
@@ -52,27 +52,26 @@ Vector databases answer "what's similar to X?" Iranti answers "what do we know a
 
 ## Benchmark Summary
 
-Iranti has now been rerun against a broader benchmark program covering 13 capability tracks. The current picture is stronger and narrower than the early validation story: exact, durable, shared memory is benchmark-backed; broad semantic-memory claims still need tighter boundaries.
+Iranti has now been rerun against a broader benchmark program covering 11 active capability tracks in `v0.2.21`. The current picture is stronger and narrower than the early validation story: exact, durable, shared memory is benchmark-backed; broad semantic-memory and autonomous-memory claims still need tighter boundaries.
 
 ### Confirmed Strengths
 
-- **Exact lookup (`iranti_query`)**: O(1) retrieval confirmed up to 276k-token haystacks, with a positive differential over baseline at large context size.
-- **Persistence**: Facts survive across sessions and across version upgrades with no observed data loss.
+- **Exact lookup (`iranti_query`)**: Retrieval remains exact and durable across genuine session and process breaks. At tested scale (`N=1938`, about `107k` tokens), the measured advantage is efficiency, not accuracy: Iranti answered `10/10` with zero haystack tokens while the baseline also answered `10/10` after reading the full document.
+- **Persistence across sessions**: Facts survive context-window loss and genuine process boundaries. `iranti_query` remained `8/8` across isolated session breaks in the rerun.
 - **Conflict handling**: Reliable when confidence differentials are large and explicit.
-- **Multi-agent coordination**: Agents can share memory with correct separation and attribution.
-- **Provenance**: `agentId` attribution is preserved correctly.
-- **Relationships**: Relationship writes, reads, and depth traversal are working.
-- **Ingest**: Prose extraction is working and benchmark-confirmed in `v0.2.16`.
-- **Search**: Effective for structured attribute-value retrieval.
-- **Observe / Attend**: Automatic detection and injection behavior improved materially and now works in realistic benchmark conditions.
+- **Multi-agent coordination**: Agents can share memory across genuine subprocess boundaries with zero shared conversational context.
+- **Provenance on writes**: Write-side attribution through stored source metadata is working and benchmark-confirmed.
+- **Ingest**: Prose extraction is accurate on clean entities in `v0.2.21`. Reliability under conflict-heavy transactional conditions should still be treated as a separate, narrower claim.
+- **Observe with hints**: `iranti_observe` recovers facts reliably when given the right entity hint, with higher-confidence facts returned first.
 - **Session recovery**: Interrupted-session recovery now performs substantially better than baseline.
-- **Upgrade safety**: Memory durability was preserved across three version upgrades.
 
 ### Current Limits
 
-- **Search is not yet full semantic paraphrase retrieval.**
-- **Observe still performs better on confidence ranking than on broad progress-fact discovery.**
-- **Structured search is operational, but not yet broad semantic paraphrase retrieval.**
+- **Search is lexical-first today, not semantic multi-hop retrieval.** In the current rerun, hop-value discovery was `0/4`; bare entity-token lookup worked, but `vectorScore` stayed `0` across results.
+- **`iranti_attend` is not yet a reliable autonomous classifier.** Natural-language attend classification still falls back to `classification_parse_failed_default_false`; `forceInject` works as an operator bypass, not as proof of autonomous injection.
+- **Observe performs better with explicit entity hints than with cold-start discovery.**
+- **Upgrade durability should be scoped carefully.** The `v0.2.21` upgrade procedure reinitialized the instance under test; do not assume KB data survives upgrades without an explicit preservation or migration path.
+- **Relationship and provenance reflection surfaces remain partially permission-gated in benchmark sessions.** The rerun did not prove `iranti_relate`, `iranti_related`, `iranti_related_deep`, or `iranti_who_knows` end-to-end under the benchmark session policy.
 
 ### Practical Position
 
@@ -82,9 +81,8 @@ Iranti is strongest today as **structured memory infrastructure for multi-agent 
 - provenance-aware writes
 - conflict-aware storage
 - session-aware recovery
-- upgrade-safe persistence
 
-It should not yet be described as a fully general semantic-memory or autonomous-extraction system.
+It should not yet be described as a fully general semantic-memory, semantic-search, or autonomous-memory-injection system.
 
 Historical benchmark material remains available here:
 - [`docs/internal/validation_results.md`](docs/internal/validation_results.md)
@@ -106,7 +104,7 @@ The current competitive case for Iranti is strongest when a team needs memory th
 - Explicit per-fact confidence scores
 - Per-agent memory injection through the Attendant
 - Temporal exact lookup with `asOf` and ordered `history()`
-- Relationship primitives through `relate()`, `getRelated()`, and `getRelatedDeep()`
+- Relationship primitives through `relate()`, `getRelated()`, and `getRelatedDeep()` at the product surface, with benchmark confirmation for those MCP-accessible paths still pending
 - Hybrid retrieval when exact keys are unknown
 - Local install + project binding flow for Claude Code and Codex
 - Published npm / PyPI surfaces with machine-level CLI setup
@@ -163,11 +161,12 @@ The current landscape splits into three buckets:
 Iranti is strongest today as infrastructure for developers building multi-agent systems who need shared, structured, queryable memory rather than pure semantic recall. The current benchmark base now supports a more concrete product claim:
 
 - exact cross-agent fact transfer works at meaningful context scales
-- facts survive session loss and version upgrades
+- facts survive session loss and genuine process breaks
 - same-key conflicting writes are serialized and observable
-- relationship traversal, prose ingest, and attended recovery are usable surfaces
+- prose ingest is accurate on clean entities
+- attended recovery works with explicit hints, while autonomous attend classification remains a known defect
 
-That is still not a claim that multi-agent memory is solved. It is a claim that Iranti now has broader evidence for durable, structured, attribution-aware memory with recovery and upgrade safety.
+That is still not a claim that multi-agent memory is solved. It is a claim that Iranti now has broader evidence for durable, structured, attribution-aware memory with exact retrieval and bounded recovery behavior.
 
 The next leverage is still product simplicity: setup, operations, and day-to-day inspection need to be simple enough that real users keep Iranti in the loop.
 
@@ -316,7 +315,7 @@ iranti codex-setup
 codex -C /path/to/your/project
 ```
 
-When `iranti codex-setup` is run from a project directory, it automatically captures that project's `.env.iranti` as `IRANTI_PROJECT_ENV` so Codex resolves the correct Iranti instance consistently.
+By default, `iranti codex-setup` does not pin a project binding globally. `iranti mcp` resolves `.env.iranti` from the active project/workspace at runtime. Use `--project-env` only if you deliberately want to pin Codex globally to one project binding.
 
 Alias:
 

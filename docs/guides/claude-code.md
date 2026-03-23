@@ -179,6 +179,8 @@ Do not auto-save every Claude turn. That will pollute the Library and reduce ret
 Use Iranti for durable memory. Prefer iranti_query for exact lookup, iranti_search for discovery, and iranti_write only for stable facts such as preferences, decisions, constraints, task state, and repository knowledge.
 ```
 
+If Claude Code is handing work to Codex, do not rely on Claude's private checkpoint as the handoff. Write the handoff to a shared `task/...` entity, checkpoint Claude's own session separately, and have Codex read the shared task through `query()` or `attend()` with explicit `entityHints`.
+
 ## 7. Verification
 
 From the project root:
@@ -252,3 +254,4 @@ If you used `--scan`, remember:
 - `scripts/claude-code-memory-hook.ts`
 - `src/lib/runtimeEnv.ts`
 - `docs/features/claude-code-mcp/spec.md`
+- `docs/guides/cross-tool-handoffs.md`

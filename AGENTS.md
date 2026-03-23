@@ -300,7 +300,7 @@ iranti/
 â”œâ”€â”€ docs/
 â”‚   â”œâ”€â”€ engineering/            â€” CODE_STANDARDS.md, COMMENTING_GUIDELINES.md
 â”‚   â”œâ”€â”€ decisions/              â€” One file per architectural decision
-â”‚   â”œâ”€â”€ features/               â€” One subfolder per feature, including cli-uninstall, ontology-evolution and compatibility-contracts
+â”‚   â”œâ”€â”€ features/               â€” One subfolder per feature, including cli-uninstall, ontology-evolution, cross-tool-handoffs, and compatibility-contracts
 â”‚   â””â”€â”€ internal/               â€” Internal design notes, validation artifacts, and compatibility backlog
 +-- clients/
 ¦   +-- python/
@@ -332,6 +332,8 @@ iranti/
 ¦       +-- run_consistency_tests.ts — Empirical validation for write serialization, read-after-write, escalation visibility, and observe isolation
 ¦   +-- session-recovery/
 ¦   ¦   +-- run_session_recovery_tests.ts — Stubbed attendant recovery validation without a live DB
+¦   +-- cross-tool/
+¦   ¦   +-- run_cross_tool_handoff_tests.ts — DB-backed Claude/Codex shared-memory handoff validation
 ¦   +-- memory-retrieval-regressions.ts — Slash-value retrieval and explicit-hint isolation regressions
 +-- AGENTS.md                   — This file
 â”œâ”€â”€ docker-compose.yml          â€” PostgreSQL for local dev

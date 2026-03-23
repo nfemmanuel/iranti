@@ -21,9 +21,14 @@ function parseEnvFile(filePath: string): Record<string, string> {
     return dotenv.parse(raw);
 }
 
-function applyEnvVars(vars: Record<string, string>, initialEnvKeys: Set<string>): void {
+function applyEnvVars(
+    vars: Record<string, string>,
+    initialEnvKeys: Set<string>,
+    options: { overrideExisting?: boolean } = {},
+): void {
+    const { overrideExisting = false } = options;
     for (const [key, value] of Object.entries(vars)) {
-        if (initialEnvKeys.has(key)) continue;
+        if (!overrideExisting && initialEnvKeys.has(key)) continue;
         process.env[key] = value;
     }
 }
@@ -75,7 +80,8 @@ export function loadRuntimeEnv(options: RuntimeEnvOptions = {}): RuntimeEnvLoadR
 
     const fallbackEnvFile = findFallbackEnvFile(options);
     if (fallbackEnvFile) {
-        applyEnvVars(parseEnvFile(fallbackEnvFile), initialEnvKeys);
+        const explicitFallback = Boolean(options.explicitEnvFile?.trim() || process.env.IRANTI_ENV_FILE?.trim());
+        applyEnvVars(parseEnvFile(fallbackEnvFile), initialEnvKeys, { overrideExisting: explicitFallback });
         loadedFiles.push(fallbackEnvFile);
     }
 
@@ -93,12 +99,12 @@ export function loadRuntimeEnv(options: RuntimeEnvOptions = {}): RuntimeEnvLoadR
         : undefined;
 
     if (resolvedInstanceEnvFile) {
-        applyEnvVars(parseEnvFile(resolvedInstanceEnvFile), initialEnvKeys);
+        applyEnvVars(parseEnvFile(resolvedInstanceEnvFile), initialEnvKeys, { overrideExisting: true });
         loadedFiles.push(resolvedInstanceEnvFile);
     }
 
     if (projectEnvFile && projectEnv) {
-        applyEnvVars(projectEnv, initialEnvKeys);
+        applyEnvVars(projectEnv, initialEnvKeys, { overrideExisting: true });
         loadedFiles.push(projectEnvFile);
     }
 

@@ -30,8 +30,10 @@ Edit `.env`:
 
 ```env
 # Database (leave as-is for local development)
-DATABASE_URL=postgresql://postgres:yourpassword@localhost:5432/iranti
-POSTGRES_PASSWORD=yourpassword
+# POSTGRES_PASSWORD is optional for local dev; Iranti setup defaults it to "postgres"
+# when you leave the Docker PostgreSQL password blank.
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/iranti
+POSTGRES_PASSWORD=postgres
 
 # LLM Provider (start with mock for testing)
 LLM_PROVIDER=mock
@@ -416,6 +418,44 @@ if (checkpointed.sessionRecovery?.available && checkpointed.sessionRecovery.reco
     });
 }
 ```
+
+For Claude Code to hand work over to Codex, write the durable handoff into a shared `task/...` entity and keep any sender-local recovery in a normal checkpoint:
+
+```typescript
+await iranti.write({
+    entity: 'task/runtime_verification_pass',
+    key: 'status',
+    value: { state: 'ready_for_codex' },
+    summary: 'Shared task is ready for Codex pickup.',
+    confidence: 96,
+    source: 'ClaudeCode',
+    agent: 'claude_code_main',
+});
+
+await iranti.write({
+    entity: 'task/runtime_verification_pass',
+    key: 'next_step',
+    value: { instruction: 'Implement the CLI runtime verification pass.' },
+    summary: 'Next step is to implement the CLI runtime verification pass.',
+    confidence: 95,
+    source: 'ClaudeCode',
+    agent: 'claude_code_main',
+});
+```
+
+The CLI now exposes the same shared-memory pattern directly:
+
+```bash
+iranti handoff task/runtime_verification_pass \
+  --agent claude_code_main \
+  --owner codex_code_main \
+  --status ready_for_codex \
+  --next-step "Implement the CLI runtime verification pass." \
+  --blockers "Preserve compatibility docs." \
+  --artifacts "docs/guides/codex.md||docs/guides/claude-code.md"
+```
+
+Use `iranti handoff` for the shared task state and `checkpoint()` for the sender's own recovery state. For the full pattern, see [Cross-Tool Handoffs](./cross-tool-handoffs.md).
 
 ---
 

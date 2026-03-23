@@ -74,7 +74,8 @@ function printHelp(): void {
         'Notes:',
         '  - Registers a global Codex MCP entry using `codex mcp add`.',
         '  - Prefers the installed CLI path: `iranti mcp`.',
-        '  - Auto-detects .env.iranti from the current working directory and stores it as IRANTI_PROJECT_ENV.',
+        '  - By default does not pin IRANTI_PROJECT_ENV, so Codex can resolve .env.iranti from the active project/workspace at runtime.',
+        '  - Use --project-env only when you deliberately want to pin Codex globally to one project binding.',
         '  - Use --local-script only if you need to point Codex at this repo build directly.',
         '  - Does not store DATABASE_URL in Codex config; iranti-mcp loads project/instance env at runtime.',
         '  - Replaces any existing MCP entry with the same name.',
@@ -148,9 +149,7 @@ function resolveProjectEnv(options: SetupOptions): string | undefined {
         }
         return resolved;
     }
-
-    const candidate = path.resolve(process.cwd(), '.env.iranti');
-    return fs.existsSync(candidate) ? candidate : undefined;
+    return undefined;
 }
 
 function canUseInstalledIranti(repoRoot: string): boolean {
@@ -220,14 +219,18 @@ function main(): void {
     if (useInstalled) {
         console.log('Registration target: installed CLI (`iranti mcp`)');
         if (projectEnv) {
-            console.log(`Project binding: ${projectEnv}`);
+            console.log(`Pinned project binding: ${projectEnv}`);
+        } else {
+            console.log('Project binding: not pinned; `iranti mcp` will resolve `.env.iranti` from the active project/workspace at runtime.');
         }
         console.log('Launch Codex in the project you want to bind to Iranti, for example:');
         console.log('  codex -C C:\\path\\to\\your\\project');
     } else {
         console.log(`Registration target: repo build (${mcpScript})`);
         if (projectEnv) {
-            console.log(`Project binding: ${projectEnv}`);
+            console.log(`Pinned project binding: ${projectEnv}`);
+        } else {
+            console.log('Project binding: not pinned; `iranti mcp` will resolve `.env.iranti` from the active project/workspace at runtime.');
         }
         console.log(`Launch with: codex -C "${repoRoot}"`);
     }

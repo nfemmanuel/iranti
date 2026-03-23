@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 import { spawnSync } from 'child_process';
 import { readInstanceRuntime } from '../../src/lib/runtimeLifecycle';
+import { parseDockerContainerNames, parsePublishedDockerHostPorts } from '../../src/lib/dockerCliParsing';
 import { loadRuntimeEnv } from '../../src/lib/runtimeEnv';
 
 type CliRun = {
@@ -192,6 +193,33 @@ function main(): void {
             assert.strictEqual(process.env.DATABASE_URL, 'postgresql://postgres:postgres@localhost:5432/iranti_local');
             assert.strictEqual(process.env.LLM_PROVIDER, 'mock');
         });
+
+        withCleanEnv(() => {
+            // Simulate dotenv/config or a parent shell preloading the wrong database before runtime env resolution.
+            process.env.DATABASE_URL = 'postgresql://postgres:postgres@localhost:5432/wrong_db';
+            process.env.LLM_PROVIDER = 'gemini';
+            process.env.IRANTI_URL = 'http://localhost:9999';
+            process.env.IRANTI_API_KEY = 'stale_key';
+
+            const runtimeEnvResult = loadRuntimeEnv({ cwd: projectDir });
+            assert.strictEqual(runtimeEnvResult.projectEnvFile, projectEnvFile);
+            assert.strictEqual(runtimeEnvResult.instanceEnvFile, envFile);
+            assert.strictEqual(process.env.DATABASE_URL, 'postgresql://postgres:postgres@localhost:5432/iranti_local');
+            assert.strictEqual(process.env.LLM_PROVIDER, 'mock');
+            assert.strictEqual(process.env.IRANTI_URL, 'http://localhost:3050');
+            assert.strictEqual(process.env.IRANTI_API_KEY, 'project_key');
+        });
+
+        const publishedPorts = parsePublishedDockerHostPorts([
+            '0.0.0.0:5435->5432/tcp, [::]:5435->5432/tcp',
+            '127.0.0.1:5434->5432/tcp',
+            '5432/tcp',
+            'localhost:5440->5432/tcp',
+        ].join('\n'));
+        assert.deepStrictEqual(Array.from(publishedPorts).sort((a, b) => a - b), [5434, 5435, 5440]);
+
+        const containerNames = parseDockerContainerNames('alpha\r\nbeta\n\n gamma \n');
+        assert.deepStrictEqual(containerNames, ['alpha', 'beta', 'gamma']);
 
         const restartRun = runCli(['instance', 'restart', 'local', '--root', root], repoRoot);
         assert.notStrictEqual(restartRun.status, 0, 'restart unexpectedly succeeded');
