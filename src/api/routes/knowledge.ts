@@ -284,7 +284,8 @@ export function knowledgeRoutes(iranti: Iranti): Router {
     router.get('/related/:entityType/:entityId/deep', requireEntityScopeByMethod('kb:read', 'kb:write', fromParams), async (req: Request, res: Response) => {
         try {
             const { entityType, entityId } = req.params;
-            const depth = parseInt(req.query.depth as string ?? '2');
+            const rawDepth = parseInt(req.query.depth as string ?? '2', 10);
+            const depth = Number.isFinite(rawDepth) ? Math.min(Math.max(1, rawDepth), 5) : 2;
             const result = await iranti.getRelatedDeep(`${entityType}/${entityId}`, depth);
             res.json(result);
         } catch (err) {

@@ -60,6 +60,7 @@ export interface WriteResult {
     action: 'created' | 'updated' | 'escalated' | 'rejected';
     key: string;
     reason: string;
+    validFrom?: string | null;
     resolvedEntity?: string;
     inputEntity?: string;
 }

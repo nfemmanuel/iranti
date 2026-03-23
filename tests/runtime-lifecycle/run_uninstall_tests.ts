@@ -2,6 +2,7 @@ import assert from 'assert';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { randomBytes } from 'crypto';
 import { spawnSync } from 'child_process';
 
 type CliRun = {
@@ -63,6 +64,7 @@ function main(): void {
         const instanceDir = path.join(runtimeRoot, 'instances', 'local');
         const envFile = path.join(instanceDir, '.env');
         const now = new Date().toISOString();
+        const testApiKey = `test_${randomBytes(16).toString('hex')}`;
 
         writeJson(path.join(runtimeRoot, 'install.json'), {
             version: '0.2.17',
@@ -84,7 +86,7 @@ function main(): void {
             'LLM_PROVIDER=mock',
             `IRANTI_ESCALATION_DIR=${path.join(instanceDir, 'escalation')}`,
             `IRANTI_REQUEST_LOG_FILE=${path.join(instanceDir, 'logs', 'api-requests.log')}`,
-            'IRANTI_API_KEY=test_key',
+            `IRANTI_API_KEY=${testApiKey}`,
             '',
         ].join('\n'));
 
@@ -96,7 +98,7 @@ function main(): void {
 
         writeText(bindingFile, [
             'IRANTI_URL=http://localhost:3001',
-            'IRANTI_API_KEY=test_key',
+            `IRANTI_API_KEY=${testApiKey}`,
             'IRANTI_AGENT_ID=test_agent',
             `IRANTI_INSTANCE_ENV=${envFile}`,
             '',

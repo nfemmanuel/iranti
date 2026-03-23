@@ -2,6 +2,7 @@ import assert from 'assert';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { randomBytes } from 'crypto';
 import { spawnSync } from 'child_process';
 import { readInstanceRuntime } from '../../src/lib/runtimeLifecycle';
 import { parseDockerContainerNames, parsePublishedDockerHostPorts } from '../../src/lib/dockerCliParsing';
@@ -97,7 +98,7 @@ function main(): void {
             'IRANTI_ARCHIVIST_WATCH=true',
             'IRANTI_ARCHIVIST_DEBOUNCE_MS=60000',
             'IRANTI_ARCHIVIST_INTERVAL_MS=0',
-            'IRANTI_API_KEY=test_api_key',
+            `IRANTI_API_KEY=test_${randomBytes(16).toString('hex')}`,
             '',
         ].join('\n'));
         writeJson(runtimeFile, {

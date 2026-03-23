@@ -28,7 +28,7 @@ async function executeWithIdentityLock<T>(
     const prisma = getDb();
     return prisma.$transaction(async (tx) => {
         const lockKey = hashToBigInt(`${identity.entityType}||${identity.entityId}||${identity.key}`);
-        await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(${lockKey});`);
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
         return fn(tx);
     }, transactionBudget());
 }
@@ -47,12 +47,12 @@ export async function withIdentityLock<T>(
     }
 }
 
-function hashToBigInt(s: string): string {
+function hashToBigInt(s: string): bigint {
     let hash = 1469598103934665603n;
     const prime = 1099511628211n;
     for (let i = 0; i < s.length; i++) {
         hash ^= BigInt(s.charCodeAt(i));
         hash = (hash * prime) & ((1n << 63n) - 1n);
     }
-    return hash.toString();
+    return hash;
 }

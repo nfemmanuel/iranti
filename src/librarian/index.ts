@@ -5,8 +5,8 @@ import {
     appendConflictLog,
     archiveEntry,
     canWriteToStaffNamespace,
+    claimWriteReceiptSlot,
     createEntry,
-    createWriteReceipt,
     deleteEntryById,
     findEntry,
     getWriteReceipt,
@@ -96,15 +96,20 @@ async function saveReceipt(
     escalationFile?: string
 ) {
     if (!input.requestId) return;
-    await createWriteReceipt({
-        requestId: input.requestId,
-        entityType: input.entityType,
-        entityId: input.entityId,
-        key: input.key,
-        outcome,
-        resultEntryId: entryId,
-        escalationFile,
-    }, tx);
+    // M-2: Use upsert — handles both the case where a slot was pre-claimed (pending) and where no slot exists yet
+    await tx.writeReceipt.upsert({
+        where: { requestId: input.requestId },
+        update: { outcome, resultEntryId: entryId, escalationFile: escalationFile ?? null },
+        create: {
+            requestId: input.requestId,
+            entityType: input.entityType,
+            entityId: input.entityId,
+            key: input.key,
+            outcome,
+            resultEntryId: entryId,
+            escalationFile: escalationFile ?? null,
+        },
+    });
 }
 
 async function logDecision(
@@ -178,24 +183,43 @@ export async function librarianWrite(input: EntryInput): Promise<{
     }
 
     if (input.requestId) {
-        const receipt = await getWriteReceipt(input.requestId);
-        if (receipt) {
-            getStaffEventEmitter().emit({
-                staffComponent: 'Librarian',
-                actionType: 'write_deduplicated',
-                agentId: input.createdBy,
-                source: input.source,
-                entityType: input.entityType,
-                entityId: input.entityId,
-                key: input.key,
-                reason: 'Idempotent replay — requestId already processed.',
-                level: 'debug',
-                metadata: { requestId: input.requestId },
-            });
+        // M-2: Pending-before-write pattern — claim the requestId slot before executing the write.
+        // This prevents two concurrent requests with the same requestId from both writing.
+        const claimed = await claimWriteReceiptSlot({
+            requestId: input.requestId,
+            entityType: input.entityType,
+            entityId: input.entityId,
+            key: input.key,
+        });
+
+        if (!claimed) {
+            // Another request already claimed this requestId
+            const receipt = await getWriteReceipt(input.requestId);
+            if (receipt && receipt.outcome !== 'pending') {
+                getStaffEventEmitter().emit({
+                    staffComponent: 'Librarian',
+                    actionType: 'write_deduplicated',
+                    agentId: input.createdBy,
+                    source: input.source,
+                    entityType: input.entityType,
+                    entityId: input.entityId,
+                    key: input.key,
+                    reason: 'Idempotent replay — requestId already processed.',
+                    level: 'debug',
+                    metadata: { requestId: input.requestId },
+                });
+                timeEnd('librarian.write_ms', t0);
+                return {
+                    action: receipt.outcome as WriteAction,
+                    reason: 'Idempotent replay of previous request',
+                    idempotentReplay: true,
+                };
+            }
+            // Receipt is still pending (in-flight race) — treat as duplicate
             timeEnd('librarian.write_ms', t0);
             return {
-                action: receipt.outcome as WriteAction,
-                reason: 'Idempotent replay of previous request',
+                action: 'rejected' as WriteAction,
+                reason: 'Request is already being processed (duplicate requestId in flight).',
                 idempotentReplay: true,
             };
         }

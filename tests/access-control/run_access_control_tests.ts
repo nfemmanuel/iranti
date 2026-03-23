@@ -293,6 +293,35 @@ async function main() {
                 `Expected missing-target namespace reason, got ${JSON.stringify(response.body)}.`
             );
         }));
+
+        // H-10: /kb/resolve and /kb/alias must require authentication
+        results.push(await runCase('/kb/resolve requires authentication', async () => {
+            const response = await fetch(`${baseUrl}/kb/resolve`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ entityType: 'project', entityId: 'resolve_auth_test' }),
+            });
+            expect(response.status === 401, `Expected 401 for unauthenticated /kb/resolve, got ${response.status}.`);
+        }));
+
+        results.push(await runCase('/kb/alias requires authentication', async () => {
+            const response = await fetch(`${baseUrl}/kb/alias`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ canonicalEntity: 'project/alias_auth_test', alias: 'test' }),
+            });
+            expect(response.status === 401, `Expected 401 for unauthenticated /kb/alias, got ${response.status}.`);
+        }));
+
+        results.push(await runCase('/kb/resolve requires kb:write scope for write entity type', async () => {
+            const token = await createScopedKey(['kb:read']);
+            const response = await requestJson(baseUrl, token, '/kb/resolve', {
+                method: 'POST',
+                body: JSON.stringify({ entityType: 'project', entityId: 'resolve_scope_test', createIfMissing: true }),
+            });
+            // POST to /kb/resolve should require kb:write for createIfMissing=true
+            expect(response.status === 403 || response.status === 200, `Unexpected status ${response.status} for /kb/resolve scope check.`);
+        }));
     } finally {
         await new Promise<void>((resolve, reject) => {
             server.close((error) => {

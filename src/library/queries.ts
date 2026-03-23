@@ -70,7 +70,7 @@ function coerceScore(value: number | string | null | undefined): number {
     return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function getVectorBackendSingleton(): VectorBackend {
+export function getVectorBackendSingleton(): VectorBackend {
     if (!vectorBackend) {
         vectorBackend = createVectorBackend();
     }
@@ -187,6 +187,7 @@ export async function findArchiveAsOf(
         orderBy: [
             { validFrom: 'desc' },
             { archivedAt: 'desc' },
+            { id: 'desc' },
         ],
     });
 }
@@ -604,7 +605,10 @@ export async function updateEntry(
 
 export async function deleteEntryById(entryId: number, db?: DbClient): Promise<void> {
     const client = db ?? getDb();
-    await getVectorBackendSingleton().delete(String(entryId)).catch(() => undefined);
+    await getVectorBackendSingleton().delete(String(entryId)).catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`[vector] Failed to delete vector for entryId=${entryId}: ${message}`);
+    });
     await client.knowledgeEntry.delete({
         where: { id: entryId },
     });
@@ -647,13 +651,21 @@ export async function archiveEntry(
     supersededBy?: SupersededByPointer,
     db?: DbClient
 ): Promise<void> {
-    await insertArchiveFromCurrent(entry, {
+    const archiveOptions = {
         reason,
         supersededBy,
         validFrom: entry.validFrom,
         validUntil: entry.validUntil ?? new Date(),
-    }, db);
-    await deleteEntryById(entry.id, db);
+    };
+    if (db) {
+        await insertArchiveFromCurrent(entry, archiveOptions, db);
+        await deleteEntryById(entry.id, db);
+    } else {
+        await getDb().$transaction(async (tx) => {
+            await insertArchiveFromCurrent(entry, archiveOptions, tx);
+            await deleteEntryById(entry.id, tx);
+        });
+    }
 }
 
 export async function updateArchiveEntry(
@@ -698,14 +710,16 @@ export async function recordKnowledgeEntryAccess(
 }
 
 // Guards
-const STAFF_NAMESPACES = ['system'];
-const STAFF_WRITERS = new Set([
-    'seed',
-    'archivist',
-    'attendant',
-    'librarian',
-    'system',
-]);
+const STAFF_NAMESPACES = (process.env.IRANTI_STAFF_NAMESPACES ?? 'system')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+const STAFF_WRITERS = new Set(
+    (process.env.IRANTI_STAFF_WRITERS ?? 'seed,archivist,attendant,librarian,system')
+        .split(',')
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean)
+);
 
 export async function isProtectedEntry(query: EntryQuery, db?: DbClient): Promise<boolean> {
     const entry = await findEntry(query, db);
@@ -724,18 +738,12 @@ export function canWriteToStaffNamespace(createdBy: string, entityType: string):
 // Conflict Log
 export async function appendConflictLog(entryId: number, event: any, db?: DbClient) {
     const client = db ?? getDb();
-    const existing = await client.knowledgeEntry.findUnique({
-        where: { id: entryId },
-        select: { conflictLog: true },
-    });
-
-    const current = (existing?.conflictLog ?? []) as any[];
-    const next = [...current, event];
-
-    return client.knowledgeEntry.update({
-        where: { id: entryId },
-        data: { conflictLog: next as Prisma.InputJsonValue },
-    });
+    const eventJson = JSON.stringify(event);
+    await client.$executeRaw`
+        UPDATE "knowledge_base"
+        SET "conflictLog" = COALESCE("conflictLog", '[]'::jsonb) || ${eventJson}::jsonb
+        WHERE "id" = ${entryId}
+    `;
 }
 
 // Write Receipts (Idempotency)
@@ -755,4 +763,36 @@ export async function createWriteReceipt(data: {
 }, db?: DbClient) {
     const client = db ?? getDb();
     return client.writeReceipt.create({ data });
+}
+
+// M-2: Reserves a requestId before the write begins (pending-before-write pattern).
+// Returns true if the slot was claimed (proceed with write), false if already claimed by a concurrent request.
+export async function claimWriteReceiptSlot(data: {
+    requestId: string;
+    entityType: string;
+    entityId: string;
+    key: string;
+}, db?: DbClient): Promise<boolean> {
+    const client = db ?? getDb();
+    try {
+        await client.writeReceipt.create({
+            data: { ...data, outcome: 'pending' },
+        });
+        return true;
+    } catch (err) {
+        // Unique constraint violation means another request already claimed this requestId
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes('Unique constraint') || msg.includes('unique constraint') || msg.includes('P2002')) {
+            return false;
+        }
+        throw err;
+    }
+}
+
+export async function updateWriteReceiptOutcome(requestId: string, outcome: string, resultEntryId?: number | null, escalationFile?: string | null, db?: DbClient): Promise<void> {
+    const client = db ?? getDb();
+    await client.writeReceipt.update({
+        where: { requestId },
+        data: { outcome, resultEntryId, escalationFile },
+    });
 }

@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { getDb } from './client';
 
 export type ResolveMatch = 'exact' | 'alias' | 'created';
@@ -91,7 +92,11 @@ export function normalizeAlias(input: string, entityType: string): string {
 function toCanonicalEntityId(entityType: string, entityId?: string, rawName?: string): string {
     const fromId = entityId ? normalizeAlias(entityId, entityType) : '';
     const fromName = rawName ? normalizeAlias(rawName, entityType) : '';
-    const normalized = fromId || fromName || `entity_${Date.now()}`;
+    if (!fromId && !fromName) {
+        console.warn('[entity-resolution] No entityId or rawName provided; generating UUID fallback.');
+        return `entity_${randomUUID()}`;
+    }
+    const normalized = fromId || fromName;
     return normalized.replace(/\s+/g, '_');
 }
 
@@ -197,8 +202,10 @@ async function ensureAliases(params: {
         });
 
         if (!existing) {
-            await db.entityAlias.create({
-                data: {
+            // M-3: Use upsert to handle concurrent alias creation races gracefully
+            const upserted = await db.entityAlias.upsert({
+                where: { entityType_aliasNorm: { entityType, aliasNorm } },
+                create: {
                     entityType,
                     aliasNorm,
                     rawAlias: alias.slice(0, 256),
@@ -207,8 +214,11 @@ async function ensureAliases(params: {
                     source,
                     confidence,
                 },
+                update: {}, // no-op if a concurrent request already created this alias
             });
-            added.push(aliasNorm);
+            if (upserted.canonicalEntityId === canonicalEntityId) {
+                added.push(aliasNorm);
+            }
             continue;
         }
 

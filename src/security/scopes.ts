@@ -162,6 +162,15 @@ export function scopeMatchesGlobal(scope: string, requiredScope: string): boolea
     return scopeGrantsGlobal(granted, required.resource, required.action);
 }
 
+const PROTECTED_ENTITY_TYPES = (process.env.IRANTI_PROTECTED_ENTITY_TYPES ?? 'system')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+
+function isProtectedEntityType(entityType: string): boolean {
+    return PROTECTED_ENTITY_TYPES.includes(entityType.toLowerCase());
+}
+
 export function evaluateEntityScopeAccess(
     grantedScopes: string[],
     requiredScope: string,
@@ -190,7 +199,13 @@ export function evaluateEntityScopeAccess(
         })
         .filter((scope): scope is ParsedScope => Boolean(scope));
 
-    const matchingResourceScopes = parsedScopes.filter((scope) => resourceMatches(scope, required.resource));
+    // Bare wildcard '*' does not grant access to protected entity types (e.g. 'system').
+    // Callers must use an explicit namespace-scoped grant for protected entities.
+    const effectiveParsedScopes = isProtectedEntityType(entityType)
+        ? parsedScopes.filter((scope) => !scope.isWildcardAll)
+        : parsedScopes;
+
+    const matchingResourceScopes = effectiveParsedScopes.filter((scope) => resourceMatches(scope, required.resource));
 
     const exactDeny = matchingResourceScopes.find((scope) => scope.action === 'deny' && namespaceMatchesExact(scope, entity));
     if (exactDeny) {
