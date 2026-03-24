@@ -134,6 +134,7 @@ Automation notes:
 `--bootstrap-db` is for a fresh or already-compatible pgvector-enabled PostgreSQL database. If your target database is already populated but not Prisma-baselined, or the server does not have `pgvector` installed, run setup without `--bootstrap-db` and bootstrap the database separately.
 
 Manual commands are still available below when you want full low-level control.
+If you are unsure which low-level command to use, `iranti <command> --help` now includes a short summary of what it does and when to use it.
 
 ### Initialize runtime root + create an instance
 

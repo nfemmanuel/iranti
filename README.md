@@ -405,6 +405,8 @@ iranti install --scope user
 - one or more project bindings
 - optional Claude Code / Codex integration scaffolding
 
+Operator-facing CLI help now includes short "what it does" and "use this when" guidance, so `iranti <command> --help` is the quickest way to choose the right entry point.
+
 For automation:
 - `iranti setup --defaults` uses sensible defaults plus environment/flag input, but still requires a real `DATABASE_URL`.
 - `iranti setup --config <file>` reads a JSON setup plan for repeatable bootstrap.

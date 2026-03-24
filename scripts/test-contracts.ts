@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { execFileSync } from 'child_process';
 
 type CheckResult = {
     name: string;
@@ -258,15 +259,43 @@ function assertCliGuideContracts(): void {
     const cliFilePath = 'scripts/iranti-cli.ts';
     const cliContent = readFile(cliFilePath);
     expectIncludes(cliFilePath, cliContent, 'iranti handoff task/<task_id>', 'CLI help includes iranti handoff');
+    expectIncludes(cliFilePath, cliContent, 'Use this when:', 'CLI help source includes use-case guidance');
+    expectIncludes(cliFilePath, cliContent, 'Setup Option Guide', 'Setup help includes option guidance section');
+
+    const helpOutput = execFileSync('node', ['bin/iranti.js', '--help'], {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+    });
+    if (helpOutput.includes('Use this when:') && helpOutput.includes('Typical scenario:')) {
+        pass('CLI help output includes use-case guidance');
+    } else {
+        fail('CLI help output includes use-case guidance', 'Expected `node bin/iranti.js --help` to include "Use this when:" and "Typical scenario:".');
+    }
+
+    const setupHelpOutput = execFileSync('node', ['bin/iranti.js', 'setup', '--help'], {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+    });
+    if (setupHelpOutput.includes('Setup Option Guide') && setupHelpOutput.includes('--mode isolated|shared')) {
+        pass('Setup help output includes option guidance');
+    } else {
+        fail('Setup help output includes option guidance', 'Expected `node bin/iranti.js setup --help` to include the setup option guide.');
+    }
 
     const quickstartPath = 'docs/guides/quickstart.md';
     const quickstartContent = readFile(quickstartPath);
     expectIncludes(quickstartPath, quickstartContent, 'iranti handoff task/runtime_verification_pass', 'Quickstart documents iranti handoff');
+    expectIncludes(quickstartPath, quickstartContent, 'what it does and when to use it', 'Quickstart points users to richer CLI help');
 
     const manualPath = 'docs/guides/manual.md';
     const manualContent = readFile(manualPath);
     expectIncludes(manualPath, manualContent, 'Write shared Codex/Claude handoff state', 'Manual command table includes iranti handoff');
     expectIncludes(manualPath, manualContent, '[Cross-Tool Handoffs](./cross-tool-handoffs.md)', 'Manual links to cross-tool handoff guide');
+    expectIncludes(manualPath, manualContent, 'CLI help now includes short "what it does" and "use this when" guidance', 'Manual points users to richer CLI help');
+
+    const readmePath = 'README.md';
+    const readmeContent = readFile(readmePath);
+    expectIncludes(readmePath, readmeContent, 'Operator-facing CLI help now includes short "what it does" and "use this when" guidance', 'README points users to richer CLI help');
 }
 
 function assertPackageMainPointsToBuiltFile(): void {

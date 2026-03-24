@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.24 - Unreleased
+
+### Changed
+
+- CLI help now explains what each operator-facing command does, when to use it, and a typical scenario directly in `iranti --help`.
+- `iranti setup --help` now includes a flag-by-flag option guide explaining what each setup option means and when it should be used.
+- Operator docs now point users at the richer built-in CLI help instead of forcing them to jump straight to the full manual for command selection.
+
+### Fixed
+
+- Contract coverage now checks the actual `--help` and `setup --help` output so help-surface regressions fail the release checks instead of slipping into npm.
+
 ## 0.2.23 - Unreleased
 
 ### Added

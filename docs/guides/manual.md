@@ -9,6 +9,8 @@ Use it when you want the full picture:
 - which commands to run for common tasks
 - how to inspect and repair a local setup
 
+CLI help now includes short "what it does" and "use this when" guidance for operator-facing commands. Use `iranti <command> --help` for the fast path; use this manual for the full workflow and surrounding context.
+
 ---
 
 ## Core Model
