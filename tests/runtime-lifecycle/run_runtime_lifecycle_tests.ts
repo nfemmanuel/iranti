@@ -341,6 +341,53 @@ async function main(): Promise<void> {
             '',
         ].join('\n'));
 
+        const misownedConfigDir = path.join(instancesDir, 'misowned-config');
+        const misownedConfigEnvFile = path.join(misownedConfigDir, '.env');
+        writeJson(path.join(misownedConfigDir, 'instance.json'), {
+            name: 'foreign-config',
+            createdAt: now,
+            port: 3092,
+            envFile: path.join(root, 'elsewhere', '.env'),
+            instanceDir: path.join(root, 'elsewhere'),
+        });
+        writeText(misownedConfigEnvFile, [
+            'IRANTI_INSTANCE_NAME=misowned-config',
+            'IRANTI_PORT=3092',
+            'DATABASE_URL=postgresql://postgres:postgres@localhost:5432/iranti_misowned_config',
+            '',
+        ].join('\n'));
+
+        const misownedRuntimeDir = path.join(instancesDir, 'misowned-runtime');
+        const misownedRuntimeEnvFile = path.join(misownedRuntimeDir, '.env');
+        writeJson(path.join(misownedRuntimeDir, 'instance.json'), {
+            name: 'misowned-runtime',
+            createdAt: now,
+            port: healthyRuntime.port,
+            envFile: misownedRuntimeEnvFile,
+            instanceDir: misownedRuntimeDir,
+        });
+        writeText(misownedRuntimeEnvFile, [
+            'IRANTI_INSTANCE_NAME=misowned-runtime',
+            `IRANTI_PORT=${healthyRuntime.port}`,
+            'DATABASE_URL=postgresql://postgres:postgres@localhost:5432/iranti_misowned_runtime',
+            '',
+        ].join('\n'));
+        writeJson(path.join(misownedRuntimeDir, 'runtime.json'), {
+            instanceName: 'foreign-runtime',
+            instanceDir: healthyDir,
+            envFile: healthyEnvFile,
+            runtimeFile: path.join(healthyDir, 'runtime.json'),
+            version: '0.2.15',
+            pid: process.pid,
+            ppid: process.ppid ?? 0,
+            port: healthyRuntime.port,
+            startedAt: now,
+            lastHeartbeatAt: now,
+            updatedAt: now,
+            status: 'running',
+            healthUrl: `http://127.0.0.1:${healthyRuntime.port}/health`,
+        });
+
         const statusWithVariantsRun = runCli(['status', '--root', root, '--json'], repoRoot);
         assert.strictEqual(statusWithVariantsRun.status, 0, `status with variant instances failed:\n${statusWithVariantsRun.stdout}\n${statusWithVariantsRun.stderr}`);
         const statusWithVariants = JSON.parse(statusWithVariantsRun.stdout.trim()) as typeof statusPayload;
@@ -348,10 +395,14 @@ async function main(): Promise<void> {
         const unhealthyStatus = statusWithVariants.instances.find((instance) => instance.name === 'unhealthy');
         const partialStatus = statusWithVariants.instances.find((instance) => instance.name === 'partial');
         const invalidStatus = statusWithVariants.instances.find((instance) => instance.name === 'invalid-config');
+        const misownedConfigStatus = statusWithVariants.instances.find((instance) => instance.name === 'misowned-config');
+        const misownedRuntimeStatus = statusWithVariants.instances.find((instance) => instance.name === 'misowned-runtime');
         assert.ok(healthyStatus, 'Expected healthy instance in status payload.');
         assert.ok(unhealthyStatus, 'Expected unhealthy instance in status payload.');
         assert.ok(partialStatus, 'Expected partial instance in status payload.');
         assert.ok(invalidStatus, 'Expected invalid-config instance in status payload.');
+        assert.ok(misownedConfigStatus, 'Expected misowned-config instance in status payload.');
+        assert.ok(misownedRuntimeStatus, 'Expected misowned-runtime instance in status payload.');
         assert.strictEqual(healthyStatus?.runtime.classification, 'running');
         assert.strictEqual(healthyStatus?.runtime.health.ok, true);
         assert.strictEqual(unhealthyStatus?.runtime.classification, 'unhealthy');
@@ -360,6 +411,8 @@ async function main(): Promise<void> {
         assert.strictEqual(unhealthyStatus?.runtime.health.ok, false);
         assert.strictEqual(partialStatus?.config.classification, 'partial');
         assert.strictEqual(invalidStatus?.config.classification, 'invalid');
+        assert.strictEqual(misownedConfigStatus?.config.classification, 'invalid');
+        assert.strictEqual(misownedRuntimeStatus?.runtime.classification, 'invalid');
 
         const healthyInspection = await inspectRuntimeState(path.join(healthyDir, 'runtime.json'));
         assert.strictEqual(healthyInspection.classification, 'running');
@@ -370,6 +423,10 @@ async function main(): Promise<void> {
         assert.strictEqual(unhealthyInspection.classification, 'unhealthy');
         assert.strictEqual(unhealthyInspection.health.checked, true);
         assert.strictEqual(unhealthyInspection.health.ok, false);
+
+        const misownedInspection = await inspectRuntimeState(path.join(misownedRuntimeDir, 'runtime.json'));
+        assert.strictEqual(misownedInspection.classification, 'invalid');
+        assert.strictEqual(misownedInspection.health.checked, false);
 
         const runPartialRun = runCli(['run', '--instance', 'partial', '--root', root], repoRoot);
         assert.notStrictEqual(runPartialRun.status, 0, 'run unexpectedly accepted a partial instance');
@@ -385,6 +442,14 @@ async function main(): Promise<void> {
             `${restartInvalidRun.stdout}\n${restartInvalidRun.stderr}`,
             /instance 'invalid-config' is invalid/i,
             'restart should reject invalid instance configuration before attempting lifecycle actions'
+        );
+
+        const runMisownedRun = runCli(['run', '--instance', 'misowned-config', '--root', root], repoRoot);
+        assert.notStrictEqual(runMisownedRun.status, 0, 'run unexpectedly accepted a misowned instance');
+        assert.match(
+            `${runMisownedRun.stdout}\n${runMisownedRun.stderr}`,
+            /instance 'misowned-config' is invalid/i,
+            'run should reject misowned instance metadata before starting a process'
         );
 
         const repairPartialPortServer = await listenOnRandomPort();

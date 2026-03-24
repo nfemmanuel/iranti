@@ -938,18 +938,30 @@ async function loadInstanceEnv(
 }
 
 async function inspectInstanceConfig(root: string, name: string): Promise<InstanceConfigSummary> {
-    const { envFile, metaFile } = instancePaths(root, name);
+    const { instanceDir, envFile, metaFile } = instancePaths(root, name);
     const metaPresent = fs.existsSync(metaFile);
     const envPresent = fs.existsSync(envFile);
 
     let metaReadable = false;
     let envReadable = false;
+    const ownershipIssues: string[] = [];
 
     if (metaPresent) {
         try {
             const raw = await fsp.readFile(metaFile, 'utf8');
             const parsed = JSON.parse(raw) as Partial<InstanceMeta>;
             metaReadable = typeof parsed.name === 'string' && parsed.name.trim().length > 0;
+            if (metaReadable) {
+                if (parsed.name?.trim() !== name) {
+                    ownershipIssues.push(`instance.json name is ${parsed.name}`);
+                }
+                if (typeof parsed.instanceDir === 'string' && path.resolve(parsed.instanceDir) !== path.resolve(instanceDir)) {
+                    ownershipIssues.push(`instance.json points to ${parsed.instanceDir}`);
+                }
+                if (typeof parsed.envFile === 'string' && path.resolve(parsed.envFile) !== path.resolve(envFile)) {
+                    ownershipIssues.push(`instance.json envFile points to ${parsed.envFile}`);
+                }
+            }
         } catch {
             metaReadable = false;
         }
@@ -966,7 +978,10 @@ async function inspectInstanceConfig(root: string, name: string): Promise<Instan
 
     let classification: InstanceConfigSummary['classification'];
     let detail: string;
-    if (metaPresent && envPresent && metaReadable && envReadable) {
+    if (ownershipIssues.length > 0) {
+        classification = 'invalid';
+        detail = ownershipIssues.join('; ');
+    } else if (metaPresent && envPresent && metaReadable && envReadable) {
         classification = 'complete';
         detail = 'instance metadata and env are present';
     } else if ((metaPresent && !metaReadable) || (envPresent && !envReadable)) {

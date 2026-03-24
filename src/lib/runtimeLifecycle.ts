@@ -228,6 +228,28 @@ export async function inspectRuntimeState(runtimeFile: string): Promise<RuntimeI
         };
     }
 
+    const expectedInstanceDir = path.resolve(path.dirname(runtimeFile));
+    const expectedRuntimeFile = path.resolve(runtimeFile);
+    const expectedEnvFile = path.resolve(path.join(expectedInstanceDir, '.env'));
+    const expectedInstanceName = path.basename(expectedInstanceDir);
+    const ownershipIssues = [
+        path.resolve(state.instanceDir) !== expectedInstanceDir ? `instanceDir points to ${state.instanceDir}` : null,
+        path.resolve(state.runtimeFile) !== expectedRuntimeFile ? `runtimeFile points to ${state.runtimeFile}` : null,
+        path.resolve(state.envFile) !== expectedEnvFile ? `envFile points to ${state.envFile}` : null,
+        state.instanceName !== expectedInstanceName ? `instanceName is ${state.instanceName}` : null,
+    ].filter((value): value is string => Boolean(value));
+    if (ownershipIssues.length > 0) {
+        return {
+            state,
+            processAlive: false,
+            running: false,
+            stale: false,
+            classification: 'invalid',
+            detail: `runtime metadata does not belong to this instance: ${ownershipIssues.join('; ')}`,
+            health: { checked: false, ok: false, source: 'none', detail: 'runtime metadata ownership mismatch' },
+        };
+    }
+
     const processAlive = isPidAlive(state.pid);
     const stale = !processAlive && state.status !== 'stopped';
     const healthUrl = state.healthUrl?.trim() || `http://127.0.0.1:${state.port}/health`;
