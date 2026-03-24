@@ -170,6 +170,35 @@ class SessionInspection:
     session_checkpoint: Optional[SessionCheckpointRecord] = None
     session_recovery: Optional[SessionRecoveryInfo] = None
     persisted_brief_generated_at: Optional[str] = None
+    summary: Optional['SessionSummary'] = None
+
+
+@dataclass
+class SessionCheckpointSummary:
+    current_step: Optional[str] = None
+    next_step: Optional[str] = None
+    open_risk_count: int = 0
+    entity_target_count: int = 0
+
+
+@dataclass
+class SessionSummary:
+    agent_id: str
+    has_checkpoint: bool
+    session_id: Optional[str] = None
+    task: Optional[str] = None
+    status: Optional[str] = None
+    operator_state: str = 'none'
+    started_at: Optional[str] = None
+    last_heartbeat_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    interrupted_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    abandoned_at: Optional[str] = None
+    resumed_at: Optional[str] = None
+    is_stale: bool = False
+    persisted_brief_generated_at: Optional[str] = None
+    checkpoint_summary: Optional[SessionCheckpointSummary] = None
 
 
 @dataclass
@@ -643,13 +672,24 @@ class IrantiClient:
         data = self._get(f'/memory/session/{agent_id}')
         checkpoint_data = data.get('sessionCheckpoint')
         recovery_data = data.get('sessionRecovery')
+        summary_data = data.get('summary')
         return SessionInspection(
             agent_id=data['agentId'],
             has_checkpoint=data['hasCheckpoint'],
             session_checkpoint=self._parse_session_checkpoint(checkpoint_data) if isinstance(checkpoint_data, dict) else None,
             session_recovery=self._parse_session_recovery(recovery_data) if isinstance(recovery_data, dict) else None,
             persisted_brief_generated_at=data.get('persistedBriefGeneratedAt'),
+            summary=self._parse_session_summary(summary_data) if isinstance(summary_data, dict) else None,
         )
+
+    def list_sessions(self) -> list[SessionSummary]:
+        """List persisted operator-visible session checkpoints across agents."""
+        data = self._get('/memory/sessions')
+        return [
+            self._parse_session_summary(item)
+            for item in data
+            if isinstance(item, dict)
+        ]
 
     def who_knows(self, entity: str) -> list[dict]:
         """Find all agents that have written facts about an entity."""
@@ -847,6 +887,36 @@ class IrantiClient:
             recent_outputs=list(data.get('recentOutputs', [])) if isinstance(data.get('recentOutputs', []), list) else [],
             entity_targets=list(data.get('entityTargets', [])) if isinstance(data.get('entityTargets', []), list) else [],
             notes=data.get('notes'),
+        )
+
+    def _parse_session_summary(self, data: dict) -> SessionSummary:
+        checkpoint_summary_data = data.get('checkpointSummary')
+        checkpoint_summary = None
+        if isinstance(checkpoint_summary_data, dict):
+            checkpoint_summary = SessionCheckpointSummary(
+                current_step=checkpoint_summary_data.get('currentStep'),
+                next_step=checkpoint_summary_data.get('nextStep'),
+                open_risk_count=int(checkpoint_summary_data.get('openRiskCount', 0) or 0),
+                entity_target_count=int(checkpoint_summary_data.get('entityTargetCount', 0) or 0),
+            )
+
+        return SessionSummary(
+            agent_id=data['agentId'],
+            has_checkpoint=data['hasCheckpoint'],
+            session_id=data.get('sessionId'),
+            task=data.get('task'),
+            status=data.get('status'),
+            operator_state=data.get('operatorState', 'none'),
+            started_at=data.get('startedAt'),
+            last_heartbeat_at=data.get('lastHeartbeatAt'),
+            updated_at=data.get('updatedAt'),
+            interrupted_at=data.get('interruptedAt'),
+            completed_at=data.get('completedAt'),
+            abandoned_at=data.get('abandonedAt'),
+            resumed_at=data.get('resumedAt'),
+            is_stale=bool(data.get('isStale', False)),
+            persisted_brief_generated_at=data.get('persistedBriefGeneratedAt'),
+            checkpoint_summary=checkpoint_summary,
         )
 
     def last_http(self) -> dict:

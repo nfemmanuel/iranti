@@ -251,6 +251,15 @@ export interface SessionInspectionParams {
     agentId: string;
 }
 
+export type SessionOperatorState = 'none' | SessionStatus;
+
+export interface SessionCheckpointSummary {
+    currentStep: string | null;
+    nextStep: string | null;
+    openRiskCount: number;
+    entityTargetCount: number;
+}
+
 export interface ReconveneParams {
     agentId: string;
     task: string;
@@ -275,6 +284,26 @@ export interface SessionInspection {
     sessionCheckpoint: SessionCheckpointRecord | null;
     sessionRecovery: SessionRecoveryInfo | null;
     persistedBriefGeneratedAt?: string;
+    summary: SessionSummary;
+}
+
+export interface SessionSummary {
+    agentId: string;
+    hasCheckpoint: boolean;
+    sessionId: string | null;
+    task: string | null;
+    status: SessionStatus | null;
+    operatorState: SessionOperatorState;
+    startedAt: string | null;
+    lastHeartbeatAt: string | null;
+    updatedAt: string | null;
+    interruptedAt: string | null;
+    completedAt: string | null;
+    abandonedAt: string | null;
+    resumedAt: string | null;
+    isStale: boolean;
+    persistedBriefGeneratedAt?: string;
+    checkpointSummary: SessionCheckpointSummary | null;
 }
 
 export interface FactInjection {

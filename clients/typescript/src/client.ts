@@ -26,6 +26,7 @@ import type {
     SearchResult,
     SessionInspection,
     SessionInspectionParams,
+    SessionSummary,
     SessionActionParams,
     SessionCheckpointParams,
     WhoKnowsResult,
@@ -367,6 +368,10 @@ export class IrantiClient {
 
     inspectSession(params: SessionInspectionParams): Promise<SessionInspection> {
         return this.request<SessionInspection>('GET', `/memory/session/${params.agentId}`);
+    }
+
+    listSessions(): Promise<SessionSummary[]> {
+        return this.request<SessionSummary[]>('GET', '/memory/sessions');
     }
 
     observe(params: ObserveParams): Promise<ObserveResult> {

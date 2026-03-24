@@ -200,6 +200,7 @@ Hybrid search response:
 
 - `POST /memory/handshake`
 - `POST /memory/reconvene`
+- `GET /memory/sessions`
 - `GET /memory/session/:agentId`
 - `POST /memory/checkpoint`
 - `POST /memory/resume`
@@ -225,6 +226,36 @@ Handshake request body:
 
 `agent` is still accepted as a legacy alias, but `agentId` is the preferred field name for new integrations.
 
+Session inventory response (`GET /memory/sessions`):
+
+```json
+[
+  {
+    "agentId": "research_agent_001",
+    "hasCheckpoint": true,
+    "sessionId": "sess_123",
+    "task": "Audit launch blockers for local setup",
+    "status": "interrupted",
+    "operatorState": "interrupted",
+    "startedAt": "2026-03-23T08:20:00.000Z",
+    "lastHeartbeatAt": "2026-03-23T08:26:00.000Z",
+    "updatedAt": "2026-03-23T08:31:00.000Z",
+    "interruptedAt": "2026-03-23T08:31:00.000Z",
+    "completedAt": null,
+    "abandonedAt": null,
+    "resumedAt": null,
+    "isStale": true,
+    "persistedBriefGeneratedAt": "2026-03-23T08:31:00.000Z",
+    "checkpointSummary": {
+      "currentStep": "collecting Windows lifecycle traces",
+      "nextStep": "compare runtime roots",
+      "openRiskCount": 1,
+      "entityTargetCount": 0
+    }
+  }
+]
+```
+
 Session inspection response (`GET /memory/session/:agentId`):
 
 ```json
@@ -246,6 +277,29 @@ Session inspection response (`GET /memory/session/:agentId`):
       "openRisks": ["stale metadata semantics unclear"]
     },
     "interruptedAt": "2026-03-23T08:31:00.000Z"
+  },
+  "summary": {
+    "agentId": "research_agent_001",
+    "hasCheckpoint": true,
+    "sessionId": "sess_123",
+    "task": "Audit launch blockers for local setup",
+    "status": "interrupted",
+    "operatorState": "interrupted",
+    "startedAt": "2026-03-23T08:20:00.000Z",
+    "lastHeartbeatAt": "2026-03-23T08:26:00.000Z",
+    "updatedAt": "2026-03-23T08:31:00.000Z",
+    "interruptedAt": "2026-03-23T08:31:00.000Z",
+    "completedAt": null,
+    "abandonedAt": null,
+    "resumedAt": null,
+    "isStale": true,
+    "persistedBriefGeneratedAt": "2026-03-23T08:31:00.000Z",
+    "checkpointSummary": {
+      "currentStep": "collecting Windows lifecycle traces",
+      "nextStep": "compare runtime roots",
+      "openRiskCount": 1,
+      "entityTargetCount": 0
+    }
   },
   "sessionRecovery": {
     "available": true,

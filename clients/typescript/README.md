@@ -73,6 +73,9 @@ const session = await client.inspectSession({
 });
 
 console.log(session.hasCheckpoint);
+
+const sessions = await client.listSessions();
+console.log(sessions.map((item) => `${item.agentId}:${item.operatorState}`));
 ```
 
 ## Graph

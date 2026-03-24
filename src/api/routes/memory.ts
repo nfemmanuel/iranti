@@ -90,6 +90,16 @@ export function memoryRoutes(iranti: Iranti): Router {
         }
     });
 
+    // GET /sessions
+    router.get('/sessions', async (_req: Request, res: Response) => {
+        try {
+            const sessions = await iranti.listSessions();
+            res.json(sessions);
+        } catch (err) {
+            res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+    });
+
     // GET /session/:agentId
     router.get('/session/:agentId', async (req: Request, res: Response) => {
         try {

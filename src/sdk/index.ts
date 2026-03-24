@@ -9,10 +9,17 @@ import {
 } from '../lib/staffEventEmitter';
 import { setStaffEventEmitter, getStaffEventEmitter, resetStaffEventEmitter } from '../lib/staffEventRegistry';
 import { librarianWrite, librarianIngest } from '../librarian';
-import type { WorkingMemoryBrief, AttendResult } from '../attendant';
+import type {
+    WorkingMemoryBrief,
+    AttendResult,
+    SessionSummary as AttendantSessionSummary,
+    SessionCheckpointSummary as AttendantSessionCheckpointSummary,
+    SessionOperatorState as AttendantSessionOperatorState,
+} from '../attendant';
 import { getAttendant, AttendantInstance } from '../attendant/registry';
 import { runArchivist } from '../archivist';
-import { findArchiveAsOf, findArchiveHistory, findEntriesByEntity, findEntry, recordKnowledgeEntryAccess, searchEntriesHybrid } from '../library/queries';
+import { summarizeSessionState } from '../attendant/AttendantInstance';
+import { findArchiveAsOf, findArchiveHistory, findEntriesByEntity, findEntry, listAttendantStateEntries, recordKnowledgeEntryAccess, searchEntriesHybrid } from '../library/queries';
 import { createRelationship, getRelated, getRelatedDeep, RelatedEntity } from '../library/relationships';
 import { registerAgent, getAgent, whoKnows, listAgents, assignToTeam, AgentProfile, AgentRecord } from '../library/agent-registry';
 import { resolveEntity } from '../library/entity-resolution';
@@ -130,7 +137,14 @@ export interface SessionInspection {
     sessionCheckpoint: SessionCheckpointRecord | null;
     sessionRecovery: SessionRecoveryInfo | null;
     persistedBriefGeneratedAt?: string;
+    summary: SessionSummary;
 }
+
+export type SessionOperatorState = AttendantSessionOperatorState;
+
+export interface SessionCheckpointSummary extends AttendantSessionCheckpointSummary {}
+
+export interface SessionSummary extends AttendantSessionSummary {}
 
 export interface TemporalQueryOptions {
     asOf?: Date;
@@ -486,6 +500,22 @@ export class Iranti {
             task: input.task,
             recentMessages: input.recentMessages,
         });
+    }
+
+    async listSessions(): Promise<SessionSummary[]> {
+        const states = await listAttendantStateEntries();
+        return states
+            .map((entry) => {
+                const raw = entry.valueRaw as Partial<WorkingMemoryBrief> | null;
+                const checkpoint = raw?.sessionCheckpoint ?? null;
+                if (!checkpoint) return null;
+                return summarizeSessionState(
+                    entry.entityId,
+                    checkpoint,
+                    typeof raw?.briefGeneratedAt === 'string' ? raw.briefGeneratedAt : undefined,
+                );
+            })
+            .filter((entry): entry is SessionSummary => Boolean(entry));
     }
 
     getAttendant(agentId: string): AttendantInstance {

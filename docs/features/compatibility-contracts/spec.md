@@ -78,6 +78,7 @@ Compatibility contracts define which Iranti surfaces are considered stable withi
 - A config key may be replaced by a new key only if fallback parsing or migration guidance exists for older installs.
 - A route may add new optional fields, but old clients must not fail parsing because of the addition.
 - Runtime metadata readers must tolerate older `runtime.json` shapes with missing fields.
+- `iranti status --json` is an automation-facing CLI surface; additive fields are allowed, but existing fields and meanings should remain stable within the major version.
 - Upgrade commands must distinguish between install version and running instance version so mixed-version state is visible and recoverable.
 
 ## Test Results

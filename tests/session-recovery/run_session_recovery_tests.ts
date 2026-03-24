@@ -67,6 +67,9 @@ async function main(): Promise<void> {
     expect(inspected.hasCheckpoint === true, 'Expected inspectSession() to report a checkpoint.');
     expect(inspected.sessionCheckpoint?.status === 'active', 'Expected inspectSession() to reflect the persisted checkpoint state.');
     expect(inspected.sessionRecovery?.recommendation === 'resume', 'Expected inspectSession() to derive a resume recommendation.');
+    expect(inspected.summary.operatorState === 'interrupted', 'Expected inspectSession() summary to classify stale active checkpoints as interrupted.');
+    expect(inspected.summary.isStale === true, 'Expected inspectSession() summary to flag the stale checkpoint.');
+    expect(inspected.summary.checkpointSummary?.openRiskCount === 1, 'Expected inspectSession() summary to expose checkpoint risk counts.');
 
     const liveAttendant: any = new AttendantInstance(agentId);
     liveAttendant.brief = recoveredBrief;

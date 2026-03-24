@@ -46,14 +46,29 @@ function dedupePaths(paths: Array<string | undefined | null>): string[] {
     return out;
 }
 
+function walkAncestorCandidates(startDir: string | undefined, relativePath: string): string[] {
+    if (!startDir) return [];
+    const results: string[] = [];
+    let current = path.resolve(startDir);
+
+    while (true) {
+        results.push(path.join(current, relativePath));
+        const parent = path.dirname(current);
+        if (parent === current) break;
+        current = parent;
+    }
+
+    return results;
+}
+
 function findProjectEnvFile(options: RuntimeEnvOptions): string | undefined {
     const explicit = options.projectEnvFile?.trim() || process.env.IRANTI_PROJECT_ENV?.trim();
     if (explicit && fs.existsSync(explicit)) return path.resolve(explicit);
 
     const candidates = dedupePaths([
-        options.payloadCwd ? path.join(options.payloadCwd, '.env.iranti') : null,
-        options.cwd ? path.join(options.cwd, '.env.iranti') : null,
-        path.join(process.cwd(), '.env.iranti'),
+        ...walkAncestorCandidates(options.payloadCwd, '.env.iranti'),
+        ...walkAncestorCandidates(options.cwd, '.env.iranti'),
+        ...walkAncestorCandidates(process.cwd(), '.env.iranti'),
     ]);
 
     return candidates.find((candidate) => fs.existsSync(candidate));
@@ -64,9 +79,9 @@ function findFallbackEnvFile(options: RuntimeEnvOptions): string | undefined {
     if (explicit && fs.existsSync(explicit)) return path.resolve(explicit);
 
     const candidates = dedupePaths([
-        options.payloadCwd ? path.join(options.payloadCwd, '.env') : null,
-        options.cwd ? path.join(options.cwd, '.env') : null,
-        path.join(process.cwd(), '.env'),
+        ...walkAncestorCandidates(options.payloadCwd, '.env'),
+        ...walkAncestorCandidates(options.cwd, '.env'),
+        ...walkAncestorCandidates(process.cwd(), '.env'),
         path.resolve(__dirname, '..', '..', '.env'),
         path.resolve(__dirname, '..', '..', '..', '.env'),
     ]);

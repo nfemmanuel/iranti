@@ -23,26 +23,30 @@ Turn compatibility from an informal expectation into a tested release gate.
 - Additive fields allowed.
 - Existing required fields cannot disappear silently.
 
+5. `iranti status --json` contract checks
+- Keep machine-readable runtime/config classifications stable within the major version.
+- Cover healthy/unhealthy runtime states plus complete/partial/invalid instance config states.
+
 ## Priority 1
 
-5. Client compatibility matrix
+6. Client compatibility matrix
 - Verify current TypeScript and Python clients can talk to at least one prior compatible server release where practical.
 - Verify current server remains usable by at least one prior client release where practical.
 
-6. Deprecation mechanism
+7. Deprecation mechanism
 - Standard warning format for deprecated CLI flags and commands.
 - Standard release-note wording for deprecated API or config surfaces.
 
-7. Benchmark and site alignment checks
+8. Benchmark and site alignment checks
 - Ensure benchmark/site/control-plane repos do not depend on stale product-contract assumptions.
 
 ## Priority 2
 
-8. Compatibility CI job
+9. Compatibility CI job
 - Dedicated CI entry that runs contract and migration-oriented checks together.
 
-9. Release checklist expansion
+10. Release checklist expansion
 - Add compatibility signoff to release procedure.
 
-10. Migration docs index
+11. Migration docs index
 - Central index of past migrations and deprecations.

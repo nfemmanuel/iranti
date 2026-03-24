@@ -119,6 +119,35 @@ export interface SessionInspection {
     sessionCheckpoint: SessionCheckpointRecord | null;
     sessionRecovery: SessionRecoveryInfo | null;
     persistedBriefGeneratedAt?: string;
+    summary: SessionSummary;
+}
+
+export type SessionOperatorState = 'none' | SessionStatus;
+
+export interface SessionCheckpointSummary {
+    currentStep: string | null;
+    nextStep: string | null;
+    openRiskCount: number;
+    entityTargetCount: number;
+}
+
+export interface SessionSummary {
+    agentId: string;
+    hasCheckpoint: boolean;
+    sessionId: string | null;
+    task: string | null;
+    status: SessionStatus | null;
+    operatorState: SessionOperatorState;
+    startedAt: string | null;
+    lastHeartbeatAt: string | null;
+    updatedAt: string | null;
+    interruptedAt: string | null;
+    completedAt: string | null;
+    abandonedAt: string | null;
+    resumedAt: string | null;
+    isStale: boolean;
+    persistedBriefGeneratedAt?: string;
+    checkpointSummary: SessionCheckpointSummary | null;
 }
 
 // ─── Observe Types ────────────────────────────────────────────────────────────
@@ -221,6 +250,54 @@ export async function readPersistedSessionState(agentId: string): Promise<Persis
         briefGeneratedAt: state.briefGeneratedAt,
         sessionCheckpoint: state.sessionCheckpoint ?? null,
         sessionRecovery: state.sessionRecovery ?? null,
+    };
+}
+
+function buildCheckpointSummary(checkpoint: SessionCheckpointRecord | null): SessionCheckpointSummary | null {
+    if (!checkpoint) return null;
+    return {
+        currentStep: checkpoint.checkpoint.currentStep ?? null,
+        nextStep: checkpoint.checkpoint.nextStep ?? null,
+        openRiskCount: Array.isArray(checkpoint.checkpoint.openRisks) ? checkpoint.checkpoint.openRisks.length : 0,
+        entityTargetCount: Array.isArray(checkpoint.checkpoint.entityTargets) ? checkpoint.checkpoint.entityTargets.length : 0,
+    };
+}
+
+export function summarizeSessionState(
+    agentId: string,
+    checkpoint: SessionCheckpointRecord | null,
+    persistedBriefGeneratedAt?: string,
+): SessionSummary {
+    const hasCheckpoint = Boolean(checkpoint);
+    const lastHeartbeatAt = checkpoint?.lastHeartbeatAt ?? null;
+    const isStale = Boolean(
+        checkpoint
+        && checkpoint.status === 'active'
+        && Date.now() - new Date(checkpoint.lastHeartbeatAt).getTime() >= SESSION_INTERRUPTION_TTL_MS
+    );
+    const operatorState: SessionOperatorState = !checkpoint
+        ? 'none'
+        : checkpoint.status === 'active' && isStale
+            ? 'interrupted'
+            : checkpoint.status;
+
+    return {
+        agentId,
+        hasCheckpoint,
+        sessionId: checkpoint?.sessionId ?? null,
+        task: checkpoint?.task ?? null,
+        status: checkpoint?.status ?? null,
+        operatorState,
+        startedAt: checkpoint?.startedAt ?? null,
+        lastHeartbeatAt,
+        updatedAt: checkpoint?.updatedAt ?? null,
+        interruptedAt: checkpoint?.interruptedAt ?? null,
+        completedAt: checkpoint?.completedAt ?? null,
+        abandonedAt: checkpoint?.abandonedAt ?? null,
+        resumedAt: checkpoint?.resumedAt ?? null,
+        isStale,
+        persistedBriefGeneratedAt,
+        checkpointSummary: buildCheckpointSummary(checkpoint),
     };
 }
 
@@ -896,6 +973,7 @@ export class AttendantInstance {
             sessionCheckpoint: checkpoint,
             sessionRecovery: recovery,
             persistedBriefGeneratedAt: persisted?.briefGeneratedAt,
+            summary: summarizeSessionState(this.agentId, checkpoint, persisted?.briefGeneratedAt),
         };
     }
 

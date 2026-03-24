@@ -154,6 +154,13 @@ async function main(): Promise<void> {
     const inspectedSession = await client.inspectSession({ agentId: recoveryAgent });
     expect(inspectedSession.hasCheckpoint === true, 'Expected inspectSession() to report the persisted session.');
     expect(inspectedSession.sessionCheckpoint?.sessionId === checkpointBrief.sessionCheckpoint?.sessionId, 'Expected inspectSession() to return the active checkpoint session id.');
+    expect(inspectedSession.summary.operatorState === 'active', 'Expected inspectSession() summary to expose operator-facing active state.');
+
+    const listedSessions = await client.listSessions();
+    expect(
+        listedSessions.some((session) => session.agentId === recoveryAgent && session.sessionId === checkpointBrief.sessionCheckpoint?.sessionId),
+        'Expected listSessions() to include the recovery checkpoint.'
+    );
 
     await client.completeSession({
         agentId: recoveryAgent,

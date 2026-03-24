@@ -478,6 +478,7 @@ const attendant = iranti.getAttendant(agentId);
 
 // Session checkpoints and recovery
 const checkpoint = await iranti.checkpoint({ agentId, task, recentMessages, checkpoint: { currentStep, nextStep, openRisks } });
+const sessions = await iranti.listSessions();
 const session = await iranti.inspectSession({ agentId });
 const resumed = await iranti.resumeSession({ agentId, sessionId });
 const completed = await iranti.completeSession({ agentId, sessionId });

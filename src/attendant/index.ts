@@ -1,13 +1,16 @@
 // Re-export new class-based API
 export { AttendantInstance } from './AttendantInstance';
 export { getAttendant, clearAttendant, activeAttendants } from './registry';
-export { readPersistedSessionState } from './AttendantInstance';
+export { readPersistedSessionState, summarizeSessionState } from './AttendantInstance';
 export type {
     AgentContext,
     WorkingMemoryBrief,
     WorkingMemoryEntry,
     PersistedSessionState,
     SessionInspection,
+    SessionSummary,
+    SessionCheckpointSummary,
+    SessionOperatorState,
     ObserveInput,
     ObserveResult,
     AttendInput,

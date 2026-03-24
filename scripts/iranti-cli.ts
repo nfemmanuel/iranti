@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from 'fs';
 import fsp from 'fs/promises';
+import http from 'http';
 import https from 'https';
 import os from 'os';
 import path from 'path';
@@ -49,8 +50,27 @@ type InstanceRuntimeSummary = {
     state: InstanceRuntimeState | null;
     running: boolean;
     stale: boolean;
-    classification: 'running' | 'stale' | 'stopped' | 'missing' | 'invalid';
+    classification: 'running' | 'unhealthy' | 'stale' | 'stopped' | 'missing' | 'invalid';
     detail: string;
+    health: {
+        checked: boolean;
+        ok: boolean;
+        source: 'health-url' | 'port-health' | 'none';
+        detail: string;
+    };
+};
+
+type InstanceConfigSummary = {
+    classification: 'complete' | 'partial' | 'invalid';
+    detail: string;
+    metaFile: string;
+    envFile: string;
+    state: {
+        metaPresent: boolean;
+        envPresent: boolean;
+        metaReadable: boolean;
+        envReadable: boolean;
+    };
 };
 
 type RuntimeRootSource =
@@ -367,6 +387,42 @@ function resolveInstallRoot(args: ParsedArgs, scope: Scope): string {
     return resolveInstallRootDetails(args, scope).root;
 }
 
+function walkAncestorPaths(startDir: string): string[] {
+    const dirs: string[] = [];
+    let current = path.resolve(startDir);
+
+    while (true) {
+        dirs.push(current);
+        const parent = path.dirname(current);
+        if (parent === current) break;
+        current = parent;
+    }
+
+    return dirs;
+}
+
+function findClosestAncestorFile(startDir: string, fileName: string): string | null {
+    for (const dir of walkAncestorPaths(startDir)) {
+        const candidate = path.join(dir, fileName);
+        if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+            return candidate;
+        }
+    }
+    return null;
+}
+
+function findClosestAncestorRuntimeRoot(startDir: string): string | null {
+    for (const dir of walkAncestorPaths(startDir)) {
+        for (const runtimeDirName of ['.iranti-runtime', '.iranti']) {
+            const candidate = path.join(dir, runtimeDirName);
+            if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) {
+                return path.resolve(candidate);
+            }
+        }
+    }
+    return null;
+}
+
 function resolveInstallRootDetails(args: ParsedArgs, scope: Scope): RuntimeRootResolution {
     const explicit = getFlag(args, 'root') ?? process.env.IRANTI_HOME;
     if (explicit) {
@@ -385,9 +441,8 @@ function resolveInstallRootDetails(args: ParsedArgs, scope: Scope): RuntimeRootR
     const userMeta = path.join(userRoot, 'install.json');
     const systemMeta = path.join(systemRoot, 'install.json');
     const cwd = process.cwd();
-    const projectBindingFile = path.join(cwd, '.env.iranti');
-    const localRuntimeCandidates = [path.join(cwd, '.iranti-runtime'), path.join(cwd, '.iranti')]
-        .map((candidate) => path.resolve(candidate));
+    const projectBindingFile = findClosestAncestorFile(cwd, '.env.iranti');
+    const localRuntimeRoot = findClosestAncestorRuntimeRoot(cwd);
 
     if (scope === 'system') {
         return {
@@ -398,7 +453,7 @@ function resolveInstallRootDetails(args: ParsedArgs, scope: Scope): RuntimeRootR
             installMetaPath: systemMeta,
         };
     }
-    if (fs.existsSync(projectBindingFile)) {
+    if (projectBindingFile && fs.existsSync(projectBindingFile)) {
         try {
             const raw = fs.readFileSync(projectBindingFile, 'utf-8');
             const match = raw.match(/^\s*IRANTI_INSTANCE_ENV\s*=\s*(.+)\s*$/m);
@@ -417,16 +472,14 @@ function resolveInstallRootDetails(args: ParsedArgs, scope: Scope): RuntimeRootR
             // Fall through to other resolution strategies.
         }
     }
-    for (const candidate of localRuntimeCandidates) {
-        if (fs.existsSync(candidate)) {
-            return {
-                root: candidate,
-                source: 'cwd-runtime',
-                userRoot,
-                systemRoot,
-                installMetaPath: path.join(candidate, 'install.json'),
-            };
-        }
+    if (localRuntimeRoot) {
+        return {
+            root: localRuntimeRoot,
+            source: 'cwd-runtime',
+            userRoot,
+            systemRoot,
+            installMetaPath: path.join(localRuntimeRoot, 'install.json'),
+        };
     }
     if (fs.existsSync(userMeta)) {
         return {
@@ -851,27 +904,159 @@ async function loadInstanceEnv(root: string, name: string): Promise<{ instanceDi
     };
 }
 
+function probeHealthUrl(urlString: string, timeoutMs: number = 800): Promise<{ ok: boolean; detail: string }> {
+    return new Promise((resolve) => {
+        let settled = false;
+        const finish = (result: { ok: boolean; detail: string }) => {
+            if (settled) return;
+            settled = true;
+            resolve(result);
+        };
+
+        let parsed: URL;
+        try {
+            parsed = new URL(urlString);
+        } catch {
+            finish({ ok: false, detail: 'invalid health URL' });
+            return;
+        }
+
+        const transport = parsed.protocol === 'https:' ? https : http;
+        const req = transport.request(parsed, { method: 'GET', timeout: timeoutMs }, (res) => {
+            res.resume();
+            if ((res.statusCode ?? 0) >= 200 && (res.statusCode ?? 0) < 300) {
+                finish({ ok: true, detail: `health ${res.statusCode}` });
+                return;
+            }
+            finish({ ok: false, detail: `health ${res.statusCode ?? 'unknown'}` });
+        });
+
+        req.on('timeout', () => {
+            req.destroy(new Error('timeout'));
+        });
+        req.on('error', (error) => {
+            finish({ ok: false, detail: error.message });
+        });
+        req.end();
+    });
+}
+
+async function inspectInstanceConfig(root: string, name: string): Promise<InstanceConfigSummary> {
+    const { envFile, metaFile } = instancePaths(root, name);
+    const metaPresent = fs.existsSync(metaFile);
+    const envPresent = fs.existsSync(envFile);
+
+    let metaReadable = false;
+    let envReadable = false;
+
+    if (metaPresent) {
+        try {
+            const raw = await fsp.readFile(metaFile, 'utf8');
+            const parsed = JSON.parse(raw) as Partial<InstanceMeta>;
+            metaReadable = typeof parsed.name === 'string' && parsed.name.trim().length > 0;
+        } catch {
+            metaReadable = false;
+        }
+    }
+
+    if (envPresent) {
+        try {
+            await readEnvFile(envFile);
+            envReadable = true;
+        } catch {
+            envReadable = false;
+        }
+    }
+
+    let classification: InstanceConfigSummary['classification'];
+    let detail: string;
+    if (metaPresent && envPresent && metaReadable && envReadable) {
+        classification = 'complete';
+        detail = 'instance metadata and env are present';
+    } else if ((metaPresent && !metaReadable) || (envPresent && !envReadable)) {
+        classification = 'invalid';
+        detail = [
+            !metaReadable && metaPresent ? 'instance metadata unreadable' : null,
+            !envReadable && envPresent ? 'env unreadable' : null,
+        ].filter((value): value is string => Boolean(value)).join('; ');
+    } else {
+        classification = 'partial';
+        detail = [
+            !metaPresent ? 'missing instance.json' : null,
+            !envPresent ? 'missing .env' : null,
+        ].filter((value): value is string => Boolean(value)).join('; ') || 'instance directory incomplete';
+    }
+
+    return {
+        classification,
+        detail,
+        metaFile,
+        envFile,
+        state: {
+            metaPresent,
+            envPresent,
+            metaReadable,
+            envReadable,
+        },
+    };
+}
+
 async function readInstanceRuntimeSummary(root: string, name: string): Promise<InstanceRuntimeSummary> {
     const { runtimeFile } = instancePaths(root, name);
     if (!fs.existsSync(runtimeFile)) {
-        return { state: null, running: false, stale: false, classification: 'missing', detail: 'no runtime metadata' };
+        return {
+            state: null,
+            running: false,
+            stale: false,
+            classification: 'missing',
+            detail: 'no runtime metadata',
+            health: { checked: false, ok: false, source: 'none', detail: 'no runtime metadata' },
+        };
     }
     const state = await readRuntimeState(runtimeFile);
     if (!state) {
-        return { state: null, running: false, stale: false, classification: 'invalid', detail: 'runtime metadata is unreadable or incomplete' };
+        return {
+            state: null,
+            running: false,
+            stale: false,
+            classification: 'invalid',
+            detail: 'runtime metadata is unreadable or incomplete',
+            health: { checked: false, ok: false, source: 'none', detail: 'runtime metadata unavailable' },
+        };
     }
-    const running = isPidRunning(state.pid);
-    const stale = !running && state.status !== 'stopped';
+    const processAlive = isPidRunning(state.pid);
+    const stale = !processAlive && state.status !== 'stopped';
+    const healthUrl = state.healthUrl?.trim() || `http://127.0.0.1:${state.port}/health`;
+    const health = processAlive
+        ? await probeHealthUrl(healthUrl)
+        : { ok: false, detail: stale ? 'process not running' : 'runtime stopped' };
+    const running = processAlive && health.ok;
+    const healthSource: InstanceRuntimeSummary['health']['source'] = state.healthUrl?.trim() ? 'health-url' : 'port-health';
+    const classification: InstanceRuntimeSummary['classification'] = running
+        ? 'running'
+        : stale
+            ? 'stale'
+            : processAlive
+                ? 'unhealthy'
+                : 'stopped';
     return {
         state,
         running,
         stale,
-        classification: running ? 'running' : stale ? 'stale' : 'stopped',
+        classification,
         detail: running
             ? `pid=${state.pid} version=${state.version}`
             : stale
                 ? `last_pid=${state.pid} version=${state.version}`
-                : `version=${state.version}`,
+                : processAlive
+                    ? `pid=${state.pid} version=${state.version} health=${health.detail}`
+                    : `version=${state.version}`,
+        health: {
+            checked: processAlive,
+            ok: running,
+            source: processAlive ? healthSource : 'none',
+            detail: health.detail,
+        },
     };
 }
 
@@ -879,6 +1064,8 @@ function describeInstanceRuntime(summary: InstanceRuntimeSummary): string {
     switch (summary.classification) {
         case 'running':
             return `${okLabel('RUNNING')} ${summary.detail}`;
+        case 'unhealthy':
+            return `${failLabel('UNHEALTHY')} ${summary.detail}`;
         case 'stale':
             return `${warnLabel('STALE')} ${summary.detail}`;
         case 'stopped':
@@ -888,6 +1075,18 @@ function describeInstanceRuntime(summary: InstanceRuntimeSummary): string {
         case 'missing':
         default:
             return `${warnLabel('STOPPED')} ${summary.detail}`;
+    }
+}
+
+function describeInstanceConfig(summary: InstanceConfigSummary): string {
+    switch (summary.classification) {
+        case 'complete':
+            return `${okLabel('COMPLETE')} ${summary.detail}`;
+        case 'partial':
+            return `${warnLabel('PARTIAL')} ${summary.detail}`;
+        case 'invalid':
+        default:
+            return `${failLabel('INVALID')} ${summary.detail}`;
     }
 }
 
@@ -4708,15 +4907,16 @@ async function statusCommand(args: ParsedArgs): Promise<void> {
     const root = resolution.root;
     const json = hasFlag(args, 'json');
     const cwd = process.cwd();
-    const repoEnv = path.join(cwd, '.env');
-    const projectEnv = path.join(cwd, '.env.iranti');
+    const repoEnv = findClosestAncestorFile(cwd, '.env');
+    const projectEnv = findClosestAncestorFile(cwd, '.env.iranti');
+    const localRuntimeRoot = findClosestAncestorRuntimeRoot(cwd);
     const installMetaPath = resolution.installMetaPath;
-    const binding = fs.existsSync(projectEnv) ? await inspectProjectBinding(projectEnv) : null;
+    const binding = projectEnv && fs.existsSync(projectEnv) ? await inspectProjectBinding(projectEnv) : null;
     const boundRuntimeRoot = binding?.runtimeRoot ?? null;
     const boundInstanceEnv = binding?.instanceEnvFile ?? null;
     const rootMismatch = Boolean(boundRuntimeRoot && path.resolve(boundRuntimeRoot) !== path.resolve(root));
     const otherRuntimeRoots = Array.from(new Set(
-        [boundRuntimeRoot, path.join(cwd, '.iranti-runtime'), path.join(cwd, '.iranti')]
+        [boundRuntimeRoot, localRuntimeRoot]
             .filter((candidate): candidate is string => Boolean(candidate))
             .map((candidate) => path.resolve(candidate))
             .filter((candidate) => candidate !== path.resolve(root) && fs.existsSync(candidate))
@@ -4728,8 +4928,8 @@ async function statusCommand(args: ParsedArgs): Promise<void> {
     rows.push({ label: 'runtime_root', value: root });
     rows.push({ label: 'root_source', value: describeRuntimeRootSource(resolution.source) });
     if (boundRuntimeRoot) rows.push({ label: 'bound_root', value: boundRuntimeRoot });
-    rows.push({ label: 'repo_env', value: fs.existsSync(repoEnv) ? repoEnv : '(missing)' });
-    rows.push({ label: 'project_binding', value: fs.existsSync(projectEnv) ? projectEnv : '(missing)' });
+    rows.push({ label: 'repo_env', value: repoEnv && fs.existsSync(repoEnv) ? repoEnv : '(missing)' });
+    rows.push({ label: 'project_binding', value: projectEnv && fs.existsSync(projectEnv) ? projectEnv : '(missing)' });
     rows.push({ label: 'install_meta', value: fs.existsSync(installMetaPath) ? installMetaPath : '(not initialized)' });
     if (rootMismatch) rows.push({ label: 'root_mismatch', value: 'project binding points at a different runtime root' });
 
@@ -4745,8 +4945,8 @@ async function statusCommand(args: ParsedArgs): Promise<void> {
             boundInstanceEnv,
             rootMismatch,
             otherRuntimeRoots,
-            repoEnv: fs.existsSync(repoEnv) ? repoEnv : null,
-            projectBinding: fs.existsSync(projectEnv) ? projectEnv : null,
+            repoEnv: repoEnv && fs.existsSync(repoEnv) ? repoEnv : null,
+            projectBinding: projectEnv && fs.existsSync(projectEnv) ? projectEnv : null,
             installMeta: fs.existsSync(installMetaPath) ? installMetaPath : null,
             instances,
         }, null, 2));
@@ -4772,6 +4972,8 @@ async function statusCommand(args: ParsedArgs): Promise<void> {
         for (const instance of instances) {
             console.log(`  - ${instance.name} (port ${instance.port})`);
             console.log(`    env: ${instance.envFile}`);
+            console.log(`    meta: ${instance.metaFile}`);
+            console.log(`    config: ${describeInstanceConfig(instance.config)}`);
             console.log(`    runtime: ${describeInstanceRuntime(instance.runtime)}`);
             if (instance.runtime.state?.healthUrl) {
                 console.log(`    health: ${instance.runtime.state.healthUrl}`);
@@ -4784,6 +4986,8 @@ async function collectRuntimeInstanceSummaries(root: string): Promise<Array<{
     name: string;
     port: string;
     envFile: string;
+    metaFile: string;
+    config: InstanceConfigSummary;
     runtime: InstanceRuntimeSummary;
 }>> {
     const instancesDir = path.join(root, 'instances');
@@ -4791,6 +4995,8 @@ async function collectRuntimeInstanceSummaries(root: string): Promise<Array<{
         name: string;
         port: string;
         envFile: string;
+        metaFile: string;
+        config: InstanceConfigSummary;
         runtime: InstanceRuntimeSummary;
     }> = [];
     if (!fs.existsSync(instancesDir)) {
@@ -4799,9 +5005,10 @@ async function collectRuntimeInstanceSummaries(root: string): Promise<Array<{
 
     const entries = await fsp.readdir(instancesDir, { withFileTypes: true });
     for (const entry of entries.filter((value) => value.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
-        const envFile = path.join(instancesDir, entry.name, '.env');
+        const { envFile, metaFile } = instancePaths(root, entry.name);
+        const config = await inspectInstanceConfig(root, entry.name);
         let port = '(unknown)';
-        if (fs.existsSync(envFile)) {
+        if (config.state.envPresent && config.state.envReadable) {
             try {
                 const env = await readEnvFile(envFile);
                 port = env.IRANTI_PORT ?? '(unknown)';
@@ -4812,7 +5019,9 @@ async function collectRuntimeInstanceSummaries(root: string): Promise<Array<{
         instances.push({
             name: entry.name,
             port,
-            envFile: fs.existsSync(envFile) ? envFile : '(missing)',
+            envFile: config.state.envPresent ? envFile : '(missing)',
+            metaFile: config.state.metaPresent ? metaFile : '(missing)',
+            config,
             runtime: await readInstanceRuntimeSummary(root, entry.name),
         });
     }

@@ -417,6 +417,9 @@ if (checkpointed.sessionRecovery?.available && checkpointed.sessionRecovery.reco
         sessionId: checkpointed.sessionRecovery.sessionId,
     });
 }
+
+const sessions = await iranti.listSessions();
+console.log(sessions.map((session) => `${session.agentId}: ${session.operatorState}`));
 ```
 
 For Claude Code to hand work over to Codex, write the durable handoff into a shared `task/...` entity and keep any sender-local recovery in a normal checkpoint:

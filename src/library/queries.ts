@@ -148,6 +148,24 @@ export async function findEntriesByEntity(
     });
 }
 
+export async function listAttendantStateEntries(
+    db?: DbClient
+): Promise<Array<Pick<KnowledgeEntry, 'entityId' | 'valueRaw' | 'updatedAt'>>> {
+    const client = db ?? getDb();
+    return client.knowledgeEntry.findMany({
+        where: {
+            entityType: 'agent',
+            key: 'attendant_state',
+        },
+        select: {
+            entityId: true,
+            valueRaw: true,
+            updatedAt: true,
+        },
+        orderBy: { entityId: 'asc' },
+    });
+}
+
 export async function findArchiveAsOf(
     query: EntryQuery,
     asOf: Date,
