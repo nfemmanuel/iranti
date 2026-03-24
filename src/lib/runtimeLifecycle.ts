@@ -1,5 +1,7 @@
 import fs from 'fs';
 import fsp from 'fs/promises';
+import http from 'http';
+import https from 'https';
 import path from 'path';
 
 export type InstanceRuntimeStatus = 'starting' | 'running' | 'stopping' | 'stopped';
@@ -25,6 +27,25 @@ export type InstanceRuntimeMetadata = {
 };
 
 export type InstanceRuntimeState = InstanceRuntimeMetadata;
+
+export type RuntimeHealthProbe = {
+    checked: boolean;
+    ok: boolean;
+    source: 'health-url' | 'port-health' | 'none';
+    detail: string;
+};
+
+export type RuntimeOperatorClassification = 'running' | 'unhealthy' | 'stale' | 'stopped' | 'missing' | 'invalid';
+
+export type RuntimeInspection = {
+    state: InstanceRuntimeState | null;
+    processAlive: boolean;
+    running: boolean;
+    stale: boolean;
+    classification: RuntimeOperatorClassification;
+    detail: string;
+    health: RuntimeHealthProbe;
+};
 
 export type InstanceRuntimeSnapshot = {
     runtimeFile: string;
@@ -142,6 +163,107 @@ export function readInstanceRuntime(runtimeFile: string): InstanceRuntimeMetadat
 
 export async function readRuntimeState(runtimeFile: string): Promise<InstanceRuntimeState | null> {
     return readInstanceRuntime(runtimeFile);
+}
+
+export async function probeRuntimeHealth(urlString: string, timeoutMs: number = 800): Promise<{ ok: boolean; detail: string }> {
+    return new Promise((resolve) => {
+        let settled = false;
+        const finish = (result: { ok: boolean; detail: string }) => {
+            if (settled) return;
+            settled = true;
+            resolve(result);
+        };
+
+        let parsed: URL;
+        try {
+            parsed = new URL(urlString);
+        } catch {
+            finish({ ok: false, detail: 'invalid health URL' });
+            return;
+        }
+
+        const transport = parsed.protocol === 'https:' ? https : http;
+        const req = transport.request(parsed, { method: 'GET', timeout: timeoutMs }, (res) => {
+            res.resume();
+            if ((res.statusCode ?? 0) >= 200 && (res.statusCode ?? 0) < 300) {
+                finish({ ok: true, detail: `health ${res.statusCode}` });
+                return;
+            }
+            finish({ ok: false, detail: `health ${res.statusCode ?? 'unknown'}` });
+        });
+
+        req.on('timeout', () => {
+            req.destroy(new Error('timeout'));
+        });
+        req.on('error', (error) => {
+            finish({ ok: false, detail: error.message });
+        });
+        req.end();
+    });
+}
+
+export async function inspectRuntimeState(runtimeFile: string): Promise<RuntimeInspection> {
+    if (!fs.existsSync(runtimeFile)) {
+        return {
+            state: null,
+            processAlive: false,
+            running: false,
+            stale: false,
+            classification: 'missing',
+            detail: 'no runtime metadata',
+            health: { checked: false, ok: false, source: 'none', detail: 'no runtime metadata' },
+        };
+    }
+
+    const state = await readRuntimeState(runtimeFile);
+    if (!state) {
+        return {
+            state: null,
+            processAlive: false,
+            running: false,
+            stale: false,
+            classification: 'invalid',
+            detail: 'runtime metadata is unreadable or incomplete',
+            health: { checked: false, ok: false, source: 'none', detail: 'runtime metadata unavailable' },
+        };
+    }
+
+    const processAlive = isPidAlive(state.pid);
+    const stale = !processAlive && state.status !== 'stopped';
+    const healthUrl = state.healthUrl?.trim() || `http://127.0.0.1:${state.port}/health`;
+    const healthResult = processAlive
+        ? await probeRuntimeHealth(healthUrl)
+        : { ok: false, detail: stale ? 'process not running' : 'runtime stopped' };
+    const healthSource: RuntimeHealthProbe['source'] = state.healthUrl?.trim() ? 'health-url' : processAlive ? 'port-health' : 'none';
+    const running = processAlive && healthResult.ok;
+    const classification: RuntimeOperatorClassification = running
+        ? 'running'
+        : stale
+            ? 'stale'
+            : processAlive
+                ? 'unhealthy'
+                : 'stopped';
+
+    return {
+        state,
+        processAlive,
+        running,
+        stale,
+        classification,
+        detail: running
+            ? `pid=${state.pid} version=${state.version}`
+            : stale
+                ? `last_pid=${state.pid} version=${state.version}`
+                : processAlive
+                    ? `pid=${state.pid} version=${state.version} health=${healthResult.detail}`
+                    : `version=${state.version}`,
+        health: {
+            checked: processAlive,
+            ok: running,
+            source: healthSource,
+            detail: healthResult.detail,
+        },
+    };
 }
 
 export async function writeInstanceRuntime(runtimeFile: string, metadata: InstanceRuntimeMetadata): Promise<void> {

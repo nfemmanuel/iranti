@@ -34,23 +34,26 @@
 ## Decision Tree / Flow
 
 1. Resolve the target:
-   - `configure instance` loads a named instance env under the runtime root.
+   - `configure instance` inspects the named instance directory under the runtime root.
    - `configure project` loads or creates `.env.iranti` under the selected project path.
 2. Validate user-supplied flags:
    - parse and validate `--port`
    - normalize provider names
    - map provider names to the correct provider API key env variable
    - if `--interactive` is enabled, prompt for missing/current values before applying updates
-3. Merge requested updates into the env file while preserving unrelated keys and comments where possible.
+3. For `configure instance`, allow repair of partial or invalid instance directories by loading whatever readable env state exists and requiring the repaired result to contain a valid `IRANTI_PORT` and `DATABASE_URL`.
+4. Merge requested updates into the env file while preserving unrelated keys and comments where possible.
 4. For project bindings:
    - derive `IRANTI_URL` and `IRANTI_INSTANCE_ENV` from the named instance when `--instance` is provided
    - preserve existing values when the user does not override them
-5. Write the resulting env file and ensure `.env.iranti` is listed in `.gitignore` for project bindings.
-6. Emit text or JSON output.
+5. When an instance port changes or a broken `instance.json` is being repaired, rewrite `instance.json` so metadata stays in sync with the repaired env.
+6. Write the resulting env file and ensure `.env.iranti` is listed in `.gitignore` for project bindings.
+7. Emit text or JSON output.
 
 ## Edge Cases
 
 - `configure instance` fails if the named instance does not exist.
+- `configure instance` can repair an instance directory with a missing or unreadable `.env`, but it refuses to finish until the repaired result has a valid `IRANTI_PORT` and `DATABASE_URL`.
 - `--provider-key` fails for providers that do not use remote API keys (`mock`, `ollama`).
 - `--interactive` requires a real terminal session and is not intended for piped/non-TTY automation.
 - Interactive secret entry is masked in the terminal, but it is still intended for local onboarding rather than non-interactive automation.
@@ -60,7 +63,7 @@
 ## Test Results
 
 - TypeScript build passes with the new CLI command surface included.
-- Temporary runtime-root smoke tests confirm instance creation, instance reconfiguration, and project binding updates execute without manual file edits.
+- Temporary runtime-root smoke tests confirm instance creation, instance reconfiguration, project binding updates, and repair of partial instance dirs execute without manual file edits.
 
 ## Related
 

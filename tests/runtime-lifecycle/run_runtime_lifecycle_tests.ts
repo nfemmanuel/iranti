@@ -5,7 +5,7 @@ import path from 'path';
 import { randomBytes } from 'crypto';
 import { ChildProcess, spawn, spawnSync } from 'child_process';
 import net from 'net';
-import { readInstanceRuntime } from '../../src/lib/runtimeLifecycle';
+import { inspectRuntimeState, readInstanceRuntime } from '../../src/lib/runtimeLifecycle';
 import { parseDockerContainerNames, parsePublishedDockerHostPorts } from '../../src/lib/dockerCliParsing';
 import { loadRuntimeEnv } from '../../src/lib/runtimeEnv';
 
@@ -193,6 +193,13 @@ async function main(): Promise<void> {
             runtimeRootSource: string;
             boundRuntimeRoot: string | null;
             rootMismatch: boolean;
+            discovery: {
+                selectedRuntimeRoot: string;
+                selectionSource: string;
+                boundRuntimeRoot: string | null;
+                projectBindingFile: string | null;
+                rootMismatch: boolean;
+            };
             instances: Array<{
                 name: string;
                 config: {
@@ -217,6 +224,11 @@ async function main(): Promise<void> {
         assert.strictEqual(statusPayload.runtimeRootSource, 'flag');
         assert.strictEqual(statusPayload.boundRuntimeRoot, null);
         assert.strictEqual(statusPayload.rootMismatch, false);
+        assert.strictEqual(statusPayload.discovery.selectedRuntimeRoot, root);
+        assert.strictEqual(statusPayload.discovery.selectionSource, 'flag');
+        assert.strictEqual(statusPayload.discovery.boundRuntimeRoot, null);
+        assert.strictEqual(statusPayload.discovery.projectBindingFile, null);
+        assert.strictEqual(statusPayload.discovery.rootMismatch, false);
         const localStatus = statusPayload.instances.find((instance) => instance.name === 'local');
         assert.ok(localStatus, 'Expected local instance in status payload.');
         assert.strictEqual(localStatus?.config.classification, 'complete');
@@ -349,6 +361,55 @@ async function main(): Promise<void> {
         assert.strictEqual(partialStatus?.config.classification, 'partial');
         assert.strictEqual(invalidStatus?.config.classification, 'invalid');
 
+        const healthyInspection = await inspectRuntimeState(path.join(healthyDir, 'runtime.json'));
+        assert.strictEqual(healthyInspection.classification, 'running');
+        assert.strictEqual(healthyInspection.health.checked, true);
+        assert.strictEqual(healthyInspection.health.ok, true);
+
+        const unhealthyInspection = await inspectRuntimeState(path.join(unhealthyDir, 'runtime.json'));
+        assert.strictEqual(unhealthyInspection.classification, 'unhealthy');
+        assert.strictEqual(unhealthyInspection.health.checked, true);
+        assert.strictEqual(unhealthyInspection.health.ok, false);
+
+        const runPartialRun = runCli(['run', '--instance', 'partial', '--root', root], repoRoot);
+        assert.notStrictEqual(runPartialRun.status, 0, 'run unexpectedly accepted a partial instance');
+        assert.match(
+            `${runPartialRun.stdout}\n${runPartialRun.stderr}`,
+            /instance 'partial' is partial/i,
+            'run should reject incomplete instance configuration before reading env state'
+        );
+
+        const restartInvalidRun = runCli(['instance', 'restart', 'invalid-config', '--root', root], repoRoot);
+        assert.notStrictEqual(restartInvalidRun.status, 0, 'restart unexpectedly accepted an invalid instance');
+        assert.match(
+            `${restartInvalidRun.stdout}\n${restartInvalidRun.stderr}`,
+            /instance 'invalid-config' is invalid/i,
+            'restart should reject invalid instance configuration before attempting lifecycle actions'
+        );
+
+        const repairPartialPortServer = await listenOnRandomPort();
+        const repairPartialPort = repairPartialPortServer.port;
+        await new Promise<void>((resolve) => repairPartialPortServer.server.close(() => resolve()));
+        const repairPartialRun = runCli([
+            'configure',
+            'instance',
+            'partial',
+            '--root',
+            root,
+            '--port',
+            String(repairPartialPort),
+            '--db-url',
+            'postgresql://postgres:postgres@localhost:5432/iranti_partial',
+            '--api-key',
+            `test_${randomBytes(16).toString('hex')}`,
+        ], repoRoot);
+        assert.strictEqual(repairPartialRun.status, 0, `configure instance failed to repair partial config:\n${repairPartialRun.stdout}\n${repairPartialRun.stderr}`);
+        const repairedPartialStatusRun = runCli(['status', '--root', root, '--json'], repoRoot);
+        assert.strictEqual(repairedPartialStatusRun.status, 0, `status after repair failed:\n${repairedPartialStatusRun.stdout}\n${repairedPartialStatusRun.stderr}`);
+        const repairedPartialStatus = JSON.parse(repairedPartialStatusRun.stdout.trim()) as typeof statusPayload;
+        const repairedPartial = repairedPartialStatus.instances.find((instance) => instance.name === 'partial');
+        assert.strictEqual(repairedPartial?.config.classification, 'complete');
+
         const legacyRuntimeFile = path.join(instanceDir, 'legacy-runtime.json');
         writeJson(legacyRuntimeFile, {
             instanceName: 'legacy-local',
@@ -414,11 +475,23 @@ async function main(): Promise<void> {
             runtimeRootSource: string;
             boundRuntimeRoot: string | null;
             rootMismatch: boolean;
+            discovery: {
+                selectedRuntimeRoot: string;
+                selectionSource: string;
+                boundRuntimeRoot: string | null;
+                projectBindingFile: string | null;
+                rootMismatch: boolean;
+            };
         };
         assert.strictEqual(projectStatus.runtimeRoot, root);
         assert.strictEqual(projectStatus.runtimeRootSource, 'project-binding');
         assert.strictEqual(projectStatus.boundRuntimeRoot, root);
         assert.strictEqual(projectStatus.rootMismatch, false);
+        assert.strictEqual(projectStatus.discovery.selectedRuntimeRoot, root);
+        assert.strictEqual(projectStatus.discovery.selectionSource, 'project-binding');
+        assert.strictEqual(projectStatus.discovery.boundRuntimeRoot, root);
+        assert.strictEqual(projectStatus.discovery.projectBindingFile, projectEnvFile);
+        assert.strictEqual(projectStatus.discovery.rootMismatch, false);
 
         const isolatedRoot = path.join(root, 'isolated-root');
         const isolatedInstanceDir = path.join(isolatedRoot, 'instances', 'isolated');
@@ -442,10 +515,17 @@ async function main(): Promise<void> {
             boundRuntimeRoot: string | null;
             rootMismatch: boolean;
             otherRuntimeRoots: string[];
+            discovery: {
+                boundRuntimeRoot: string | null;
+                rootMismatch: boolean;
+                otherRuntimeRoots?: string[];
+            };
         };
         assert.strictEqual(mismatchStatus.boundRuntimeRoot, isolatedRoot);
         assert.strictEqual(mismatchStatus.rootMismatch, true);
         assert.ok(mismatchStatus.otherRuntimeRoots.includes(isolatedRoot), 'Expected status JSON to report the alternate bound runtime root.');
+        assert.strictEqual(mismatchStatus.discovery.boundRuntimeRoot, isolatedRoot);
+        assert.strictEqual(mismatchStatus.discovery.rootMismatch, true);
 
         const publishedPorts = parsePublishedDockerHostPorts([
             '0.0.0.0:5435->5432/tcp, [::]:5435->5432/tcp',

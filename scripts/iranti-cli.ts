@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 import fs from 'fs';
 import fsp from 'fs/promises';
-import http from 'http';
-import https from 'https';
 import os from 'os';
 import path from 'path';
 import { spawn, spawnSync } from 'child_process';
+import https from 'https';
 import readline from 'readline/promises';
 import { Writable } from 'stream';
 import net from 'net';
@@ -17,7 +16,7 @@ import { loadRuntimeEnv } from '../src/lib/runtimeEnv';
 import { resolveInteractive } from '../src/resolutionist';
 import { startChatSession } from '../src/chat';
 import { createVectorBackend, resolveVectorBackendName } from '../src/library/backends';
-import { InstanceRuntimeState, isPidRunning, readRuntimeState, waitForPidExit } from '../src/lib/runtimeLifecycle';
+import { InstanceRuntimeState, RuntimeInspection, inspectRuntimeState, isPidRunning, waitForPidExit } from '../src/lib/runtimeLifecycle';
 import { Iranti } from '../src/sdk';
 
 type Scope = 'user' | 'system';
@@ -46,19 +45,7 @@ type InstanceMeta = {
     instanceDir: string;
 };
 
-type InstanceRuntimeSummary = {
-    state: InstanceRuntimeState | null;
-    running: boolean;
-    stale: boolean;
-    classification: 'running' | 'unhealthy' | 'stale' | 'stopped' | 'missing' | 'invalid';
-    detail: string;
-    health: {
-        checked: boolean;
-        ok: boolean;
-        source: 'health-url' | 'port-health' | 'none';
-        detail: string;
-    };
-};
+type InstanceRuntimeSummary = RuntimeInspection;
 
 type InstanceConfigSummary = {
     classification: 'complete' | 'partial' | 'invalid';
@@ -884,9 +871,28 @@ function instancePaths(root: string, name: string): { instanceDir: string; envFi
     };
 }
 
-async function loadInstanceEnv(root: string, name: string): Promise<{ instanceDir: string; envFile: string; metaFile: string; runtimeFile: string; env: Record<string, string> }> {
+function instanceRepairNextSteps(name: string): string[] {
+    return [
+        `Run \`iranti configure instance ${name} --interactive\` to repair the instance files.`,
+        'Run `iranti status --json` to inspect the current config classification.',
+    ];
+}
+
+async function loadInstanceEnv(
+    root: string,
+    name: string,
+    options: { allowRepair?: boolean } = {},
+): Promise<{
+    instanceDir: string;
+    envFile: string;
+    metaFile: string;
+    runtimeFile: string;
+    env: Record<string, string>;
+    config: InstanceConfigSummary;
+}> {
     const paths = instancePaths(root, name);
-    if (!fs.existsSync(paths.envFile)) {
+    const config = await inspectInstanceConfig(root, name);
+    if (!config.state.metaPresent && !config.state.envPresent) {
         throw cliError(
             'IRANTI_INSTANCE_NOT_FOUND',
             `Instance '${name}' not found at ${paths.instanceDir}`,
@@ -897,48 +903,38 @@ async function loadInstanceEnv(root: string, name: string): Promise<{ instanceDi
             { instance: name, root, instanceDir: paths.instanceDir }
         );
     }
+    if (!options.allowRepair && config.classification !== 'complete') {
+        throw cliError(
+            config.classification === 'partial' ? 'IRANTI_INSTANCE_INCOMPLETE' : 'IRANTI_INSTANCE_INVALID',
+            `Instance '${name}' is ${config.classification}: ${config.detail}.`,
+            instanceRepairNextSteps(name),
+            {
+                instance: name,
+                root,
+                instanceDir: paths.instanceDir,
+                config: config.classification,
+                metaFile: paths.metaFile,
+                envFile: paths.envFile,
+            }
+        );
+    }
+    let env: Record<string, string> = {};
+    if (config.state.envPresent && config.state.envReadable) {
+        env = await readEnvFile(paths.envFile);
+    } else if (!options.allowRepair) {
+        throw cliError(
+            'IRANTI_INSTANCE_ENV_UNREADABLE',
+            `Instance '${name}' env file is missing or unreadable: ${paths.envFile}`,
+            instanceRepairNextSteps(name),
+            { instance: name, root, envFile: paths.envFile, config: config.classification }
+        );
+    }
     debugLog('Loaded instance env target.', { instance: name, envFile: paths.envFile });
     return {
         ...paths,
-        env: await readEnvFile(paths.envFile),
+        env,
+        config,
     };
-}
-
-function probeHealthUrl(urlString: string, timeoutMs: number = 800): Promise<{ ok: boolean; detail: string }> {
-    return new Promise((resolve) => {
-        let settled = false;
-        const finish = (result: { ok: boolean; detail: string }) => {
-            if (settled) return;
-            settled = true;
-            resolve(result);
-        };
-
-        let parsed: URL;
-        try {
-            parsed = new URL(urlString);
-        } catch {
-            finish({ ok: false, detail: 'invalid health URL' });
-            return;
-        }
-
-        const transport = parsed.protocol === 'https:' ? https : http;
-        const req = transport.request(parsed, { method: 'GET', timeout: timeoutMs }, (res) => {
-            res.resume();
-            if ((res.statusCode ?? 0) >= 200 && (res.statusCode ?? 0) < 300) {
-                finish({ ok: true, detail: `health ${res.statusCode}` });
-                return;
-            }
-            finish({ ok: false, detail: `health ${res.statusCode ?? 'unknown'}` });
-        });
-
-        req.on('timeout', () => {
-            req.destroy(new Error('timeout'));
-        });
-        req.on('error', (error) => {
-            finish({ ok: false, detail: error.message });
-        });
-        req.end();
-    });
 }
 
 async function inspectInstanceConfig(root: string, name: string): Promise<InstanceConfigSummary> {
@@ -1003,61 +999,7 @@ async function inspectInstanceConfig(root: string, name: string): Promise<Instan
 
 async function readInstanceRuntimeSummary(root: string, name: string): Promise<InstanceRuntimeSummary> {
     const { runtimeFile } = instancePaths(root, name);
-    if (!fs.existsSync(runtimeFile)) {
-        return {
-            state: null,
-            running: false,
-            stale: false,
-            classification: 'missing',
-            detail: 'no runtime metadata',
-            health: { checked: false, ok: false, source: 'none', detail: 'no runtime metadata' },
-        };
-    }
-    const state = await readRuntimeState(runtimeFile);
-    if (!state) {
-        return {
-            state: null,
-            running: false,
-            stale: false,
-            classification: 'invalid',
-            detail: 'runtime metadata is unreadable or incomplete',
-            health: { checked: false, ok: false, source: 'none', detail: 'runtime metadata unavailable' },
-        };
-    }
-    const processAlive = isPidRunning(state.pid);
-    const stale = !processAlive && state.status !== 'stopped';
-    const healthUrl = state.healthUrl?.trim() || `http://127.0.0.1:${state.port}/health`;
-    const health = processAlive
-        ? await probeHealthUrl(healthUrl)
-        : { ok: false, detail: stale ? 'process not running' : 'runtime stopped' };
-    const running = processAlive && health.ok;
-    const healthSource: InstanceRuntimeSummary['health']['source'] = state.healthUrl?.trim() ? 'health-url' : 'port-health';
-    const classification: InstanceRuntimeSummary['classification'] = running
-        ? 'running'
-        : stale
-            ? 'stale'
-            : processAlive
-                ? 'unhealthy'
-                : 'stopped';
-    return {
-        state,
-        running,
-        stale,
-        classification,
-        detail: running
-            ? `pid=${state.pid} version=${state.version}`
-            : stale
-                ? `last_pid=${state.pid} version=${state.version}`
-                : processAlive
-                    ? `pid=${state.pid} version=${state.version} health=${health.detail}`
-                    : `version=${state.version}`,
-        health: {
-            checked: processAlive,
-            ok: running,
-            source: processAlive ? healthSource : 'none',
-            detail: health.detail,
-        },
-    };
+    return inspectRuntimeState(runtimeFile);
 }
 
 function describeInstanceRuntime(summary: InstanceRuntimeSummary): string {
@@ -4915,6 +4857,8 @@ async function statusCommand(args: ParsedArgs): Promise<void> {
     const boundRuntimeRoot = binding?.runtimeRoot ?? null;
     const boundInstanceEnv = binding?.instanceEnvFile ?? null;
     const rootMismatch = Boolean(boundRuntimeRoot && path.resolve(boundRuntimeRoot) !== path.resolve(root));
+    const userInstallRuntimeRoot = fs.existsSync(path.join(resolution.userRoot, 'install.json')) ? resolution.userRoot : null;
+    const systemInstallRuntimeRoot = fs.existsSync(path.join(resolution.systemRoot, 'install.json')) ? resolution.systemRoot : null;
     const otherRuntimeRoots = Array.from(new Set(
         [boundRuntimeRoot, localRuntimeRoot]
             .filter((candidate): candidate is string => Boolean(candidate))
@@ -4941,6 +4885,21 @@ async function statusCommand(args: ParsedArgs): Promise<void> {
             scope,
             runtimeRoot: root,
             runtimeRootSource: resolution.source,
+            discovery: {
+                selectedRuntimeRoot: root,
+                selectionSource: resolution.source,
+                selectionReason: describeRuntimeRootSource(resolution.source),
+                boundRuntimeRoot,
+                boundInstanceEnv,
+                ancestorRuntimeRoot: localRuntimeRoot,
+                userInstallRuntimeRoot,
+                systemInstallRuntimeRoot,
+                projectBindingFile: projectEnv && fs.existsSync(projectEnv) ? projectEnv : null,
+                projectBindingSource: projectEnv && fs.existsSync(projectEnv) ? 'ancestor-project-binding' : null,
+                repoEnvFile: repoEnv && fs.existsSync(repoEnv) ? repoEnv : null,
+                rootMismatch,
+                otherRuntimeRoots,
+            },
             boundRuntimeRoot,
             boundInstanceEnv,
             rootMismatch,
@@ -5390,15 +5349,18 @@ async function showInstanceCommand(args: ParsedArgs): Promise<void> {
     if (!name) throw new Error('Missing instance name. Usage: iranti instance show <name>');
     const scope = normalizeScope(getFlag(args, 'scope'));
     const root = resolveInstallRoot(args, scope);
-    const instanceDir = path.join(root, 'instances', name);
-    const envFile = path.join(instanceDir, '.env');
-    if (!fs.existsSync(envFile)) throw new Error(`Instance '${name}' not found at ${instanceDir}`);
+    const { instanceDir, envFile } = instancePaths(root, name);
+    const config = await inspectInstanceConfig(root, name);
+    if (!config.state.metaPresent && !config.state.envPresent) throw new Error(`Instance '${name}' not found at ${instanceDir}`);
 
-    const env = await readEnvFile(envFile);
+    const env = config.state.envPresent && config.state.envReadable
+        ? await readEnvFile(envFile)
+        : {};
     const runtime = await readInstanceRuntimeSummary(root, name);
     console.log(bold(`Instance: ${name}`));
     console.log(`  dir : ${instanceDir}`);
     console.log(`  env : ${envFile}`);
+    console.log(`  config: ${describeInstanceConfig(config)}`);
     console.log(`  port: ${env.IRANTI_PORT ?? '3001'}`);
     console.log(`  db  : ${env.DATABASE_URL ?? '(missing)'}`);
     console.log(`  esc : ${env.IRANTI_ESCALATION_DIR ?? '(missing)'}`);
@@ -5420,17 +5382,7 @@ async function runInstanceCommand(args: ParsedArgs): Promise<void> {
     }
     const scope = normalizeScope(getFlag(args, 'scope'));
     const root = resolveInstallRoot(args, scope);
-    const { instanceDir, envFile, runtimeFile } = instancePaths(root, name);
-    if (!fs.existsSync(envFile)) {
-        throw cliError(
-            'IRANTI_INSTANCE_NOT_FOUND',
-            `Instance '${name}' not found. Create it first.`,
-            [`Run \`iranti setup\` or \`iranti instance create ${name}\` first.`],
-            { instance: name, envFile }
-        );
-    }
-
-    const env = await readEnvFile(envFile);
+    const { instanceDir, envFile, runtimeFile, env } = await loadInstanceEnv(root, name);
     const runtime = await readInstanceRuntimeSummary(root, name);
     if (runtime.running) {
         throw cliError(
@@ -5560,7 +5512,7 @@ async function configureInstanceCommand(args: ParsedArgs): Promise<void> {
 
     const scope = normalizeScope(getFlag(args, 'scope'));
     const root = resolveInstallRoot(args, scope);
-    const { envFile, env } = await loadInstanceEnv(root, name);
+    const { instanceDir, envFile, env, config } = await loadInstanceEnv(root, name, { allowRepair: true });
     const updates: Record<string, string | undefined> = {};
 
     let portRaw = getFlag(args, 'port');
@@ -5619,10 +5571,37 @@ async function configureInstanceCommand(args: ParsedArgs): Promise<void> {
         throw new Error('No changes provided. Use flags like --provider, --provider-key, --api-key, --db-url, or --port.');
     }
 
-    await upsertEnvFile(envFile, updates);
-    if (updates.IRANTI_PORT) {
-        await syncInstanceMeta(root, name, Number.parseInt(updates.IRANTI_PORT, 10));
+    const nextEnv: Record<string, string> = { ...env };
+    for (const [key, value] of Object.entries(updates)) {
+        if (value === undefined) {
+            delete nextEnv[key];
+        } else {
+            nextEnv[key] = value;
+        }
     }
+
+    const nextPortRaw = nextEnv.IRANTI_PORT?.trim();
+    const nextPort = Number.parseInt(nextPortRaw ?? '', 10);
+    if (!Number.isFinite(nextPort) || nextPort <= 0) {
+        throw cliError(
+            'IRANTI_INSTANCE_PORT_REQUIRED',
+            `Instance '${name}' still needs a valid IRANTI_PORT before it can be considered repaired.`,
+            ['Pass `--port <n>` or rerun `iranti configure instance <name> --interactive`.'],
+            { instance: name, envFile, port: nextPortRaw ?? null, config: config.classification }
+        );
+    }
+    if (!nextEnv.DATABASE_URL?.trim()) {
+        throw cliError(
+            'IRANTI_INSTANCE_DATABASE_REQUIRED',
+            `Instance '${name}' still needs DATABASE_URL before it can be considered repaired.`,
+            ['Pass `--db-url <postgresql://...>` or rerun `iranti configure instance <name> --interactive`.'],
+            { instance: name, envFile, config: config.classification }
+        );
+    }
+
+    await ensureDir(instanceDir);
+    await upsertEnvFile(envFile, updates);
+    await syncInstanceMeta(root, name, nextPort);
 
     const json = hasFlag(args, 'json');
     const result = {
