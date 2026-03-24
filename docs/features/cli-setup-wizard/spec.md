@@ -2,6 +2,7 @@
 
 ## Overview
 `iranti setup` is the first-run onboarding wizard for installed-package users. It guides a user through runtime installation, instance creation or update, provider credential entry, Iranti client API key generation, optional project bindings, and optional Claude Code / Codex integration scaffolding in one interactive flow.
+The interactive wizard also explains high-friction choices inline before prompting, especially around isolated vs shared mode, runtime-root selection, database sourcing, provider choice, project binding, and Codex registration.
 
 ## Inputs
 
@@ -31,23 +32,30 @@
 1. Report a dependency preflight for Docker, `psql`, `pg_isready`, and `localhost:5432`.
 2. Require a real terminal session.
 3. Ask whether setup should use an isolated per-project runtime folder or a shared machine-level runtime. Default to `isolated`.
+   - Before prompting, explain what `isolated` and `shared` mean and when each should be used.
 4. Resolve and create the runtime root.
+   - In isolated mode, explain that the chosen path becomes the runtime root storing instances, metadata, and logs for that isolated setup.
+   - In shared mode, explain `user` vs `system` scope and when an explicit `--root` is preferable.
 5. Ask for the instance name.
 6. Select an API port, warning if `3001` is occupied and suggesting the next free port.
 7. Recommend a PostgreSQL source in this order: local, Docker, then managed.
 8. Ask how PostgreSQL should be provided: local, managed, or Docker-local. Legacy `existing` remains accepted as an alias for `local`.
+   - Before prompting, explain what each database mode means and when to choose it.
 9. When Docker-local is selected, optionally start or reuse a Docker PostgreSQL container and derive the connection string automatically.
 10. When local PostgreSQL is selected and `psql` is available, create the target localhost database automatically if it does not already exist.
 11. Ask for the default LLM provider.
+   - Before prompting, explain the difference between local/dev providers (`mock`, `ollama`) and remote providers that require API keys.
 12. If the provider is remote, require its API key.
 13. Offer to collect additional provider keys for other supported providers.
 14. Generate or rotate a usable instance `IRANTI_API_KEY` so the instance can run even without DB-backed registry setup.
 15. Create or update the target instance env.
 16. Optionally bootstrap the database schema and seed data.
 17. Offer to bind project folders by writing `.env.iranti`, tagging each binding with `IRANTI_PROJECT_MODE`.
+   - Before prompting, explain that binding targets one specific repo/app root rather than a broad parent directory.
 18. In isolated mode, allow one bound project. Shared mode may bind multiple projects.
 19. For each bound project, optionally scaffold Claude Code MCP and hook files.
 20. If Codex is installed and at least one project was bound, optionally register Codex globally against the first bound project.
+   - Before prompting, explain that Codex registration touches the machine-global Codex MCP config.
 21. Print a runnable summary with next-step commands.
 
 Non-interactive variants:

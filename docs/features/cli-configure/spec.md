@@ -2,7 +2,7 @@
 
 ## Overview
 
-`iranti configure` updates named instance env files and project binding files without requiring users to hand-edit `.env` files. It is intended for both first-run onboarding and later changes such as provider switches, key rotation, port updates, and project rebinding.
+`iranti configure` updates named instance env files and project binding files without requiring users to hand-edit `.env` files. It is intended for both first-run onboarding and later changes such as provider switches, key rotation, port updates, and project rebinding. Interactive mode now explains each field before prompting so operators understand what changing it will affect.
 
 ## Inputs
 
@@ -40,7 +40,7 @@
    - parse and validate `--port`
    - normalize provider names
    - map provider names to the correct provider API key env variable
-   - if `--interactive` is enabled, prompt for missing/current values before applying updates
+   - if `--interactive` is enabled, explain the meaning of each field, then prompt for missing/current values before applying updates
 3. For `configure instance`, allow repair of partial or invalid instance directories by loading whatever readable env state exists and requiring the repaired result to contain a valid `IRANTI_PORT` and `DATABASE_URL`.
 4. Merge requested updates into the env file while preserving unrelated keys and comments where possible.
 4. For project bindings:

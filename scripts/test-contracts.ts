@@ -261,6 +261,10 @@ function assertCliGuideContracts(): void {
     expectIncludes(cliFilePath, cliContent, 'iranti handoff task/<task_id>', 'CLI help includes iranti handoff');
     expectIncludes(cliFilePath, cliContent, 'Use this when:', 'CLI help source includes use-case guidance');
     expectIncludes(cliFilePath, cliContent, 'Setup Option Guide', 'Setup help includes option guidance section');
+    expectIncludes(cliFilePath, cliContent, 'Runtime Mode Choices', 'Setup wizard source includes runtime mode guidance');
+    expectIncludes(cliFilePath, cliContent, 'Project Binding', 'Setup wizard source includes project binding guidance');
+    expectIncludes(cliFilePath, cliContent, 'Interactive Instance Configuration', 'Configure instance source includes interactive guidance');
+    expectIncludes(cliFilePath, cliContent, 'Interactive Project Configuration', 'Configure project source includes interactive guidance');
 
     const helpOutput = execFileSync('node', ['bin/iranti.js', '--help'], {
         cwd: process.cwd(),

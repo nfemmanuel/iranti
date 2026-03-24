@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.25 - Unreleased
+
+### Changed
+
+- `iranti setup` now explains high-friction choices inline before prompting, including runtime mode, runtime root, database mode, provider selection, project binding, project memory entity, and Codex registration.
+- `iranti configure instance --interactive` and `iranti configure project --interactive` now explain what each field changes before prompting for values.
+- Setup and configure feature specs now document the richer interactive guidance as part of the operator contract.
+
+### Fixed
+
+- Contract coverage now checks for the new interactive-guidance blocks in the setup and configure flows so prompt-level help regressions fail before release.
+
 ## 0.2.24 - Unreleased
 
 ### Changed

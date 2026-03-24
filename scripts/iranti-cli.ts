@@ -4379,6 +4379,18 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
 
     await withPromptSession(async (prompt) => {
         let setupMode: 'shared' | 'isolated' = 'isolated';
+        printChoiceGuide('Runtime Mode Choices', [
+            {
+                choice: 'isolated',
+                meaning: 'one project gets its own runtime root and usually its own instance boundary',
+                useWhen: 'one repo should stay self-contained and you do not want other repos sharing its memory/runtime by default.',
+            },
+            {
+                choice: 'shared',
+                meaning: 'multiple projects can bind to the same runtime root and instances under it',
+                useWhen: 'several repos should intentionally share one Iranti instance and memory space.',
+            },
+        ]);
         while (true) {
             const chosen = (await prompt.line('Runtime mode (isolated or shared)', 'isolated') ?? 'isolated').trim().toLowerCase();
             if (chosen === 'shared' || chosen === 'isolated') {
@@ -4391,6 +4403,11 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
         let finalScope: Scope = 'user';
         let finalRoot = '';
         if (setupMode === 'isolated') {
+            printWizardNotes('Isolated Runtime Path', [
+                'This folder becomes the runtime root for this isolated setup.',
+                'Iranti stores instance env files, runtime metadata, logs, and install metadata under this root.',
+                'Use a project-local path like `<repo>/.iranti-runtime` when one repo should own its own runtime.',
+            ]);
             finalRoot = path.resolve(await promptNonEmpty(
                 prompt,
                 'Isolated runtime path',
@@ -4398,6 +4415,11 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
             ));
             finalScope = 'user';
         } else {
+            printWizardNotes('Shared Runtime Scope', [
+                'Shared mode uses one runtime root that can hold multiple named instances.',
+                'Choose `user` for a per-user machine install. Choose `system` only when you deliberately want a machine-wide shared location.',
+                'Use `--root` instead when you need an exact custom shared runtime path.',
+            ]);
             while (true) {
                 const chosenScope = (await prompt.line('Install scope (user or system)', explicitScope ?? 'user') ?? 'user').trim().toLowerCase();
                 if (chosenScope === 'user' || chosenScope === 'system') {
@@ -4441,6 +4463,23 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
         let databaseProvisioned = false;
         let dockerContainerName: string | undefined;
         let databaseMode: DatabaseSetupMode = recommendedDatabaseMode;
+        printChoiceGuide('Database Mode Choices', [
+            {
+                choice: 'local',
+                meaning: 'use PostgreSQL already running on this machine',
+                useWhen: 'you already have local Postgres with pgvector, or want Iranti to reuse a local developer database.',
+            },
+            {
+                choice: 'docker',
+                meaning: 'start or reuse a local PostgreSQL container just for the database',
+                useWhen: 'you want a reliable local pgvector path without managing a direct host Postgres install.',
+            },
+            {
+                choice: 'managed',
+                meaning: 'use a remote PostgreSQL connection string you already control',
+                useWhen: 'your database lives on Railway, Supabase, Neon, or another hosted PostgreSQL service.',
+            },
+        ]);
         while (true) {
             const defaultMode = recommendedDatabaseMode;
             const dbMode = (await prompt.line(
@@ -4508,6 +4547,23 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
         }
 
         let provider = normalizeProvider(existingInstance?.env.LLM_PROVIDER ?? 'openai') ?? 'openai';
+        printChoiceGuide('Provider Choices', [
+            {
+                choice: 'mock',
+                meaning: 'local development provider with no remote API key requirement',
+                useWhen: 'you want to validate setup and runtime behavior before spending money on a remote model provider.',
+            },
+            {
+                choice: 'openai / claude / gemini / groq / mistral',
+                meaning: 'remote hosted model providers that need an upstream API key',
+                useWhen: 'you want real model-backed Iranti behavior and already have a provider key.',
+            },
+            {
+                choice: 'ollama',
+                meaning: 'local Ollama runtime instead of a hosted provider',
+                useWhen: 'you want local model execution and already run Ollama on the machine.',
+            },
+        ]);
         while (true) {
             listProviderChoices(provider, existingInstance?.env ?? {});
             const chosen = normalizeProvider(await promptNonEmpty(prompt, 'Default LLM provider', provider));
@@ -4571,6 +4627,11 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
 
         const projects: SetupProjectPlan[] = [];
         const defaultProjectPath = process.cwd();
+        printWizardNotes('Project Binding', [
+            'Binding a project writes `.env.iranti` into one specific repo or app folder.',
+            'Use the project root that should contain the binding file, not a broad parent folder like your whole `Projects` directory.',
+            'In shared mode you can bind multiple repos to the same instance. In isolated mode you normally bind one repo.',
+        ]);
         let shouldBindProject = await promptYesNo(prompt, 'Bind a project folder to this instance now?', true);
         while (shouldBindProject) {
             const projectPath = path.resolve(await promptNonEmpty(prompt, 'Project path to bind', projects.length === 0 ? defaultProjectPath : process.cwd()));
@@ -4578,6 +4639,11 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
                 await promptNonEmpty(prompt, 'Project agent ID', projectAgentDefault(projectPath)),
                 'project_main'
             );
+            printWizardNotes('Project Memory Entity', [
+                'This is the durable memory namespace the project will use by default.',
+                'Use a stable entity like `project/my_repo` when the repo should have its own long-lived shared memory identity.',
+                'Use a narrower entity only when you intentionally want this project bound to some other memory namespace.',
+            ]);
             const memoryEntity = await promptNonEmpty(prompt, 'Project memory entity', 'user/main');
             const claudeCode = await promptYesNo(prompt, 'Create Claude Code project files here now?', true);
             projects.push({
@@ -4594,6 +4660,13 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
             }
         }
 
+        if (projects.length > 0 && hasCodexInstalled()) {
+            printWizardNotes('Codex Registration', [
+                'This registers Iranti with the global Codex CLI MCP config.',
+                'Say yes when this machine should let Codex call Iranti tools from bound projects.',
+                'Say no if you are not using Codex yet or do not want to touch the global Codex config right now.',
+            ]);
+        }
         const codex = projects.length > 0 && hasCodexInstalled()
             ? await promptYesNo(prompt, 'Register Codex globally for the first bound project now?', false)
             : false;
@@ -5582,6 +5655,13 @@ async function configureInstanceCommand(args: ParsedArgs): Promise<void> {
 
     if (hasFlag(args, 'interactive')) {
         await withPromptSession(async (prompt) => {
+            printWizardNotes('Interactive Instance Configuration', [
+                'This updates one existing instance in place.',
+                'API port controls where the Iranti API listens.',
+                'DATABASE_URL points at the PostgreSQL database for this instance.',
+                'LLM provider and provider key control which model backend Iranti uses.',
+                'Iranti API key is the client credential other tools and project bindings use to authenticate.',
+            ]);
             portRaw = await prompt.line('API port', portRaw ?? env.IRANTI_PORT);
             dbUrl = await prompt.line('DATABASE_URL', dbUrl ?? env.DATABASE_URL);
             providerInput = await prompt.line('LLM provider', providerInput ?? env.LLM_PROVIDER ?? 'mock');
@@ -5706,6 +5786,14 @@ async function configureProjectCommand(args: ParsedArgs): Promise<void> {
 
     if (hasFlag(args, 'interactive')) {
         await withPromptSession(async (prompt) => {
+            printWizardNotes('Interactive Project Configuration', [
+                'This updates the `.env.iranti` binding inside one project folder.',
+                'Instance name retargets the binding to a named local instance and derives URL/env metadata from it.',
+                'Iranti URL and Project API key are the direct connection details the project will use.',
+                'Project agent ID is the default agent identity for tools running from this repo.',
+                'Project memory entity is the durable namespace the project will use for shared memory.',
+                'Project mode should stay `isolated` for repo-local memory or `shared` only when this repo should intentionally share one instance with other repos.',
+            ]);
             instanceName = await prompt.line('Instance name', instanceName);
             explicitUrl = await prompt.line('Iranti URL', explicitUrl ?? existing.IRANTI_URL);
             explicitApiKey = await prompt.secret('Project API key', explicitApiKey ?? existing.IRANTI_API_KEY);
@@ -6393,6 +6481,24 @@ function printOptionGuide(title: string, entries: Array<{ option: string; meanin
         console.log(`  ${commandText(entry.option)}`);
         console.log(`    What it means: ${entry.meaning}`);
         console.log(`    Use this when: ${entry.useWhen}`);
+    }
+    console.log('');
+}
+
+function printChoiceGuide(title: string, entries: Array<{ choice: string; meaning: string; useWhen: string }>): void {
+    console.log(sectionTitle(title));
+    for (const entry of entries) {
+        console.log(`  ${commandText(entry.choice)}`);
+        console.log(`    What it means: ${entry.meaning}`);
+        console.log(`    Use this when: ${entry.useWhen}`);
+    }
+    console.log('');
+}
+
+function printWizardNotes(title: string, lines: string[]): void {
+    console.log(sectionTitle(title));
+    for (const line of lines) {
+        console.log(`  - ${line}`);
     }
     console.log('');
 }
