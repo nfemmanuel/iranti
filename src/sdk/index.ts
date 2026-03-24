@@ -678,7 +678,17 @@ export class Iranti {
             findEntry({ entityType: resolved.entityType, entityId: resolved.entityId, key }),
         ]);
 
-        const history: HistoryEntry[] = archiveRows.map((row) => ({
+        const history: HistoryEntry[] = archiveRows.map((row: {
+            valueRaw: unknown;
+            valueSummary: string;
+            confidence: number;
+            source: string;
+            validFrom: Date;
+            validUntil: Date | null;
+            archivedReason: ArchivedReason;
+            resolutionState: ResolutionState;
+            resolutionOutcome: ResolutionOutcome;
+        }) => ({
             value: row.valueRaw,
             summary: row.valueSummary,
             confidence: row.confidence,

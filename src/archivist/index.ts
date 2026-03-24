@@ -5,7 +5,7 @@ import { getDb } from '../library/client';
 import { archiveEntry, createEntry, findPendingEscalation } from '../library/queries';
 import { complete } from '../lib/llm';
 import { ensureEscalationFolders } from '../lib/escalationPaths';
-import { ArchivedReason, ResolutionOutcome, ResolutionState } from '../generated/prisma/client';
+import { ArchivedReason, ResolutionOutcome, ResolutionState, type PrismaClient } from '../generated/prisma/client';
 import { calculateDecayedConfidence, getDecayConfig, readOriginalConfidence } from '../lib/decay';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -30,6 +30,8 @@ type AuthoritativeResolution = {
     summary: string;
     notes?: string;
 };
+
+type TransactionClient = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
 
 function extractAuthoritativeJson(fileText: string): AuthoritativeResolution {
     const marker = '### AUTHORITATIVE_JSON';
@@ -298,7 +300,7 @@ async function processEscalationFile(
         JSON.stringify(pending.valueRaw) === JSON.stringify(auth.value) &&
         pending.valueSummary === auth.summary;
 
-    await getDb().$transaction(async (tx) => {
+    await getDb().$transaction(async (tx: TransactionClient) => {
         await tx.archive.update({
             where: { id: pending.id },
             data: {

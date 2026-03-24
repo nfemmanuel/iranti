@@ -14,17 +14,30 @@ type CliRun = {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const cliScript = path.join(repoRoot, 'scripts', 'iranti-cli.ts');
+const tsNodeRegister = require.resolve('ts-node/register');
+
+function buildTsNodeEnv(extraEnv: Record<string, string> = {}): NodeJS.ProcessEnv {
+    return {
+        ...process.env,
+        ...extraEnv,
+        TS_NODE_PROJECT: path.join(repoRoot, 'tsconfig.json'),
+        TS_NODE_TRANSPILE_ONLY: 'true',
+    };
+}
+
+function cliEntrypointArgs(args: string[]): string[] {
+    return ['-r', tsNodeRegister, cliScript, ...args];
+}
 
 function runCli(args: string[], cwd: string, extraEnv: Record<string, string> = {}): CliRun {
     const proc = spawnSync(
         process.execPath,
-        ['-r', 'ts-node/register/transpile-only', cliScript, ...args],
+        cliEntrypointArgs(args),
         {
             cwd,
             encoding: 'utf8',
             env: {
-                ...process.env,
-                ...extraEnv,
+                ...buildTsNodeEnv(extraEnv),
                 NO_COLOR: '1',
             },
         }

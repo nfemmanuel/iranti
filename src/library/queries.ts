@@ -22,6 +22,7 @@ import { createVectorBackend } from './backends';
 import { VectorBackend, VectorConsistencyFilter } from './vectorBackend';
 
 type DbClient = PrismaClient | Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+type TransactionClient = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
 
 type HybridSearchRow = {
     id: number;
@@ -37,6 +38,11 @@ type HybridSearchRow = {
     vectorScore: number | string | null;
     score: number | string;
 };
+
+type HybridFallbackEntry = Pick<
+    KnowledgeEntry,
+    'id' | 'entityType' | 'entityId' | 'key' | 'valueRaw' | 'valueSummary' | 'confidence' | 'source' | 'validUntil'
+>;
 
 export type ArchiveHistoryEntry = Archive;
 
@@ -364,7 +370,7 @@ async function fetchLexicalCandidateIds(
         ) DESC
         LIMIT ${limit}
     `);
-    return rows.map((row) => row.id);
+    return rows.map((row: { id: number }) => row.id);
 }
 
 async function hybridSearchWithoutBackend(
@@ -379,7 +385,7 @@ async function hybridSearchWithoutBackend(
         ? Math.max(limit, configuredLimit)
         : Math.max(limit, DEFAULT_VECTOR_FALLBACK_SCAN_LIMIT);
 
-    const entries = await db.knowledgeEntry.findMany({
+    const entries: HybridFallbackEntry[] = await db.knowledgeEntry.findMany({
         where: {
             isProtected: false,
             ...(input.entityType ? { entityType: input.entityType } : {}),
@@ -404,7 +410,7 @@ async function hybridSearchWithoutBackend(
         return [];
     }
 
-    const lexicalRows = await scoreHybridCandidates(entries.map((entry) => entry.id), input, db);
+    const lexicalRows = await scoreHybridCandidates(entries.map((entry: HybridFallbackEntry) => entry.id), input, db);
     const lexicalById = new Map<number, number>();
     for (const row of lexicalRows) {
         lexicalById.set(row.id, coerceScore(row.lexicalScore));
@@ -412,7 +418,7 @@ async function hybridSearchWithoutBackend(
 
     const queryEmbedding = generateEmbedding(input.query);
     const scored = entries
-        .map((entry) => {
+        .map((entry: HybridFallbackEntry) => {
             const lexicalScore = lexicalById.get(entry.id) ?? 0;
             const vectorScore = cosineSimilarity(
                 queryEmbedding,
@@ -427,9 +433,9 @@ async function hybridSearchWithoutBackend(
                 score,
             };
         })
-        .filter((entry) => entry.score >= minScore)
-        .filter((entry) => entry.lexicalScore > 0 || entry.vectorScore > 0)
-        .sort((left, right) => right.score - left.score)
+        .filter((entry: HybridSearchResult) => entry.score >= minScore)
+        .filter((entry: HybridSearchResult) => entry.lexicalScore > 0 || entry.vectorScore > 0)
+        .sort((left: HybridSearchResult, right: HybridSearchResult) => right.score - left.score)
         .slice(0, limit);
 
     return mapHybridRows(scored);
@@ -688,7 +694,7 @@ async function listExpectedVectorEntryIds(filter?: VectorConsistencyFilter, db?:
         select: { id: true },
         orderBy: { id: 'asc' },
     });
-    return entries.map((entry) => String(entry.id));
+    return entries.map((entry: { id: number }) => String(entry.id));
 }
 
 async function loadEntriesForVectorRepair(entryIds: string[], db?: DbClient): Promise<Array<Pick<KnowledgeEntry, 'id' | 'entityType' | 'entityId' | 'key' | 'valueSummary' | 'valueRaw' | 'source'>>> {
@@ -846,7 +852,7 @@ export async function archiveEntry(
     };
 
     if (supportsInteractiveTransactions(client)) {
-        await client.$transaction(async (tx) => {
+        await client.$transaction(async (tx: TransactionClient) => {
             await runArchiveMutation(tx);
         });
         return;

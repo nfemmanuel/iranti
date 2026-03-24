@@ -3660,6 +3660,38 @@ function runtimeRootFromInstanceEnv(envFile: string): string | null {
     return parts.slice(0, instancesIndex).join(path.sep);
 }
 
+function parentPidFor(pid: number): number | null {
+    if (!pid || pid <= 1) return null;
+
+    if (process.platform === 'win32') {
+        const probe = runCommandCapture('powershell', [
+            '-NoProfile',
+            '-Command',
+            `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").ParentProcessId`,
+        ]);
+        if (probe.status !== 0) return null;
+        const parsed = Number.parseInt(probe.stdout.trim(), 10);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    }
+
+    const probe = runCommandCapture('ps', ['-o', 'ppid=', '-p', String(pid)]);
+    if (probe.status !== 0) return null;
+    const parsed = Number.parseInt(probe.stdout.trim(), 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function currentProcessFamilyPids(): Set<number> {
+    const protectedPids = new Set<number>([process.pid]);
+    let current = process.ppid;
+
+    while (current && current > 1 && !protectedPids.has(current)) {
+        protectedPids.add(current);
+        current = parentPidFor(current) ?? 0;
+    }
+
+    return protectedPids;
+}
+
 async function discoverRuntimeRoots(root: string, projectArtifacts: UninstallProjectArtifact[], scanRoots: string[]): Promise<UninstallRuntimeRoot[]> {
     const discovered = new Map<string, UninstallRuntimeRoot>();
     const add = (candidate: string | null | undefined, source: UninstallRuntimeRoot['source']) => {
@@ -3712,11 +3744,12 @@ async function discoverRuntimeRoots(root: string, projectArtifacts: UninstallPro
 
 async function collectUninstallProcesses(runtimeRoots: UninstallRuntimeRoot[], context: ReturnType<typeof detectUpgradeContext>): Promise<UninstallProcessCandidate[]> {
     const processes = new Map<number, UninstallProcessCandidate>();
+    const protectedPids = currentProcessFamilyPids();
     for (const runtimeRoot of runtimeRoots) {
         const instances = await collectRuntimeInstanceSummaries(runtimeRoot.path);
         for (const instance of instances) {
             const pid = instance.runtime.state?.pid;
-            if (!instance.runtime.running || !pid || pid === process.pid) continue;
+            if (!instance.runtime.running || !pid || protectedPids.has(pid)) continue;
             processes.set(pid, {
                 pid,
                 source: 'runtime',
@@ -3751,7 +3784,7 @@ async function collectUninstallProcesses(runtimeRoots: UninstallRuntimeRoot[], c
                 for (const row of rows) {
                     const pid = row.ProcessId;
                     const command = row.CommandLine ?? '';
-                    if (!pid || pid === process.pid || !command) continue;
+                    if (!pid || protectedPids.has(pid) || !command) continue;
                     const lower = command.toLowerCase();
                     if (!needles.some((needle) => lower.includes(needle))) continue;
                     processes.set(pid, {
@@ -3779,7 +3812,7 @@ async function collectUninstallProcesses(runtimeRoots: UninstallRuntimeRoot[], c
                 if (!match) continue;
                 const pid = Number.parseInt(match[1] ?? '', 10);
                 const command = match[2] ?? '';
-                if (!pid || pid === process.pid) continue;
+                if (!pid || protectedPids.has(pid)) continue;
                 const lower = command.toLowerCase();
                 if (!needles.some((needle) => lower.includes(needle))) continue;
                 processes.set(pid, {

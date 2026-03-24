@@ -27,7 +27,7 @@ async function executeWithIdentityLock<T>(
     fn: (tx: TransactionClient) => Promise<T>
 ): Promise<T> {
     const prisma = getDb();
-    return prisma.$transaction(async (tx) => {
+    return prisma.$transaction(async (tx: TransactionClient) => {
         const lockKey = hashToBigInt(`${identity.entityType}||${identity.entityId}||${identity.key}`);
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
         return fn(tx);

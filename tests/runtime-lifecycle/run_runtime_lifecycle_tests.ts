@@ -18,16 +18,34 @@ type CliRun = {
 const repoRoot = path.resolve(__dirname, '..', '..');
 const cliScript = path.join(repoRoot, 'scripts', 'iranti-cli.ts');
 const serverScript = path.join(repoRoot, 'src', 'api', 'server.ts');
+const tsNodeRegister = require.resolve('ts-node/register');
+
+function buildTsNodeEnv(extraEnv: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+    return {
+        ...process.env,
+        ...extraEnv,
+        TS_NODE_PROJECT: path.join(repoRoot, 'tsconfig.json'),
+        TS_NODE_TRANSPILE_ONLY: 'true',
+    };
+}
+
+function cliEntrypointArgs(args: string[]): string[] {
+    return ['-r', tsNodeRegister, cliScript, ...args];
+}
+
+function serverEntrypointArgs(): string[] {
+    return ['-r', tsNodeRegister, serverScript];
+}
 
 function runCli(args: string[], cwd: string): CliRun {
     const proc = spawnSync(
         process.execPath,
-        ['-r', 'ts-node/register/transpile-only', cliScript, ...args],
+        cliEntrypointArgs(args),
         {
             cwd,
             encoding: 'utf8',
             env: {
-                ...process.env,
+                ...buildTsNodeEnv(),
                 NO_COLOR: '1',
             },
         }
@@ -143,6 +161,8 @@ const server = http.createServer((req, res) => {
   res.writeHead(404);
   res.end();
 });
+process.on('SIGTERM', () => process.exit(0));
+process.on('SIGINT', () => process.exit(0));
 server.listen(0, '127.0.0.1', () => {
   const address = server.address();
   if (!address || typeof address === 'string') {
@@ -750,19 +770,18 @@ async function main(): Promise<void> {
 
         const prodMissingPepper = spawnSync(
             process.execPath,
-            ['-r', 'ts-node/register/transpile-only', serverScript],
+            serverEntrypointArgs(),
             {
                 cwd: repoRoot,
                 encoding: 'utf8',
-                env: {
-                    ...process.env,
+                env: buildTsNodeEnv({
                     DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/iranti_runtime_guard',
                     NODE_ENV: 'production',
                     IRANTI_PORT: '3007',
                     NO_COLOR: '1',
                     IRANTI_API_KEY_PEPPER: '',
                     IRANTI_ALLOW_INSECURE_STARTUP: '',
-                },
+                }),
             }
         );
         assert.notStrictEqual(prodMissingPepper.status, 0, 'server unexpectedly started in production without IRANTI_API_KEY_PEPPER');
@@ -774,12 +793,11 @@ async function main(): Promise<void> {
 
         const prodInvalidAuthority = spawnSync(
             process.execPath,
-            ['-r', 'ts-node/register/transpile-only', serverScript],
+            serverEntrypointArgs(),
             {
                 cwd: repoRoot,
                 encoding: 'utf8',
-                env: {
-                    ...process.env,
+                env: buildTsNodeEnv({
                     DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/iranti_runtime_guard',
                     NODE_ENV: 'production',
                     IRANTI_PORT: '3008',
@@ -787,7 +805,7 @@ async function main(): Promise<void> {
                     IRANTI_API_KEY_PEPPER: 'x'.repeat(32),
                     IRANTI_INSTANCE_DIR: instanceDir,
                     IRANTI_INSTANCE_RUNTIME_FILE: path.join(root, 'foreign', 'runtime.json'),
-                },
+                }),
             }
         );
         assert.notStrictEqual(prodInvalidAuthority.status, 0, 'server unexpectedly started with invalid managed runtime authority');

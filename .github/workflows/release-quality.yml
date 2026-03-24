@@ -119,6 +119,9 @@ jobs:
       - name: Apply Prisma migrations
         run: npx prisma migrate deploy --schema prisma/schema.prisma
 
+      - name: Generate Prisma client
+        run: npm run prisma:generate
+
       - name: Seed staff namespace
         run: npm run seed
 

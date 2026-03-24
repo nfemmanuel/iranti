@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.28 - Unreleased
+
+### Fixed
+
+- Runtime lifecycle now treats zombie/defunct Unix-like PIDs as exited, so restart and status flows no longer hang behind stale liveness checks after a process has already died.
+- `iranti uninstall --all --yes` now excludes the current CLI process family from best-effort process scans, preventing Unix-like uninstall flows from terminating their own launcher or test harness.
+- Clean Node 24/Linux builds now pass TypeScript strictness in archive, vector, lock, and SDK paths instead of failing on implicit `any` gaps that local Windows runs had masked.
+- Runtime lifecycle test harnesses now preload `ts-node` by resolved path with an explicit project config, so clean Linux CI no longer fails from temp-directory `ts-node/register/transpile-only` resolution.
+- DB validation workflows now generate the Prisma client before seeding in jobs that do not already build first, so `npm run seed` no longer fails on missing generated client code in CI.
+
+### Validation
+
+- Re-ran `npm run build` and `npm run test:hardening-fast` locally on Windows after the fixes.
+- Reproduced the release fast gate in a clean `node:24` container with `npm ci`, `npm run build`, and `npm run test:hardening-fast`.
+- Re-ran the DB-backed release path against a fresh pgvector PostgreSQL instance with `npm run prisma:generate`, `prisma migrate deploy`, `npm run seed`, and `npm run test:hardening-db`.
+
 ## 0.2.27 - Unreleased
 
 ### Fixed

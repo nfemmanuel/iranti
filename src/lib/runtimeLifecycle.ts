@@ -3,6 +3,7 @@ import fsp from 'fs/promises';
 import http from 'http';
 import https from 'https';
 import path from 'path';
+import { spawnSync } from 'child_process';
 import { writeTextFileLocked } from './fileMutation';
 
 export type InstanceRuntimeStatus = 'starting' | 'running' | 'stopping' | 'stopped';
@@ -63,6 +64,36 @@ export type InstanceRuntimeSnapshot = {
     processAlive: boolean;
     observedAt: string;
 };
+
+function readUnixProcessState(pid: number): string | null {
+    if (process.platform === 'win32') return null;
+
+    if (process.platform === 'linux') {
+        try {
+            const statPath = `/proc/${pid}/stat`;
+            if (fs.existsSync(statPath)) {
+                const stat = fs.readFileSync(statPath, 'utf8');
+                const state = stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3);
+                return state || null;
+            }
+        } catch {
+            // fall through to ps-based detection
+        }
+    }
+
+    try {
+        const probe = spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], {
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'ignore'],
+            shell: false,
+        });
+        if (probe.status !== 0) return null;
+        const state = probe.stdout.trim();
+        return state ? state[0] : null;
+    } catch {
+        return null;
+    }
+}
 
 export function runtimeFileForInstance(instanceDir: string): string {
     return path.join(instanceDir, 'runtime.json');
@@ -161,6 +192,9 @@ export function isPidAlive(pid: number | null | undefined): boolean {
     if (!pid || !Number.isFinite(pid)) return false;
     try {
         process.kill(pid, 0);
+        if (readUnixProcessState(pid) === 'Z') {
+            return false;
+        }
         return true;
     } catch {
         return false;

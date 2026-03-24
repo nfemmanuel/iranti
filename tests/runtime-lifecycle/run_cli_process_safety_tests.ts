@@ -5,6 +5,13 @@ import path from 'path';
 import { spawnSync } from 'child_process';
 import { spawnSyncResolved } from '../../src/lib/commandInvocation';
 import { ensureFileContainsLinesLocked, writeTextFileLocked } from '../../src/lib/fileMutation';
+const repoRoot = path.resolve(__dirname, '..', '..');
+const codexSetupScript = path.join(repoRoot, 'scripts', 'codex-setup.ts');
+const tsNodeRegister = require.resolve('ts-node/register');
+
+function codexSetupEntrypointArgs(args: string[]): string[] {
+    return ['-r', tsNodeRegister, codexSetupScript, ...args];
+}
 
 async function testLiteralArgumentDelivery(root: string): Promise<void> {
     const scriptDir = path.join(root, 'script dir');
@@ -169,10 +176,7 @@ process.exit(1);
     const specialName = 'iranti-codex-test';
     const proc = spawnSync(
         process.execPath,
-        [
-            '-r',
-            'ts-node/register/transpile-only',
-            path.join(process.cwd(), 'scripts', 'codex-setup.ts'),
+        codexSetupEntrypointArgs([
             '--name',
             specialName,
             '--agent',
@@ -181,14 +185,16 @@ process.exit(1);
             specialSource,
             '--provider',
             specialProvider,
-        ],
+        ]),
         {
-            cwd: process.cwd(),
+            cwd: repoRoot,
             encoding: 'utf8',
             env: {
                 ...process.env,
                 IRANTI_TEST_LOG: logPath,
                 IRANTI_TEST_TOOL_SHIM: shimScript,
+                TS_NODE_PROJECT: path.join(repoRoot, 'tsconfig.json'),
+                TS_NODE_TRANSPILE_ONLY: 'true',
             },
             stdio: ['ignore', 'pipe', 'pipe'],
         },

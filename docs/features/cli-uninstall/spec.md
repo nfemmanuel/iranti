@@ -65,6 +65,7 @@
 - `.mcp.json` and `.claude/settings.local.json` are edited surgically; unrelated MCP servers and Claude settings are preserved.
 - Invalid JSON in project integration files is treated as a warning, not a hard failure.
 - Best-effort process scanning may miss some Iranti processes; runtime-metadata-backed instance processes are still handled directly.
+- Unix-like uninstall process scanning now excludes the current CLI process and its ancestor chain, so `uninstall --all --yes` does not kill its own launcher or test harness while stopping other Iranti-owned processes.
 - On Windows, self-uninstall from a live global npm install is detached instead of attempting an in-place uninstall that would fail while the CLI binary is still running.
 - Detached Windows uninstall resolves helper executables such as `npm` and `codex` to concrete absolute paths before launching the PowerShell handoff.
 
@@ -74,6 +75,7 @@
   - plain `uninstall --yes --json` removed npm/Python package surfaces but preserved runtime roots, `.env.iranti`, `.mcp.json`, and Claude hook files
   - `uninstall --all --dry-run --json` reported destructive cleanup targets without mutating them
   - `uninstall --all --yes --json` removed runtime roots and project-local Iranti artifacts while preserving unrelated MCP servers and Claude hook entries
+- clean Ubuntu/Node 24 repro (`docker run ... node:24 ... npm run test:uninstall-lifecycle`) now completes without terminating its own parent process
 - `npx tsc --noEmit`
 
 ## Related

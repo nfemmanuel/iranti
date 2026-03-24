@@ -40,6 +40,7 @@
 - If `instance.json` points at a different instance name, env file, or instance directory than the directory being inspected, status marks config as `INVALID`.
 - If an instance env file exists but cannot be parsed, the port is reported as unknown.
 - If runtime metadata exists but the recorded PID is no longer alive, status marks the instance as `STALE` rather than `RUNNING`.
+- If a Unix-like runtime PID has already exited but remains as a zombie/defunct process, status treats it as exited rather than falsely reporting it as still alive.
 - If runtime metadata claims `stopped` but the recorded PID is still alive, status marks the instance runtime as `INVALID` instead of trusting contradictory metadata.
 - If a PID is alive but the health endpoint does not respond successfully, status marks the runtime as `UNHEALTHY` rather than `RUNNING`.
 - If `runtime.json` exists but is unreadable or incomplete, status marks the instance runtime as `INVALID` instead of pretending it is merely stopped.

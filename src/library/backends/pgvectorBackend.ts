@@ -120,7 +120,7 @@ export class PgvectorBackend implements VectorBackend {
                 LIMIT ${Math.max(1, topK)}
             `);
 
-            return rows.map((row) => ({
+            return rows.map((row: { id: number; entityType: string; entityId: string; key: string; score: number | string | null }) => ({
                 entityType: row.entityType,
                 entityId: row.entityId,
                 key: row.key,
@@ -151,7 +151,7 @@ export class PgvectorBackend implements VectorBackend {
                 ORDER BY kb."id" ASC
             `);
 
-            return rows.map((row) => String(row.id));
+            return rows.map((row: { id: number }) => String(row.id));
         } catch (error) {
             if (isVectorRuntimeError(error)) {
                 vectorSupportCache = false;

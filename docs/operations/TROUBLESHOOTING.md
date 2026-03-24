@@ -140,10 +140,21 @@ If the detached path still fails, check:
 - whether the instance env is complete
 - whether the configured port is already occupied
 - whether the replacement runtime can pass `/health`
+- on Unix-like systems, whether a previously killed process is lingering as a zombie under another parent process; Iranti now treats zombie PIDs as exited, but the parent process still needs to reap them
 
 Important:
 - `iranti upgrade --restart --instance <name>` only performs the restart during an executing upgrade path such as `--yes`
 - without `--yes`, the command remains inspect-only and prints the plan instead of mutating anything
+
+### Uninstall On Unix Terminates The Invoking Shell Or Test Harness
+
+**Symptom**: A Unix-like `iranti uninstall --all --yes` ends with `Terminated` or appears to kill the process that launched it.
+
+**What changed**:
+- Iranti now excludes the current CLI process and its ancestor chain from uninstall process-stop scans.
+- That prevents uninstall from classifying its own launcher (`npm`, `ts-node`, the current shell, or the test harness parent) as an Iranti runtime candidate.
+
+If you still see this after upgrading, inspect `iranti uninstall --all --dry-run --json` and look for unexpected `process-scan` entries before running the destructive path.
 
 ### Uninstall Removed The Package But Left Runtime Data Behind
 
