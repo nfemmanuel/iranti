@@ -19,17 +19,27 @@ const schemas = {
     requestId: { type: 'string', required: false, maxLength: 100 }
   },
   observe: {
-    agentId: { type: 'string', required: true, maxLength: 200 },
+    agent: { type: 'string', required: false, maxLength: 200 },
+    agentId: { type: 'string', required: false, maxLength: 200 },
     currentContext: { type: 'string', required: true, maxLength: 50000 },
-    maxFacts: { type: 'number', required: false, min: 1, max: 100, default: 10 }
+    maxFacts: { type: 'number', required: false, min: 1, max: 100, default: 10 },
+    entityHints: { type: 'array', required: false, maxLength: 100 }
   },
   handshake: {
-    agent: { type: 'string', required: true, maxLength: 200 },
+    agent: { type: 'string', required: false, maxLength: 200 },
+    agentId: { type: 'string', required: false, maxLength: 200 },
+    task: { type: 'string', required: true, maxLength: 1000 },
+    recentMessages: { type: 'array', required: false, maxLength: 100 }
+  },
+  reconvene: {
+    agent: { type: 'string', required: false, maxLength: 200 },
+    agentId: { type: 'string', required: false, maxLength: 200 },
     task: { type: 'string', required: true, maxLength: 1000 },
     recentMessages: { type: 'array', required: false, maxLength: 100 }
   },
   checkpoint: {
-    agentId: { type: 'string', required: true, maxLength: 200 },
+    agent: { type: 'string', required: false, maxLength: 200 },
+    agentId: { type: 'string', required: false, maxLength: 200 },
     task: { type: 'string', required: true, maxLength: 1000 },
     recentMessages: { type: 'array', required: true, maxLength: 100 },
     checkpoint: { type: 'any', required: true, maxSize: 20000 },
@@ -37,8 +47,24 @@ const schemas = {
     heartbeatAt: { type: 'string', required: false, maxLength: 50 }
   },
   sessionAction: {
-    agentId: { type: 'string', required: true, maxLength: 200 },
+    agent: { type: 'string', required: false, maxLength: 200 },
+    agentId: { type: 'string', required: false, maxLength: 200 },
     sessionId: { type: 'string', required: false, maxLength: 200 }
+  },
+  sessionInspect: {
+    agent: { type: 'string', required: false, maxLength: 200 },
+    agentId: { type: 'string', required: false, maxLength: 200 },
+    task: { type: 'string', required: false, maxLength: 1000 },
+    recentMessages: { type: 'array', required: false, maxLength: 100 }
+  },
+  attend: {
+    agent: { type: 'string', required: false, maxLength: 200 },
+    agentId: { type: 'string', required: false, maxLength: 200 },
+    currentContext: { type: 'string', required: false, maxLength: 50000 },
+    latestMessage: { type: 'string', required: false, maxLength: 10000 },
+    maxFacts: { type: 'number', required: false, min: 1, max: 100, default: 10 },
+    entityHints: { type: 'array', required: false, maxLength: 100 },
+    forceInject: { type: 'boolean', required: false }
   },
   relate: {
     fromEntity: { type: 'string', required: true, pattern: /^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_/-]+$/, maxLength: 200 },
@@ -144,6 +170,26 @@ export function validateInput(schemaName: keyof typeof schemas) {
         error: `Unexpected fields: ${unexpectedFields.join(', ')}`,
         code: 'VALIDATION_ERROR'
       });
+    }
+
+    if (
+      schemaName === 'handshake'
+      || schemaName === 'reconvene'
+      || schemaName === 'checkpoint'
+      || schemaName === 'sessionAction'
+      || schemaName === 'sessionInspect'
+      || schemaName === 'observe'
+      || schemaName === 'attend'
+    ) {
+      const agent = typeof data.agent === 'string' ? data.agent.trim() : '';
+      const agentId = typeof data.agentId === 'string' ? data.agentId.trim() : '';
+      if (!agent && !agentId) {
+        return res.status(400).json({
+          error: 'agentId is required (agent is accepted as a legacy alias).',
+          code: 'VALIDATION_ERROR',
+          field: 'agentId'
+        });
+      }
     }
 
     next();

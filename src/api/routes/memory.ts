@@ -7,11 +7,25 @@ function normalizeAgent(req: Request): string | null {
     const fromAgent = req.body.agent;
     const fromAgentId = req.body.agentId;
 
+    if (typeof fromAgentId === 'string' && fromAgentId.trim().length > 0) {
+        return fromAgentId.trim();
+    }
     if (typeof fromAgent === 'string' && fromAgent.trim().length > 0) {
         return fromAgent.trim();
     }
+
+    return null;
+}
+
+function normalizeAgentFromBody(body: Record<string, unknown>): string | null {
+    const fromAgent = body.agent;
+    const fromAgentId = body.agentId;
+
     if (typeof fromAgentId === 'string' && fromAgentId.trim().length > 0) {
         return fromAgentId.trim();
+    }
+    if (typeof fromAgent === 'string' && fromAgent.trim().length > 0) {
+        return fromAgent.trim();
     }
 
     return null;
@@ -46,7 +60,15 @@ export function memoryRoutes(iranti: Iranti): Router {
     // POST /handshake
     router.post('/handshake', validateInput('handshake'), async (req: Request, res: Response) => {
         try {
-            const result = await iranti.handshake(req.body);
+            const agentId = normalizeAgent(req);
+            if (!agentId) {
+                return res.status(400).json({ error: 'agentId is required (agent is accepted as a legacy alias).' });
+            }
+            const result = await iranti.handshake({
+                agentId,
+                task: req.body.task,
+                recentMessages: req.body.recentMessages,
+            });
             res.json(result);
         } catch (err) {
             res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
@@ -54,11 +76,29 @@ export function memoryRoutes(iranti: Iranti): Router {
     });
 
     // POST /reconvene
-    router.post('/reconvene', async (req: Request, res: Response) => {
+    router.post('/reconvene', validateInput('reconvene'), async (req: Request, res: Response) => {
         try {
-            const { agentId, task, recentMessages } = req.body;
+            const agentId = normalizeAgentFromBody(req.body as Record<string, unknown>);
+            if (!agentId) {
+                return res.status(400).json({ error: 'agentId is required (agent is accepted as a legacy alias).' });
+            }
+            const { task, recentMessages } = req.body;
             const result = await iranti.reconvene(agentId, { task, recentMessages });
             res.json(result);
+        } catch (err) {
+            res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+    });
+
+    // GET /session/:agentId
+    router.get('/session/:agentId', async (req: Request, res: Response) => {
+        try {
+            const agentId = Array.isArray(req.params.agentId) ? req.params.agentId[0] : req.params.agentId;
+            if (!agentId || !agentId.trim()) {
+                return res.status(400).json({ error: 'agentId path parameter is required.' });
+            }
+            const sessionState = await iranti.inspectSession({ agentId: agentId.trim() });
+            res.json(sessionState);
         } catch (err) {
             res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
         }
@@ -67,7 +107,11 @@ export function memoryRoutes(iranti: Iranti): Router {
     // POST /checkpoint
     router.post('/checkpoint', validateInput('checkpoint'), async (req: Request, res: Response) => {
         try {
-            const { agentId, task, recentMessages, checkpoint, sessionId, heartbeatAt } = req.body;
+            const agentId = normalizeAgent(req);
+            if (!agentId) {
+                return res.status(400).json({ error: 'agentId is required (agent is accepted as a legacy alias).' });
+            }
+            const { task, recentMessages, checkpoint, sessionId, heartbeatAt } = req.body;
             const result = await iranti.checkpoint({
                 agentId,
                 task,
@@ -85,7 +129,11 @@ export function memoryRoutes(iranti: Iranti): Router {
     // POST /resume
     router.post('/resume', validateInput('sessionAction'), async (req: Request, res: Response) => {
         try {
-            const { agentId, sessionId } = req.body;
+            const agentId = normalizeAgent(req);
+            if (!agentId) {
+                return res.status(400).json({ error: 'agentId is required (agent is accepted as a legacy alias).' });
+            }
+            const { sessionId } = req.body;
             const result = await iranti.resumeSession({ agentId, sessionId });
             res.json(result);
         } catch (err) {
@@ -96,7 +144,11 @@ export function memoryRoutes(iranti: Iranti): Router {
     // POST /complete
     router.post('/complete', validateInput('sessionAction'), async (req: Request, res: Response) => {
         try {
-            const { agentId, sessionId } = req.body;
+            const agentId = normalizeAgent(req);
+            if (!agentId) {
+                return res.status(400).json({ error: 'agentId is required (agent is accepted as a legacy alias).' });
+            }
+            const { sessionId } = req.body;
             const result = await iranti.completeSession({ agentId, sessionId });
             res.json(result);
         } catch (err) {
@@ -107,7 +159,11 @@ export function memoryRoutes(iranti: Iranti): Router {
     // POST /abandon
     router.post('/abandon', validateInput('sessionAction'), async (req: Request, res: Response) => {
         try {
-            const { agentId, sessionId } = req.body;
+            const agentId = normalizeAgent(req);
+            if (!agentId) {
+                return res.status(400).json({ error: 'agentId is required (agent is accepted as a legacy alias).' });
+            }
+            const { sessionId } = req.body;
             const result = await iranti.abandonSession({ agentId, sessionId });
             res.json(result);
         } catch (err) {
@@ -137,7 +193,7 @@ export function memoryRoutes(iranti: Iranti): Router {
     });
 
     // POST /observe
-    router.post('/observe', async (req: Request, res: Response) => {
+    router.post('/observe', validateInput('observe'), async (req: Request, res: Response) => {
         try {
             const { currentContext, maxFacts } = req.body;
             const agent = normalizeAgent(req);
@@ -179,7 +235,7 @@ export function memoryRoutes(iranti: Iranti): Router {
     });
 
     // POST /attend
-    router.post('/attend', async (req: Request, res: Response) => {
+    router.post('/attend', validateInput('attend'), async (req: Request, res: Response) => {
         try {
             const { currentContext, maxFacts, latestMessage, forceInject } = req.body;
             const agent = normalizeAgent(req);

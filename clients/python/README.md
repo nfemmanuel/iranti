@@ -103,6 +103,9 @@ if brief.session_recovery and brief.session_recovery.available:
         session_id=brief.session_recovery.session_id
     )
 
+session = client.inspect_session("my_agent")
+print(session.has_checkpoint)
+
 # Query facts
 result = client.query("researcher/jane_smith", "affiliation")
 if result.found:

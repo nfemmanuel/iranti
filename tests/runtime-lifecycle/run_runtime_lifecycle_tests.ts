@@ -139,11 +139,15 @@ async function main(): Promise<void> {
         assert.strictEqual(statusRun.status, 0, `status failed:\n${statusRun.stdout}\n${statusRun.stderr}`);
 
         const statusPayload = JSON.parse(statusRun.stdout.trim()) as {
+            runtimeRootSource: string;
+            boundRuntimeRoot: string | null;
+            rootMismatch: boolean;
             instances: Array<{
                 name: string;
                 runtime: {
                     running: boolean;
                     stale: boolean;
+                    classification: string;
                     state: {
                         pid: number;
                         version: string;
@@ -152,10 +156,14 @@ async function main(): Promise<void> {
             }>;
         };
 
+        assert.strictEqual(statusPayload.runtimeRootSource, 'flag');
+        assert.strictEqual(statusPayload.boundRuntimeRoot, null);
+        assert.strictEqual(statusPayload.rootMismatch, false);
         assert.strictEqual(statusPayload.instances.length, 1);
         assert.strictEqual(statusPayload.instances[0]?.name, 'local');
         assert.strictEqual(statusPayload.instances[0]?.runtime.running, false);
         assert.strictEqual(statusPayload.instances[0]?.runtime.stale, true);
+        assert.strictEqual(statusPayload.instances[0]?.runtime.classification, 'stale');
         assert.strictEqual(statusPayload.instances[0]?.runtime.state?.pid, 999999);
 
         const upgradeRun = runCli(['upgrade', '--check', '--json', '--root', root], repoRoot);
@@ -226,6 +234,46 @@ async function main(): Promise<void> {
             assert.strictEqual(process.env.IRANTI_URL, 'http://localhost:3050');
             assert.strictEqual(process.env.IRANTI_API_KEY, 'project_key');
         });
+
+        const projectStatusRun = runCli(['status', '--json'], projectDir);
+        assert.strictEqual(projectStatusRun.status, 0, `project status failed:\n${projectStatusRun.stdout}\n${projectStatusRun.stderr}`);
+        const projectStatus = JSON.parse(projectStatusRun.stdout.trim()) as {
+            runtimeRoot: string;
+            runtimeRootSource: string;
+            boundRuntimeRoot: string | null;
+            rootMismatch: boolean;
+        };
+        assert.strictEqual(projectStatus.runtimeRoot, root);
+        assert.strictEqual(projectStatus.runtimeRootSource, 'project-binding');
+        assert.strictEqual(projectStatus.boundRuntimeRoot, root);
+        assert.strictEqual(projectStatus.rootMismatch, false);
+
+        const isolatedRoot = path.join(root, 'isolated-root');
+        const isolatedInstanceDir = path.join(isolatedRoot, 'instances', 'isolated');
+        const isolatedEnvFile = path.join(isolatedInstanceDir, '.env');
+        writeText(projectEnvFile, [
+            'IRANTI_URL=http://localhost:3999',
+            'IRANTI_API_KEY=project_key',
+            `IRANTI_INSTANCE_ENV=${isolatedEnvFile}`,
+            '',
+        ].join('\n'));
+        writeText(isolatedEnvFile, [
+            'IRANTI_INSTANCE_NAME=isolated',
+            'IRANTI_PORT=3999',
+            'DATABASE_URL=postgresql://postgres:postgres@localhost:5432/iranti_isolated',
+            '',
+        ].join('\n'));
+
+        const mismatchStatusRun = runCli(['status', '--root', root, '--json'], projectDir);
+        assert.strictEqual(mismatchStatusRun.status, 0, `status with bound-root mismatch failed:\n${mismatchStatusRun.stdout}\n${mismatchStatusRun.stderr}`);
+        const mismatchStatus = JSON.parse(mismatchStatusRun.stdout.trim()) as {
+            boundRuntimeRoot: string | null;
+            rootMismatch: boolean;
+            otherRuntimeRoots: string[];
+        };
+        assert.strictEqual(mismatchStatus.boundRuntimeRoot, isolatedRoot);
+        assert.strictEqual(mismatchStatus.rootMismatch, true);
+        assert.ok(mismatchStatus.otherRuntimeRoots.includes(isolatedRoot), 'Expected status JSON to report the alternate bound runtime root.');
 
         const publishedPorts = parsePublishedDockerHostPorts([
             '0.0.0.0:5435->5432/tcp, [::]:5435->5432/tcp',

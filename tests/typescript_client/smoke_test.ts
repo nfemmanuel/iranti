@@ -106,7 +106,7 @@ async function main(): Promise<void> {
     );
 
     const brief = await client.handshake({
-        agent: agentId,
+        agentId,
         task: 'Validate the external TypeScript client against the live API.',
         recentMessages: [`Need current status for ${entity}.`],
     });
@@ -134,7 +134,7 @@ async function main(): Promise<void> {
     expect(Boolean(checkpointBrief.sessionCheckpoint?.sessionId), 'Expected checkpoint() to return a session id.');
 
     const recoveryBrief = await client.handshake({
-        agent: recoveryAgent,
+        agentId: recoveryAgent,
         task: recoveryTask,
         recentMessages: ['Returning to the incident response checklist.'],
     });
@@ -150,6 +150,10 @@ async function main(): Promise<void> {
         sessionId: checkpointBrief.sessionCheckpoint?.sessionId,
     });
     expect(resumedBrief.sessionCheckpoint?.status === 'active', 'Expected resumeSession() to reactivate the checkpoint.');
+
+    const inspectedSession = await client.inspectSession({ agentId: recoveryAgent });
+    expect(inspectedSession.hasCheckpoint === true, 'Expected inspectSession() to report the persisted session.');
+    expect(inspectedSession.sessionCheckpoint?.sessionId === checkpointBrief.sessionCheckpoint?.sessionId, 'Expected inspectSession() to return the active checkpoint session id.');
 
     await client.completeSession({
         agentId: recoveryAgent,

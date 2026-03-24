@@ -55,7 +55,8 @@ export interface IngestInput {
 }
 
 export interface HandshakeInput {
-    agent: string;
+    agent?: string;
+    agentId?: string;
     task: string;
     recentMessages: string[];
 }
@@ -101,7 +102,8 @@ export interface SessionRecoveryInfo {
 }
 
 export interface SessionCheckpointInput {
-    agentId: string;
+    agent?: string;
+    agentId?: string;
     task: string;
     recentMessages: string[];
     checkpoint: SessionCheckpointPayload | string | Record<string, unknown>;
@@ -110,8 +112,24 @@ export interface SessionCheckpointInput {
 }
 
 export interface SessionActionInput {
-    agentId: string;
+    agent?: string;
+    agentId?: string;
     sessionId?: string;
+}
+
+export interface SessionInspectionInput {
+    agent?: string;
+    agentId?: string;
+    task?: string;
+    recentMessages?: string[];
+}
+
+export interface SessionInspection {
+    agentId: string;
+    hasCheckpoint: boolean;
+    sessionCheckpoint: SessionCheckpointRecord | null;
+    sessionRecovery: SessionRecoveryInfo | null;
+    persistedBriefGeneratedAt?: string;
 }
 
 export interface TemporalQueryOptions {
@@ -200,7 +218,8 @@ export interface IngestResult {
 }
 
 export interface ObserveInput {
-    agent: string;
+    agent?: string;
+    agentId?: string;
     currentContext: string;
     maxFacts?: number;
     entityHints?: string[];
@@ -249,6 +268,14 @@ function parseEntity(entity: string): { entityType: EntityType; entityId: string
     const entityType = parts[0] as EntityType;
     const entityId = parts.slice(1).join('/');
     return { entityType, entityId };
+}
+
+function resolveAgentId(input: { agent?: string; agentId?: string }, operation: string): string {
+    const agentId = input.agentId?.trim() || input.agent?.trim();
+    if (!agentId) {
+        throw new Error(`${operation} requires agentId (agent is accepted as a legacy alias).`);
+    }
+    return agentId;
 }
 
 async function resolveQueryEntity(entity: string): Promise<{
@@ -401,7 +428,7 @@ export class Iranti {
     // ── Handshake ───────────────────────────────────────────────────────────
 
     async handshake(input: HandshakeInput): Promise<WorkingMemoryBrief> {
-        const attendant = getAttendant(input.agent);
+        const attendant = getAttendant(resolveAgentId(input, 'handshake'));
         return attendant.handshake({
             task: input.task,
             recentMessages: input.recentMessages,
@@ -412,7 +439,7 @@ export class Iranti {
 
     async reconvene(
         agentId: string,
-        input: Omit<HandshakeInput, 'agent'>
+        input: Omit<HandshakeInput, 'agent' | 'agentId'>
     ): Promise<WorkingMemoryBrief> {
         const attendant = getAttendant(agentId);
         return attendant.reconvene({
@@ -422,7 +449,7 @@ export class Iranti {
     }
 
     async checkpoint(input: SessionCheckpointInput): Promise<WorkingMemoryBrief> {
-        const attendant = getAttendant(input.agentId);
+        const attendant = getAttendant(resolveAgentId(input, 'checkpoint'));
         return attendant.checkpoint({
             task: input.task,
             recentMessages: input.recentMessages,
@@ -433,23 +460,31 @@ export class Iranti {
     }
 
     async resumeSession(input: SessionActionInput): Promise<WorkingMemoryBrief> {
-        const attendant = getAttendant(input.agentId);
+        const attendant = getAttendant(resolveAgentId(input, 'resumeSession'));
         return attendant.resumeSession({
             sessionId: input.sessionId,
         });
     }
 
     async completeSession(input: SessionActionInput): Promise<WorkingMemoryBrief> {
-        const attendant = getAttendant(input.agentId);
+        const attendant = getAttendant(resolveAgentId(input, 'completeSession'));
         return attendant.completeSession({
             sessionId: input.sessionId,
         });
     }
 
     async abandonSession(input: SessionActionInput): Promise<WorkingMemoryBrief> {
-        const attendant = getAttendant(input.agentId);
+        const attendant = getAttendant(resolveAgentId(input, 'abandonSession'));
         return attendant.abandonSession({
             sessionId: input.sessionId,
+        });
+    }
+
+    async inspectSession(input: SessionInspectionInput): Promise<SessionInspection> {
+        const attendant = getAttendant(resolveAgentId(input, 'inspectSession'));
+        return attendant.inspectSession({
+            task: input.task,
+            recentMessages: input.recentMessages,
         });
     }
 
@@ -704,9 +739,7 @@ export class Iranti {
     // ── Context Window Observation ────────────────────────────────────────────
 
     async observe(input: ObserveInput): Promise<import('../attendant/AttendantInstance').ObserveResult> {
-        if (!input.agent || typeof input.agent !== 'string' || input.agent.trim().length === 0) {
-            throw new Error('agent is required for observe().');
-        }
+        const agentId = resolveAgentId(input, 'observe');
 
         if (input.entityHints !== undefined) {
             if (!Array.isArray(input.entityHints)) {
@@ -720,7 +753,7 @@ export class Iranti {
             }
         }
 
-        const attendant = getAttendant(input.agent);
+        const attendant = getAttendant(agentId);
         return attendant.observe({
             currentContext: input.currentContext,
             maxFacts: input.maxFacts,
@@ -729,9 +762,7 @@ export class Iranti {
     }
 
     async attend(input: AttendInput): Promise<AttendResult> {
-        if (!input.agent || typeof input.agent !== 'string' || input.agent.trim().length === 0) {
-            throw new Error('agent is required for attend().');
-        }
+        const agentId = resolveAgentId(input, 'attend');
 
         if (input.entityHints !== undefined) {
             if (!Array.isArray(input.entityHints)) {
@@ -745,7 +776,7 @@ export class Iranti {
             }
         }
 
-        const attendant = getAttendant(input.agent);
+        const attendant = getAttendant(agentId);
         return attendant.attend({
             currentContext: input.currentContext,
             maxFacts: input.maxFacts,

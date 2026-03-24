@@ -105,6 +105,22 @@ export interface SessionRecoveryInfo {
     checkpoint: SessionCheckpointPayload | null;
 }
 
+export interface PersistedSessionState {
+    agentId: string;
+    sessionStarted: string;
+    briefGeneratedAt: string;
+    sessionCheckpoint: SessionCheckpointRecord | null;
+    sessionRecovery: SessionRecoveryInfo | null;
+}
+
+export interface SessionInspection {
+    agentId: string;
+    hasCheckpoint: boolean;
+    sessionCheckpoint: SessionCheckpointRecord | null;
+    sessionRecovery: SessionRecoveryInfo | null;
+    persistedBriefGeneratedAt?: string;
+}
+
 // ─── Observe Types ────────────────────────────────────────────────────────────
 
 export interface ObserveInput {
@@ -178,6 +194,34 @@ export interface AttendResult extends ObserveResult {
         | 'memory_needed_but_in_context'
         | 'memory_needed_injected';
     decision: AttendDecision;
+}
+
+async function readPersistedBriefForAgent(agentId: string): Promise<WorkingMemoryBrief | null> {
+    const entry = await getDb().knowledgeEntry.findUnique({
+        where: {
+            entityType_entityId_key: {
+                entityType: 'agent',
+                entityId: agentId,
+                key: 'attendant_state',
+            },
+        },
+    });
+
+    if (!entry) return null;
+    return entry.valueRaw as unknown as WorkingMemoryBrief;
+}
+
+export async function readPersistedSessionState(agentId: string): Promise<PersistedSessionState | null> {
+    const state = await readPersistedBriefForAgent(agentId);
+    if (!state) return null;
+
+    return {
+        agentId,
+        sessionStarted: state.sessionStarted,
+        briefGeneratedAt: state.briefGeneratedAt,
+        sessionCheckpoint: state.sessionCheckpoint ?? null,
+        sessionRecovery: state.sessionRecovery ?? null,
+    };
 }
 
 type EntityCandidate = {
@@ -835,6 +879,24 @@ export class AttendantInstance {
 
         await this.persistState();
         return this.brief;
+    }
+
+    async inspectSession(context?: Partial<AgentContext>): Promise<SessionInspection> {
+        const persisted = await this.loadPersistedState();
+        const checkpoint = persisted?.sessionCheckpoint ?? this.sessionCheckpoint ?? null;
+        const normalizedTask = typeof context?.task === 'string' ? context.task.trim() : '';
+        const recentMessages = Array.isArray(context?.recentMessages) ? context.recentMessages : [];
+        const recovery = checkpoint && normalizedTask
+            ? this.buildRecovery({ task: normalizedTask, recentMessages }, checkpoint).recovery
+            : null;
+
+        return {
+            agentId: this.agentId,
+            hasCheckpoint: Boolean(checkpoint),
+            sessionCheckpoint: checkpoint,
+            sessionRecovery: recovery,
+            persistedBriefGeneratedAt: persisted?.briefGeneratedAt,
+        };
     }
 
     getAgentId(): string {
@@ -1555,19 +1617,9 @@ If nothing is relevant, return: none`,
     }
 
     private async loadPersistedState(): Promise<WorkingMemoryBrief | null> {
-        const entry = await getDb().knowledgeEntry.findUnique({
-            where: {
-                entityType_entityId_key: {
-                    entityType: 'agent',
-                    entityId: this.agentId,
-                    key: 'attendant_state',
-                },
-            },
-        });
+        const state = await readPersistedBriefForAgent(this.agentId);
+        if (!state) return null;
 
-        if (!entry) return null;
-
-        const state = entry.valueRaw as unknown as WorkingMemoryBrief;
         this.sessionStarted = state.sessionStarted;
         this.contextCallCount = state.contextCallCount ?? 0;
         this.sessionCheckpoint = state.sessionCheckpoint ?? null;

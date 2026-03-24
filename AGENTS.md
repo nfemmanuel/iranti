@@ -262,7 +262,7 @@ iranti/
 â”‚   â”‚   â””â”€â”€ routes/
 â”‚   â”‚       â”œâ”€â”€ knowledge.ts    â€” Write, ingest, query, hybrid search, relationships, resolution
 â”‚   â”‚       â”œâ”€â”€ agents.ts       â€” Agent registration and management
-â”‚   â”‚       â””â”€â”€ memory.ts       â€” Handshake, reconvene, observe, attend, whoKnows, maintenance
+â”‚   â”‚       â””â”€â”€ memory.ts       â€” Handshake, session inspection/recovery, reconvene, observe, attend, whoKnows, maintenance
 â”‚   â””â”€â”€ types.ts                â€” Shared TypeScript types
 â”œâ”€â”€ prisma/
 â”‚   â”œâ”€â”€ schema.prisma           â€” KnowledgeEntry, Archive, EntityRelationship, Entity, EntityAlias
@@ -471,13 +471,14 @@ await iranti.write({ entity, key, value, summary, confidence, source, agent, val
 await iranti.ingest({ entity, content, source, confidence, agent });
 
 // Agent working memory
-const brief = await iranti.handshake({ agent, task, recentMessages });
+const brief = await iranti.handshake({ agentId, task, recentMessages });
 await iranti.reconvene(agentId, { task, recentMessages });
-const turn = await iranti.attend({ agent, latestMessage, currentContext, entityHints });
+const turn = await iranti.attend({ agentId, latestMessage, currentContext, entityHints });
 const attendant = iranti.getAttendant(agentId);
 
 // Session checkpoints and recovery
 const checkpoint = await iranti.checkpoint({ agentId, task, recentMessages, checkpoint: { currentStep, nextStep, openRisks } });
+const session = await iranti.inspectSession({ agentId });
 const resumed = await iranti.resumeSession({ agentId, sessionId });
 const completed = await iranti.completeSession({ agentId, sessionId });
 const abandoned = await iranti.abandonSession({ agentId, sessionId });

@@ -365,7 +365,7 @@ await iranti.registerAgent({
 
 // Get working memory for a task
 const brief = await iranti.handshake({
-    agent: 'research_agent_001',
+    agentId: 'research_agent_001',
     task: 'Research publication history for Dr. Jane Smith',
     recentMessages: ['Starting literature review...'],
 });
@@ -385,7 +385,7 @@ Before each LLM response, use `attend()` so Attendant decides whether to inject 
 
 ```typescript
 const turn = await iranti.attend({
-    agent: 'research_agent_001',
+    agentId: 'research_agent_001',
     latestMessage: 'What is my favorite snack?',
     currentContext: 'User: What is my favorite snack?\nAssistant:',
     entityHints: ['user/main'],

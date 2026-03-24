@@ -164,6 +164,15 @@ class WorkingMemoryBrief:
 
 
 @dataclass
+class SessionInspection:
+    agent_id: str
+    has_checkpoint: bool
+    session_checkpoint: Optional[SessionCheckpointRecord] = None
+    session_recovery: Optional[SessionRecoveryInfo] = None
+    persisted_brief_generated_at: Optional[str] = None
+
+
+@dataclass
 class AgentStats:
     total_writes: int
     total_rejections: int
@@ -555,8 +564,12 @@ class IrantiClient:
         Start an agent session. Returns a working memory brief
         containing operating rules and relevant knowledge for the task.
         """
+        resolved_agent_id = agent.strip()
+        if not resolved_agent_id:
+            raise IrantiValidationError('handshake() requires a non-empty agent id.')
+
         data = self._post('/memory/handshake', {
-            'agent': agent,
+            'agentId': resolved_agent_id,
             'task': task,
             'recentMessages': recent_messages,
         })
@@ -624,6 +637,19 @@ class IrantiClient:
             payload['sessionId'] = session_id
         data = self._post('/memory/abandon', payload)
         return self._parse_brief(data)
+
+    def inspect_session(self, agent_id: str) -> SessionInspection:
+        """Read the current persisted session/checkpoint state for an agent."""
+        data = self._get(f'/memory/session/{agent_id}')
+        checkpoint_data = data.get('sessionCheckpoint')
+        recovery_data = data.get('sessionRecovery')
+        return SessionInspection(
+            agent_id=data['agentId'],
+            has_checkpoint=data['hasCheckpoint'],
+            session_checkpoint=self._parse_session_checkpoint(checkpoint_data) if isinstance(checkpoint_data, dict) else None,
+            session_recovery=self._parse_session_recovery(recovery_data) if isinstance(recovery_data, dict) else None,
+            persisted_brief_generated_at=data.get('persistedBriefGeneratedAt'),
+        )
 
     def who_knows(self, entity: str) -> list[dict]:
         """Find all agents that have written facts about an entity."""

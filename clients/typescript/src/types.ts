@@ -187,7 +187,8 @@ export interface WorkingMemoryEntry {
 }
 
 export interface HandshakeParams {
-    agent: string;
+    agentId?: string;
+    agent?: string;
     task: string;
     recentMessages: string[];
 }
@@ -246,6 +247,10 @@ export interface SessionActionParams {
     sessionId?: string;
 }
 
+export interface SessionInspectionParams {
+    agentId: string;
+}
+
 export interface ReconveneParams {
     agentId: string;
     task: string;
@@ -262,6 +267,14 @@ export interface WorkingMemoryBrief {
     contextCallCount: number;
     sessionCheckpoint?: SessionCheckpointRecord | null;
     sessionRecovery?: SessionRecoveryInfo | null;
+}
+
+export interface SessionInspection {
+    agentId: string;
+    hasCheckpoint: boolean;
+    sessionCheckpoint: SessionCheckpointRecord | null;
+    sessionRecovery: SessionRecoveryInfo | null;
+    persistedBriefGeneratedAt?: string;
 }
 
 export interface FactInjection {

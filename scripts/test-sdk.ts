@@ -38,7 +38,7 @@ async function test() {
     // Test 3 — handshake
     console.log('\nTest 3 — handshake:');
     const brief = await iranti.handshake({
-        agent: 'sdk_agent_001',
+        agentId: 'sdk_agent_001',
         task: 'Research publication history',
         recentMessages: ['Looking up researcher on OpenAlex'],
     });
@@ -67,6 +67,7 @@ async function test() {
         heartbeatAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
     });
     clearAttendant(recoveryAgent);
+    // Handshake still accepts the legacy `agent` alias for backward compatibility.
     const recoveryBrief = await iranti.handshake({
         agent: recoveryAgent,
         task: recoveryTask,
@@ -80,6 +81,13 @@ async function test() {
         throw new Error('Expected handshake() to surface interrupted-session recovery.');
     }
 
+    const inspected = await iranti.inspectSession({ agentId: recoveryAgent });
+    console.log('  Inspect has checkpoint:', inspected.hasCheckpoint);
+    console.log('  Inspect session id:', inspected.sessionCheckpoint?.sessionId);
+    if (!inspected.hasCheckpoint || inspected.sessionCheckpoint?.sessionId !== checkpointBrief.sessionCheckpoint?.sessionId) {
+        throw new Error('Expected inspectSession() to expose the persisted checkpoint.');
+    }
+
     const resumedBrief = await iranti.resumeSession({
         agentId: recoveryAgent,
         sessionId: checkpointBrief.sessionCheckpoint?.sessionId,
@@ -89,8 +97,9 @@ async function test() {
         throw new Error('Expected resumeSession() to reactivate the checkpoint.');
     }
 
+    // Session actions also keep the legacy alias temporarily for compatibility.
     await iranti.completeSession({
-        agentId: recoveryAgent,
+        agent: recoveryAgent,
         sessionId: checkpointBrief.sessionCheckpoint?.sessionId,
     });
 

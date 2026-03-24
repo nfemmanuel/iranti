@@ -49,6 +49,26 @@ type InstanceRuntimeSummary = {
     state: InstanceRuntimeState | null;
     running: boolean;
     stale: boolean;
+    classification: 'running' | 'stale' | 'stopped' | 'missing' | 'invalid';
+    detail: string;
+};
+
+type RuntimeRootSource =
+    | 'flag'
+    | 'env'
+    | 'project-binding'
+    | 'cwd-runtime'
+    | 'user-install-meta'
+    | 'system-install-meta'
+    | 'default-user'
+    | 'default-system';
+
+type RuntimeRootResolution = {
+    root: string;
+    source: RuntimeRootSource;
+    userRoot: string;
+    systemRoot: string;
+    installMetaPath: string;
 };
 
 type DoctorStatus = 'pass' | 'warn' | 'fail';
@@ -344,19 +364,149 @@ function defaultInstallRoot(scope: Scope): string {
 }
 
 function resolveInstallRoot(args: ParsedArgs, scope: Scope): string {
+    return resolveInstallRootDetails(args, scope).root;
+}
+
+function resolveInstallRootDetails(args: ParsedArgs, scope: Scope): RuntimeRootResolution {
     const explicit = getFlag(args, 'root') ?? process.env.IRANTI_HOME;
-    if (explicit) return path.resolve(explicit);
+    if (explicit) {
+        return {
+            root: path.resolve(explicit),
+            source: getFlag(args, 'root') ? 'flag' : 'env',
+            userRoot: defaultInstallRoot('user'),
+            systemRoot: defaultInstallRoot('system'),
+            installMetaPath: path.join(path.resolve(explicit), 'install.json'),
+        };
+    }
 
     const userRoot = defaultInstallRoot('user');
     const systemRoot = defaultInstallRoot('system');
 
     const userMeta = path.join(userRoot, 'install.json');
     const systemMeta = path.join(systemRoot, 'install.json');
+    const cwd = process.cwd();
+    const projectBindingFile = path.join(cwd, '.env.iranti');
+    const localRuntimeCandidates = [path.join(cwd, '.iranti-runtime'), path.join(cwd, '.iranti')]
+        .map((candidate) => path.resolve(candidate));
 
-    if (scope === 'system') return systemRoot;
-    if (fs.existsSync(userMeta)) return userRoot;
-    if (fs.existsSync(systemMeta)) return systemRoot;
-    return userRoot;
+    if (scope === 'system') {
+        return {
+            root: systemRoot,
+            source: 'default-system',
+            userRoot,
+            systemRoot,
+            installMetaPath: systemMeta,
+        };
+    }
+    if (fs.existsSync(projectBindingFile)) {
+        try {
+            const raw = fs.readFileSync(projectBindingFile, 'utf-8');
+            const match = raw.match(/^\s*IRANTI_INSTANCE_ENV\s*=\s*(.+)\s*$/m);
+            const value = match?.[1]?.trim().replace(/^['"]|['"]$/g, '');
+            const boundRoot = inferRuntimeRootFromInstanceEnv(value);
+            if (boundRoot && fs.existsSync(boundRoot)) {
+                return {
+                    root: boundRoot,
+                    source: 'project-binding',
+                    userRoot,
+                    systemRoot,
+                    installMetaPath: path.join(boundRoot, 'install.json'),
+                };
+            }
+        } catch {
+            // Fall through to other resolution strategies.
+        }
+    }
+    for (const candidate of localRuntimeCandidates) {
+        if (fs.existsSync(candidate)) {
+            return {
+                root: candidate,
+                source: 'cwd-runtime',
+                userRoot,
+                systemRoot,
+                installMetaPath: path.join(candidate, 'install.json'),
+            };
+        }
+    }
+    if (fs.existsSync(userMeta)) {
+        return {
+            root: userRoot,
+            source: 'user-install-meta',
+            userRoot,
+            systemRoot,
+            installMetaPath: userMeta,
+        };
+    }
+    if (fs.existsSync(systemMeta)) {
+        return {
+            root: systemRoot,
+            source: 'system-install-meta',
+            userRoot,
+            systemRoot,
+            installMetaPath: systemMeta,
+        };
+    }
+    return {
+        root: userRoot,
+        source: 'default-user',
+        userRoot,
+        systemRoot,
+        installMetaPath: userMeta,
+    };
+}
+
+function describeRuntimeRootSource(source: RuntimeRootSource): string {
+    switch (source) {
+        case 'flag':
+            return '--root flag';
+        case 'env':
+            return 'IRANTI_HOME';
+        case 'project-binding':
+            return 'project binding';
+        case 'cwd-runtime':
+            return 'cwd runtime root';
+        case 'user-install-meta':
+            return 'user install metadata';
+        case 'system-install-meta':
+            return 'system install metadata';
+        case 'default-system':
+            return 'system default';
+        case 'default-user':
+        default:
+            return 'user default';
+    }
+}
+
+function inferRuntimeRootFromInstanceEnv(instanceEnvFile: string | undefined): string | null {
+    if (!instanceEnvFile) return null;
+    const normalized = path.resolve(instanceEnvFile);
+    if (path.basename(normalized).toLowerCase() !== '.env') return null;
+    const instanceDir = path.dirname(normalized);
+    const instancesDir = path.dirname(instanceDir);
+    if (path.basename(instancesDir).toLowerCase() !== 'instances') return null;
+    return path.dirname(instancesDir);
+}
+
+async function inspectProjectBinding(projectEnvFile: string): Promise<{
+    bindingFile: string;
+    instanceEnvFile: string | null;
+    runtimeRoot: string | null;
+}> {
+    try {
+        const env = await readEnvFile(projectEnvFile);
+        const instanceEnvFile = env.IRANTI_INSTANCE_ENV?.trim() || null;
+        return {
+            bindingFile: projectEnvFile,
+            instanceEnvFile,
+            runtimeRoot: inferRuntimeRootFromInstanceEnv(instanceEnvFile ?? undefined),
+        };
+    } catch {
+        return {
+            bindingFile: projectEnvFile,
+            instanceEnvFile: null,
+            runtimeRoot: null,
+        };
+    }
 }
 
 function getPackageVersion(): string {
@@ -703,29 +853,42 @@ async function loadInstanceEnv(root: string, name: string): Promise<{ instanceDi
 
 async function readInstanceRuntimeSummary(root: string, name: string): Promise<InstanceRuntimeSummary> {
     const { runtimeFile } = instancePaths(root, name);
+    if (!fs.existsSync(runtimeFile)) {
+        return { state: null, running: false, stale: false, classification: 'missing', detail: 'no runtime metadata' };
+    }
     const state = await readRuntimeState(runtimeFile);
     if (!state) {
-        return { state: null, running: false, stale: false };
+        return { state: null, running: false, stale: false, classification: 'invalid', detail: 'runtime metadata is unreadable or incomplete' };
     }
     const running = isPidRunning(state.pid);
+    const stale = !running && state.status !== 'stopped';
     return {
         state,
         running,
-        stale: !running && state.status !== 'stopped',
+        stale,
+        classification: running ? 'running' : stale ? 'stale' : 'stopped',
+        detail: running
+            ? `pid=${state.pid} version=${state.version}`
+            : stale
+                ? `last_pid=${state.pid} version=${state.version}`
+                : `version=${state.version}`,
     };
 }
 
 function describeInstanceRuntime(summary: InstanceRuntimeSummary): string {
-    if (!summary.state) {
-        return `${warnLabel('STOPPED')} no runtime metadata`;
+    switch (summary.classification) {
+        case 'running':
+            return `${okLabel('RUNNING')} ${summary.detail}`;
+        case 'stale':
+            return `${warnLabel('STALE')} ${summary.detail}`;
+        case 'stopped':
+            return `${warnLabel('STOPPED')} ${summary.detail}`;
+        case 'invalid':
+            return `${failLabel('INVALID')} ${summary.detail}`;
+        case 'missing':
+        default:
+            return `${warnLabel('STOPPED')} ${summary.detail}`;
     }
-    if (summary.running) {
-        return `${okLabel('RUNNING')} pid=${summary.state.pid} version=${summary.state.version}`;
-    }
-    if (summary.stale) {
-        return `${warnLabel('STALE')} last_pid=${summary.state.pid} version=${summary.state.version}`;
-    }
-    return `${warnLabel('STOPPED')} version=${summary.state.version}`;
 }
 
 async function startInstanceRuntime(name: string, instanceDir: string, envFile: string, runtimeFile: string): Promise<void> {
@@ -4541,55 +4704,47 @@ async function doctorCommand(args: ParsedArgs): Promise<void> {
 
 async function statusCommand(args: ParsedArgs): Promise<void> {
     const scope = normalizeScope(getFlag(args, 'scope'));
-    const root = resolveInstallRoot(args, scope);
+    const resolution = resolveInstallRootDetails(args, scope);
+    const root = resolution.root;
     const json = hasFlag(args, 'json');
     const cwd = process.cwd();
     const repoEnv = path.join(cwd, '.env');
     const projectEnv = path.join(cwd, '.env.iranti');
-    const installMetaPath = path.join(root, 'install.json');
-    const instancesDir = path.join(root, 'instances');
+    const installMetaPath = resolution.installMetaPath;
+    const binding = fs.existsSync(projectEnv) ? await inspectProjectBinding(projectEnv) : null;
+    const boundRuntimeRoot = binding?.runtimeRoot ?? null;
+    const boundInstanceEnv = binding?.instanceEnvFile ?? null;
+    const rootMismatch = Boolean(boundRuntimeRoot && path.resolve(boundRuntimeRoot) !== path.resolve(root));
+    const otherRuntimeRoots = Array.from(new Set(
+        [boundRuntimeRoot, path.join(cwd, '.iranti-runtime'), path.join(cwd, '.iranti')]
+            .filter((candidate): candidate is string => Boolean(candidate))
+            .map((candidate) => path.resolve(candidate))
+            .filter((candidate) => candidate !== path.resolve(root) && fs.existsSync(candidate))
+    ));
 
     const rows: StatusRow[] = [];
     rows.push({ label: 'version', value: getPackageVersion() });
     rows.push({ label: 'scope', value: scope });
     rows.push({ label: 'runtime_root', value: root });
+    rows.push({ label: 'root_source', value: describeRuntimeRootSource(resolution.source) });
+    if (boundRuntimeRoot) rows.push({ label: 'bound_root', value: boundRuntimeRoot });
     rows.push({ label: 'repo_env', value: fs.existsSync(repoEnv) ? repoEnv : '(missing)' });
     rows.push({ label: 'project_binding', value: fs.existsSync(projectEnv) ? projectEnv : '(missing)' });
     rows.push({ label: 'install_meta', value: fs.existsSync(installMetaPath) ? installMetaPath : '(not initialized)' });
+    if (rootMismatch) rows.push({ label: 'root_mismatch', value: 'project binding points at a different runtime root' });
 
-    const instances: Array<{
-        name: string;
-        port: string;
-        envFile: string;
-        runtime: InstanceRuntimeSummary;
-    }> = [];
-    if (fs.existsSync(instancesDir)) {
-        const entries = await fsp.readdir(instancesDir, { withFileTypes: true });
-        for (const entry of entries.filter((value) => value.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
-            const envFile = path.join(instancesDir, entry.name, '.env');
-            let port = '(unknown)';
-            if (fs.existsSync(envFile)) {
-                try {
-                    const env = await readEnvFile(envFile);
-                    port = env.IRANTI_PORT ?? '(unknown)';
-                } catch {
-                    port = '(unreadable)';
-                }
-            }
-            instances.push({
-                name: entry.name,
-                port,
-                envFile: fs.existsSync(envFile) ? envFile : '(missing)',
-                runtime: await readInstanceRuntimeSummary(root, entry.name),
-            });
-        }
-    }
+    const instances = await collectRuntimeInstanceSummaries(root);
 
     if (json) {
         console.log(JSON.stringify({
             version: getPackageVersion(),
             scope,
             runtimeRoot: root,
+            runtimeRootSource: resolution.source,
+            boundRuntimeRoot,
+            boundInstanceEnv,
+            rootMismatch,
+            otherRuntimeRoots,
             repoEnv: fs.existsSync(repoEnv) ? repoEnv : null,
             projectBinding: fs.existsSync(projectEnv) ? projectEnv : null,
             installMeta: fs.existsSync(installMetaPath) ? installMetaPath : null,
@@ -4602,6 +4757,12 @@ async function statusCommand(args: ParsedArgs): Promise<void> {
     for (const row of rows) {
         console.log(`  ${row.label.padEnd(15)} ${row.value}`);
     }
+    if (otherRuntimeRoots.length > 0) {
+        console.log('  other_roots');
+        for (const runtimeRoot of otherRuntimeRoots) {
+            console.log(`    - ${runtimeRoot}`);
+        }
+    }
 
     console.log('');
     if (instances.length === 0) {
@@ -4611,16 +4772,9 @@ async function statusCommand(args: ParsedArgs): Promise<void> {
         for (const instance of instances) {
             console.log(`  - ${instance.name} (port ${instance.port})`);
             console.log(`    env: ${instance.envFile}`);
-            if (instance.runtime.state) {
-                const runtimeLabel = instance.runtime.running
-                    ? `${okLabel('RUNNING')} pid=${instance.runtime.state.pid} version=${instance.runtime.state.version}`
-                    : instance.runtime.stale
-                        ? `${warnLabel('STALE')} last_pid=${instance.runtime.state.pid} version=${instance.runtime.state.version}`
-                        : `${warnLabel('STOPPED')} version=${instance.runtime.state.version}`;
-                console.log(`    runtime: ${runtimeLabel}`);
+            console.log(`    runtime: ${describeInstanceRuntime(instance.runtime)}`);
+            if (instance.runtime.state?.healthUrl) {
                 console.log(`    health: ${instance.runtime.state.healthUrl}`);
-            } else {
-                console.log(`    runtime: ${warnLabel('STOPPED')} no runtime metadata`);
             }
         }
     }

@@ -40,7 +40,7 @@ const fact = await client.query('researcher/jane_smith', 'affiliation');
 
 ```ts
 const brief = await client.handshake({
-  agent: 'research_agent',
+  agentId: 'research_agent',
   task: 'Research publication history',
   recentMessages: ['Starting OpenAlex pass.'],
 });
@@ -67,6 +67,12 @@ if (checkpointed.sessionRecovery?.available) {
     sessionId: checkpointed.sessionRecovery.sessionId,
   });
 }
+
+const session = await client.inspectSession({
+  agentId: 'research_agent',
+});
+
+console.log(session.hasCheckpoint);
 ```
 
 ## Graph

@@ -24,6 +24,8 @@ import type {
     ResolveEntityResponse,
     SearchParams,
     SearchResult,
+    SessionInspection,
+    SessionInspectionParams,
     SessionActionParams,
     SessionCheckpointParams,
     WhoKnowsResult,
@@ -334,7 +336,13 @@ export class IrantiClient {
     }
 
     handshake(params: HandshakeParams): Promise<WorkingMemoryBrief> {
-        return this.request<WorkingMemoryBrief>('POST', '/memory/handshake', { body: params });
+        return this.request<WorkingMemoryBrief>('POST', '/memory/handshake', {
+            body: {
+                agentId: params.agentId ?? params.agent,
+                task: params.task,
+                recentMessages: params.recentMessages,
+            },
+        });
     }
 
     reconvene(params: ReconveneParams): Promise<WorkingMemoryBrief> {
@@ -355,6 +363,10 @@ export class IrantiClient {
 
     abandonSession(params: SessionActionParams): Promise<WorkingMemoryBrief> {
         return this.request<WorkingMemoryBrief>('POST', '/memory/abandon', { body: params });
+    }
+
+    inspectSession(params: SessionInspectionParams): Promise<SessionInspection> {
+        return this.request<SessionInspection>('GET', `/memory/session/${params.agentId}`);
     }
 
     observe(params: ObserveParams): Promise<ObserveResult> {

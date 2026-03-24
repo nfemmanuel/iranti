@@ -60,6 +60,14 @@ async function main(): Promise<void> {
     expect(recoveredBrief.sessionCheckpoint?.status === 'interrupted', 'Expected the stale checkpoint to be marked interrupted.');
     expect(recoveredBrief.sessionCheckpoint?.checkpoint.currentStep === 'drafting launch checklist', 'Expected checkpoint step to round-trip.');
 
+    const inspected = await attendant.inspectSession({
+        task,
+        recentMessages: ['Need to continue the launch checklist.'],
+    });
+    expect(inspected.hasCheckpoint === true, 'Expected inspectSession() to report a checkpoint.');
+    expect(inspected.sessionCheckpoint?.status === 'active', 'Expected inspectSession() to reflect the persisted checkpoint state.');
+    expect(inspected.sessionRecovery?.recommendation === 'resume', 'Expected inspectSession() to derive a resume recommendation.');
+
     const liveAttendant: any = new AttendantInstance(agentId);
     liveAttendant.brief = recoveredBrief;
     liveAttendant.persistState = async () => {};
@@ -97,6 +105,7 @@ async function main(): Promise<void> {
     console.log(`status after resume(): ${resumedBrief.sessionCheckpoint?.status}`);
     console.log(`status after complete(): ${completedBrief.sessionCheckpoint?.status}`);
     console.log(`status after abandon(): ${abandonedBrief.sessionCheckpoint?.status}`);
+    console.log(`inspectSession recommendation: ${inspected.sessionRecovery?.recommendation}`);
 }
 
 main().catch((error: unknown) => {

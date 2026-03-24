@@ -100,13 +100,14 @@ function assertMemoryRoutes(): void {
     const content = readFile(filePath);
 
     expectIncludes(filePath, content, "router.post('/handshake', validateInput('handshake')", 'Memory route: POST /handshake uses validation');
-    expectIncludes(filePath, content, "router.post('/reconvene'", 'Memory route: POST /reconvene');
+    expectIncludes(filePath, content, "router.post('/reconvene', validateInput('reconvene')", 'Memory route: POST /reconvene uses validation');
+    expectIncludes(filePath, content, "router.get('/session/:agentId'", 'Memory route: GET /session/:agentId');
     expectIncludes(filePath, content, "router.post('/checkpoint', validateInput('checkpoint')", 'Memory route: POST /checkpoint uses validation');
     expectIncludes(filePath, content, "router.post('/resume', validateInput('sessionAction')", 'Memory route: POST /resume uses validation');
     expectIncludes(filePath, content, "router.post('/complete', validateInput('sessionAction')", 'Memory route: POST /complete uses validation');
     expectIncludes(filePath, content, "router.post('/abandon', validateInput('sessionAction')", 'Memory route: POST /abandon uses validation');
-    expectIncludes(filePath, content, "router.post('/observe'", 'Memory route: POST /observe');
-    expectIncludes(filePath, content, "router.post('/attend'", 'Memory route: POST /attend');
+    expectIncludes(filePath, content, "router.post('/observe', validateInput('observe')", 'Memory route: POST /observe uses validation');
+    expectIncludes(filePath, content, "router.post('/attend', validateInput('attend')", 'Memory route: POST /attend uses validation');
     expectIncludes(filePath, content, "router.get('/whoknows/:entityType/:entityId'", 'Memory route: GET /whoknows/:type/:id');
     expectIncludes(filePath, content, "router.post('/maintenance'", 'Memory route: POST /maintenance');
 }
@@ -147,6 +148,7 @@ function assertPythonClientContract(): void {
     expectIncludes(filePath, content, "self._post('/memory/resume'", 'Python client resumes via /memory/resume');
     expectIncludes(filePath, content, "self._post('/memory/complete'", 'Python client completes via /memory/complete');
     expectIncludes(filePath, content, "self._post('/memory/abandon'", 'Python client abandons via /memory/abandon');
+    expectIncludes(filePath, content, "self._get(f'/memory/session/{agent_id}')", 'Python client inspects /memory/session/:agentId');
     expectIncludes(filePath, content, "self._post('/memory/attend'", 'Python client attends via /memory/attend');
     expectIncludes(filePath, content, "self._get(f'/memory/whoknows/{entity_type}/{entity_id}')", 'Python client reads /memory/whoknows/:type/:id');
     expectIncludes(filePath, content, "self._post('/memory/maintenance'", 'Python client calls /memory/maintenance');
@@ -171,6 +173,7 @@ function assertTypeScriptSdkSurface(): void {
         'async resumeSession(',
         'async completeSession(',
         'async abandonSession(',
+        'async inspectSession(',
         'async attend(',
         'async query(',
         'async history(',
@@ -207,6 +210,7 @@ function assertTypeScriptHttpClientContract(): void {
     expectIncludes(filePath, content, "'/memory/resume'", 'TypeScript client resumes via /memory/resume');
     expectIncludes(filePath, content, "'/memory/complete'", 'TypeScript client completes via /memory/complete');
     expectIncludes(filePath, content, "'/memory/abandon'", 'TypeScript client abandons via /memory/abandon');
+    expectIncludes(filePath, content, "'GET', `/memory/session/${params.agentId}`", 'TypeScript client inspects /memory/session/:agentId');
     expectIncludes(filePath, content, "'/memory/attend'", 'TypeScript client attends via /memory/attend');
     expectIncludes(filePath, content, "'/memory/observe'", 'TypeScript client observes via /memory/observe');
     expectIncludes(filePath, content, '`/memory/whoknows/${entityType}/${entityId}`', 'TypeScript client reads /memory/whoknows/:type/:id');
@@ -229,6 +233,7 @@ function assertApiDocsContract(): void {
         '- `POST /kb/relate`',
         '- `POST /memory/handshake`',
         '- `POST /memory/reconvene`',
+        '- `GET /memory/session/:agentId`',
         '- `POST /memory/checkpoint`',
         '- `POST /memory/resume`',
         '- `POST /memory/complete`',
