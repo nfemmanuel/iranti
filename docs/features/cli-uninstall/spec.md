@@ -71,6 +71,9 @@
 ## Test Results
 
 - `npx ts-node tests/runtime-lifecycle/run_uninstall_tests.ts`
+  - plain `uninstall --yes --json` removed npm/Python package surfaces but preserved runtime roots, `.env.iranti`, `.mcp.json`, and Claude hook files
+  - `uninstall --all --dry-run --json` reported destructive cleanup targets without mutating them
+  - `uninstall --all --yes --json` removed runtime roots and project-local Iranti artifacts while preserving unrelated MCP servers and Claude hook entries
 - `npx tsc --noEmit`
 
 ## Related

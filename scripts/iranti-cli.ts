@@ -26,7 +26,7 @@ import { getEscalationPaths } from '../src/lib/escalationPaths';
 import { parseDockerContainerNames, parsePublishedDockerHostPorts } from '../src/lib/dockerCliParsing';
 import { resolveCommandInvocation, spawnResolved, spawnSyncResolved } from '../src/lib/commandInvocation';
 import { loadRuntimeEnv } from '../src/lib/runtimeEnv';
-import { writeTextFileLocked } from '../src/lib/fileMutation';
+import { ensureFileContainsLinesLocked, writeTextFileLocked } from '../src/lib/fileMutation';
 import { resolveInteractive } from '../src/resolutionist';
 import { startChatSession } from '../src/chat';
 import { createVectorBackend, resolveVectorBackendName } from '../src/library/backends';
@@ -1209,12 +1209,7 @@ async function ensureProjectGitignore(projectPath: string): Promise<void> {
     const gitignorePath = path.join(projectPath, '.gitignore');
     const requiredLines = ['.env.iranti', '.env.iranti.local'];
     if (fs.existsSync(gitignorePath)) {
-        const raw = await fsp.readFile(gitignorePath, 'utf-8');
-        const existing = new Set(raw.split(/\r?\n/));
-        const missing = requiredLines.filter((line) => !existing.has(line));
-        if (missing.length > 0) {
-            await fsp.writeFile(gitignorePath, `${raw.trimEnd()}\n${missing.join('\n')}\n`, 'utf-8');
-        }
+        await ensureFileContainsLinesLocked(gitignorePath, requiredLines);
     } else {
         await writeText(gitignorePath, `${requiredLines.join('\n')}\n`);
     }

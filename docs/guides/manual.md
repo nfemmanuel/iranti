@@ -129,10 +129,11 @@ iranti upgrade --check
 If you want an installed upgrade to take effect on a running instance immediately:
 
 ```bash
-iranti upgrade --restart --instance local
+iranti upgrade --yes --restart --instance local
 ```
 
 This is a staged operator flow, not live in-place binary replacement. Clients should reconnect after restart.
+`--restart` only takes effect during an executing upgrade path. Without `--yes`, `iranti upgrade` stays inspect-only and prints the plan instead of restarting the instance.
 
 If you need to remove Iranti:
 
@@ -145,6 +146,7 @@ Notes:
 - plain `iranti uninstall` removes package installs and stops live Iranti processes, but keeps runtime data and project bindings
 - `--all` also removes discovered runtime roots, `.env.iranti`, Iranti MCP entries in `.mcp.json`, Claude hook settings, and Codex MCP registration
 - use `--scan-root` when your projects or isolated `.iranti-runtime` folders live outside the default scan roots
+- use `--dry-run --json` first when you want the exact uninstall inventory before a destructive `--all --yes` pass
 
 ---
 

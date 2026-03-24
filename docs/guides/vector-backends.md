@@ -82,7 +82,6 @@ The lexical half of hybrid search always stays in PostgreSQL regardless of the v
 - which vector backend is configured
 - whether it is reachable
 - the configured backend URL for Qdrant and ChromaDB
-- whether the vector index is consistent with the KB
 
 If the backend is unreachable, hybrid search falls back to lexical-only scoring instead of blocking the request.
 
@@ -117,4 +116,4 @@ Notes:
 - pgvector audits compare KB rows against non-null `knowledge_base.embedding` values.
 - Qdrant and Chroma audits enumerate indexed ids through their REST APIs.
 - Repair keeps public read/write behavior backward compatible; it only reconciles backend state.
-- `iranti doctor` now runs the consistency audit automatically after a successful vector-backend reachability check and warns if drift is present.
+- The natural future CLI hook for this is the existing vector backend reachability check in `iranti doctor`, but that wiring is not in place yet.

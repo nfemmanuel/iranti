@@ -76,6 +76,7 @@
   - `upgrade --yes --target npm-global,python --json` executed against fake tool shims
   - npm-global and python verification both returned `pass`
   - runtime install metadata recorded `upgradedAt`
+  - `upgrade --restart --instance <name> --json` without `--yes` remained inspect-only and returned a note that `--yes` is required before any restart executes
 - `npx tsc --noEmit`
 - `node -r ts-node/register/transpile-only tests/runtime-lifecycle/run_runtime_lifecycle_tests.ts`
 

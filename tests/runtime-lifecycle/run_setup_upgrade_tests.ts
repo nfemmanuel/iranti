@@ -106,8 +106,13 @@ async function main(): Promise<void> {
 
         const runtimeRoot = path.join(tempRoot, 'runtime');
         const projectDir = path.join(tempRoot, 'project');
+        const sharedRuntimeRoot = path.join(tempRoot, 'shared-runtime');
+        const sharedProjectA = path.join(tempRoot, 'shared-project-a');
+        const sharedProjectB = path.join(tempRoot, 'shared-project-b');
         const port = await reservePort();
+        const sharedPort = await reservePort();
         const testApiKey = `test_${randomBytes(16).toString('hex')}`;
+        const sharedApiKey = `test_${randomBytes(16).toString('hex')}`;
 
         const setupRun = runCli([
             'setup',
@@ -133,6 +138,7 @@ async function main(): Promise<void> {
             '--claude-code',
         ], repoRoot);
         assert.strictEqual(setupRun.status, 0, `setup failed:\n${setupRun.stdout}\n${setupRun.stderr}`);
+        assert.match(setupRun.stdout, /Dependency (preflight|check)/i, 'Expected setup to print dependency status before executing the plan.');
 
         const setupRepeatRun = runCli([
             'setup',
@@ -177,6 +183,42 @@ async function main(): Promise<void> {
         assert.strictEqual(bindingEnv.IRANTI_INSTANCE_ENV, instanceEnvPath);
         assert.strictEqual(bindingEnv.IRANTI_API_KEY, testApiKey);
 
+        const sharedSetupRun = runCli([
+            'setup',
+            '--defaults',
+            '--mode',
+            'shared',
+            '--root',
+            sharedRuntimeRoot,
+            '--instance',
+            'team',
+            '--port',
+            String(sharedPort),
+            '--db-mode',
+            'managed',
+            '--db-url',
+            'postgresql://postgres:postgres@localhost:5432/iranti_setup_shared',
+            '--provider',
+            'mock',
+            '--api-key',
+            sharedApiKey,
+            '--projects',
+            `${sharedProjectA},${sharedProjectB}`,
+            '--claude-code',
+        ], repoRoot);
+        assert.strictEqual(sharedSetupRun.status, 0, `shared setup failed:\n${sharedSetupRun.stdout}\n${sharedSetupRun.stderr}`);
+
+        const sharedInstanceEnvPath = path.join(sharedRuntimeRoot, 'instances', 'team', '.env');
+        for (const projectPath of [sharedProjectA, sharedProjectB]) {
+            const sharedBinding = readEnv(path.join(projectPath, '.env.iranti'));
+            assert.strictEqual(sharedBinding.IRANTI_PROJECT_MODE, 'shared');
+            assert.strictEqual(sharedBinding.IRANTI_INSTANCE, 'team');
+            assert.strictEqual(sharedBinding.IRANTI_INSTANCE_ENV, sharedInstanceEnvPath);
+            assert.strictEqual(sharedBinding.IRANTI_API_KEY, sharedApiKey);
+            assert.ok(fs.existsSync(path.join(projectPath, '.mcp.json')), 'Expected shared setup to scaffold .mcp.json for each bound project.');
+            assert.ok(fs.existsSync(path.join(projectPath, '.claude', 'settings.local.json')), 'Expected shared setup to scaffold Claude settings for each bound project.');
+        }
+
         const statusRun = runCli(['status', '--root', runtimeRoot, '--json'], repoRoot);
         assert.strictEqual(statusRun.status, 0, `status failed after setup:\n${statusRun.stdout}\n${statusRun.stderr}`);
         const statusPayload = parseJsonFromStdout(statusRun.stdout) as {
@@ -191,6 +233,15 @@ async function main(): Promise<void> {
         assert.strictEqual(localInstance?.config.classification, 'complete');
         assert.strictEqual(localInstance?.runtime.running, false);
         assert.ok(['missing', 'stopped'].includes(localInstance?.runtime.classification ?? ''), `Expected non-running setup instance, got ${localInstance?.runtime.classification}.`);
+
+        const sharedStatusRun = runCli(['status', '--root', sharedRuntimeRoot, '--json'], repoRoot);
+        assert.strictEqual(sharedStatusRun.status, 0, `status failed after shared setup:\n${sharedStatusRun.stdout}\n${sharedStatusRun.stderr}`);
+        const sharedStatusPayload = parseJsonFromStdout(sharedStatusRun.stdout) as typeof statusPayload;
+        const sharedInstance = sharedStatusPayload.instances.find((instance) => instance.name === 'team');
+        assert.ok(sharedInstance, 'Expected shared setup-created instance in status output.');
+        assert.strictEqual(sharedInstance?.config.classification, 'complete');
+        assert.strictEqual(sharedInstance?.runtime.running, false);
+        assert.ok(['missing', 'stopped'].includes(sharedInstance?.runtime.classification ?? ''), `Expected non-running shared setup instance, got ${sharedInstance?.runtime.classification}.`);
 
         const fakeStateFile = path.join(tempRoot, 'fake-upgrade-state.json');
         const fakeLogFile = path.join(tempRoot, 'fake-upgrade-log.ndjson');
@@ -270,6 +321,27 @@ process.exit(1);
 
         const installMeta = JSON.parse(fs.readFileSync(installMetaPath, 'utf8')) as { upgradedAt?: string };
         assert.ok(installMeta.upgradedAt, 'Expected install metadata to record upgradedAt after executable upgrade paths.');
+
+        const inspectOnlyRestartRun = runCli([
+            'upgrade',
+            '--restart',
+            '--instance',
+            'local',
+            '--json',
+            '--root',
+            runtimeRoot,
+        ], repoRoot, upgradeEnv);
+        assert.strictEqual(inspectOnlyRestartRun.status, 0, `upgrade inspect with restart failed:\n${inspectOnlyRestartRun.stdout}\n${inspectOnlyRestartRun.stderr}`);
+        const inspectOnlyPayload = parseJsonFromStdout(inspectOnlyRestartRun.stdout) as {
+            action: string;
+            execution: Array<unknown>;
+            restartSummary: unknown;
+            note: string | null;
+        };
+        assert.strictEqual(inspectOnlyPayload.action, 'inspect');
+        assert.strictEqual(inspectOnlyPayload.execution.length, 0);
+        assert.strictEqual(inspectOnlyPayload.restartSummary, null);
+        assert.match(inspectOnlyPayload.note ?? '', /--yes/i, 'Expected inspect-only upgrade to explain that --yes is required before restart executes.');
 
         const logLines = fs.readFileSync(fakeLogFile, 'utf8').trim().split(/\r?\n/).map((line) => JSON.parse(line) as { tool: string; args: string[] });
         assert.ok(logLines.some((entry) => entry.tool === 'npm' && entry.args.includes('install')), 'Expected npm global upgrade command to run.');

@@ -117,3 +117,22 @@ export async function writeTextFileLocked(
         await release();
     }
 }
+
+export async function ensureFileContainsLinesLocked(
+    filePath: string,
+    requiredLines: string[],
+    options: LockOptions = {},
+): Promise<void> {
+    await writeTextFileLocked(filePath, (existingRaw) => {
+        const existingLines = existingRaw.split(/\r?\n/);
+        const existing = new Set(existingLines);
+        const missing = requiredLines.filter((line) => !existing.has(line));
+
+        if (missing.length === 0) {
+            return existingRaw;
+        }
+
+        const prefix = existingRaw.length > 0 ? `${existingRaw.trimEnd()}\n` : '';
+        return `${prefix}${missing.join('\n')}\n`;
+    }, options);
+}

@@ -39,6 +39,8 @@ If those do not match, publishing stops.
    - `npm run test:contracts`
    - `npm run test:runtime-lifecycle`
    - `npm run test:cli-process-safety`
+   - `npm run test:setup-upgrade-lifecycle`
+   - `npm run test:uninstall-lifecycle`
    - `npm run test:session-recovery`
 4. Runs the DB-backed hardening gate on pgvector-backed PostgreSQL:
    - `npm run test:access-control`

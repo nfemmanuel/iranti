@@ -318,6 +318,140 @@ Reason:
 - the corrected surfaces are backed by code, tests, docs, and validation evidence
 - the previously deferred `8`, `13`, and `16` items are now closed with bounded fixes and current validation
 
+## Final Release-Readiness Verification (A-L)
+
+### Issue A - Windows command/process safety
+
+- Verification:
+  - `npm run test:cli-process-safety`
+  - code audit of `src/lib/commandInvocation.ts` and Windows detached restart/uninstall helpers in `scripts/iranti-cli.ts`
+- Result:
+  - fixed
+
+### Issue B - Env/config mutation safety
+
+- Newly fixed:
+  - project `.gitignore` mutation now uses `ensureFileContainsLinesLocked()` in `src/lib/fileMutation.ts`
+  - `ensureProjectGitignore()` in `scripts/iranti-cli.ts` no longer does an unlocked read-modify-write
+- Verification:
+  - `npm run test:cli-process-safety`
+  - added regression that concurrently ensures `.env.iranti` ignore lines without duplication or loss
+- Result:
+  - fixed
+
+### Issue C - Archive/delete/vector consistency
+
+- Verification:
+  - `npm run test:archive-vector-contracts`
+  - `npm run test:vector-backends`
+  - fresh pgvector-backed `npm run test:hardening-db`
+  - `node bin\\iranti.js doctor --root C:\\Users\\NF\\.iranti-runtime --instance iranti_dev --json`
+- Runtime evidence:
+  - live doctor reported `vector index consistency` drift on `iranti_dev` and produced actionable remediation text
+- Result:
+  - fixed
+
+### Issue D - Authority-model convergence
+
+- Verification:
+  - `node bin\\iranti.js status --json`
+  - `node bin\\iranti.js status --root C:\\Users\\NF\\.iranti-runtime --json`
+  - `npm run test:runtime-lifecycle`
+- Runtime evidence:
+  - repo-local status selected the repo `.iranti-runtime` via `cwd-runtime`
+  - explicit `--root C:\\Users\\NF\\.iranti-runtime` selected the user runtime root and surfaced the repo-local root as `otherRuntimeRoots`
+- Result:
+  - fixed
+
+### Issue E - Runtime metadata and lifecycle truthfulness
+
+- Verification:
+  - `npm run test:runtime-lifecycle`
+  - `node bin\\iranti.js doctor --root C:\\Users\\NF\\.iranti-runtime --instance local --json`
+  - `node bin\\iranti.js status --root C:\\Users\\NF\\.iranti-runtime --json`
+- Runtime evidence:
+  - live stale instances under the user runtime root were classified as `stale`, not `running`
+  - doctor returned `fail` for unreachable pgvector on `local` and `warn` for drift on `iranti_dev`
+- Result:
+  - fixed
+
+### Issue F - CI truthfulness and coverage gating
+
+- Verification:
+  - reviewed `.github/workflows/contracts.yml`
+  - reviewed `.github/workflows/release-quality.yml`
+  - reviewed `.github/workflows/publish-packages.yml`
+  - `npm run test:hardening-fast`
+  - fresh pgvector-backed `npm run test:hardening-db`
+- Newly fixed:
+  - `docs/guides/releasing.md` now lists the full fast gate actually exercised by the workflows, including `test:setup-upgrade-lifecycle` and `test:uninstall-lifecycle`
+- Result:
+  - fixed
+
+### Issue G - Production security posture
+
+- Verification:
+  - `docker run --rm -v "C:\\Users\\NF\\Documents\\Projects\\iranti:/repo" zricethezav/gitleaks:latest detect --source=/repo --no-banner --config=/repo/.gitleaks.toml`
+  - `npm run test:contracts`
+  - `npm run test:runtime-lifecycle`
+- Runtime evidence:
+  - doctor on live instances still warns clearly when `IRANTI_API_KEY_PEPPER` is absent in local environments
+- Result:
+  - fixed
+
+### Issue H - Session, handshake, and cross-tool semantics
+
+- Verification:
+  - `npm run test:session-recovery`
+  - fresh pgvector-backed `npm run test:cross-tool-handoff`
+  - doc/code cross-check of session and cross-tool guides/specs
+- Result:
+  - fixed
+
+### Issue I - Docs canonicalization and truth sprawl
+
+- Verification:
+  - reviewed `docs/README.md`
+  - reviewed `docs/internal/README.md`
+  - re-cross-checked session, vector, lifecycle, and release docs against current code and tests
+- Result:
+  - fixed
+
+### Issue J - Remaining CLI monolith risk
+
+- Verification:
+  - code review of `scripts/iranti-cli.ts`, `src/lib/cliHelpCatalog.ts`, and `src/lib/cliHelpRenderer.ts`
+  - `npm run build`
+  - `npm run test:hardening-fast`
+- Judgment:
+  - no additional extraction was justified for release safety in this pass
+- Result:
+  - fixed for `0.2.x`; broader decomposition remains a `0.3.x` concern
+
+### Issue K - Operator trust surfaces and message truthfulness
+
+- Verification:
+  - `node bin\\iranti.js status --root C:\\Users\\NF\\.iranti-runtime --json`
+  - `node bin\\iranti.js doctor --root C:\\Users\\NF\\.iranti-runtime --instance local --json`
+  - `node bin\\iranti.js doctor --root C:\\Users\\NF\\.iranti-runtime --instance iranti_dev --json`
+  - `docs/API.md`
+  - `docs/operations/TROUBLESHOOTING.md`
+- Runtime evidence:
+  - stale metadata, unreachable vector backend, and live vector drift were reported distinctly with actionable remediations
+- Result:
+  - fixed
+
+### Issue L - Final 0.2.x release readiness
+
+- Verification:
+  - `npm run build`
+  - `npm run test:hardening-fast`
+  - fresh pgvector-backed `npm run test:hardening-db`
+  - `npm run release:check -- v0.2.25`
+  - local gitleaks scan
+- Result:
+  - fixed
+
 
 
 

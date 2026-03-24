@@ -180,8 +180,10 @@ iranti upgrade --check
 If you install a newer CLI/runtime and want the instance-backed API server to pick it up immediately:
 
 ```bash
-iranti upgrade --restart --instance local
+iranti upgrade --yes --restart --instance local
 ```
+
+`--restart` is only executed during a real upgrade run. If you omit `--yes`, Iranti stays in inspect/dry-run mode and prints the plan without restarting anything.
 
 ### Check configuration before run
 
@@ -401,7 +403,7 @@ if (turn.shouldInject) {
 For longer tasks, checkpoint the current step so the next handshake can recommend resuming interrupted work:
 
 ```typescript
-const checkpointed = await iranti.checkpoint({
+await iranti.checkpoint({
     agentId: 'research_agent_001',
     task: 'Research publication history for Dr. Jane Smith',
     recentMessages: ['Still comparing affiliation sources.'],
@@ -412,10 +414,17 @@ const checkpointed = await iranti.checkpoint({
     },
 });
 
-if (checkpointed.sessionRecovery?.available && checkpointed.sessionRecovery.recommendation === 'resume') {
+// Later, after the process dies or the agent comes back:
+const recovered = await iranti.handshake({
+    agentId: 'research_agent_001',
+    task: 'Research publication history for Dr. Jane Smith',
+    recentMessages: ['Returning to the affiliation investigation.'],
+});
+
+if (recovered.sessionRecovery?.available && recovered.sessionRecovery.recommendation === 'resume') {
     await iranti.resumeSession({
         agentId: 'research_agent_001',
-        sessionId: checkpointed.sessionRecovery.sessionId,
+        sessionId: recovered.sessionRecovery.sessionId,
     });
 }
 
@@ -433,6 +442,7 @@ console.log(inspection.sessionRecovery?.recommendation ?? 'no recovery recommend
 ```
 
 `inspectSession()` gives you both the raw persisted checkpoint and the operator-facing summary. A stale checkpoint can still have `sessionCheckpoint.status = 'active'` while `summary.operatorState = 'interrupted'`. `listSessions()` is the inventory view; `inspectSession()` is the one-agent drill-down.
+`checkpoint()` itself stores progress and clears any existing recovery recommendation. Recovery advice appears later on `handshake()` or `inspectSession(...)` when Iranti evaluates a returning task against the persisted checkpoint.
 
 For Claude Code to hand work over to Codex, write the durable handoff into a shared `task/...` entity and keep any sender-local recovery in a normal checkpoint:
 

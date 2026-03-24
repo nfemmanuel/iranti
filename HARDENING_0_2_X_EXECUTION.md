@@ -140,3 +140,59 @@
 - Runtime lifecycle test cleanup required an extra Windows-specific fix: detached test runtimes are now terminated before temp-root cleanup.
 
 - The final deferred pass closed the remaining scoped deferrals by extracting CLI help rendering, tightening startup/doctor truthfulness, and removing risky placeholder/fake-key defaults from docs and examples.
+
+## Final Release-Readiness Verification
+
+### Newly fixed in this final pass
+
+- Closed the remaining uncovered mutation path by moving project `.gitignore` updates onto the canonical locked mutation helper:
+  - `src/lib/fileMutation.ts`
+  - `scripts/iranti-cli.ts`
+  - `tests/runtime-lifecycle/run_cli_process_safety_tests.ts`
+- Corrected release docs so the written fast gate matches the actual workflow:
+  - `docs/guides/releasing.md`
+- Re-verified and kept the already-correct runtime/session/vector/operator docs and tests aligned:
+  - `docs/guides/quickstart.md`
+  - `docs/guides/python-client.md`
+  - `docs/guides/cross-tool-handoffs.md`
+  - `docs/guides/vector-backends.md`
+  - `docs/features/interrupted-session-recovery/spec.md`
+  - `docs/features/cross-tool-handoffs/spec.md`
+  - `docs/features/vector-backends/spec.md`
+  - `docs/features/cli-setup-wizard/spec.md`
+  - `docs/features/cli-upgrade/spec.md`
+  - `docs/features/cli-uninstall/spec.md`
+  - `docs/operations/TROUBLESHOOTING.md`
+- Re-validated operator truthfulness on the real user runtime root with:
+  - `node bin\\iranti.js status --root C:\\Users\\NF\\.iranti-runtime --json`
+  - `node bin\\iranti.js doctor --root C:\\Users\\NF\\.iranti-runtime --instance local --json`
+  - `node bin\\iranti.js doctor --root C:\\Users\\NF\\.iranti-runtime --instance iranti_dev --json`
+
+### A-L Classification
+
+| Issue | Status | Notes |
+|---|---|---|
+| A | fixed | Verified by code audit plus `test:cli-process-safety`, runtime lifecycle coverage, and the constrained detached PowerShell handoff still in use on Windows. |
+| B | fixed | The last CLI-owned direct config mutation (`.gitignore`) now uses the shared locked helper. |
+| C | fixed | Doctor now surfaces vector drift when reachable, and live validation showed truthful drift reporting on `iranti_dev`. |
+| D | fixed | Authority precedence remained correct for repo-local and user-root contexts. |
+| E | fixed | Live stale-instance classification and runtime truthfulness matched the implemented state model. |
+| F | fixed | Workflows and release docs now describe the same gates. |
+| G | fixed | Pepper posture, gitleaks, and placeholder hygiene revalidated. |
+| H | fixed | Session semantics remained code-correct; docs were tightened where wording could overstate behavior. |
+| I | fixed | Canonical doc hierarchy remained coherent after cross-checking the owned guides/specs. |
+| J | fixed | Additional extraction was reviewed and not required for release safety. |
+| K | fixed | Status/doctor/health surfaces were validated against real stale, failed, and drifted runtime states. |
+| L | fixed | Final release evidence and recommendation are now part of the repo-root hardening set. |
+
+### Files Changed In This Final Pass
+
+- `src/lib/fileMutation.ts`
+- `scripts/iranti-cli.ts`
+- `tests/runtime-lifecycle/run_cli_process_safety_tests.ts`
+- `docs/guides/releasing.md`
+- `docs/operations/TROUBLESHOOTING.md`
+- `HARDENING_0_2_X_PLAN.md`
+- `HARDENING_0_2_X_EXECUTION.md`
+- `HARDENING_0_2_X_VALIDATION.md`
+- `HARDENING_0_2_X_RELEASE_RECOMMENDATION.md`

@@ -11,6 +11,18 @@ type CliRun = {
     stderr: string;
 };
 
+type Fixture = {
+    tempRoot: string;
+    runtimeRoot: string;
+    projectsRoot: string;
+    bindingFile: string;
+    mcpFile: string;
+    claudeSettingsFile: string;
+    fakeStateFile: string;
+    fakeLogFile: string;
+    env: Record<string, string>;
+};
+
 const repoRoot = path.resolve(__dirname, '..', '..');
 const cliScript = path.join(repoRoot, 'scripts', 'iranti-cli.ts');
 
@@ -57,96 +69,95 @@ function writeFakeCommand(binDir: string, name: string, toolScript: string): voi
     fs.chmodSync(shellFile, 0o755);
 }
 
-function main(): void {
+function buildFixture(): Fixture {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'iranti-uninstall-'));
-    try {
-        const runtimeRoot = path.join(tempRoot, 'runtime');
-        const instanceDir = path.join(runtimeRoot, 'instances', 'local');
-        const envFile = path.join(instanceDir, '.env');
-        const now = new Date().toISOString();
-        const testApiKey = `test_${randomBytes(16).toString('hex')}`;
+    const runtimeRoot = path.join(tempRoot, 'runtime');
+    const instanceDir = path.join(runtimeRoot, 'instances', 'local');
+    const envFile = path.join(instanceDir, '.env');
+    const now = new Date().toISOString();
+    const testApiKey = `test_${randomBytes(16).toString('hex')}`;
 
-        writeJson(path.join(runtimeRoot, 'install.json'), {
-            version: '0.2.17',
-            scope: 'user',
-            root: runtimeRoot,
-            installedAt: now,
-        });
-        writeJson(path.join(instanceDir, 'instance.json'), {
-            name: 'local',
-            createdAt: now,
-            port: 3001,
-            envFile,
-            instanceDir,
-        });
-        writeText(envFile, [
-            'IRANTI_INSTANCE_NAME=local',
-            'IRANTI_PORT=3001',
-            'DATABASE_URL=postgresql://postgres:postgres@localhost:5432/iranti_local',
-            'LLM_PROVIDER=mock',
-            `IRANTI_ESCALATION_DIR=${path.join(instanceDir, 'escalation')}`,
-            `IRANTI_REQUEST_LOG_FILE=${path.join(instanceDir, 'logs', 'api-requests.log')}`,
-            `IRANTI_API_KEY=${testApiKey}`,
-            '',
-        ].join('\n'));
+    writeJson(path.join(runtimeRoot, 'install.json'), {
+        version: '0.2.17',
+        scope: 'user',
+        root: runtimeRoot,
+        installedAt: now,
+    });
+    writeJson(path.join(instanceDir, 'instance.json'), {
+        name: 'local',
+        createdAt: now,
+        port: 3001,
+        envFile,
+        instanceDir,
+    });
+    writeText(envFile, [
+        'IRANTI_INSTANCE_NAME=local',
+        'IRANTI_PORT=3001',
+        'DATABASE_URL=postgresql://postgres:postgres@localhost:5432/iranti_local',
+        'LLM_PROVIDER=mock',
+        `IRANTI_ESCALATION_DIR=${path.join(instanceDir, 'escalation')}`,
+        `IRANTI_REQUEST_LOG_FILE=${path.join(instanceDir, 'logs', 'api-requests.log')}`,
+        `IRANTI_API_KEY=${testApiKey}`,
+        '',
+    ].join('\n'));
 
-        const projectsRoot = path.join(tempRoot, 'projects');
-        const projectDir = path.join(projectsRoot, 'demo');
-        const bindingFile = path.join(projectDir, '.env.iranti');
-        const mcpFile = path.join(projectDir, '.mcp.json');
-        const claudeSettingsFile = path.join(projectDir, '.claude', 'settings.local.json');
+    const projectsRoot = path.join(tempRoot, 'projects');
+    const projectDir = path.join(projectsRoot, 'demo');
+    const bindingFile = path.join(projectDir, '.env.iranti');
+    const mcpFile = path.join(projectDir, '.mcp.json');
+    const claudeSettingsFile = path.join(projectDir, '.claude', 'settings.local.json');
 
-        writeText(bindingFile, [
-            'IRANTI_URL=http://localhost:3001',
-            `IRANTI_API_KEY=${testApiKey}`,
-            'IRANTI_AGENT_ID=test_agent',
-            `IRANTI_INSTANCE_ENV=${envFile}`,
-            '',
-        ].join('\n'));
-        writeJson(mcpFile, {
-            mcpServers: {
-                iranti: { command: 'iranti', args: ['mcp'] },
-                other: { command: 'other', args: ['mcp'] },
-            },
-        });
-        writeJson(claudeSettingsFile, {
-            theme: 'test',
-            hooks: {
-                SessionStart: [
-                    {
-                        matcher: '',
-                        hooks: [
-                            { type: 'command', command: 'iranti claude-hook --event SessionStart' },
-                            { type: 'command', command: 'other-hook --event SessionStart' },
-                        ],
-                    },
-                ],
-                UserPromptSubmit: [
-                    {
-                        matcher: '',
-                        hooks: [
-                            { type: 'command', command: 'iranti claude-hook --event UserPromptSubmit' },
-                        ],
-                    },
-                ],
-            },
-        });
+    writeText(bindingFile, [
+        'IRANTI_URL=http://localhost:3001',
+        `IRANTI_API_KEY=${testApiKey}`,
+        'IRANTI_AGENT_ID=test_agent',
+        `IRANTI_INSTANCE_ENV=${envFile}`,
+        '',
+    ].join('\n'));
+    writeJson(mcpFile, {
+        mcpServers: {
+            iranti: { command: 'iranti', args: ['mcp'] },
+            other: { command: 'other', args: ['mcp'] },
+        },
+    });
+    writeJson(claudeSettingsFile, {
+        theme: 'test',
+        hooks: {
+            SessionStart: [
+                {
+                    matcher: '',
+                    hooks: [
+                        { type: 'command', command: 'iranti claude-hook --event SessionStart' },
+                        { type: 'command', command: 'other-hook --event SessionStart' },
+                    ],
+                },
+            ],
+            UserPromptSubmit: [
+                {
+                    matcher: '',
+                    hooks: [
+                        { type: 'command', command: 'iranti claude-hook --event UserPromptSubmit' },
+                    ],
+                },
+            ],
+        },
+    });
 
-        const binDir = path.join(tempRoot, 'bin');
-        fs.mkdirSync(binDir, { recursive: true });
-        const fakeStateFile = path.join(tempRoot, 'fake-state.json');
-        const fakeLogFile = path.join(tempRoot, 'fake-log.ndjson');
-        const fakeGlobalRoot = path.join(tempRoot, 'global-node');
-        writeJson(fakeStateFile, {
-            globalRoot: fakeGlobalRoot,
-            npmInstalled: true,
-            npmVersion: '0.2.17',
-            pythonInstalled: true,
-            pythonVersion: '0.2.17',
-            codexRegistered: true,
-        });
-        const fakeToolScript = path.join(binDir, 'fake-tool.js');
-        writeText(fakeToolScript, `
+    const binDir = path.join(tempRoot, 'bin');
+    fs.mkdirSync(binDir, { recursive: true });
+    const fakeStateFile = path.join(tempRoot, 'fake-state.json');
+    const fakeLogFile = path.join(tempRoot, 'fake-log.ndjson');
+    const fakeGlobalRoot = path.join(tempRoot, 'global-node');
+    writeJson(fakeStateFile, {
+        globalRoot: fakeGlobalRoot,
+        npmInstalled: true,
+        npmVersion: '0.2.17',
+        pythonInstalled: true,
+        pythonVersion: '0.2.17',
+        codexRegistered: true,
+    });
+    const fakeToolScript = path.join(binDir, 'fake-tool.js');
+    writeText(fakeToolScript, `
 const fs = require('fs');
 const statePath = process.env.IRANTI_FAKE_STATE;
 const logPath = process.env.IRANTI_FAKE_LOG;
@@ -198,27 +209,97 @@ if (tool === 'codex') {
 process.exit(1);
 `.trim());
 
-        for (const name of ['npm', 'py', 'python', 'python3', 'codex']) {
-            writeFakeCommand(binDir, name, fakeToolScript);
-        }
+    for (const name of ['npm', 'py', 'python', 'python3', 'codex']) {
+        writeFakeCommand(binDir, name, fakeToolScript);
+    }
 
-        const env = {
+    return {
+        tempRoot,
+        runtimeRoot,
+        projectsRoot,
+        bindingFile,
+        mcpFile,
+        claudeSettingsFile,
+        fakeStateFile,
+        fakeLogFile,
+        env: {
             PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}`,
             IRANTI_FAKE_STATE: fakeStateFile,
             IRANTI_FAKE_LOG: fakeLogFile,
             IRANTI_TEST_TOOL_SHIM: fakeToolScript,
-        };
+        },
+    };
+}
 
+function readLogLines(logFile: string): Array<{ tool: string; args: string[] }> {
+    const raw = fs.readFileSync(logFile, 'utf8').trim();
+    if (!raw) return [];
+    return raw.split(/\r?\n/).map((line) => JSON.parse(line) as { tool: string; args: string[] });
+}
+
+function testConservativeUninstall(): void {
+    const fixture = buildFixture();
+    try {
+        const executeRun = runCli([
+            'uninstall',
+            '--yes',
+            '--json',
+            '--root',
+            fixture.runtimeRoot,
+            '--scan-root',
+            fixture.projectsRoot,
+        ], repoRoot, fixture.env);
+        assert.strictEqual(executeRun.status, 0, `conservative uninstall failed:\n${executeRun.stdout}\n${executeRun.stderr}`);
+        const payload = JSON.parse(executeRun.stdout.trim()) as {
+            actions: {
+                removeGlobalNpm: boolean;
+                removePython: boolean;
+                removeProjectBindings: boolean;
+                removeRuntimeRoots: boolean;
+                removeCodexRegistration: boolean;
+            };
+            execution: Array<{ label: string; status: string }>;
+        };
+        assert.strictEqual(payload.actions.removeGlobalNpm, true);
+        assert.strictEqual(payload.actions.removePython, true);
+        assert.strictEqual(payload.actions.removeProjectBindings, false);
+        assert.strictEqual(payload.actions.removeRuntimeRoots, false);
+        assert.strictEqual(payload.actions.removeCodexRegistration, false);
+        assert.ok(payload.execution.some((entry) => entry.label === 'npm uninstall' && entry.status === 'pass'));
+        assert.ok(payload.execution.some((entry) => entry.label === 'python uninstall' && entry.status === 'pass'));
+
+        assert.ok(fs.existsSync(fixture.runtimeRoot), 'runtime root should remain when --all is not used');
+        assert.ok(fs.existsSync(fixture.bindingFile), 'project binding should remain when --all is not used');
+        assert.ok(fs.existsSync(fixture.mcpFile), '.mcp.json should remain when --all is not used');
+        assert.ok(fs.existsSync(fixture.claudeSettingsFile), 'Claude settings should remain when --all is not used');
+
+        const mcpPayload = JSON.parse(fs.readFileSync(fixture.mcpFile, 'utf8')) as { mcpServers?: Record<string, unknown> };
+        assert.ok(mcpPayload.mcpServers?.iranti, 'Iranti MCP server should remain during conservative uninstall');
+        const claudePayload = JSON.parse(fs.readFileSync(fixture.claudeSettingsFile, 'utf8')) as { hooks?: Record<string, unknown> };
+        assert.ok(claudePayload.hooks?.UserPromptSubmit, 'Iranti Claude hooks should remain during conservative uninstall');
+
+        const logLines = readLogLines(fixture.fakeLogFile);
+        assert.ok(logLines.some((entry) => entry.tool === 'npm' && entry.args.includes('uninstall')), 'npm uninstall should run during conservative uninstall');
+        assert.ok(logLines.some((entry) => (entry.tool === 'py' || entry.tool === 'python' || entry.tool === 'python3') && entry.args.includes('uninstall')), 'python uninstall should run during conservative uninstall');
+        assert.ok(!logLines.some((entry) => entry.tool === 'codex' && entry.args.includes('remove')), 'codex registration should not be removed during conservative uninstall');
+    } finally {
+        fs.rmSync(fixture.tempRoot, { recursive: true, force: true });
+    }
+}
+
+function testFullUninstall(): void {
+    const fixture = buildFixture();
+    try {
         const dryRun = runCli([
             'uninstall',
             '--all',
             '--dry-run',
             '--json',
             '--root',
-            runtimeRoot,
+            fixture.runtimeRoot,
             '--scan-root',
-            projectsRoot,
-        ], repoRoot, env);
+            fixture.projectsRoot,
+        ], repoRoot, fixture.env);
         assert.strictEqual(dryRun.status, 0, `dry-run failed:\n${dryRun.stdout}\n${dryRun.stderr}`);
         const dryPayload = JSON.parse(dryRun.stdout.trim()) as {
             actions: {
@@ -245,19 +326,19 @@ process.exit(1);
             '--yes',
             '--json',
             '--root',
-            runtimeRoot,
+            fixture.runtimeRoot,
             '--scan-root',
-            projectsRoot,
-        ], repoRoot, env);
+            fixture.projectsRoot,
+        ], repoRoot, fixture.env);
         assert.strictEqual(executeRun.status, 0, `execute failed:\n${executeRun.stdout}\n${executeRun.stderr}`);
-        assert.strictEqual(fs.existsSync(runtimeRoot), false, 'runtime root should be removed');
-        assert.strictEqual(fs.existsSync(bindingFile), false, 'project binding should be removed');
+        assert.strictEqual(fs.existsSync(fixture.runtimeRoot), false, 'runtime root should be removed');
+        assert.strictEqual(fs.existsSync(fixture.bindingFile), false, 'project binding should be removed');
 
-        const mcpPayload = JSON.parse(fs.readFileSync(mcpFile, 'utf8')) as { mcpServers?: Record<string, unknown> };
+        const mcpPayload = JSON.parse(fs.readFileSync(fixture.mcpFile, 'utf8')) as { mcpServers?: Record<string, unknown> };
         assert.ok(mcpPayload.mcpServers?.other, 'non-Iranti MCP server should be preserved');
         assert.ok(!mcpPayload.mcpServers?.iranti, 'Iranti MCP server should be removed');
 
-        const claudePayload = JSON.parse(fs.readFileSync(claudeSettingsFile, 'utf8')) as {
+        const claudePayload = JSON.parse(fs.readFileSync(fixture.claudeSettingsFile, 'utf8')) as {
             theme?: string;
             hooks?: Record<string, unknown>;
         };
@@ -267,15 +348,19 @@ process.exit(1);
         assert.strictEqual(sessionStart?.[0]?.hooks?.length, 1);
         assert.strictEqual(sessionStart?.[0]?.hooks?.[0]?.command, 'other-hook --event SessionStart');
 
-        const logLines = fs.readFileSync(fakeLogFile, 'utf8').trim().split(/\r?\n/).map((line) => JSON.parse(line) as { tool: string; args: string[] });
+        const logLines = readLogLines(fixture.fakeLogFile);
         assert.ok(logLines.some((entry) => entry.tool === 'npm' && entry.args.includes('uninstall')), 'npm uninstall should run');
         assert.ok(logLines.some((entry) => (entry.tool === 'py' || entry.tool === 'python' || entry.tool === 'python3') && entry.args.includes('uninstall')), 'python uninstall should run');
         assert.ok(logLines.some((entry) => entry.tool === 'codex' && entry.args.includes('remove')), 'codex remove should run');
-
-        console.log('cli uninstall smoke passed');
     } finally {
-        fs.rmSync(tempRoot, { recursive: true, force: true });
+        fs.rmSync(fixture.tempRoot, { recursive: true, force: true });
     }
+}
+
+function main(): void {
+    testConservativeUninstall();
+    testFullUninstall();
+    console.log('cli uninstall smoke passed');
 }
 
 main();

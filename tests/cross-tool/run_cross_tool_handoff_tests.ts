@@ -197,6 +197,10 @@ async function main(): Promise<void> {
     });
 
     expect(codexHandshake.agentId === codexAgent, 'Expected Codex handshake to initialize the Codex agent.');
+    expect(
+        codexHandshake.workingMemory.every((entry) => !entry.entityKey.startsWith(`${taskEntity}/`)),
+        'Expected receiver handshake to avoid auto-importing shared task facts without an explicit query, observe, or attend call.'
+    );
 
     const codexSession = await iranti.inspectSession({
         agentId: codexAgent,

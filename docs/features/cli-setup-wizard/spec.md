@@ -81,9 +81,11 @@ Non-interactive variants:
 ## Test Results
 - `npm run build` completed successfully after wiring the wizard into the CLI.
 - `npx ts-node tests/runtime-lifecycle/run_setup_upgrade_tests.ts`
+  - `setup --defaults` printed the dependency preflight before executing the setup plan
   - `install --root <path>` created the runtime root, `instances/`, and `install.json`
   - `setup --defaults` created install metadata, instance env, project binding, `.mcp.json`, and `.claude/settings.local.json`
   - repeating the same `setup --defaults` invocation updated the existing instance cleanly instead of failing on idempotent rerun
+  - `setup --defaults --mode shared --projects <a>,<b>` bound multiple projects and tagged each binding `IRANTI_PROJECT_MODE=shared`
   - `status --json` classified the created instance as configured but not running
 - `node dist/scripts/iranti-cli.js help` shows `iranti setup` in the machine-level command list.
 - `node dist/scripts/iranti-cli.js setup --defaults --root tests/tmp_cli_setup_runtime --instance cli_setup_smoke --provider mock --db-url <db> --projects tests/tmp_cli_setup_project --claude-code` completed and wrote the instance env plus project binding files.

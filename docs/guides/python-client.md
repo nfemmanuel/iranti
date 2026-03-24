@@ -261,6 +261,64 @@ if turn["shouldInject"]:
 - `decision` (dict): Attendant decision metadata (`needed`, `confidence`, `method`, `explanation`)
 - `facts` (list): facts to inject when needed
 
+### Session Checkpoints And Recovery
+
+Checkpoint long-running work so a later handshake can recommend resuming it:
+
+```python
+client.checkpoint(
+    agent_id="my_agent",
+    task="Research publication history for Dr. Jane Smith",
+    recent_messages=["Still comparing affiliation sources."],
+    checkpoint={
+        "currentStep": "Resolve source disagreement",
+        "nextStep": "Write corrected affiliation fact",
+        "openRisks": ["OpenAlex and homepage disagree on date range"],
+    },
+)
+
+# Later, after the process dies or the agent returns:
+recovered = client.handshake(
+    agent_id="my_agent",
+    task="Research publication history for Dr. Jane Smith",
+    recent_messages=["Returning to the affiliation investigation."],
+)
+
+if recovered.session_recovery and recovered.session_recovery.available:
+    client.resume_session(
+        agent_id="my_agent",
+        session_id=recovered.session_recovery.session_id,
+    )
+```
+
+Inspect one agent's persisted session state:
+
+```python
+inspection = client.inspect_session(
+    agent_id="my_agent",
+    task="Research publication history for Dr. Jane Smith",
+    recent_messages=["Returning to the affiliation investigation."],
+)
+
+print(inspection.summary.operator_state)
+print(inspection.session_checkpoint.status if inspection.session_checkpoint else "none")
+print(inspection.session_recovery.recommendation if inspection.session_recovery else "no recovery recommendation")
+```
+
+Inventory persisted checkpoints across agents:
+
+```python
+sessions = client.list_sessions(operator_state="interrupted", sort="operator")
+print([(session.agent_id, session.operator_state) for session in sessions])
+```
+
+Important distinction:
+- `session_checkpoint.status` is the raw persisted checkpoint state
+- `summary.operator_state` is the operator-facing classification
+
+That means a stale checkpoint can still have `status = "active"` while `operator_state = "interrupted"`.
+`checkpoint()` stores progress and clears any current recovery recommendation. Recovery advice appears later on `handshake()` or `inspect_session(...)` when Iranti evaluates a returning task against the persisted checkpoint.
+
 ### Who Knows What
 
 Find all agents that have written facts about an entity:

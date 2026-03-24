@@ -67,3 +67,20 @@ The `0.2.x` hardening release is considered ready only when:
 4. operator-facing lifecycle/session/status/doctor surfaces are truthful
 5. runtime authority resolution is explainable and documented
 6. the repo is clean and release-ready
+
+## Final Release-Readiness Verification (A-L)
+
+| Issue | Classification | Notes |
+|---|---|---|
+| A | fixed | Verified no risky `cmd.exe /c` joined-string lifecycle path remains in the owned Windows/process layer; direct invocation and constrained detached PowerShell handoff are what remain. |
+| B | fixed | Re-verified locked mutation paths and closed the remaining uncovered project `.gitignore` read-modify-write path by moving it onto the canonical lock + temp write + rename helper. |
+| C | fixed | Archive/delete rollback, vector drift detection, repair, and doctor visibility are all present and validated, including live doctor output on a drifted instance. |
+| D | fixed | Authority resolution remains converged in code and docs, with repo-local and user-root runtime selection both behaving consistently. |
+| E | fixed | Runtime metadata, PID, and health probe composition remain explicit and truthful; live stale-instance classification validated against `C:\\Users\\NF\\.iranti-runtime`. |
+| F | fixed | CI/workflow files and release docs now agree on the actual fast and DB-backed gates the release depends on. |
+| G | fixed | Production pepper posture, local secret scanning, and placeholder hygiene remain enforced and validated. |
+| H | fixed | Session/checkpoint/handshake semantics remain correct; receiver handshake scope and checkpoint recovery semantics were re-documented to match reality. |
+| I | fixed | Canonical docs remain discoverable; non-canonical summaries are contained and the session/vector/release docs now point to the same truths. |
+| J | fixed | Additional extraction was reviewed and not required for release safety beyond the existing help renderer split; current boundaries are sufficient for another `0.2.x` release. |
+| K | fixed | Live `status`/`doctor` output on real instances produced accurate stale, fail, and drift classifications with actionable remediations. |
+| L | fixed | Final release evidence, ledgers, and recommendation are being produced from the validated tree. |

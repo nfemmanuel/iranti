@@ -95,6 +95,7 @@ npm run api
 
 **What it means**:
 - another Iranti process is already updating the same env/config/runtime metadata file
+- another Iranti process is scaffolding the same project files, such as `.env.iranti` or `.gitignore`
 - or a previous process crashed and left a stale `.lock` file behind
 
 **Solutions**:
@@ -139,6 +140,27 @@ If the detached path still fails, check:
 - whether the instance env is complete
 - whether the configured port is already occupied
 - whether the replacement runtime can pass `/health`
+
+Important:
+- `iranti upgrade --restart --instance <name>` only performs the restart during an executing upgrade path such as `--yes`
+- without `--yes`, the command remains inspect-only and prints the plan instead of mutating anything
+
+### Uninstall Removed The Package But Left Runtime Data Behind
+
+**Symptom**: `iranti uninstall --yes` removed the executable package surface, but the runtime root or `.env.iranti` files are still present.
+
+**What it means**:
+- this is the intended conservative default
+- plain uninstall stops live Iranti processes and removes package installs, but preserves runtime data and project bindings
+
+**Solutions**:
+```bash
+# Inspect the exact destructive plan first
+iranti uninstall --all --dry-run --json
+
+# Then remove runtime roots and project-local Iranti files
+iranti uninstall --all --yes
+```
 
 ### 401 Unauthorized Errors
 
@@ -430,7 +452,7 @@ psql $DATABASE_URL -c "INSERT INTO knowledge_base SELECT * FROM archive WHERE id
 **What it means**:
 - `knowledge_base` and the configured vector backend have drifted
 - the usual causes are missing embeddings or orphaned backend vectors
-- `iranti doctor` now surfaces this as a vector index consistency warning when the backend is reachable
+- `iranti doctor` does not detect this yet; use the library reconciliation helpers below
 
 **Recovery path**:
 Run the reconciliation helpers from the repo root:
@@ -453,8 +475,8 @@ Interpretation:
 - `consistent: true`: the KB and vector backend are aligned
 
 Current 0.2.x note:
-- `iranti doctor` detects drift
-- the repair path is still the library helper surface until a dedicated CLI fix flag exists
+- drift detection and repair exist in the library helper surface now
+- the natural CLI hook is `iranti doctor`, but that wiring is intentionally left for a separate patch
 
 ### Unicode/Emoji Issues
 

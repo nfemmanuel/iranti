@@ -102,6 +102,8 @@ await iranti.handshake({
 });
 ```
 
+That handshake initializes Codex's own agent-scoped session state. It does not automatically import Claude's private checkpoint or the shared `task/...` facts.
+
 Then retrieve the shared task explicitly:
 
 - `query()` when the key is known

@@ -22,7 +22,8 @@ This feature formalizes how Claude Code and Codex collaborate through the same I
 |---|---|---|
 | Shared durable handoff | knowledge entries | Facts written to `task/...` and optional `project/...` entities. |
 | Sender-local recovery state | checkpoint record | Claude's own session checkpoint, still resumable only by Claude's agent id. |
-| Receiver working-memory brief | handshake/attend output | Codex-visible memory populated from shared task/project facts. |
+| Receiver agent session start | handshake output | Codex's own agent-scoped session starts without inheriting Claude's private checkpoint. |
+| Receiver handoff retrieval | query/observe/attend output | Codex-visible shared task/project facts retrieved explicitly through shared-memory surfaces. |
 | Operator session view | session inspection payload | Sender and receiver session state remain independently inspectable through `inspectSession()` and filtered `listSessions()`; no cross-agent checkpoint leakage is allowed. |
 | Follow-up status | knowledge entries | Receiver writes back progress such as `implementation_status` or `handoff_ack`. |
 
@@ -35,6 +36,8 @@ This feature formalizes how Claude Code and Codex collaborate through the same I
    - checkpoint Claude's own session with `entityTargets` including the task entity
 5. Claude does **not** expect Codex to resume Claude's session id.
 6. Codex starts its own handshake for the shared task.
+   - this initializes Codex's own agent session
+   - it does not automatically import Claude's checkpoint or the shared `task/...` facts
 7. Codex retrieves the shared handoff by:
    - exact `query()` for known keys
    - `attend()` or `observe()` with explicit `entityHints`
@@ -59,6 +62,7 @@ This feature formalizes how Claude Code and Codex collaborate through the same I
   - Claude writes shared handoff facts to `task/...`
   - Claude checkpoints its own session with the shared task in `entityTargets`
   - operator inspection can read Claude's persisted session state through `inspectSession()` and filtered `listSessions()`
+  - Codex handshake initializes only Codex's own session state and does not auto-import shared task facts
   - Codex does not inherit Claude's private checkpoint or session inventory automatically
   - Codex can query and attend against the shared task using explicit hints
   - Codex writes follow-up status back to the same task

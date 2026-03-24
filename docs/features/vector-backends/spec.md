@@ -22,7 +22,7 @@ Vector backends make the embedding-search portion of Iranti pluggable while leav
 | Upserted embedding | Backend write | Stores the embedding for each KB row after successful create/update |
 | Deleted embedding | Backend delete | Removes or nulls the embedding when a fact is archived |
 | Vector search results | `VectorSearchResult[]` | Top-k vector matches with metadata used for hybrid reranking |
-| Doctor status | CLI output | Reachability plus KB/vector consistency report for the selected backend |
+| Doctor status | CLI output | Reachability report for the selected backend |
 | Consistency audit | `VectorIndexConsistencyReport` | Detects missing embeddings and orphaned external vector ids |
 | Consistency repair | `VectorIndexRepairReport` | Re-populates missing embeddings and removes orphaned vector ids |
 
@@ -58,8 +58,8 @@ Vector backends make the embedding-search portion of Iranti pluggable while leav
 ## Edge Cases
 - Unknown backend: throws immediately with a clear error naming the invalid value.
 - Missing Qdrant URL: throws immediately when `qdrant` is selected.
-- Unreachable backend: `iranti doctor` reports it, and hybrid search falls back to lexical-only scoring.
-- Reachable but inconsistent backend: `iranti doctor` warns with missing/orphaned counts so drift is visible before hybrid-search quality degrades silently.
+- Unreachable backend: `iranti doctor` reports reachability, and hybrid search falls back to lexical-only scoring.
+- Reachable but inconsistent backend: the library audit/repair helpers detect drift; the natural future CLI hook is `iranti doctor`, but that hook is not wired yet in this pass.
 - Backend delete failure during archive/delete: the KB row is retained and the archive mutation fails rather than silently leaving stale external vectors behind.
 - External vector drift: Iranti can now enumerate missing embeddings and orphaned vector ids and repair them without changing caller-facing write/query APIs.
 - Validation DB without pgvector: pgvector-specific test is skipped rather than reported as a false pass.
@@ -67,13 +67,12 @@ Vector backends make the embedding-search portion of Iranti pluggable while leav
 
 ## Test Results
 Validation performed during implementation:
-- `npx tsc --noEmit`
-- `npm run test:archive-vector-contracts`
-- `npm run test:vector-backends`
+- `node -r ts-node/register/transpile-only tests/consistency/run_archive_vector_contract_tests.ts`
+- `node -r ts-node/register/transpile-only tests/vector-backends/run_vector_backend_tests.ts`
   - factory validation: pass
   - Qdrant REST adapter: pass
   - Chroma REST adapter: pass
-  - pgvector regression: skipped in local validation because the `5433` DB does not expose pgvector support
+  - pgvector audit/repair regression: pass on a fresh disposable pgvector DB
 
 ## Related
 - [src/library/vectorBackend.ts](/c:/Users/NF/Documents/Projects/iranti/src/library/vectorBackend.ts)

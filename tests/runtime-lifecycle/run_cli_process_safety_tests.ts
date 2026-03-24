@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { spawnSyncResolved } from '../../src/lib/commandInvocation';
-import { writeTextFileLocked } from '../../src/lib/fileMutation';
+import { ensureFileContainsLinesLocked, writeTextFileLocked } from '../../src/lib/fileMutation';
 
 async function testLiteralArgumentDelivery(root: string): Promise<void> {
     const scriptDir = path.join(root, 'script dir');
@@ -96,6 +96,23 @@ async function testFailedWritePreservesOriginal(root: string): Promise<void> {
     assert.ok(!fs.existsSync(`${filePath}.lock`), 'failed writes should release the lock');
 }
 
+async function testEnsureFileContainsLinesLocked(root: string): Promise<void> {
+    const filePath = path.join(root, 'project.gitignore');
+    fs.writeFileSync(filePath, 'node_modules\n', 'utf8');
+
+    await Promise.all([
+        ensureFileContainsLinesLocked(filePath, ['.env.iranti', '.env.iranti.local']),
+        ensureFileContainsLinesLocked(filePath, ['.env.iranti.local', '.env.iranti']),
+        ensureFileContainsLinesLocked(filePath, ['.env.iranti']),
+    ]);
+
+    const lines = fs.readFileSync(filePath, 'utf8').trim().split(/\r?\n/);
+    assert.ok(lines.includes('.env.iranti'), 'project ignore should include .env.iranti');
+    assert.ok(lines.includes('.env.iranti.local'), 'project ignore should include .env.iranti.local');
+    assert.strictEqual(lines.filter((line) => line === '.env.iranti').length, 1, 'project ignore should not duplicate .env.iranti');
+    assert.strictEqual(lines.filter((line) => line === '.env.iranti.local').length, 1, 'project ignore should not duplicate .env.iranti.local');
+}
+
 async function main(): Promise<void> {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'iranti-cli-hardening-'));
     try {
@@ -103,6 +120,7 @@ async function main(): Promise<void> {
         await testConcurrentLockedWrites(root);
         await testStaleLockRecovery(root);
         await testFailedWritePreservesOriginal(root);
+        await testEnsureFileContainsLinesLocked(root);
         console.log('cli process safety tests passed');
     } finally {
         fs.rmSync(root, { recursive: true, force: true });
