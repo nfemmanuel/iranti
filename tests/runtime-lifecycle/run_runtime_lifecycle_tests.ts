@@ -200,8 +200,10 @@ async function main(): Promise<void> {
                 projectBindingFile: string | null;
                 rootMismatch: boolean;
             };
+            recommendedActions: string[];
             instances: Array<{
                 name: string;
+                repairHints?: string[];
                 config: {
                     classification: string;
                 };
@@ -229,6 +231,7 @@ async function main(): Promise<void> {
         assert.strictEqual(statusPayload.discovery.boundRuntimeRoot, null);
         assert.strictEqual(statusPayload.discovery.projectBindingFile, null);
         assert.strictEqual(statusPayload.discovery.rootMismatch, false);
+        assert.ok(statusPayload.recommendedActions.some((hint) => hint.includes('instance restart local')), 'Expected stale local instance repair hint in initial status payload.');
         const localStatus = statusPayload.instances.find((instance) => instance.name === 'local');
         assert.ok(localStatus, 'Expected local instance in status payload.');
         assert.strictEqual(localStatus?.config.classification, 'complete');
@@ -413,6 +416,10 @@ async function main(): Promise<void> {
         assert.strictEqual(invalidStatus?.config.classification, 'invalid');
         assert.strictEqual(misownedConfigStatus?.config.classification, 'invalid');
         assert.strictEqual(misownedRuntimeStatus?.runtime.classification, 'invalid');
+        assert.ok((partialStatus?.repairHints ?? []).some((hint) => hint.includes('configure instance partial')), 'Expected partial instance repair hint.');
+        assert.ok((unhealthyStatus?.repairHints ?? []).some((hint) => hint.includes('doctor --instance unhealthy')), 'Expected unhealthy instance repair hint.');
+        assert.ok((misownedRuntimeStatus?.repairHints ?? []).some((hint) => hint.includes('runtime.json')), 'Expected invalid runtime repair hint.');
+        assert.ok(statusWithVariants.recommendedActions.length >= 3, 'Expected aggregated recommended actions in status JSON.');
 
         const healthyInspection = await inspectRuntimeState(path.join(healthyDir, 'runtime.json'));
         assert.strictEqual(healthyInspection.classification, 'running');

@@ -16,7 +16,7 @@
 | Output | Type | Description |
 |---|---|---|
 | Runtime summary | text | Current package version, runtime root, root source, optional bound runtime root, repo env, project binding, install metadata, known instances, per-instance config state, and live runtime state. |
-| Runtime summary | JSON | Structured status payload for scripts or automation, including per-instance runtime metadata, health results, config-state classification, runtime-root provenance, and root-mismatch hints. |
+| Runtime summary | JSON | Structured status payload for scripts or automation, including per-instance runtime metadata, health results, config-state classification, runtime-root provenance, root-mismatch hints, per-instance repair hints, and aggregated recommended actions. |
 
 ## Decision Tree / Flow
 
@@ -53,6 +53,7 @@
 - `iranti status --json` reports runtime-root source plus bound-root mismatch information when a project binding points at a different root.
 - `iranti status --json` resolves project bindings and local runtime roots correctly from nested subdirectories.
 - `iranti status --json` distinguishes complete/partial/invalid instance config and healthy/unhealthy runtimes.
+- `iranti status --json` includes per-instance repair hints plus aggregated recommended actions when operator intervention is needed.
 
 ## Related
 

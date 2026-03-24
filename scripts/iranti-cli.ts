@@ -1047,6 +1047,29 @@ function describeInstanceConfig(summary: InstanceConfigSummary): string {
     }
 }
 
+function buildInstanceRepairHints(name: string, config: InstanceConfigSummary, runtime: InstanceRuntimeSummary): string[] {
+    const hints: string[] = [];
+
+    if (config.classification === 'partial') {
+        hints.push(`Run \`iranti configure instance ${name} --interactive\` to finish the missing instance files.`);
+    }
+    if (config.classification === 'invalid') {
+        hints.push(`Run \`iranti configure instance ${name} --interactive\` to repair invalid instance metadata or env values.`);
+    }
+
+    if (runtime.classification === 'stale') {
+        hints.push(`Run \`iranti instance restart ${name}\` if this instance should still be running.`);
+    }
+    if (runtime.classification === 'unhealthy') {
+        hints.push(`Run \`iranti doctor --instance ${name}\` and inspect ${runtime.state?.healthUrl ?? `http://localhost:${runtime.state?.port ?? 3001}/health`} before restarting.`);
+    }
+    if (runtime.classification === 'invalid') {
+        hints.push(`Inspect ${runtime.state?.runtimeFile ?? `instances/${name}/runtime.json`} for copied or foreign runtime metadata.`);
+    }
+
+    return Array.from(new Set(hints));
+}
+
 async function startInstanceRuntime(name: string, instanceDir: string, envFile: string, runtimeFile: string): Promise<void> {
     process.env.IRANTI_INSTANCE_NAME = name;
     process.env.IRANTI_INSTANCE_DIR = instanceDir;
@@ -4893,6 +4916,7 @@ async function statusCommand(args: ParsedArgs): Promise<void> {
     if (rootMismatch) rows.push({ label: 'root_mismatch', value: 'project binding points at a different runtime root' });
 
     const instances = await collectRuntimeInstanceSummaries(root);
+    const recommendedActions = Array.from(new Set(instances.flatMap((instance) => instance.repairHints)));
 
     if (json) {
         console.log(JSON.stringify({
@@ -4922,6 +4946,7 @@ async function statusCommand(args: ParsedArgs): Promise<void> {
             repoEnv: repoEnv && fs.existsSync(repoEnv) ? repoEnv : null,
             projectBinding: projectEnv && fs.existsSync(projectEnv) ? projectEnv : null,
             installMeta: fs.existsSync(installMetaPath) ? installMetaPath : null,
+            recommendedActions,
             instances,
         }, null, 2));
         return;
@@ -4946,14 +4971,28 @@ async function statusCommand(args: ParsedArgs): Promise<void> {
         for (const instance of instances) {
             console.log(`  - ${instance.name} (port ${instance.port})`);
             console.log(`    env: ${instance.envFile}`);
-            console.log(`    meta: ${instance.metaFile}`);
-            console.log(`    config: ${describeInstanceConfig(instance.config)}`);
-            console.log(`    runtime: ${describeInstanceRuntime(instance.runtime)}`);
-            if (instance.runtime.state?.healthUrl) {
-                console.log(`    health: ${instance.runtime.state.healthUrl}`);
+        console.log(`    meta: ${instance.metaFile}`);
+        console.log(`    config: ${describeInstanceConfig(instance.config)}`);
+        console.log(`    runtime: ${describeInstanceRuntime(instance.runtime)}`);
+        if (instance.repairHints.length > 0) {
+            console.log('    hints:');
+            for (const hint of instance.repairHints) {
+                console.log(`      - ${hint}`);
             }
         }
+        if (instance.runtime.state?.healthUrl) {
+            console.log(`    health: ${instance.runtime.state.healthUrl}`);
+        }
     }
+
+    if (recommendedActions.length > 0) {
+        console.log('');
+        console.log('Suggested fixes:');
+        for (const action of recommendedActions) {
+            console.log(`  - ${action}`);
+        }
+    }
+}
 }
 
 async function collectRuntimeInstanceSummaries(root: string): Promise<Array<{
@@ -4963,6 +5002,7 @@ async function collectRuntimeInstanceSummaries(root: string): Promise<Array<{
     metaFile: string;
     config: InstanceConfigSummary;
     runtime: InstanceRuntimeSummary;
+    repairHints: string[];
 }>> {
     const instancesDir = path.join(root, 'instances');
     const instances: Array<{
@@ -4972,6 +5012,7 @@ async function collectRuntimeInstanceSummaries(root: string): Promise<Array<{
         metaFile: string;
         config: InstanceConfigSummary;
         runtime: InstanceRuntimeSummary;
+        repairHints: string[];
     }> = [];
     if (!fs.existsSync(instancesDir)) {
         return instances;
@@ -4990,17 +5031,19 @@ async function collectRuntimeInstanceSummaries(root: string): Promise<Array<{
                 port = '(unreadable)';
             }
         }
-        instances.push({
-            name: entry.name,
-            port,
-            envFile: config.state.envPresent ? envFile : '(missing)',
-            metaFile: config.state.metaPresent ? metaFile : '(missing)',
-            config,
-            runtime: await readInstanceRuntimeSummary(root, entry.name),
-        });
-    }
-    return instances;
-}
+          const runtime = await readInstanceRuntimeSummary(root, entry.name);
+          instances.push({
+              name: entry.name,
+              port,
+              envFile: config.state.envPresent ? envFile : '(missing)',
+              metaFile: config.state.metaPresent ? metaFile : '(missing)',
+              config,
+              runtime,
+              repairHints: buildInstanceRepairHints(entry.name, config, runtime),
+          });
+      }
+      return instances;
+  }
 
 async function upgradeCommand(args: ParsedArgs): Promise<void> {
     const runAll = hasFlag(args, 'all');
