@@ -17,9 +17,13 @@ def console_safe(value):
 def test():
     print('\nTesting Iranti Python Client...\n')
 
+    api_key = os.getenv('IRANTI_API_KEY')
+    if not api_key:
+        raise EnvironmentError('IRANTI_API_KEY environment variable is required to run the test client.')
+
     client = IrantiClient(
         base_url=os.getenv('IRANTI_URL', 'http://localhost:3001'),
-        api_key=os.getenv('IRANTI_API_KEY', 'dev_test_key_12345')
+        api_key=api_key
     )
 
     ts = int(time.time())

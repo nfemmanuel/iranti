@@ -189,6 +189,31 @@ const ANSI = {
 let CLI_DEBUG = process.argv.includes('--debug') || process.env.IRANTI_DEBUG === '1';
 let CLI_VERBOSE = CLI_DEBUG || process.argv.includes('--verbose') || process.env.IRANTI_VERBOSE === '1';
 
+// H-7: Cleanup/rollback stack — LIFO handlers run on SIGINT/SIGTERM to undo partial multi-step operations
+const _cleanupStack: Array<() => void | Promise<void>> = [];
+function pushCleanup(fn: () => void | Promise<void>): void {
+    _cleanupStack.push(fn);
+}
+function popCleanup(): void {
+    _cleanupStack.pop();
+}
+async function runCleanupStack(): Promise<void> {
+    while (_cleanupStack.length > 0) {
+        const fn = _cleanupStack.pop()!;
+        try {
+            await fn();
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            process.stderr.write(`[cleanup] Error during rollback: ${msg}\n`);
+        }
+    }
+}
+for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+    process.on(sig, () => {
+        void runCleanupStack().finally(() => process.exit(130));
+    });
+}
+
 function useColor(): boolean {
     return Boolean(process.stdout.isTTY && !process.env.NO_COLOR);
 }
@@ -511,11 +536,25 @@ async function writeJson(filePath: string, value: unknown): Promise<void> {
 }
 
 async function writeText(filePath: string, content: string): Promise<void> {
-    await fsp.writeFile(filePath, content, 'utf-8');
+    // Atomic write: write to temp file then rename to avoid partial writes on crash
+    const tmpPath = `${filePath}.tmp${process.pid}`;
+    try {
+        await fsp.writeFile(tmpPath, content, { encoding: 'utf-8', flag: 'w' });
+        await fsp.rename(tmpPath, filePath);
+    } catch (err) {
+        await fsp.unlink(tmpPath).catch(() => undefined);
+        throw err;
+    }
 }
+
+const MAX_ENV_FILE_BYTES = 1_048_576; // 1 MiB
 
 async function readEnvFile(filePath: string): Promise<Record<string, string>> {
     const out: Record<string, string> = {};
+    const stat = await fsp.stat(filePath).catch(() => null);
+    if (stat && stat.size > MAX_ENV_FILE_BYTES) {
+        throw new Error(`Env file too large (${stat.size} bytes): ${filePath}. Maximum is ${MAX_ENV_FILE_BYTES} bytes.`);
+    }
     const raw = await fsp.readFile(filePath, 'utf-8');
     for (const line of raw.split(/\r?\n/)) {
         const trimmed = line.trim();
@@ -620,9 +659,8 @@ async function upsertEnvFile(filePath: string, updates: Record<string, string | 
 
     const finalLines = nextLines
         .join('\n')
-        .replace(/\n{3,}/g, '\n\n')
-        .replace(/^\n+/, '')
-        .trimEnd();
+        .replace(/^\n+/, '') // strip leading blank lines only
+        .trimEnd();          // strip trailing whitespace only — preserving internal blank line groups
 
     await writeText(filePath, `${finalLines}\n`);
 }
@@ -973,13 +1011,28 @@ async function withPromptSession<T>(run: (session: PromptSession) => Promise<T>)
 function detectPlaceholder(value: string | undefined): boolean {
     if (!value) return true;
     const normalized = value.trim().toLowerCase();
-    return normalized.length === 0
-        || normalized.includes('yourpassword')
-        || normalized.includes('replace_me')
-        || normalized.includes('your_secret')
-        || normalized.includes('your_key_here')
-        || normalized.includes('your_api_key')
-        || normalized === 'changeme';
+    if (normalized.length === 0) return true;
+    const exactWeakValues = new Set([
+        'changeme',
+        'placeholder',
+        'example',
+        'todo',
+        'fixme',
+        'none',
+        'null',
+        'undefined',
+    ]);
+    if (exactWeakValues.has(normalized)) return true;
+    const weakFragments = [
+        'yourpassword',
+        'replace_me',
+        'your_secret',
+        'your_key_here',
+        'your_api_key',
+        'insert_key_here',
+        'add_your_key',
+    ];
+    return weakFragments.some((p) => normalized.includes(p));
 }
 
 function quoteSqlLiteral(value: string): string {
@@ -1019,6 +1072,9 @@ function isLocalPostgresHost(hostname: string): boolean {
 
 function sanitizeIdentifier(input: string, fallback: string): string {
     const value = input.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
+    if (!value && input.trim()) {
+        verboseLog(`sanitizeIdentifier: input "${input}" normalized to empty — using fallback "${fallback}"`);
+    }
     return value || fallback;
 }
 
@@ -1184,6 +1240,8 @@ async function ensureInstanceConfigured(
         LLM_PROVIDER: config.provider,
         ...config.providerKeys,
     });
+
+    await syncInstanceMeta(root, name, config.port);
 
     return { envFile, instanceDir, created };
 }
@@ -1663,11 +1721,32 @@ async function findNextAvailablePort(
     throw new Error(`No available port found in range ${start}-${start + maxSteps - 1}.`);
 }
 
-async function chooseAvailablePort(session: PromptSession, promptText: string, preferredPort: number, allowOccupiedCurrent: boolean = false): Promise<number> {
+async function readAllInstancePorts(root: string): Promise<Set<number>> {
+    const ports = new Set<number>();
+    const instancesDir = path.join(root, 'instances');
+    if (!fs.existsSync(instancesDir)) return ports;
+    try {
+        const entries = await fsp.readdir(instancesDir, { withFileTypes: true });
+        for (const entry of entries) {
+            if (!entry.isDirectory()) continue;
+            const metaPath = path.join(instancesDir, entry.name, 'instance.json');
+            try {
+                const raw = await fsp.readFile(metaPath, 'utf-8');
+                const meta = JSON.parse(raw) as { port?: unknown };
+                const port = Number(meta.port);
+                if (Number.isFinite(port) && port > 0) ports.add(port);
+            } catch { /* ignore unreadable meta files */ }
+        }
+    } catch { /* ignore unreadable instances dir */ }
+    return ports;
+}
+
+async function chooseAvailablePort(session: PromptSession, promptText: string, preferredPort: number, allowOccupiedCurrent: boolean = false, reservedPorts: ReadonlySet<number> = new Set()): Promise<number> {
     const dockerPublishedPorts = listPublishedDockerHostPorts();
+    const allReserved = new Set([...dockerPublishedPorts, ...reservedPorts]);
     let suggested = preferredPort;
-    if (!allowOccupiedCurrent && !(await isPortUsable(preferredPort, '0.0.0.0', dockerPublishedPorts))) {
-        suggested = await findNextAvailablePort(preferredPort + 1, '0.0.0.0', 50, dockerPublishedPorts);
+    if (!allowOccupiedCurrent && !(await isPortUsable(preferredPort, '0.0.0.0', allReserved))) {
+        suggested = await findNextAvailablePort(preferredPort + 1, '0.0.0.0', 50, allReserved);
         console.log(`${warnLabel()} Port ${preferredPort} is already in use. A good next option is ${suggested}.`);
     }
 
@@ -1681,12 +1760,68 @@ async function chooseAvailablePort(session: PromptSession, promptText: string, p
         if (allowOccupiedCurrent && parsed === preferredPort) {
             return parsed;
         }
-        if (await isPortUsable(parsed, '0.0.0.0', dockerPublishedPorts)) {
+        if (await isPortUsable(parsed, '0.0.0.0', allReserved)) {
             return parsed;
         }
-        const next = await findNextAvailablePort(parsed + 1, '0.0.0.0', 50, dockerPublishedPorts);
+        const next = await findNextAvailablePort(parsed + 1, '0.0.0.0', 50, allReserved);
         console.log(`${warnLabel()} Port ${parsed} is already in use. Try ${next} instead.`);
         suggested = next;
+    }
+}
+
+async function syncInstanceMeta(root: string, name: string, port: number): Promise<void> {
+    const { instanceDir, envFile, metaFile } = instancePaths(root, name);
+    const existingCreatedAt = fs.existsSync(metaFile)
+        ? await fsp.readFile(metaFile, 'utf-8')
+            .then((raw) => {
+                try {
+                    const parsed = JSON.parse(raw) as Partial<InstanceMeta>;
+                    return typeof parsed.createdAt === 'string' ? parsed.createdAt : undefined;
+                } catch {
+                    return undefined;
+                }
+            })
+        : undefined;
+
+    const meta: InstanceMeta = {
+        name,
+        createdAt: existingCreatedAt ?? new Date().toISOString(),
+        port,
+        envFile,
+        instanceDir,
+    };
+    await writeJson(metaFile, meta);
+}
+
+async function assertPortAssignable(root: string, port: number, currentInstanceName?: string): Promise<void> {
+    const reservedPorts = await readAllInstancePorts(root);
+    let allowCurrentRunningPort = false;
+
+    if (currentInstanceName) {
+        const { envFile } = instancePaths(root, currentInstanceName);
+        if (fs.existsSync(envFile)) {
+            try {
+                const env = await readEnvFile(envFile);
+                const currentPort = Number.parseInt(env.IRANTI_PORT ?? '', 10);
+                if (Number.isFinite(currentPort) && currentPort > 0) {
+                    reservedPorts.delete(currentPort);
+                    if (currentPort === port) {
+                        const runtime = await readInstanceRuntimeSummary(root, currentInstanceName);
+                        allowCurrentRunningPort = runtime.running && runtime.state?.port === port;
+                    }
+                }
+            } catch {
+                // Ignore unreadable current instance env and fall back to stricter validation.
+            }
+        }
+    }
+
+    if (reservedPorts.has(port)) {
+        throw new Error(`Port ${port} is already assigned to another Iranti instance.`);
+    }
+
+    if (!allowCurrentRunningPort && !(await isPortUsable(port, '0.0.0.0', listPublishedDockerHostPorts()))) {
+        throw new Error(`Port ${port} is already in use.`);
     }
 }
 
@@ -2268,8 +2403,11 @@ function printDependencyChecks(checks: DependencyCheck[]): void {
 
 function quoteForCmd(arg: string): string {
     if (arg.length === 0) return '""';
-    if (!/[ \t"&()<>|^]/.test(arg)) return arg;
-    return `"${arg.replace(/"/g, '\\"')}"`;
+    // Escape % to prevent CMD variable expansion (%VAR%)
+    const pctEscaped = arg.replace(/%/g, '%%');
+    if (!/[ \t"&()<>|^%!]/.test(arg)) return pctEscaped;
+    // Use "" for inner double quotes (CMD convention, not Unix \")
+    return `"${pctEscaped.replace(/"/g, '""')}"`;
 }
 
 function runCommandCapture(
@@ -2373,7 +2511,11 @@ function spawnDetachedCli(args: string[], cwd?: string): number {
         env: process.env,
     });
     child.unref();
-    return child.pid ?? 0;
+    const pid = child.pid;
+    if (!pid) {
+        throw new Error(`Failed to spawn detached CLI process (executable: ${invocation.executable}). The process did not start.`);
+    }
+    return pid;
 }
 
 async function restartInstanceRuntime(args: ParsedArgs, instanceName: string, scope: Scope, root: string): Promise<{
@@ -2612,14 +2754,20 @@ function readJsonFile<T>(filePath: string): T | null {
     }
 }
 
-function httpsJson(url: string, headers: Record<string, string> = {}): Promise<any> {
+function httpsJson(url: string, headers: Record<string, string> = {}, _redirectDepth: number = 0): Promise<any> {
+    const MAX_REDIRECTS = 5;
+    const REQUEST_TIMEOUT_MS = 10_000;
     return new Promise((resolve, reject) => {
         const request = https.get(url, { headers }, (response) => {
             const statusCode = response.statusCode ?? 0;
             if (statusCode >= 300 && statusCode < 400 && response.headers.location) {
                 response.resume();
+                if (_redirectDepth >= MAX_REDIRECTS) {
+                    reject(new Error(`Too many redirects fetching ${url}`));
+                    return;
+                }
                 const redirect = new URL(response.headers.location, url).toString();
-                httpsJson(redirect, headers).then(resolve).catch(reject);
+                httpsJson(redirect, headers, _redirectDepth + 1).then(resolve).catch(reject);
                 return;
             }
             if (statusCode < 200 || statusCode >= 300) {
@@ -2640,7 +2788,7 @@ function httpsJson(url: string, headers: Record<string, string> = {}): Promise<a
                 }
             });
         });
-        request.setTimeout(5000, () => {
+        request.setTimeout(REQUEST_TIMEOUT_MS, () => {
             request.destroy(new Error(`Timed out fetching ${url}`));
         });
         request.on('error', reject);
@@ -2919,6 +3067,10 @@ function escapeForSingleQuotedPowerShell(value: string): string {
 }
 
 function resolveWindowsDetachedExecutable(executable: string): string {
+    // H-5: Validate executable name — reject empty strings or strings with shell metacharacters
+    if (!executable || /[;&|<>\n\r`$(){}[\]\\/"']/.test(executable)) {
+        throw new Error(`Invalid executable name: "${executable}"`);
+    }
     if (path.isAbsolute(executable)) {
         return executable;
     }
@@ -2976,7 +3128,20 @@ function launchDetachedWindowsPowerShellFile(scriptPath: string, cwd: string): v
     }
 }
 
+// C-5: postCommand must be a pre-escaped PowerShell snippet produced internally (never from raw user input).
+// Validate it against a strict allowlist pattern to prevent future injection if the call site changes.
+function validateDetachedPostCommand(postCommand: string): void {
+    // Allow only: alphanumeric, spaces, single-quotes, hyphens, underscores, dots, slashes,
+    // backslashes, colons, and & for PS call operator.
+    if (!/^[a-zA-Z0-9 '&_\-./:\\]+$/.test(postCommand)) {
+        throw new Error(`Unsafe characters in detached post-command. Only pre-escaped PowerShell call expressions are permitted.`);
+    }
+}
+
 function scheduleDetachedWindowsGlobalNpmUpgrade(command: UpgradeCommand, postCommand?: string): void {
+    if (postCommand !== undefined) {
+        validateDetachedPostCommand(postCommand);
+    }
     const neutralCwd = resolveDetachedUpgradeCwd(command);
     const parentPid = process.pid;
     const escapedCwd = escapeForSingleQuotedPowerShell(neutralCwd);
@@ -3921,7 +4086,10 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
         }
 
         const existingPort = Number.parseInt(existingInstance?.env.IRANTI_PORT ?? '3001', 10);
-        const port = await chooseAvailablePort(prompt, 'API port', existingPort, Boolean(existingInstance));
+        const existingInstancePorts = await readAllInstancePorts(finalRoot);
+        // Exclude the current instance's own port from the reserved set when updating
+        if (existingInstance) existingInstancePorts.delete(existingPort);
+        const port = await chooseAvailablePort(prompt, 'API port', existingPort, Boolean(existingInstance), existingInstancePorts);
 
         const dockerStatus = inspectDockerAvailability();
         const dockerAvailable = dockerStatus.daemonReachable;
@@ -4769,8 +4937,17 @@ async function createInstanceCommand(args: ParsedArgs): Promise<void> {
     }
 
     const { instanceDir, envFile, metaFile } = instancePaths(root, name);
-    if (fs.existsSync(instanceDir) && !hasFlag(args, 'force')) {
+    const instanceAlreadyExisted = fs.existsSync(instanceDir);
+    if (instanceAlreadyExisted && !hasFlag(args, 'force')) {
         throw new Error(`Instance '${name}' already exists at ${instanceDir}. Use --force to overwrite.`);
+    }
+    await assertPortAssignable(root, port, instanceAlreadyExisted ? name : undefined);
+
+    // H-7: Register rollback if the instance dir is new (so SIGINT cleans up partial state)
+    if (!instanceAlreadyExisted) {
+        pushCleanup(async () => {
+            try { await fsp.rm(instanceDir, { recursive: true, force: true }); } catch {}
+        });
     }
 
     await ensureDir(instanceDir);
@@ -4792,6 +4969,9 @@ async function createInstanceCommand(args: ParsedArgs): Promise<void> {
         instanceDir,
     };
     await writeJson(metaFile, meta);
+
+    // Instance fully created — pop the rollback so it doesn't run on normal exit
+    if (!instanceAlreadyExisted) popCleanup();
 
     console.log(sectionTitle('Instance Created'));
     console.log(`  status  ${okLabel()}`);
@@ -4911,6 +5091,23 @@ async function runInstanceCommand(args: ParsedArgs): Promise<void> {
             { instance: name, envFile }
         );
     }
+    const port = Number.parseInt(env.IRANTI_PORT ?? '3001', 10);
+    if (!Number.isFinite(port) || port <= 0) {
+        throw cliError(
+            'IRANTI_INSTANCE_PORT_INVALID',
+            `Instance '${name}' has invalid IRANTI_PORT in ${envFile}.`,
+            ['Run `iranti configure instance <name> --port <n>` to repair it.'],
+            { instance: name, envFile, port: env.IRANTI_PORT ?? null }
+        );
+    }
+    if (!(await isPortUsable(port, '0.0.0.0', listPublishedDockerHostPorts()))) {
+        throw cliError(
+            'IRANTI_INSTANCE_PORT_IN_USE',
+            `Cannot start instance '${name}' because port ${port} is already in use.`,
+            ['Run `iranti configure instance <name> --port <n>` or free the port before retrying.'],
+            { instance: name, envFile, port }
+        );
+    }
     await startInstanceRuntime(name, instanceDir, envFile, runtimeFile);
 }
 
@@ -5028,6 +5225,7 @@ async function configureInstanceCommand(args: ParsedArgs): Promise<void> {
     if (portRaw) {
         const port = Number.parseInt(portRaw, 10);
         if (!Number.isFinite(port) || port <= 0) throw new Error(`Invalid --port '${portRaw}'.`);
+        await assertPortAssignable(root, port, name);
         updates.IRANTI_PORT = String(port);
     }
 
@@ -5059,6 +5257,9 @@ async function configureInstanceCommand(args: ParsedArgs): Promise<void> {
     }
 
     await upsertEnvFile(envFile, updates);
+    if (updates.IRANTI_PORT) {
+        await syncInstanceMeta(root, name, Number.parseInt(updates.IRANTI_PORT, 10));
+    }
 
     const json = hasFlag(args, 'json');
     const result = {
@@ -5811,6 +6012,7 @@ function printHelp(): void {
     ]);
 
     printRows('Diagnostics And Operator Tools', [
+        ['iranti version', 'Print the installed CLI version and exit.'],
         ['iranti doctor [--instance <name>] [--scope user|system] [--env <file>] [--json] [--debug]', 'Run environment and runtime diagnostics.'],
         ['iranti status [--scope user|system] [--json]', 'Show runtime roots, bindings, and known instances.'],
         ['iranti upgrade [--check] [--dry-run] [--yes] [--all] [--target auto|npm-global|npm-repo|python[,python]] [--json]', 'Check or run CLI/runtime/package upgrades.'],
@@ -5913,6 +6115,11 @@ async function main(): Promise<void> {
         subcommand: args.subcommand,
         cwd: process.cwd(),
     });
+    if (args.command === '--version' || args.command === 'version' || hasFlag(args, 'version')) {
+        console.log(getPackageVersion());
+        return;
+    }
+
     if (!args.command || args.command === 'help' || args.command === '--help') {
         printHelp();
         return;
@@ -6152,5 +6359,3 @@ main().catch((err) => {
     }
     process.exit(1);
 });
-
-

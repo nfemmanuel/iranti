@@ -1,6 +1,21 @@
 import { Request, Response, NextFunction } from 'express';
 import { validateApiKey } from '../../security/apiKeys';
 
+export interface IrantiAuthContext {
+    mode: string;
+    keyId: string;
+    owner: string;
+    scopes: string[];
+}
+
+declare global {
+    namespace Express {
+        interface Request {
+            irantiAuth?: IrantiAuthContext;
+        }
+    }
+}
+
 function extractApiKey(req: Request): string | undefined {
     const fromHeader = req.headers['x-iranti-key'];
     const keyHeader = Array.isArray(fromHeader) ? fromHeader[0] : fromHeader;
@@ -27,7 +42,7 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
         return;
     }
 
-    (req as any).irantiAuth = {
+    req.irantiAuth = {
         mode: result.mode ?? 'registry',
         keyId: result.keyId ?? 'unknown',
         owner: result.owner ?? 'unknown',

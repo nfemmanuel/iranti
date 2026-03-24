@@ -18,6 +18,8 @@ import { requestContext } from '../lib/requestContext';
 import { startArchivistScheduler } from './archivistScheduler';
 import { getEscalationPaths } from '../lib/escalationPaths';
 import { completeWithFallback } from '../lib/llm';
+import { getDb } from '../library/client';
+import { getVectorBackendSingleton } from '../library/queries';
 import {
     InstanceRuntimeState,
     markRuntimeStopped,
@@ -47,6 +49,11 @@ const INSTANCE_RUNTIME_FILE = process.env.IRANTI_INSTANCE_RUNTIME_FILE?.trim()
 const INSTANCE_NAME = process.env.IRANTI_INSTANCE_NAME?.trim() || (INSTANCE_DIR ? path.basename(INSTANCE_DIR) : 'adhoc');
 const VERSION = '0.2.22';
 
+// M-18: Warn at startup if API key pepper is not set (important for production security)
+if (!process.env.IRANTI_API_KEY_PEPPER) {
+    console.warn('[security] WARNING: IRANTI_API_KEY_PEPPER is not set. API key hashes have no pepper — set this env var in production.');
+}
+
 try {
     fs.mkdirSync(path.dirname(REQUEST_LOG_FILE), { recursive: true });
 } catch (err) {
@@ -63,6 +70,7 @@ requestLogStream.on('error', (err) => {
 
 let runtimeState: InstanceRuntimeState | null = null;
 let runtimeHeartbeat: NodeJS.Timeout | null = null;
+let vectorHealthInterval: NodeJS.Timeout | null = null;
 
 function runtimeHealthPayload(): InstanceRuntimeState | null {
     return runtimeState
@@ -107,14 +115,14 @@ function logApiRequest(line: string): void {
 app.use((req, res, next) => {
     const startedAt = Date.now();
     const method = req.method;
-    const url = req.originalUrl;
+    const logPath = req.path; // M-7: log path only, not full URL (avoids logging sensitive query params)
     const requestId = req.headers['x-request-id'];
 
     res.on('finish', () => {
         const durationMs = Date.now() - startedAt;
         const rid = Array.isArray(requestId) ? requestId[0] : requestId;
         const line =
-            `${new Date().toISOString()} ${method} ${url} ` +
+            `${new Date().toISOString()} ${method} ${logPath} ` +
             `status=${res.statusCode} duration_ms=${durationMs}` +
             `${rid ? ` request_id=${rid}` : ''}`;
         logApiRequest(line);
@@ -230,12 +238,27 @@ const server = app.listen(PORT, () => {
             console.error('[runtime] failed to write runtime state:', err);
         });
     }
+
+    // M-21: Periodic vector backend health check
+    vectorHealthInterval = setInterval(() => {
+        void getVectorBackendSingleton().ping().then((ok) => {
+            if (!ok) console.error('[vector] Health check failed — vector backend is not responding.');
+        }).catch((err: unknown) => {
+            const message = err instanceof Error ? err.message : String(err);
+            console.error(`[vector] Health check error: ${message}`);
+        });
+    }, 60_000);
+    vectorHealthInterval.unref();
 });
 
 async function shutdownRuntime(signal: string): Promise<void> {
     if (runtimeHeartbeat) {
         clearInterval(runtimeHeartbeat);
         runtimeHeartbeat = null;
+    }
+    if (vectorHealthInterval) {
+        clearInterval(vectorHealthInterval);
+        vectorHealthInterval = null;
     }
     if (INSTANCE_RUNTIME_FILE) {
         try {
@@ -244,6 +267,12 @@ async function shutdownRuntime(signal: string): Promise<void> {
         } catch (err) {
             console.error('[runtime] failed to mark runtime stopped:', err);
         }
+    }
+    // M-8: Graceful DB disconnect on shutdown
+    try {
+        await getDb().$disconnect();
+    } catch (err) {
+        console.error('[db] failed to disconnect:', err);
     }
 }
 

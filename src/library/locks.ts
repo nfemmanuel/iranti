@@ -2,6 +2,7 @@ import { getDb } from './client';
 import type { PrismaClient } from '../generated/prisma/client';
 
 type TransactionClient = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+const identityQueueTails = new Map<string, Promise<void>>();
 
 function parsePositiveInt(raw: string | undefined, fallback: number): number {
     const parsed = Number.parseInt(raw ?? '', 10);
@@ -28,31 +29,62 @@ async function executeWithIdentityLock<T>(
     const prisma = getDb();
     return prisma.$transaction(async (tx) => {
         const lockKey = hashToBigInt(`${identity.entityType}||${identity.entityId}||${identity.key}`);
-        await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(${lockKey});`);
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
         return fn(tx);
     }, transactionBudget());
+}
+
+function identityQueueKey(identity: { entityType: string; entityId: string; key: string }): string {
+    return `${identity.entityType}||${identity.entityId}||${identity.key}`;
+}
+
+async function withInProcessIdentityQueue<T>(
+    identity: { entityType: string; entityId: string; key: string },
+    fn: () => Promise<T>
+): Promise<T> {
+    const queueKey = identityQueueKey(identity);
+    const previous = identityQueueTails.get(queueKey);
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    identityQueueTails.set(queueKey, current);
+
+    try {
+        if (previous) {
+            await previous;
+        }
+        return await fn();
+    } finally {
+        release();
+        if (identityQueueTails.get(queueKey) === current) {
+            identityQueueTails.delete(queueKey);
+        }
+    }
 }
 
 export async function withIdentityLock<T>(
     identity: { entityType: string; entityId: string; key: string },
     fn: (tx: TransactionClient) => Promise<T>
 ): Promise<T> {
-    try {
-        return await executeWithIdentityLock(identity, fn);
-    } catch (err) {
-        if (!isAbortedTransactionError(err)) {
-            throw err;
+    return withInProcessIdentityQueue(identity, async () => {
+        try {
+            return await executeWithIdentityLock(identity, fn);
+        } catch (err) {
+            if (!isAbortedTransactionError(err)) {
+                throw err;
+            }
+            return executeWithIdentityLock(identity, fn);
         }
-        return executeWithIdentityLock(identity, fn);
-    }
+    });
 }
 
-function hashToBigInt(s: string): string {
+function hashToBigInt(s: string): bigint {
     let hash = 1469598103934665603n;
     const prime = 1099511628211n;
     for (let i = 0; i < s.length; i++) {
         hash ^= BigInt(s.charCodeAt(i));
         hash = (hash * prime) & ((1n << 63n) - 1n);
     }
-    return hash.toString();
+    return hash;
 }

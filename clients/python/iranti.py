@@ -49,6 +49,7 @@ class WriteResult:
     action: str
     key: str
     reason: str
+    valid_from: Optional[str] = None
     resolved_entity: Optional[str] = None
     input_entity: Optional[str] = None
     http_status: Optional[int] = None
@@ -360,6 +361,7 @@ class IrantiClient:
             'action': data['action'],
             'key': data['key'],
             'reason': data['reason'],
+            'valid_from': data.get('validFrom'),
             'resolved_entity': data.get('resolvedEntity'),
             'input_entity': data.get('inputEntity'),
             'http_status': self.last_http_status,

@@ -9,11 +9,10 @@ export interface EntityTarget {
 type EntityExtractor = (req: Request) => EntityTarget | EntityTarget[];
 
 function normalizeScopes(scopes: unknown): string[] {
-    if (!Array.isArray(scopes)) return ['*'];
-    const normalized = scopes
+    if (!Array.isArray(scopes)) return [];
+    return scopes
         .map((scope) => String(scope).trim())
         .filter(Boolean);
-    return normalized.length > 0 ? normalized : ['*'];
 }
 
 function hasGlobalScope(grantedScopes: string[], requiredScope: string): boolean {
@@ -40,7 +39,7 @@ export function requireAnyScope(requiredScopes: string[]) {
     const required = requiredScopes.map((scope) => scope.trim()).filter(Boolean);
 
     return (req: Request, res: Response, next: NextFunction): void => {
-        const auth = (req as any).irantiAuth;
+        const auth = req.irantiAuth;
         if (!auth) {
             res.status(401).json({ error: 'Unauthorized. Authentication is required.' });
             return;
@@ -63,7 +62,7 @@ export function requireAnyScopeFamily(requiredScopes: string[]) {
     const required = requiredScopes.map((scope) => scope.trim()).filter(Boolean);
 
     return (req: Request, res: Response, next: NextFunction): void => {
-        const auth = (req as any).irantiAuth;
+        const auth = req.irantiAuth;
         if (!auth) {
             res.status(401).json({ error: 'Unauthorized. Authentication is required.' });
             return;
@@ -98,7 +97,7 @@ export function requireScopeFamilyByMethod(readScope: string, writeScope: string
 
 export function requireEntityScopeByMethod(readScope: string, writeScope: string, extractEntities: EntityExtractor) {
     return (req: Request, res: Response, next: NextFunction): void => {
-        const auth = (req as any).irantiAuth;
+        const auth = req.irantiAuth;
         if (!auth) {
             res.status(401).json({ error: 'Unauthorized. Authentication is required.' });
             return;
@@ -110,6 +109,11 @@ export function requireEntityScopeByMethod(readScope: string, writeScope: string
             targets = Array.isArray(extracted) ? extracted : [extracted];
         } catch (error) {
             res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+            return;
+        }
+
+        if (targets.length === 0) {
+            forbid(res, 'No entity targets to authorize against.');
             return;
         }
 
