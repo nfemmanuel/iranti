@@ -10,8 +10,8 @@
   - `clients/python/pyproject.toml`: `0.2.25`
   - `clients/python/iranti.py`: `0.2.25`
 - Reviewed release evidence:
-  - `HARDENING_0_2_X_RELEASE_RECOMMENDATION.md`
-  - `HARDENING_0_2_X_VALIDATION.md`
+  - `docs/internal/releases/0.2.26/HARDENING_0_2_X_RELEASE_RECOMMENDATION.md`
+  - `docs/internal/releases/0.2.26/HARDENING_0_2_X_VALIDATION.md`
 - Live runtime truth check:
   - `node bin\iranti.js status --root C:\Users\NF\.iranti-runtime --json`
   - confirmed stale instances were classified as `stale`, not `running`
@@ -92,9 +92,9 @@ Result: passed
 
 - `scripts/codex-setup.ts`
 - `tests/runtime-lifecycle/run_cli_process_safety_tests.ts`
-- `HARDENING_0_2_X_EXECUTION.md`
-- `HARDENING_0_2_X_VALIDATION.md`
-- `HARDENING_0_2_X_RELEASE_RECOMMENDATION.md`
+- `docs/internal/releases/0.2.26/HARDENING_0_2_X_EXECUTION.md`
+- `docs/internal/releases/0.2.26/HARDENING_0_2_X_VALIDATION.md`
+- `docs/internal/releases/0.2.26/HARDENING_0_2_X_RELEASE_RECOMMENDATION.md`
 - `package.json`
 - `package-lock.json`
 - `clients/typescript/package.json`

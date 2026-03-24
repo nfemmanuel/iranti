@@ -192,7 +192,7 @@
 - `tests/runtime-lifecycle/run_cli_process_safety_tests.ts`
 - `docs/guides/releasing.md`
 - `docs/operations/TROUBLESHOOTING.md`
-- `HARDENING_0_2_X_PLAN.md`
-- `HARDENING_0_2_X_EXECUTION.md`
-- `HARDENING_0_2_X_VALIDATION.md`
-- `HARDENING_0_2_X_RELEASE_RECOMMENDATION.md`
+- `docs/internal/releases/0.2.26/HARDENING_0_2_X_PLAN.md`
+- `docs/internal/releases/0.2.26/HARDENING_0_2_X_EXECUTION.md`
+- `docs/internal/releases/0.2.26/HARDENING_0_2_X_VALIDATION.md`
+- `docs/internal/releases/0.2.26/HARDENING_0_2_X_RELEASE_RECOMMENDATION.md`

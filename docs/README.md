@@ -67,6 +67,14 @@ These files remain useful history, but they are not the canonical product contra
 - `docs/issue_*_fix_verification.md`
 - `docs/BACKLOG.local.md`
 
+Release ledgers are also non-canonical and live under `docs/internal/releases/`, for example:
+
+- `docs/internal/releases/0.2.26/HARDENING_0_2_X_PLAN.md`
+- `docs/internal/releases/0.2.26/HARDENING_0_2_X_EXECUTION.md`
+- `docs/internal/releases/0.2.26/HARDENING_0_2_X_VALIDATION.md`
+- `docs/internal/releases/0.2.26/HARDENING_0_2_X_RELEASE_RECOMMENDATION.md`
+- `docs/internal/releases/0.2.26/RELEASE_0_2_26_EXECUTION.md`
+
 When these disagree with guides/specs/decisions/operations docs, prefer the canonical sources above.
 
 ## Architecture

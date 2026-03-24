@@ -24,6 +24,7 @@ These are the internal files most likely to stay useful during normal developmen
 
 These files preserve useful history and evidence, but they are not the canonical product contract:
 
+- [`releases/README.md`](./releases/README.md) - release-specific hardening and execution artifacts
 - [`IMPLEMENTATION_SUMMARY.md`](./IMPLEMENTATION_SUMMARY.md) - historical implementation summary
 - [`FIXES_APPLIED.md`](./FIXES_APPLIED.md) - historical fixes ledger
 - [`GOAL_VALIDATION_SUMMARY.md`](./GOAL_VALIDATION_SUMMARY.md) - early goal-validation summary
