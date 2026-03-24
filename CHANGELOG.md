@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.29 - Unreleased
+
+### Fixed
+
+- Managed `iranti run --instance ...` and restart flows now treat the instance env as authoritative for startup-critical settings instead of inheriting an ambient parent `DATABASE_URL`. Broken instance env files now fail clearly instead of accidentally booting under CI or shell-level overrides.
+- Added a runtime lifecycle regression that proves a managed restart still fails when the parent process provides an unrelated `DATABASE_URL`, preventing workflow env leakage from masking broken instance config.
+
+### Validation
+
+- Re-ran `npm run test:runtime-lifecycle` locally on Windows after restoring a clean install.
+- Reproduced the runtime lifecycle suite in a clean `node:24` container after the managed-env authority fix.
+
 ## 0.2.28 - Unreleased
 
 ### Fixed

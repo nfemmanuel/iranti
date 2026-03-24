@@ -37,7 +37,7 @@ function serverEntrypointArgs(): string[] {
     return ['-r', tsNodeRegister, serverScript];
 }
 
-function runCli(args: string[], cwd: string): CliRun {
+function runCli(args: string[], cwd: string, extraEnv: NodeJS.ProcessEnv = {}): CliRun {
     const proc = spawnSync(
         process.execPath,
         cliEntrypointArgs(args),
@@ -45,7 +45,7 @@ function runCli(args: string[], cwd: string): CliRun {
             cwd,
             encoding: 'utf8',
             env: {
-                ...buildTsNodeEnv(),
+                ...buildTsNodeEnv(extraEnv),
                 NO_COLOR: '1',
             },
         }
@@ -976,11 +976,17 @@ async function main(): Promise<void> {
             status: 'running',
             healthUrl: `http://127.0.0.1:${restartFailureRuntime.port}/health`,
         });
-        const restartFailureRun = runCli(['instance', 'restart', 'restart-failure', '--root', root], root);
+        const restartFailureRun = runCli(
+            ['instance', 'restart', 'restart-failure', '--root', root],
+            root,
+            {
+                DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/ambient_should_not_override_instance_env',
+            },
+        );
         assert.notStrictEqual(restartFailureRun.status, 0, 'restart unexpectedly reported success when the replacement runtime could not start');
         assert.match(
             `${restartFailureRun.stdout}\n${restartFailureRun.stderr}`,
-            /did not become healthy|DATABASE_URL is required/i,
+            /did not become healthy|DATABASE_URL is missing|placeholder DATABASE_URL/i,
             'restart should surface replacement-startup failure instead of pretending it succeeded'
         );
 

@@ -141,6 +141,7 @@ If the detached path still fails, check:
 - whether the configured port is already occupied
 - whether the replacement runtime can pass `/health`
 - on Unix-like systems, whether a previously killed process is lingering as a zombie under another parent process; Iranti now treats zombie PIDs as exited, but the parent process still needs to reap them
+- whether the instance `.env` actually contains `DATABASE_URL`; managed instance startup now treats the instance env as authoritative and will not silently borrow a parent-shell or CI `DATABASE_URL`
 
 Important:
 - `iranti upgrade --restart --instance <name>` only performs the restart during an executing upgrade path such as `--yes`

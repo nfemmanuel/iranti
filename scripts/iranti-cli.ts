@@ -1589,6 +1589,25 @@ function applyEnvMap(vars: Record<string, string>): void {
     }
 }
 
+const MANAGED_INSTANCE_ENV_KEYS = [
+    'DATABASE_URL',
+    'IRANTI_PORT',
+    'IRANTI_API_KEY',
+    'IRANTI_API_KEY_PEPPER',
+    'IRANTI_ALLOW_INSECURE_STARTUP',
+    'LLM_PROVIDER',
+    ...Object.values(PROVIDER_ENV_KEYS).filter((value): value is string => Boolean(value)),
+] as const;
+
+function applyManagedInstanceEnv(vars: Record<string, string>): void {
+    for (const key of MANAGED_INSTANCE_ENV_KEYS) {
+        if (!(key in vars)) {
+            delete process.env[key];
+        }
+    }
+    applyEnvMap(vars);
+}
+
 async function resolveAttendantCliTarget(args: ParsedArgs): Promise<AttendantCliTarget> {
     const explicitAgent = getFlag(args, 'agent')?.trim();
     const explicitProjectEnv = getFlag(args, 'project-env');
@@ -5669,9 +5688,7 @@ async function runInstanceCommand(args: ParsedArgs): Promise<void> {
     if (runtime.stale) {
         console.log(`${warnLabel()} Found stale runtime metadata for '${name}' at ${runtimeFile}; starting a fresh process.`);
     }
-    for (const [k, v] of Object.entries(env)) {
-        process.env[k] = v;
-    }
+    applyManagedInstanceEnv(env);
     if (!process.env.DATABASE_URL || process.env.DATABASE_URL.includes('yourpassword')) {
         throw cliError(
             'IRANTI_INSTANCE_DATABASE_PLACEHOLDER',
