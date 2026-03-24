@@ -434,7 +434,7 @@ Finish onboarding or change settings later with:
 
 ```bash
 # Provider/db updates
-iranti configure instance local --provider openai --provider-key sk-... --db-url "postgresql://postgres:realpassword@localhost:5432/iranti_local"
+iranti configure instance local --provider openai --provider-key replace-with-real-openai-key --db-url "postgresql://postgres:realpassword@localhost:5432/iranti_local"
 iranti configure instance local --interactive
 
 # Provider key shortcuts

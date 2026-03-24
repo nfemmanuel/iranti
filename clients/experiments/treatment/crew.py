@@ -41,7 +41,7 @@ from control.crew import calculate_consistency
 
 iranti = IrantiClient(
     base_url='http://localhost:3001',
-    api_key=os.getenv("IRANTI_API_KEY", "dev-benchmark-key"),
+    api_key=os.environ["IRANTI_API_KEY"],
 )
 CURRENT_ENTITY = None  # set per target
 
@@ -368,3 +368,4 @@ def run_treatment():
 
 if __name__ == "__main__":
     run_treatment()
+

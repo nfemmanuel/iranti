@@ -32,7 +32,7 @@ from clients.python.iranti import IrantiClient
 
 client = IrantiClient(
     base_url="http://localhost:3001",
-    api_key="dev_test_key_12345"
+    api_key="replace-with-real-iranti-key"
 )
 
 # Write 3 test facts
@@ -104,3 +104,4 @@ ChatGPT's response should reference the facts (Dr. Sarah Chen, December 15 deadl
 - The observe() API might not be returning facts
 - Check that facts exist in Iranti (run query_all in Python)
 - Verify entity name matches exactly: "project/test_extension"
+

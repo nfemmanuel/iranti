@@ -14,7 +14,7 @@ Add Iranti memory to Claude.ai or ChatGPT in your browser.
 
 2. **API key configured** in `.env`:
    ```
-   IRANTI_API_KEY=your_key_here
+   IRANTI_API_KEY=replace-with-real-iranti-key
    ```
 
 ---
@@ -59,7 +59,7 @@ Create a folder `iranti-extension/` with these files:
 ```javascript
 // Iranti configuration
 const IRANTI_URL = 'http://localhost:3001';
-const IRANTI_API_KEY = 'your_key_here';  // Replace with your key
+const IRANTI_API_KEY = 'replace-with-real-iranti-key';  // Replace with your key
 const AGENT_ID = 'browser_assistant';
 
 // Intercept fetch() calls
@@ -251,7 +251,7 @@ import json
 app = Flask(__name__)
 
 IRANTI_URL = "http://localhost:3001"
-IRANTI_API_KEY = "your_key_here"
+IRANTI_API_KEY = "replace-with-real-iranti-key"
 AGENT_ID = "proxy_assistant"
 
 @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
@@ -422,3 +422,4 @@ if __name__ == '__main__':
 - Build a popup UI to show injected facts
 - Add settings page for API key configuration
 - Support more LLM platforms (Gemini, Perplexity, etc.)
+

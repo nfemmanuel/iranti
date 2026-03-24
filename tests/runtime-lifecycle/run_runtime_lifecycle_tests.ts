@@ -279,6 +279,7 @@ async function main(): Promise<void> {
                     running: boolean;
                     stale: boolean;
                     classification: string;
+                    detail: string;
                     health: {
                         checked: boolean;
                         ok: boolean;
@@ -455,6 +456,37 @@ async function main(): Promise<void> {
             healthUrl: `http://127.0.0.1:${healthyRuntime.port}/health`,
         });
 
+        const stoppedButAliveDir = path.join(instancesDir, 'stopped-but-alive');
+        const stoppedButAliveEnvFile = path.join(stoppedButAliveDir, '.env');
+        writeJson(path.join(stoppedButAliveDir, 'instance.json'), {
+            name: 'stopped-but-alive',
+            createdAt: now,
+            port: healthyRuntime.port,
+            envFile: stoppedButAliveEnvFile,
+            instanceDir: stoppedButAliveDir,
+        });
+        writeText(stoppedButAliveEnvFile, [
+            'IRANTI_INSTANCE_NAME=stopped-but-alive',
+            `IRANTI_PORT=${healthyRuntime.port}`,
+            'DATABASE_URL=postgresql://postgres:postgres@localhost:5432/iranti_stopped_but_alive',
+            '',
+        ].join('\n'));
+        writeJson(path.join(stoppedButAliveDir, 'runtime.json'), {
+            instanceName: 'stopped-but-alive',
+            instanceDir: stoppedButAliveDir,
+            envFile: stoppedButAliveEnvFile,
+            runtimeFile: path.join(stoppedButAliveDir, 'runtime.json'),
+            version: '0.2.15',
+            pid: process.pid,
+            ppid: process.ppid ?? 0,
+            port: healthyRuntime.port,
+            startedAt: now,
+            lastHeartbeatAt: now,
+            updatedAt: now,
+            status: 'stopped',
+            healthUrl: `http://127.0.0.1:${healthyRuntime.port}/health`,
+        });
+
         const statusWithVariantsRun = runCli(['status', '--root', root, '--json'], repoRoot);
         assert.strictEqual(statusWithVariantsRun.status, 0, `status with variant instances failed:\n${statusWithVariantsRun.stdout}\n${statusWithVariantsRun.stderr}`);
         const statusWithVariants = JSON.parse(statusWithVariantsRun.stdout.trim()) as typeof statusPayload;
@@ -464,18 +496,22 @@ async function main(): Promise<void> {
         const invalidStatus = statusWithVariants.instances.find((instance) => instance.name === 'invalid-config');
         const misownedConfigStatus = statusWithVariants.instances.find((instance) => instance.name === 'misowned-config');
         const misownedRuntimeStatus = statusWithVariants.instances.find((instance) => instance.name === 'misowned-runtime');
+        const stoppedButAliveStatus = statusWithVariants.instances.find((instance) => instance.name === 'stopped-but-alive');
         assert.ok(healthyStatus, 'Expected healthy instance in status payload.');
         assert.ok(unhealthyStatus, 'Expected unhealthy instance in status payload.');
         assert.ok(partialStatus, 'Expected partial instance in status payload.');
         assert.ok(invalidStatus, 'Expected invalid-config instance in status payload.');
         assert.ok(misownedConfigStatus, 'Expected misowned-config instance in status payload.');
         assert.ok(misownedRuntimeStatus, 'Expected misowned-runtime instance in status payload.');
+        assert.ok(stoppedButAliveStatus, 'Expected stopped-but-alive instance in status payload.');
         assert.strictEqual(healthyStatus?.runtime.classification, 'running');
         assert.strictEqual(healthyStatus?.runtime.health.ok, true);
         assert.strictEqual(unhealthyStatus?.runtime.classification, 'unhealthy');
         assert.strictEqual(unhealthyStatus?.runtime.running, false);
         assert.strictEqual(unhealthyStatus?.runtime.health.checked, true);
         assert.strictEqual(unhealthyStatus?.runtime.health.ok, false);
+        assert.strictEqual(stoppedButAliveStatus?.runtime.classification, 'invalid');
+        assert.match(stoppedButAliveStatus?.runtime.detail ?? '', /metadata says stopped but pid=.*alive/i);
         assert.strictEqual(partialStatus?.config.classification, 'partial');
         assert.strictEqual(invalidStatus?.config.classification, 'invalid');
         assert.strictEqual(misownedConfigStatus?.config.classification, 'invalid');
@@ -735,6 +771,53 @@ async function main(): Promise<void> {
             /IRANTI_API_KEY_PEPPER.*Refusing to start in production/i,
             'server should fail fast in production when API key pepper is missing'
         );
+
+        const prodInvalidAuthority = spawnSync(
+            process.execPath,
+            ['-r', 'ts-node/register/transpile-only', serverScript],
+            {
+                cwd: repoRoot,
+                encoding: 'utf8',
+                env: {
+                    ...process.env,
+                    DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/iranti_runtime_guard',
+                    NODE_ENV: 'production',
+                    IRANTI_PORT: '3008',
+                    NO_COLOR: '1',
+                    IRANTI_API_KEY_PEPPER: 'x'.repeat(32),
+                    IRANTI_INSTANCE_DIR: instanceDir,
+                    IRANTI_INSTANCE_RUNTIME_FILE: path.join(root, 'foreign', 'runtime.json'),
+                },
+            }
+        );
+        assert.notStrictEqual(prodInvalidAuthority.status, 0, 'server unexpectedly started with invalid managed runtime authority');
+        assert.match(
+            `${prodInvalidAuthority.stdout}\n${prodInvalidAuthority.stderr}`,
+            /managed runtime authority is invalid/i,
+            'server should fail fast when managed runtime authority is invalid'
+        );
+
+        const doctorProdEnvFile = path.join(root, 'doctor-production.env');
+        writeText(doctorProdEnvFile, [
+            'NODE_ENV=production',
+            'DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:1/iranti_doctor_guard',
+            'LLM_PROVIDER=mock',
+            'IRANTI_API_KEY_PEPPER=',
+            `IRANTI_INSTANCE_DIR=${instanceDir}`,
+            `IRANTI_INSTANCE_RUNTIME_FILE=${path.join(root, 'foreign', 'runtime.json')}`,
+            '',
+        ].join('\n'));
+        const doctorProdRun = runCli(['doctor', '--env', doctorProdEnvFile, '--json'], repoRoot);
+        assert.notStrictEqual(doctorProdRun.status, 0, 'doctor should fail for production env with missing pepper and invalid runtime authority');
+        const doctorProdPayload = JSON.parse(doctorProdRun.stdout.trim()) as {
+            checks: Array<{ name: string; status: string; detail: string }>;
+        };
+        const startupSecurityCheck = doctorProdPayload.checks.find((check) => check.name === 'startup security');
+        const runtimeAuthorityCheck = doctorProdPayload.checks.find((check) => check.name === 'runtime authority');
+        assert.strictEqual(startupSecurityCheck?.status, 'fail');
+        assert.match(startupSecurityCheck?.detail ?? '', /refuse to boot/i);
+        assert.strictEqual(runtimeAuthorityCheck?.status, 'fail');
+        assert.match(runtimeAuthorityCheck?.detail ?? '', /does not match/i);
 
         const publishedPorts = parsePublishedDockerHostPorts([
             '0.0.0.0:5435->5432/tcp, [::]:5435->5432/tcp',

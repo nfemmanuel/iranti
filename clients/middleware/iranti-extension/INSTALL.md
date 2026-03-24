@@ -73,7 +73,7 @@ Extension is now installed!
 - Check console for `[Iranti] Error:` messages
 - Verify fact exists: 
   ```bash
-  curl -H "X-Iranti-Key: dev_test_key_12345" http://localhost:3001/kb/query/project/test_demo
+  curl -H "X-Iranti-Key: replace-with-real-iranti-key" http://localhost:3001/kb/query/project/test_demo
   ```
 
 ### CORS errors
@@ -86,7 +86,7 @@ To change settings, edit `content.js`:
 
 ```javascript
 const IRANTI_URL = 'http://localhost:3001';  // Change if server is elsewhere
-const IRANTI_API_KEY = 'dev_test_key_12345'; // Your API key from .env
+const IRANTI_API_KEY = 'replace-with-real-iranti-key'; // Your API key from .env
 const AGENT_ID = 'browser_assistant';        // Unique ID for browser agent
 ```
 
@@ -107,3 +107,4 @@ You see the normal response, but Claude/ChatGPT now has access to facts from Ira
 - Try on chat.openai.com (works there too)
 - Check console to see when facts are injected
 - Build agents that write facts - browser will read them automatically
+

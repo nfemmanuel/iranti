@@ -56,7 +56,7 @@ def print_observe_trace(label: str, result: dict, context: str) -> None:
 
 client = IrantiClient(
     base_url=os.getenv("IRANTI_URL", "http://localhost:3001"),
-    api_key=os.getenv("IRANTI_API_KEY", "dev-benchmark-key"),
+    api_key=os.environ["IRANTI_API_KEY"],
 )
 
 ENTITY = f"project/neural_lattice_{int(time.time())}"
@@ -167,4 +167,5 @@ if overall:
     print("\nConclusion: observe() correctly injects absent facts and does not re-inject present facts.")
 else:
     print("\nConclusion: observe() failed presence detection and/or key coverage.")
+
 

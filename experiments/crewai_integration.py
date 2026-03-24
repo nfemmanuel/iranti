@@ -14,9 +14,16 @@ from typing import List, Dict, Any
 import concurrent.futures
 import requests
 
+IRANTI_API_KEY = os.getenv("IRANTI_API_KEY", "").strip()
+if not IRANTI_API_KEY:
+    raise SystemExit(
+        "Missing IRANTI_API_KEY. "
+        "Set a real Iranti key before running the CrewAI integration experiment."
+    )
+
 # Set environment variables for CrewAI to use Iranti API
 os.environ["OPENAI_API_BASE"] = "http://localhost:3001/v1"
-os.environ["OPENAI_API_KEY"] = "dev_test_key_12345"
+os.environ["OPENAI_API_KEY"] = IRANTI_API_KEY
 os.environ["OPENAI_MODEL_NAME"] = "mock"
 
 try:
@@ -29,7 +36,7 @@ except ImportError:
 
 class IrantiLLM:
     """Custom LLM wrapper for Iranti API"""
-    def __init__(self, base_url: str = "http://localhost:3001", api_key: str = "dev_test_key_12345"):
+    def __init__(self, base_url: str = "http://localhost:3001", api_key: str = IRANTI_API_KEY):
         self.base_url = base_url
         self.api_key = api_key
         self.headers = {
@@ -56,7 +63,7 @@ def create_research_agent(agent_id: str, use_iranti_memory: bool = False) -> Age
     llm = LLM(
         model="mock",
         base_url="http://localhost:3001/v1",
-        api_key="dev_test_key_12345"
+        api_key=IRANTI_API_KEY
     )
     
     role = "Research Specialist"

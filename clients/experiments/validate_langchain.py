@@ -20,7 +20,7 @@ load_dotenv()
 # Configuration
 ENTITY = "project/stellar_drift"
 IRANTI_URL = "http://localhost:3001"
-IRANTI_API_KEY = os.getenv("IRANTI_API_KEY", "dev-benchmark-key")
+IRANTI_API_KEY = os.environ["IRANTI_API_KEY"]
 
 # Initialize Iranti
 iranti = IrantiClient(base_url=IRANTI_URL, api_key=IRANTI_API_KEY)
@@ -177,3 +177,4 @@ def run_experiment():
 if __name__ == "__main__":
     success = run_experiment()
     exit(0 if success else 1)
+

@@ -14,7 +14,7 @@ from python.iranti import IrantiClient
 
 
 BASE_URL = os.getenv("IRANTI_URL", "http://localhost:3001")
-API_KEY = os.getenv("IRANTI_API_KEY", "dev-benchmark-key")
+API_KEY = os.environ["IRANTI_API_KEY"]
 AGENT_ID = "demo_memory_agent"
 
 
@@ -102,3 +102,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

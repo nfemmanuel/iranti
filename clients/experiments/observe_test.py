@@ -31,7 +31,7 @@ from python.iranti import IrantiClient, IrantiError
 # ─── Config ───────────────────────────────────────────────────────────────────
 
 BASE_URL = os.getenv('IRANTI_URL', 'http://localhost:3001')
-API_KEY  = os.getenv('IRANTI_API_KEY', 'dev-benchmark-key')
+API_KEY  = os.environ["IRANTI_API_KEY"]
 
 # Fictional entity — no LLM prior knowledge can contaminate results
 ENTITY      = "project/aurora_station"
@@ -248,3 +248,4 @@ def run():
 
 if __name__ == "__main__":
     run()
+

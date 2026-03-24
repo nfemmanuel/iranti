@@ -45,7 +45,7 @@ Tech Stack: {NEXUS_FACTS['tech_stack']}
 All details are fictional and not in any LLM training data.
 """
 
-iranti = IrantiClient(base_url='http://localhost:3001', api_key=os.getenv("IRANTI_API_KEY", "dev-benchmark-key"))
+iranti = IrantiClient(base_url='http://localhost:3001', api_key=os.environ["IRANTI_API_KEY"])
 
 @tool("Write finding to shared memory")
 def write_finding(key: str, value: str, summary: str, confidence: int) -> str:
@@ -199,3 +199,4 @@ def run():
 
 if __name__ == "__main__":
     run()
+

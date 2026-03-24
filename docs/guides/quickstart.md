@@ -40,7 +40,7 @@ LLM_PROVIDER=mock
 
 # For production, use a real provider:
 # LLM_PROVIDER=gemini
-# GEMINI_API_KEY=your_key_here
+# GEMINI_API_KEY=replace-with-real-gemini-key
 
 # Optional runtime hygiene:
 # IRANTI_ESCALATION_DIR=C:/Users/<you>/.iranti/escalation
@@ -150,7 +150,7 @@ Finish setup without hand-editing the env file:
 
 ```bash
 # Switch to a real provider later if needed
-iranti configure instance local --provider openai --provider-key sk-... --db-url "postgresql://postgres:realpassword@localhost:5432/iranti_local"
+iranti configure instance local --provider openai --provider-key replace-with-real-openai-key --db-url "postgresql://postgres:realpassword@localhost:5432/iranti_local"
 iranti configure instance local --interactive
 
 # Manage provider keys directly
@@ -582,3 +582,4 @@ You now have a working Iranti installation. Try:
 4. **Run maintenance** — Call `runMaintenance()` to see the Archivist in action
 
 See the [full SDK documentation](../../README.md#usage) for all available methods.
+

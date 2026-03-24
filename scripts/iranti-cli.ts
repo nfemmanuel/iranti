@@ -11,25 +11,17 @@ import net from 'net';
 import { disconnectDb, initDb } from '../src/library/client';
 import { createOrRotateApiKey, formatApiKeyToken, generateApiKeySecret, listApiKeys, revokeApiKey } from '../src/security/apiKeys';
 import {
-    AUTH_HELP,
-    COMMON_FLOWS,
-    CONFIGURATION_HELP,
-    CONFIGURE_HELP,
-    DIAGNOSTICS_HELP,
-    HelpEntry,
-    INSTANCE_HELP,
-    INTEGRATE_HELP,
-    INTEGRATIONS_HELP,
-    KEY_HELP,
-    OptionGuideEntry,
-    PROVIDER_KEY_HELP,
-    SETUP_AND_RUNTIME_HELP,
-    SETUP_COMMAND_HELP,
-    SETUP_OPTION_GUIDE,
-    START_HERE_HELP,
-    UNINSTALL_HELP,
-    UNINSTALL_OPTION_GUIDE,
-} from '../src/lib/cliHelpCatalog';
+    printAuthHelp as renderAuthHelp,
+    printChoiceGuide as renderChoiceGuide,
+    printConfigureHelp as renderConfigureHelp,
+    printInstanceHelp as renderInstanceHelp,
+    printIntegrateHelp as renderIntegrateHelp,
+    printMainHelp as renderMainHelp,
+    printProviderKeyHelp as renderProviderKeyHelp,
+    printSetupHelp as renderSetupHelp,
+    printUninstallHelp as renderUninstallHelp,
+    printWizardNotes as renderWizardNotes,
+} from '../src/lib/cliHelpRenderer';
 import { getEscalationPaths } from '../src/lib/escalationPaths';
 import { parseDockerContainerNames, parsePublishedDockerHostPorts } from '../src/lib/dockerCliParsing';
 import { resolveCommandInvocation, spawnResolved, spawnSyncResolved } from '../src/lib/commandInvocation';
@@ -38,7 +30,7 @@ import { writeTextFileLocked } from '../src/lib/fileMutation';
 import { resolveInteractive } from '../src/resolutionist';
 import { startChatSession } from '../src/chat';
 import { createVectorBackend, resolveVectorBackendName } from '../src/library/backends';
-import { InstanceRuntimeState, RuntimeInspection, inspectRuntimeState, isPidRunning, waitForPidExit } from '../src/lib/runtimeLifecycle';
+import { InstanceRuntimeState, RuntimeInspection, inspectRuntimeState, isPidRunning, resolveRuntimeAuthorityFromEnv, waitForPidExit } from '../src/lib/runtimeLifecycle';
 import { Iranti } from '../src/sdk';
 import { auditVectorIndexConsistency } from '../src/library/queries';
 
@@ -2507,6 +2499,63 @@ function detectProviderKey(provider: string | undefined, env: Record<string, str
         };
 }
 
+function detectStartupSecurityPosture(env: Record<string, string>, prefix = ''): DoctorCheck {
+    const productionLike = (env.NODE_ENV ?? '').trim().toLowerCase() === 'production';
+    const allowInsecure = (env.IRANTI_ALLOW_INSECURE_STARTUP ?? '').trim().toLowerCase() === 'true';
+    const pepper = (env.IRANTI_API_KEY_PEPPER ?? '').trim();
+
+    if (!pepper) {
+        return {
+            name: `${prefix}startup security`,
+            status: productionLike && !allowInsecure ? 'fail' : 'warn',
+            detail: productionLike && !allowInsecure
+                ? 'IRANTI_API_KEY_PEPPER is missing. Production startup will refuse to boot.'
+                : 'IRANTI_API_KEY_PEPPER is missing. Local startup is allowed, but production startup will refuse to boot without an override.',
+        };
+    }
+
+    if (pepper.length < 32) {
+        return {
+            name: `${prefix}startup security`,
+            status: productionLike && !allowInsecure ? 'fail' : 'warn',
+            detail: productionLike && !allowInsecure
+                ? `IRANTI_API_KEY_PEPPER is too short (${pepper.length}). Production startup will refuse to boot.`
+                : `IRANTI_API_KEY_PEPPER is too short (${pepper.length}). Operator trust is degraded even though startup may continue locally.`,
+        };
+    }
+
+    if (productionLike && allowInsecure) {
+        return {
+            name: `${prefix}startup security`,
+            status: 'warn',
+            detail: 'Production startup is explicitly allowing insecure startup via IRANTI_ALLOW_INSECURE_STARTUP=true.',
+        };
+    }
+
+    return {
+        name: `${prefix}startup security`,
+        status: 'pass',
+        detail: 'Startup security invariants are satisfied.',
+    };
+}
+
+function detectRuntimeAuthorityCheck(env: Record<string, string>, prefix = ''): DoctorCheck | null {
+    const hasRuntimeSignals = [
+        env.IRANTI_INSTANCE_DIR,
+        env.IRANTI_INSTANCE_RUNTIME_FILE,
+        env.IRANTI_ESCALATION_DIR,
+        env.IRANTI_REQUEST_LOG_FILE,
+    ].some((value) => typeof value === 'string' && value.trim().length > 0);
+    if (!hasRuntimeSignals) return null;
+
+    const authority = resolveRuntimeAuthorityFromEnv(env);
+    return {
+        name: `${prefix}runtime authority`,
+        status: authority.source === 'invalid' ? 'fail' : authority.managed ? 'pass' : 'warn',
+        detail: authority.detail,
+    };
+}
+
 function summarizeStatus(checks: DoctorCheck[]): DoctorStatus {
     if (checks.some((check) => check.status === 'fail')) return 'fail';
     if (checks.some((check) => check.status === 'warn')) return 'warn';
@@ -4768,6 +4817,9 @@ async function doctorCommand(args: ParsedArgs): Promise<void> {
     const pushEnvironmentChecks = async (env: Record<string, string>, prefix = ''): Promise<void> => {
         const databaseUrl = env.DATABASE_URL;
         let databaseInitializedForDoctor = false;
+        checks.push(detectStartupSecurityPosture(env, prefix));
+        const runtimeAuthorityCheck = detectRuntimeAuthorityCheck(env, prefix);
+        if (runtimeAuthorityCheck) checks.push(runtimeAuthorityCheck);
         checks.push(detectPlaceholder(databaseUrl)
             ? {
                 name: `${prefix}database configuration`,
@@ -4824,7 +4876,7 @@ async function doctorCommand(args: ParsedArgs): Promise<void> {
             const url = vectorBackendUrl(backendName, env);
             checks.push({
                 name: `${prefix}vector backend`,
-                status: reachable ? 'pass' : 'warn',
+                status: reachable ? 'pass' : 'fail',
                 detail: url
                     ? `${backendName} (${url}) is ${reachable ? 'reachable' : 'unreachable'}`
                     : `${backendName} is ${reachable ? 'reachable' : 'unreachable'}`,
@@ -4964,6 +5016,9 @@ async function doctorCommand(args: ParsedArgs): Promise<void> {
     };
 
     if (json) {
+        if (result.status !== 'pass') {
+            process.exitCode = 1;
+        }
         console.log(JSON.stringify(result, null, 2));
         return;
     }
@@ -5570,6 +5625,17 @@ async function runInstanceCommand(args: ParsedArgs): Promise<void> {
             `Instance '${name}' is already running on pid ${runtime.state?.pid ?? '(unknown)'}.`,
             [`Run \`iranti instance restart ${name}\` to restart the live process, or stop the existing process first.`],
             { instance: name, pid: runtime.state?.pid ?? null, runtimeFile }
+        );
+    }
+    if (runtime.classification === 'invalid') {
+        throw cliError(
+            'IRANTI_INSTANCE_RUNTIME_INVALID',
+            `Instance '${name}' has invalid runtime metadata at ${runtimeFile}: ${runtime.detail}.`,
+            [
+                `Inspect ${runtimeFile} and remove foreign or malformed runtime metadata before retrying.`,
+                `Run \`iranti status --json --root ${root}\` to confirm the instance classification.`,
+            ],
+            { instance: name, runtimeFile, detail: runtime.detail }
         );
     }
     if (runtime.stale) {
@@ -6503,113 +6569,44 @@ async function chatCommand(args: ParsedArgs): Promise<void> {
     });
 }
 
-function printHelpEntries(title: string, entries: HelpEntry[]): void {
-    console.log(sectionTitle(title));
-    for (const entry of entries) {
-        console.log(`  ${commandText(entry.command)}`);
-        console.log(`    What it does: ${entry.description}`);
-        if (entry.useWhen) {
-            console.log(`    Use this when: ${entry.useWhen}`);
-        }
-        if (entry.scenario) {
-            console.log(`    Typical scenario: ${entry.scenario}`);
-        }
-    }
-    console.log('');
-}
-
-function printOptionGuide(title: string, entries: OptionGuideEntry[]): void {
-    console.log(sectionTitle(title));
-    for (const entry of entries) {
-        console.log(`  ${commandText(entry.option)}`);
-        console.log(`    What it means: ${entry.meaning}`);
-        console.log(`    Use this when: ${entry.useWhen}`);
-    }
-    console.log('');
+function printHelp(): void {
+    renderMainHelp({ sectionTitle, commandText });
 }
 
 function printChoiceGuide(title: string, entries: Array<{ choice: string; meaning: string; useWhen: string }>): void {
-    console.log(sectionTitle(title));
-    for (const entry of entries) {
-        console.log(`  ${commandText(entry.choice)}`);
-        console.log(`    What it means: ${entry.meaning}`);
-        console.log(`    Use this when: ${entry.useWhen}`);
-    }
-    console.log('');
+    renderChoiceGuide({ sectionTitle, commandText }, title, entries);
 }
 
 function printWizardNotes(title: string, lines: string[]): void {
-    console.log(sectionTitle(title));
-    for (const line of lines) {
-        console.log(`  - ${line}`);
-    }
-    console.log('');
-}
-
-function printHelp(): void {
-    console.log(sectionTitle('Iranti CLI'));
-    console.log('Memory infrastructure for multi-agent systems.');
-    console.log('Most instance-aware commands also accept --root <path> in addition to --scope.');
-    console.log('Global debugging flags: --debug for extra diagnostics, --verbose for subprocess trace output.');
-    console.log('');
-
-    console.log('Run `iranti <command> --help` when you want the flag-by-flag version of this guidance.');
-    console.log('');
-
-    printHelpEntries('Start Here', START_HERE_HELP);
-    printHelpEntries('Setup And Runtime', SETUP_AND_RUNTIME_HELP);
-    printHelpEntries('Configuration', CONFIGURATION_HELP);
-    printHelpEntries('Keys', KEY_HELP);
-    printHelpEntries('Diagnostics And Operator Tools', DIAGNOSTICS_HELP);
-    printHelpEntries('Integrations', INTEGRATIONS_HELP);
-
-    console.log(sectionTitle('Common Flows'));
-    console.log(`  ${commandText('First install')}`);
-    for (const command of COMMON_FLOWS.firstInstall) {
-        console.log(`    ${commandText(command)}`);
-    }
-    console.log('');
-    console.log(`  ${commandText('Bind a project')}`);
-    for (const command of COMMON_FLOWS.bindProject) {
-        console.log(`    ${commandText(command)}`);
-    }
-    console.log('');
-    console.log(`  ${commandText('Work with keys')}`);
-    for (const command of COMMON_FLOWS.workWithKeys) {
-        console.log(`    ${commandText(command)}`);
-    }
+    renderWizardNotes({ sectionTitle, commandText }, title, lines);
 }
 
 function printSetupHelp(): void {
-    printHelpEntries('Setup Command', SETUP_COMMAND_HELP);
-    printOptionGuide('Setup Option Guide', SETUP_OPTION_GUIDE);
+    renderSetupHelp({ sectionTitle, commandText });
 }
 
 function printUninstallHelp(): void {
-    printHelpEntries('Uninstall Command', UNINSTALL_HELP);
-    printOptionGuide('Uninstall Option Guide', UNINSTALL_OPTION_GUIDE);
+    renderUninstallHelp({ sectionTitle, commandText });
 }
 
 function printInstanceHelp(): void {
-    printHelpEntries('Instance Commands', INSTANCE_HELP);
+    renderInstanceHelp({ sectionTitle, commandText });
 }
 
 function printConfigureHelp(): void {
-    printHelpEntries('Configure Commands', CONFIGURE_HELP);
+    renderConfigureHelp({ sectionTitle, commandText });
 }
 
 function printAuthHelp(): void {
-    printHelpEntries('Auth Commands', AUTH_HELP);
+    renderAuthHelp({ sectionTitle, commandText });
 }
 
 function printIntegrateHelp(): void {
-    printHelpEntries('Integrations', INTEGRATE_HELP);
+    renderIntegrateHelp({ sectionTitle, commandText });
 }
 
 function printProviderKeyHelp(): void {
-    printHelpEntries('Provider Key Commands', PROVIDER_KEY_HELP);
-    console.log('  Target either an instance env or a project binding. If neither is supplied, the CLI will try the current project first.');
-    console.log('  Use instance targeting for shared runtime configuration. Use project targeting when the command should follow a specific `.env.iranti` binding.');
+    renderProviderKeyHelp({ sectionTitle, commandText });
 }
 
 async function main(): Promise<void> {

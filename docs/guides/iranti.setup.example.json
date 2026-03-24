@@ -9,8 +9,8 @@
   "provider": "openai",
   "bootstrapDatabase": true,
   "providerKeys": {
-    "openai": "sk-your-openai-key",
-    "claude": "sk-ant-your-claude-key"
+    "openai": "replace-with-real-openai-key",
+    "claude": "replace-with-real-anthropic-key"
   },
   "projects": [
     {
@@ -24,3 +24,4 @@
   "codex": false,
   "codexAgent": "codex_code"
 }
+

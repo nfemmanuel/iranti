@@ -33,7 +33,7 @@ Then send a message in ChatGPT and watch the console.
 ```javascript
 (async function() {
   const IRANTI_URL = 'http://localhost:3001';
-  const IRANTI_API_KEY = 'dev_test_key_12345';
+  const IRANTI_API_KEY = 'replace-with-real-iranti-key';
   
   console.log('[Iranti] Installing memory interceptor...');
   
@@ -106,3 +106,4 @@ Then send a message in ChatGPT and watch the console.
 7. Watch console for `[Iranti] ChatGPT API call detected`
 
 This works because you're running it directly in the page context, not as a content script.
+

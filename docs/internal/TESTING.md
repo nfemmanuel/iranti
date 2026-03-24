@@ -392,7 +392,7 @@ Notes: None
 ### "API connection error"
 - Check API server is running: `npm run api`
 - Check port in `.env`: `IRANTI_PORT=3001`
-- Check API key matches: `IRANTI_API_KEY=dev_test_key_12345`
+- Check API key matches: `IRANTI_API_KEY=replace-with-real-iranti-key`
 
 ### "Control scores above 0"
 - Entity is not fictional enough (LLM has prior knowledge)
@@ -426,3 +426,4 @@ Notes: None
 
 **Last Updated**: 2026-02-28  
 **Maintainer**: Iranti Core Team
+

@@ -4,7 +4,7 @@
   script.textContent = `
     (function() {
       const IRANTI_URL = 'http://localhost:3001';
-      const IRANTI_API_KEY = 'dev_test_key_12345';
+      const IRANTI_API_KEY = 'replace-with-real-iranti-key';
       const AGENT_ID = 'browser_assistant';
       
       console.log('[Iranti] Loading on', window.location.hostname);
@@ -24,6 +24,11 @@
 
       async function handleClaudeRequest(url, options) {
         try {
+          if (!IRANTI_API_KEY || IRANTI_API_KEY === 'replace-with-real-iranti-key') {
+            console.error('[Iranti] Configure a real IRANTI_API_KEY in content.js before using the extension.');
+            return originalFetch(url, options);
+          }
+
           const body = JSON.parse(options.body);
           const prompt = body.prompt;
           

@@ -363,14 +363,17 @@ export async function inspectRuntimeState(runtimeFile: string): Promise<RuntimeI
         ? await probeRuntimeHealth(healthUrl)
         : { ok: false, detail: stale ? 'process not running' : 'runtime stopped' };
     const healthSource: RuntimeHealthProbe['source'] = state.healthUrl?.trim() ? 'health-url' : processAlive ? 'port-health' : 'none';
-    const running = processAlive && healthResult.ok;
-    const classification: RuntimeOperatorClassification = running
-        ? 'running'
-        : stale
-            ? 'stale'
-            : processAlive
-                ? 'unhealthy'
-                : 'stopped';
+    const stoppedButAlive = processAlive && state.status === 'stopped';
+    const running = processAlive && healthResult.ok && !stoppedButAlive;
+    const classification: RuntimeOperatorClassification = stoppedButAlive
+        ? 'invalid'
+        : running
+            ? 'running'
+            : stale
+                ? 'stale'
+                : processAlive
+                    ? 'unhealthy'
+                    : 'stopped';
 
     return {
         state,
@@ -378,13 +381,15 @@ export async function inspectRuntimeState(runtimeFile: string): Promise<RuntimeI
         running,
         stale,
         classification,
-        detail: running
-            ? `pid=${state.pid} version=${state.version}`
-            : stale
-                ? `last_pid=${state.pid} version=${state.version}`
-                : processAlive
-                    ? `pid=${state.pid} version=${state.version} health=${healthResult.detail}`
-                    : `version=${state.version}`,
+        detail: stoppedButAlive
+            ? `runtime metadata says stopped but pid=${state.pid} is alive (health=${healthResult.detail})`
+            : running
+                ? `pid=${state.pid} version=${state.version}`
+                : stale
+                    ? `last_pid=${state.pid} version=${state.version}`
+                    : processAlive
+                        ? `pid=${state.pid} version=${state.version} health=${healthResult.detail}`
+                        : `version=${state.version}`,
         health: {
             checked: processAlive,
             ok: running,

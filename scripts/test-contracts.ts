@@ -18,6 +18,45 @@ function readFile(relativePath: string): string {
     return fs.readFileSync(projectPath(relativePath), 'utf8');
 }
 
+function collectFiles(relativePath: string): string[] {
+    const root = projectPath(relativePath);
+    if (!fs.existsSync(root)) {
+        return [];
+    }
+
+    const results: string[] = [];
+    const stack: string[] = [root];
+
+    while (stack.length > 0) {
+        const current = stack.pop()!;
+        const stat = fs.statSync(current);
+        if (stat.isDirectory()) {
+            for (const entry of fs.readdirSync(current)) {
+                if (
+                    entry === 'node_modules' ||
+                    entry === 'dist' ||
+                    entry === '.git' ||
+                    entry === '__pycache__' ||
+                    entry === 'venv' ||
+                    entry === '.venv' ||
+                    entry === '.venv-smoke' ||
+                    entry === 'site-packages' ||
+                    entry.endsWith('.egg-info') ||
+                    entry.endsWith('.dist-info')
+                ) {
+                    continue;
+                }
+                stack.push(path.join(current, entry));
+            }
+            continue;
+        }
+
+        results.push(path.relative(process.cwd(), current).replace(/\\/g, '/'));
+    }
+
+    return results;
+}
+
 function pass(name: string): void {
     results.push({ name, passed: true });
 }
@@ -258,9 +297,11 @@ function assertApiDocsContract(): void {
 function assertCliGuideContracts(): void {
     const cliFilePath = 'scripts/iranti-cli.ts';
     const cliContent = readFile(cliFilePath);
+    const helpRendererPath = 'src/lib/cliHelpRenderer.ts';
+    const helpRendererContent = readFile(helpRendererPath);
     expectIncludes(cliFilePath, cliContent, 'iranti handoff task/<task_id>', 'CLI help includes iranti handoff');
-    expectIncludes(cliFilePath, cliContent, 'Use this when:', 'CLI help source includes use-case guidance');
-    expectIncludes(cliFilePath, cliContent, 'Setup Option Guide', 'Setup help includes option guidance section');
+    expectIncludes(helpRendererPath, helpRendererContent, 'Use this when:', 'CLI help source includes use-case guidance');
+    expectIncludes(helpRendererPath, helpRendererContent, 'Setup Option Guide', 'Setup help includes option guidance section');
     expectIncludes(cliFilePath, cliContent, 'Runtime Mode Choices', 'Setup wizard source includes runtime mode guidance');
     expectIncludes(cliFilePath, cliContent, 'Project Binding', 'Setup wizard source includes project binding guidance');
     expectIncludes(cliFilePath, cliContent, 'Interactive Instance Configuration', 'Configure instance source includes interactive guidance');
@@ -300,6 +341,60 @@ function assertCliGuideContracts(): void {
     const readmePath = 'README.md';
     const readmeContent = readFile(readmePath);
     expectIncludes(readmePath, readmeContent, 'Operator-facing CLI help now includes short "what it does" and "use this when" guidance', 'README points users to richer CLI help');
+}
+
+function assertPlaceholderHygiene(): void {
+    const bannedTokens = [
+        ['your', 'key', 'here'].join('_'),
+        ['your', 'openai', 'key'].join('_'),
+        ['dev', 'test', 'key', '12345'].join('_'),
+        ['dev', 'benchmark', 'key'].join('-'),
+    ];
+    const bannedPatterns = [
+        /\bsk-(?:ant-)?\.\.\.\b/,
+        /\bsk-your-openai-key\b/,
+        /\bsk-ant-your-claude-key\b/,
+    ];
+    const scanTargets = [
+        'README.md',
+        ...collectFiles('docs'),
+        ...collectFiles('tests'),
+        ...collectFiles('clients'),
+        ...collectFiles('scripts'),
+        ...collectFiles('experiments'),
+    ].filter((filePath) => filePath !== 'scripts/test-contracts.ts' && filePath !== 'scripts/iranti-cli.ts');
+    const violations: string[] = [];
+
+    for (const filePath of new Set(scanTargets)) {
+        const ext = path.extname(filePath).toLowerCase();
+        if (ext && !['.md', '.py', '.ts', '.js', '.json', '.toml', '.txt', '.yml', '.yaml'].includes(ext)) {
+            continue;
+        }
+
+        const content = readFile(filePath);
+        for (const token of bannedTokens) {
+            if (content.includes(token)) {
+                violations.push(`${filePath} contains banned placeholder token: ${token}`);
+            }
+        }
+        for (const pattern of bannedPatterns) {
+            if (pattern.test(content)) {
+                violations.push(`${filePath} matches banned placeholder pattern: ${pattern}`);
+            }
+        }
+    }
+
+    if (violations.length === 0) {
+        pass('Docs and examples avoid risky placeholder tokens');
+    } else {
+        fail('Docs and examples avoid risky placeholder tokens', violations.slice(0, 10).join('; '));
+    }
+
+    const gitleaksPath = '.gitleaks.toml';
+    const gitleaksContent = readFile(gitleaksPath);
+    expectNotRegex(gitleaksPath, gitleaksContent, /\bsk-your-openai-key\b/, 'gitleaks does not allowlist old OpenAI key placeholder');
+    expectNotRegex(gitleaksPath, gitleaksContent, /\bsk-ant-your-claude-key\b/, 'gitleaks does not allowlist old Anthropic key placeholder');
+    expectNotRegex(gitleaksPath, gitleaksContent, /\bsk-(?:ant-)?\.\.\.\b/, 'gitleaks does not allowlist key-like ellipsis placeholders');
 }
 
 function assertPackageMainPointsToBuiltFile(): void {
@@ -360,6 +455,7 @@ function main(): void {
     assertTypeScriptHttpClientContract();
     assertApiDocsContract();
     assertCliGuideContracts();
+    assertPlaceholderHygiene();
     assertPackageMainPointsToBuiltFile();
     printSummaryAndExit();
 }

@@ -9,7 +9,7 @@ Usage:
 
     client = IrantiClient(
         base_url="http://localhost:3001",
-        api_key="your_key_here"
+        api_key="replace-with-real-iranti-key"
     )
 
     client.write(
@@ -945,4 +945,5 @@ class IrantiClient:
             'path': self.last_http_path,
             'ok': self.last_http_ok,
         }
+
 

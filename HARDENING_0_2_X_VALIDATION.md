@@ -210,13 +210,68 @@ This file records concrete validation evidence for the `0.2.x` hardening pass.
 - Result:
   - fixed
 
+### Issue 8 â€” Reduce lifecycle/operator monolith risk in `scripts/iranti-cli.ts`
+
+- Code paths:
+  - `scripts/iranti-cli.ts`
+  - `src/lib/cliHelpCatalog.ts`
+  - `src/lib/cliHelpRenderer.ts`
+  - `AGENTS.md`
+- Tests:
+  - `npm run build`
+  - `npm run test:contracts`
+  - `npm run test:hardening-fast`
+- Runtime validation:
+  - `node -r ts-node/register/transpile-only scripts/iranti-cli.ts --help`
+  - `node -r ts-node/register/transpile-only scripts/iranti-cli.ts setup --help`
+  - `node -r ts-node/register/transpile-only scripts/iranti-cli.ts uninstall --help`
+  - `node -r ts-node/register/transpile-only scripts/iranti-cli.ts auth help`
+- Result:
+  - fixed
+
+### Issue 13 â€” Eliminate remaining unsafe warning-and-continue production behavior
+
+- Code paths:
+  - `src/api/server.ts`
+  - `src/lib/runtimeLifecycle.ts`
+  - `scripts/iranti-cli.ts`
+  - `tests/runtime-lifecycle/run_runtime_lifecycle_tests.ts`
+  - `docs/API.md`
+  - `docs/features/cli-doctor/spec.md`
+  - `docs/features/cli-status/spec.md`
+  - `docs/features/runtime-upgrades/spec.md`
+- Tests:
+  - `npm run build`
+  - `npm run test:runtime-lifecycle`
+  - `npm run test:hardening-fast`
+- Runtime validation:
+  - production startup without `IRANTI_API_KEY_PEPPER` fails fast
+  - production startup with mismatched `IRANTI_INSTANCE_DIR` / `IRANTI_INSTANCE_RUNTIME_FILE` fails fast
+  - `iranti doctor --env ... --json` now exits non-zero when startup/runtime invariants fail
+  - `/health` now exposes operator-facing degraded state via runtime/vector checks instead of relying on logs alone
+- Result:
+  - fixed
+
+### Issue 16 â€” Review static placeholder test values and distinguish harmless placeholders from risky defaults
+
+- Code paths:
+  - `.gitleaks.toml`
+  - `scripts/test-contracts.ts`
+  - canonical docs/examples under `README.md`, `docs/`, `clients/`, and `experiments/`
+- Tests:
+  - `npm run test:contracts`
+  - `npm run test:hardening-fast`
+- Runtime validation:
+  - repo-source placeholder sweep found no banned placeholder tokens in canonical docs/examples
+  - `python -m py_compile` passed for touched Python client/experiment files
+  - `node --check clients/middleware/iranti-extension/content.js` passed
+  - `gitleaks detect --config=/repo/.gitleaks.toml` reported `no leaks found`
+- Result:
+  - fixed
+
 ## Deferred Issues
 
-| Issue | Why Deferred | Current Mitigation |
-|---|---|---|
-| 8 | CLI still remains a large operational file after helper extraction. | Reduced shell/file-mutation blast radius via extracted helpers. |
-| 13 | Not every warning/fail-open path was re-audited in this pass. | Production pepper posture and runtime authority warnings were tightened. |
-| 16 | Placeholder review across docs/experiments is incomplete. | Secret scanning is active and allowlists are narrow. |
+- No scoped `0.2.x` hardening issues remain deferred.
 
 ## Validation Commands Run
 
@@ -247,21 +302,21 @@ Result: `no leaks found`
 
 ## Remaining Blockers
 
-- The repo is substantially harder and tighter than it was at the start of this pass.
-- The remaining blockers are now mostly explicit deferrals rather than unknown reliability gaps:
-  - CLI modularity follow-on
-  - warn/fail-open audit completion
-  - placeholder cleanup
+- No release-blocking hardening blockers remain in the scoped `0.2.x` backlog.
+- Follow-up work still exists, but it is incremental rather than a stabilization blocker:
+  - continue splitting `scripts/iranti-cli.ts`
+  - keep auditing new warn-vs-fail decisions as new surfaces are added
+  - keep placeholder hygiene checks aligned with new docs/examples
 
 ## Release Recommendation
 
-Recommended status: ready for another `0.2.x` stabilization release if the deferred items above are explicitly carried forward as follow-up work, not silently forgotten.
+Recommended status: ready for another `0.2.x` stabilization release.
 
 Reason:
 
 - critical lifecycle, runtime authority, access-control, session/operator, and CI trust surfaces are now materially stronger
 - the corrected surfaces are backed by code, tests, docs, and validation evidence
-- remaining work is real, but it is narrower and better isolated than the starting state
+- the previously deferred `8`, `13`, and `16` items are now closed with bounded fixes and current validation
 
 
 

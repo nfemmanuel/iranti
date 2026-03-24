@@ -55,9 +55,10 @@ Iranti supports upgrading while API servers, MCP servers, or other Iranti-manage
    - or a later cleanup command explicitly prunes it
 11. Resolve runtime authority from explicit instance env/runtime vars first, then from well-formed runtime paths such as `<instance>/escalation` or `<instance>/logs/api-requests.log`.
 12. If managed runtime authority is invalid or ambiguous, do not silently write runtime metadata to an inferred location.
-13. When `iranti run --instance <name>` starts an API server, write runtime metadata with PID, port, version, and health URL.
-14. When `iranti instance restart <name>` is invoked, refuse to restart stale or stopped instances and only restart instances that are actually running.
-15. After spawning the replacement runtime, wait for healthy runtime metadata before returning success.
+13. If managed runtime authority is explicitly invalid, fail startup instead of logging and continuing.
+14. When `iranti run --instance <name>` starts an API server, write runtime metadata with PID, port, version, and health URL.
+15. When `iranti instance restart <name>` is invoked, refuse to restart stale or stopped instances and only restart instances that are actually running.
+16. After spawning the replacement runtime, wait for healthy runtime metadata before returning success.
 
 ## Edge Cases
 
@@ -71,6 +72,7 @@ Iranti supports upgrading while API servers, MCP servers, or other Iranti-manage
 - `iranti instance restart` only operates on a live instance process; stale runtime metadata is reported but not restarted.
 - `iranti instance restart` only reports success after the replacement runtime becomes healthy; a detached child that exits early is treated as a failed restart.
 - Invalid runtime metadata should be classified as invalid, not coerced into `running`.
+- Managed startup must fail if the initial runtime metadata write fails; a managed instance without trustworthy runtime metadata is not considered healthy.
 - Production startup must fail fast when runtime/security invariants required for operator trust are missing.
 
 ## Test Results

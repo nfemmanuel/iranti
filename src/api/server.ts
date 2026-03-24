@@ -45,6 +45,35 @@ const INSTANCE_DIR = RUNTIME_AUTHORITY.instanceDir;
 const INSTANCE_RUNTIME_FILE = RUNTIME_AUTHORITY.runtimeFile;
 const INSTANCE_NAME = process.env.IRANTI_INSTANCE_NAME?.trim() || (INSTANCE_DIR ? path.basename(INSTANCE_DIR) : 'adhoc');
 const VERSION = '0.2.25';
+const PORT_RAW = (process.env.IRANTI_PORT ?? '3001').trim();
+const PORT = Number.parseInt(PORT_RAW, 10);
+
+type HealthCheckState = {
+    checked: boolean;
+    ok: boolean;
+    detail: string;
+};
+
+const runtimeMetadataHealth: HealthCheckState = {
+    checked: RUNTIME_AUTHORITY.managed,
+    ok: !RUNTIME_AUTHORITY.managed,
+    detail: RUNTIME_AUTHORITY.managed
+        ? 'waiting for initial runtime metadata write'
+        : 'runtime is not running under managed instance authority',
+};
+
+const vectorBackendHealth: HealthCheckState = {
+    checked: false,
+    ok: true,
+    detail: 'vector backend has not been probed yet',
+};
+
+function operatorStatus(): 'ok' | 'degraded' {
+    if (RUNTIME_AUTHORITY.source === 'invalid') return 'degraded';
+    if (runtimeMetadataHealth.checked && !runtimeMetadataHealth.ok) return 'degraded';
+    if (vectorBackendHealth.checked && !vectorBackendHealth.ok) return 'degraded';
+    return 'ok';
+}
 
 function assertStartupSecurity(): void {
     const pepper = process.env.IRANTI_API_KEY_PEPPER?.trim() ?? '';
@@ -68,11 +97,24 @@ function assertStartupSecurity(): void {
         console.warn(`[security] WARNING: ${message}`);
     }
 }
-assertStartupSecurity();
 
-if (RUNTIME_AUTHORITY.source === 'invalid') {
-    console.error(`[runtime] managed runtime authority is invalid: ${RUNTIME_AUTHORITY.detail}`);
-} else if (!RUNTIME_AUTHORITY.managed) {
+function assertStartupConfiguration(): void {
+    const databaseUrl = process.env.DATABASE_URL?.trim() ?? '';
+    if (!databaseUrl || databaseUrl.includes('yourpassword')) {
+        throw new Error('DATABASE_URL is missing or still uses a placeholder value.');
+    }
+    if (!Number.isInteger(PORT) || PORT <= 0 || PORT > 65535) {
+        throw new Error(`IRANTI_PORT must be a valid port. Received "${PORT_RAW || '(empty)'}".`);
+    }
+    if (RUNTIME_AUTHORITY.source === 'invalid') {
+        throw new Error(`Managed runtime authority is invalid: ${RUNTIME_AUTHORITY.detail}`);
+    }
+}
+
+assertStartupSecurity();
+assertStartupConfiguration();
+
+if (!RUNTIME_AUTHORITY.managed) {
     console.warn(`[runtime] ${RUNTIME_AUTHORITY.detail}`);
 }
 
@@ -93,6 +135,7 @@ requestLogStream.on('error', (err) => {
 let runtimeState: InstanceRuntimeState | null = null;
 let runtimeHeartbeat: NodeJS.Timeout | null = null;
 let vectorHealthInterval: NodeJS.Timeout | null = null;
+let server: ReturnType<typeof app.listen> | null = null;
 
 function runtimeHealthPayload(): InstanceRuntimeState | null {
     return runtimeState
@@ -129,6 +172,34 @@ async function persistRuntimeState(status: InstanceRuntimeState['status'], signa
     await writeRuntimeState(INSTANCE_RUNTIME_FILE, runtimeState);
 }
 
+function markRuntimeMetadataHealth(ok: boolean, detail: string): void {
+    runtimeMetadataHealth.checked = true;
+    runtimeMetadataHealth.ok = ok;
+    runtimeMetadataHealth.detail = detail;
+}
+
+function markVectorBackendHealth(ok: boolean, detail: string): void {
+    vectorBackendHealth.checked = true;
+    vectorBackendHealth.ok = ok;
+    vectorBackendHealth.detail = detail;
+}
+
+async function probeVectorBackendHealth(context: 'startup' | 'interval'): Promise<void> {
+    try {
+        const ok = await getVectorBackendSingleton().ping();
+        if (!ok) {
+            markVectorBackendHealth(false, 'vector backend did not respond to ping');
+            console.error(`[vector] ${context} health check failed: vector backend is not responding.`);
+            return;
+        }
+        markVectorBackendHealth(true, 'vector backend responded to ping');
+    } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        markVectorBackendHealth(false, message);
+        console.error(`[vector] ${context} health check error: ${message}`);
+    }
+}
+
 function logApiRequest(line: string): void {
     console.log(line);
     requestLogStream.write(`${line}\n`);
@@ -159,6 +230,7 @@ app.use(express.json({ limit: process.env.IRANTI_MAX_BODY_BYTES ?? '256kb' }));
 app.get(ROUTES.health, (_req, res) => {
     res.json({
         status: 'ok',
+        operatorStatus: operatorStatus(),
         version: VERSION,
         provider: process.env.LLM_PROVIDER ?? 'mock',
         runtime: runtimeHealthPayload(),
@@ -168,6 +240,10 @@ app.get(ROUTES.health, (_req, res) => {
             detail: RUNTIME_AUTHORITY.detail,
             instanceDir: INSTANCE_DIR,
             runtimeFile: INSTANCE_RUNTIME_FILE,
+        },
+        checks: {
+            runtimeMetadata: runtimeMetadataHealth,
+            vectorBackend: vectorBackendHealth,
         },
     });
 });
@@ -188,6 +264,27 @@ void startArchivistScheduler(iranti)
     .catch((err) => {
         console.error('[archivist] scheduler startup failed:', err);
     });
+
+function terminateStartup(code: number): void {
+    if (runtimeHeartbeat) {
+        clearInterval(runtimeHeartbeat);
+        runtimeHeartbeat = null;
+    }
+    if (vectorHealthInterval) {
+        clearInterval(vectorHealthInterval);
+        vectorHealthInterval = null;
+    }
+    if (stopArchivistScheduler) {
+        stopArchivistScheduler();
+        stopArchivistScheduler = null;
+    }
+    const closeAndExit = () => requestLogStream.end(() => process.exit(code));
+    if (!server) {
+        closeAndExit();
+        return;
+    }
+    server.close(() => closeAndExit());
+}
 
 // Mount protected routes
 app.use(ROUTES.agents, authenticate, rateLimitMiddleware, requireScopeByMethod('agents:read', 'agents:write'), agentRoutes(iranti));
@@ -247,8 +344,7 @@ app.post(['/v1/chat/completions', '/chat/completions'], authenticate, rateLimitM
     }
 });
 
-const PORT = parseInt(process.env.IRANTI_PORT ?? '3001');
-const server = app.listen(PORT, () => {
+server = app.listen(PORT, () => {
     console.log(`\nIranti API running on port ${PORT}`);
     console.log(`Health: http://localhost:${PORT}/health`);
     console.log(`Provider: ${process.env.LLM_PROVIDER ?? 'mock'}\n`);
@@ -256,28 +352,32 @@ const server = app.listen(PORT, () => {
     console.log(`Request log file: ${REQUEST_LOG_FILE}\n`);
     if (RUNTIME_AUTHORITY.managed && INSTANCE_RUNTIME_FILE) {
         void persistRuntimeState('running').then(() => {
+            markRuntimeMetadataHealth(true, 'runtime metadata written successfully');
             if (runtimeHeartbeat) clearInterval(runtimeHeartbeat);
             runtimeHeartbeat = setInterval(() => {
                 void persistRuntimeState('running').catch((err) => {
+                    markRuntimeMetadataHealth(false, err instanceof Error ? err.message : String(err));
                     console.error('[runtime] failed to refresh runtime state:', err);
                 });
             }, 15000);
             runtimeHeartbeat.unref();
         }).catch((err) => {
+            markRuntimeMetadataHealth(false, err instanceof Error ? err.message : String(err));
             console.error('[runtime] failed to write runtime state:', err);
+            terminateStartup(1);
         });
     }
 
-    // M-21: Periodic vector backend health check
+    void probeVectorBackendHealth('startup');
     vectorHealthInterval = setInterval(() => {
-        void getVectorBackendSingleton().ping().then((ok) => {
-            if (!ok) console.error('[vector] Health check failed — vector backend is not responding.');
-        }).catch((err: unknown) => {
-            const message = err instanceof Error ? err.message : String(err);
-            console.error(`[vector] Health check error: ${message}`);
-        });
+        void probeVectorBackendHealth('interval');
     }, 60_000);
     vectorHealthInterval.unref();
+});
+
+server.on('error', (err) => {
+    console.error('[runtime] API server failed to start:', err);
+    terminateStartup(1);
 });
 
 async function shutdownRuntime(signal: string): Promise<void> {
@@ -310,7 +410,7 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
         void (async () => {
             if (stopArchivistScheduler) stopArchivistScheduler();
             await shutdownRuntime(signal);
-            server.close(() => {
+            server?.close(() => {
                 requestLogStream.end(() => process.exit(0));
             });
         })().catch((err) => {
@@ -319,3 +419,4 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
         });
     });
 }
+

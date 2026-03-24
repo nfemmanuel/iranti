@@ -16,15 +16,15 @@
 | 5 | fixed | `.github/workflows/*`, `docs/guides/releasing.md` |
 | 6 | fixed | `src/api/server.ts`, `tests/runtime-lifecycle/run_runtime_lifecycle_tests.ts`, security docs |
 | 7 | fixed | `.github/workflows/secret-scan.yml`, `.gitleaks.toml`, security docs |
-| 8 | deferred | `scripts/iranti-cli.ts`, `src/lib/commandInvocation.ts`, `src/lib/fileMutation.ts`, `src/lib/cliHelpCatalog.ts` |
+| 8 | fixed | `scripts/iranti-cli.ts`, `src/lib/cliHelpCatalog.ts`, `src/lib/cliHelpRenderer.ts`, CLI help contracts |
 | 9 | fixed | `src/lib/runtimeEnv.ts`, `src/lib/runtimeLifecycle.ts`, `src/api/server.ts`, runtime docs |
 | 10 | fixed | `src/lib/runtimeLifecycle.ts`, `scripts/iranti-cli.ts`, runtime lifecycle tests/docs |
 | 11 | fixed | workflows, `package.json`, lifecycle/session/access-control/runtime tests |
 | 12 | fixed | `docs/README.md`, `docs/internal/README.md`, internal summary docs, `AGENTS.md` |
-| 13 | deferred | `src/api/server.ts`, runtime/operator docs |
+| 13 | fixed | `src/api/server.ts`, `src/lib/runtimeLifecycle.ts`, `scripts/iranti-cli.ts`, runtime/operator docs/tests |
 | 14 | fixed | `src/library/queries.ts`, `src/library/vectorBackend.ts`, vector backend adapters, vector docs/tests, `scripts/iranti-cli.ts` |
 | 15 | fixed | `src/api/middleware/rateLimit.ts`, `src/security/scopes.ts`, access-control tests |
-| 16 | deferred | `.gitleaks.toml`, security docs, placeholder audit notes |
+| 16 | fixed | `.gitleaks.toml`, `scripts/test-contracts.ts`, canonical docs/examples, experiment/client placeholders |
 | 17 | fixed | `src/api/routes/memory.ts`, session/cross-tool tests, guides/specs |
 | 18 | fixed | `tests/runtime-lifecycle/run_setup_upgrade_tests.ts`, `tests/runtime-lifecycle/run_uninstall_tests.ts`, lifecycle specs/docs |
 | 19 | fixed | runtime authority/runtime status/session/operator docs and tests |
@@ -40,6 +40,7 @@
 - `src/api/server.ts`
 - `src/lib/commandInvocation.ts`
 - `src/lib/cliHelpCatalog.ts`
+- `src/lib/cliHelpRenderer.ts`
 - `src/lib/fileMutation.ts`
 - `src/lib/runtimeEnv.ts`
 - `src/lib/runtimeLifecycle.ts`
@@ -50,6 +51,7 @@
 - `src/library/backends/chromaBackend.ts`
 - `src/security/scopes.ts`
 - `package.json`
+- `scripts/test-contracts.ts`
 
 ### Tests
 
@@ -108,6 +110,7 @@
 - Added `test:hardening-fast`
 - Added `test:hardening-db`
 - Expanded access-control, session-recovery, cross-tool, runtime lifecycle, vector backend, and archive/vector correctness coverage
+- Added placeholder-hygiene contract coverage and excluded generated local environments from source-tree scans
 
 ## Docs Updated
 
@@ -115,19 +118,25 @@
 - Added an internal docs index and trust-level map in `docs/internal/README.md`
 - Marked major internal summary artifacts as historical/supporting rather than canonical product contract
 - Documented runtime authority and `/health` authority reporting
+- Documented degraded `/health` operator status and startup/doctor fail-fast invariants
 - Clarified handshake/session/operator semantics and cross-tool expectations
 - Updated release docs to reflect the real gating suites and `npm ci` policy
 - Added troubleshooting guidance for config lock conflicts and Windows detached lifecycle behavior
 - Added vector drift detection/reconciliation guidance and install/setup/upgrade lifecycle smoke coverage docs
+- Replaced risky key-like placeholders and silent fake-key fallbacks in canonical docs/examples with explicit non-secret replacement strings
 
 ## Remaining Blockers
 
-- Issue 8: `scripts/iranti-cli.ts` still needs a larger structural split beyond the helper extractions landed in this pass.
-- Issue 13: there are still additional warn-vs-fail decisions worth auditing beyond the major startup/runtime posture fix.
-- Issue 16: placeholder review is materially safer because of secret scanning, but the long tail of experimental/doc fixtures is not fully normalized.
+- No open blockers remain in the scoped `0.2.x` hardening backlog.
+- Follow-up work remains, but it is now incremental rather than release-blocking:
+  - continue shrinking `scripts/iranti-cli.ts`
+  - keep tightening operator messaging as new surfaces are added
+  - keep placeholder hygiene checks aligned with new examples
 
 ## Integration Notes
 
 - Worker A and lead integration closed the Windows shell-join risk with direct or structured invocation rather than raw `cmd.exe /c` joins.
 - Worker B’s stricter runtime authority model and worker E’s session/operator semantics were integrated without breaking build or contract checks.
 - Runtime lifecycle test cleanup required an extra Windows-specific fix: detached test runtimes are now terminated before temp-root cleanup.
+
+- The final deferred pass closed the remaining scoped deferrals by extracting CLI help rendering, tightening startup/doctor truthfulness, and removing risky placeholder/fake-key defaults from docs and examples.

@@ -26,16 +26,16 @@ SOURCE = os.getenv("IRANTI_SOURCE", "live_chatbot_plus")
 DEFAULT_CONF = int(os.getenv("IRANTI_DEFAULT_CONF", "85"))
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 
-if not OPENAI_API_KEY or OPENAI_API_KEY == "your_openai_key":
+if not OPENAI_API_KEY:
     raise SystemExit(
         "Missing valid OPENAI_API_KEY. "
-        "Set a real key in PowerShell: $env:OPENAI_API_KEY=\"sk-...\""
+        "Set a real key in PowerShell: $env:OPENAI_API_KEY=\"replace-with-real-openai-key\""
     )
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 iranti = IrantiClient(
     base_url=os.getenv("IRANTI_URL", "http://localhost:3001"),
-    api_key=os.getenv("IRANTI_API_KEY", "dev-benchmark-key"),
+    api_key=os.environ["IRANTI_API_KEY"],
 )
 
 conversation: List[Dict[str, str]] = []
@@ -428,3 +428,4 @@ while True:
         print("[DEBUG] completion_tokens:", usage.completion_tokens)
 
     print("-" * 60)
+

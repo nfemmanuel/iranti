@@ -59,7 +59,7 @@ nano .env
 
 # Set these:
 DATABASE_URL=postgresql://user:pass@localhost:5432/iranti
-IRANTI_API_KEY=your_secure_key_here
+IRANTI_API_KEY=replace-with-real-iranti-key
 IRANTI_PORT=3001
 NODE_ENV=production
 
@@ -116,7 +116,7 @@ pip install requests python-dotenv
 
 # 3. Configure
 export IRANTI_URL=http://your-server-ip:3001
-export IRANTI_API_KEY=your_secure_key_here
+export IRANTI_API_KEY=replace-with-real-iranti-key
 
 # 4. Use in your code
 from iranti import IrantiClient
@@ -290,7 +290,7 @@ sudo certbot --nginx -d iranti.yourcompany.com
 **content.js** - update these lines:
 ```javascript
 const IRANTI_URL = 'https://iranti.yourcompany.com';  // Your server
-const IRANTI_API_KEY = 'your_key_here';                // Your API key
+const IRANTI_API_KEY = 'replace-with-real-iranti-key';                // Your API key
 ```
 
 ### Python Agents
@@ -298,14 +298,14 @@ const IRANTI_API_KEY = 'your_key_here';                // Your API key
 **Option A: Environment variables** (recommended)
 ```bash
 export IRANTI_URL=https://iranti.yourcompany.com
-export IRANTI_API_KEY=your_key_here
+export IRANTI_API_KEY=replace-with-real-iranti-key
 ```
 
 **Option B: Code configuration**
 ```python
 client = IrantiClient(
     base_url="https://iranti.yourcompany.com",
-    api_key="your_key_here"
+    api_key="replace-with-real-iranti-key"
 )
 ```
 
@@ -313,7 +313,7 @@ client = IrantiClient(
 ```bash
 # .env
 IRANTI_URL=https://iranti.yourcompany.com
-IRANTI_API_KEY=your_key_here
+IRANTI_API_KEY=replace-with-real-iranti-key
 ```
 
 ```python
@@ -376,7 +376,7 @@ npm run api
 ```bash
 pip install requests python-dotenv
 export IRANTI_URL=http://your-server:3001
-export IRANTI_API_KEY=your_key
+export IRANTI_API_KEY=replace-with-real-iranti-key
 python your_agent.py
 ```
 
@@ -390,3 +390,4 @@ python your_agent.py
 4. **All devices share the same PostgreSQL database**
 
 No complex setup. Just HTTP connections to a central server.
+

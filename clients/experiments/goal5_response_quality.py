@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-client = IrantiClient(base_url="http://localhost:3001", api_key=os.getenv("IRANTI_API_KEY", "dev-benchmark-key"))
+client = IrantiClient(base_url="http://localhost:3001", api_key=os.environ["IRANTI_API_KEY"])
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 ENTITY = "project/meridian_core"
@@ -238,3 +238,4 @@ os.makedirs("results", exist_ok=True)
 with open(result_file, 'w') as f:
     json.dump(result_data, f, indent=2)
 print(f"\nResult saved: {result_file}")
+

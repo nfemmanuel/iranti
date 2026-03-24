@@ -59,7 +59,7 @@ This is a classified neural computing initiative. All details are fictional
 and not present in any public dataset or LLM training corpus.
 """
 
-iranti = IrantiClient(base_url='http://localhost:3001', api_key=os.getenv("IRANTI_API_KEY", "dev-benchmark-key"))
+iranti = IrantiClient(base_url='http://localhost:3001', api_key=os.environ["IRANTI_API_KEY"])
 
 # ─── Tools ────────────────────────────────────────────────────────────────────
 
@@ -380,3 +380,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     run_experiment(args.iterations, args.delay)
+

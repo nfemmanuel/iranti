@@ -46,7 +46,7 @@ Set these in your environment or `.env` file:
 
 ```bash
 export IRANTI_URL=http://localhost:3001
-export IRANTI_API_KEY=your_api_key_here
+export IRANTI_API_KEY=replace-with-real-iranti-key
 ```
 
 `IRANTI_API_KEY` can be either:
@@ -612,14 +612,14 @@ Set in your environment:
 
 ```bash
 export IRANTI_URL=http://localhost:3001
-export IRANTI_API_KEY=your_key_here
+export IRANTI_API_KEY=replace-with-real-iranti-key
 ```
 
 Or in a `.env` file:
 
 ```env
 IRANTI_URL=http://localhost:3001
-IRANTI_API_KEY=your_key_here
+IRANTI_API_KEY=replace-with-real-iranti-key
 ```
 
 Load with `python-dotenv`:
@@ -643,7 +643,7 @@ def main():
     # Initialize
     client = IrantiClient(
         base_url="http://localhost:3001",
-        api_key="your_key_here"
+        api_key="replace-with-real-iranti-key"
     )
 
     # Check health
@@ -749,4 +749,5 @@ IrantiError: Request timed out after 30s
 ```python
 client = IrantiClient(timeout=60)  # 60 seconds
 ```
+
 

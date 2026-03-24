@@ -52,6 +52,7 @@ Response:
 ```json
 {
   "status": "ok",
+  "operatorStatus": "ok",
   "version": "0.2.15",
   "provider": "mock",
   "runtime": {
@@ -69,6 +70,18 @@ Response:
     "detail": "using explicit runtime authority",
     "instanceDir": "C:\\Users\\NF\\.iranti\\instances\\local",
     "runtimeFile": "C:\\Users\\NF\\.iranti\\instances\\local\\runtime.json"
+  },
+  "checks": {
+    "runtimeMetadata": {
+      "checked": true,
+      "ok": true,
+      "detail": "runtime metadata written successfully"
+    },
+    "vectorBackend": {
+      "checked": false,
+      "ok": true,
+      "detail": "vector backend has not been probed yet"
+    }
   }
 }
 ```

@@ -295,13 +295,13 @@ iranti list api-keys --instance local
 Add a key:
 
 ```bash
-iranti add api-key openai --instance local --key sk-... --set-default
+iranti add api-key openai --instance local --key replace-with-real-openai-key --set-default
 ```
 
 Update a key:
 
 ```bash
-iranti update api-key claude --instance local --key sk-ant-...
+iranti update api-key claude --instance local --key replace-with-real-anthropic-key
 ```
 
 Remove a key:
@@ -341,7 +341,7 @@ iranti configure instance local --interactive
 Update one directly:
 
 ```bash
-iranti configure instance local --provider openai --provider-key sk-... --db-url "postgresql://postgres:realpassword@localhost:5432/iranti_local"
+iranti configure instance local --provider openai --provider-key replace-with-real-openai-key --db-url "postgresql://postgres:realpassword@localhost:5432/iranti_local"
 ```
 
 ---

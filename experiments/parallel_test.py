@@ -22,6 +22,13 @@ from dataclasses import dataclass
 import concurrent.futures
 import requests
 
+IRANTI_API_KEY = os.getenv("IRANTI_API_KEY", "").strip()
+if not IRANTI_API_KEY:
+    raise SystemExit(
+        "Missing IRANTI_API_KEY. "
+        "Set a real Iranti key before running the parallel experiment."
+    )
+
 @dataclass
 class ExperimentResult:
     agent_id: str
@@ -35,7 +42,7 @@ class ExperimentResult:
     memory_usage: bool
 
 class IrantiClient:
-    def __init__(self, base_url: str = "http://localhost:3001", api_key: str = "dev_test_key_12345"):
+    def __init__(self, base_url: str = "http://localhost:3001", api_key: str = IRANTI_API_KEY):
         self.base_url = base_url
         self.api_key = api_key
         self.headers = {

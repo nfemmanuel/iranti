@@ -78,7 +78,7 @@ iranti.configureMock({
 
 ```env
 LLM_PROVIDER=gemini
-GEMINI_API_KEY=your_key_here
+GEMINI_API_KEY=replace-with-real-gemini-key
 GEMINI_MODEL=gemini-2.5-flash
 ```
 
@@ -91,7 +91,7 @@ GEMINI_MODEL=gemini-2.5-flash
 
 ```env
 LLM_PROVIDER=gemini
-GEMINI_API_KEY=your_key_here
+GEMINI_API_KEY=replace-with-real-gemini-key
 
 # Use flash for fast tasks
 CLASSIFICATION_MODEL=gemini-2.5-flash
@@ -122,7 +122,7 @@ CONFLICT_MODEL=gemini-2.5-pro
 
 ```env
 LLM_PROVIDER=claude
-ANTHROPIC_API_KEY=your_key_here
+ANTHROPIC_API_KEY=replace-with-real-anthropic-key
 ANTHROPIC_MODEL=claude-sonnet-4
 # Optional (for proxies/self-hosted gateways)
 ANTHROPIC_BASE_URL=
@@ -151,7 +151,7 @@ ANTHROPIC_BASE_URL=
 
 ```env
 LLM_PROVIDER=openai
-OPENAI_API_KEY=your_key_here
+OPENAI_API_KEY=replace-with-real-openai-key
 OPENAI_MODEL=gpt-5-mini
 OPENAI_BASE_URL=https://api.openai.com/v1
 ```
@@ -166,7 +166,7 @@ OPENAI_BASE_URL=https://api.openai.com/v1
 
 ```env
 LLM_PROVIDER=openai
-OPENAI_API_KEY=your_key_here
+OPENAI_API_KEY=replace-with-real-openai-key
 
 # Use mini for fast tasks
 CLASSIFICATION_MODEL=gpt-5-mini
@@ -212,7 +212,7 @@ OPENAI_BASE_URL=https://api.endpoints.anyscale.com/v1
 
 ```env
 LLM_PROVIDER=groq
-GROQ_API_KEY=your_key_here
+GROQ_API_KEY=replace-with-real-groq-key
 GROQ_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
 ```
 
@@ -242,7 +242,7 @@ GROQ_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
 
 ```env
 LLM_PROVIDER=mistral
-MISTRAL_API_KEY=your_key_here
+MISTRAL_API_KEY=replace-with-real-mistral-key
 MISTRAL_MODEL=mistral-small-latest
 ```
 
@@ -342,7 +342,7 @@ GROQ_API_KEY=your_groq_key
 
 # Fall back to OpenAI if Groq fails
 LLM_PROVIDER_FALLBACK=openai,mock
-OPENAI_API_KEY=your_openai_key
+OPENAI_API_KEY=replace-with-real-openai-key
 ```
 
 ---
@@ -354,7 +354,7 @@ Override models for specific task types:
 ```env
 # Primary provider
 LLM_PROVIDER=gemini
-GEMINI_API_KEY=your_key_here
+GEMINI_API_KEY=replace-with-real-gemini-key
 
 # Fast tasks use flash
 CLASSIFICATION_MODEL=gemini-2.5-flash
@@ -578,6 +578,7 @@ ollama serve
 | EU Hosting | N/A | No | No | No | Yes | Yes |
 | Rate Limits | None | High | Medium | Medium | Medium | None |
 | Best For | Dev/Test | Production | Production | High Throughput | EU Compliance | Privacy |
+
 
 
 

@@ -1,14 +1,7 @@
 title = "Iranti gitleaks config"
 
 [[allowlists]]
-description = "Intentional placeholder provider keys in docs and test fixtures"
+description = "Intentional invalid credential fixture for deterministic failure-path tests"
 regexes = [
-  '''sk-\.\.\.''',
-  '''sk-ant-\.\.\.''',
-  '''sk-your-openai-key''',
-  '''sk-ant-your-claude-key''',
-  '''your_openai_key''',
-  '''your_key_here''',
-  '''dev_test_key_12345''',
   '''invalid_key_to_force_failure'''
 ]

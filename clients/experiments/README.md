@@ -30,7 +30,7 @@ experiments/
 
 3. **Verify Gemini API key in `.env`:**
    ```env
-   GEMINI_API_KEY=your_key_here
+   GEMINI_API_KEY=replace-with-real-gemini-key
    ```
 
 ## Running the Experiment

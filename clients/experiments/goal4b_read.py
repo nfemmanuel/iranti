@@ -8,7 +8,7 @@ from python.iranti import IrantiClient
 import os, json
 from datetime import datetime
 
-client = IrantiClient(base_url="http://localhost:3001", api_key=os.getenv("IRANTI_API_KEY", "dev-benchmark-key"))
+client = IrantiClient(base_url="http://localhost:3001", api_key=os.environ["IRANTI_API_KEY"])
 
 print("\n=== GOAL 4B: READ FACTS (Process 2) ===\n")
 
@@ -65,4 +65,5 @@ result_file = f"results/goal4_persistence_{datetime.now().strftime('%Y%m%d_%H%M%
 with open(result_file, 'w') as f:
     json.dump(result_data, f, indent=2)
 print(f"\nResult saved: {result_file}\n")
+
 

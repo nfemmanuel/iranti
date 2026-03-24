@@ -36,10 +36,14 @@
    - `IRANTI_API_KEY` or `IRANTI_URL` for project bindings
    - `LLM_PROVIDER`
    - provider-specific API key when required
-6. Probe the configured vector backend:
+6. Evaluate startup/operator invariants:
+   - production envs fail the check if `IRANTI_API_KEY_PEPPER` is missing or too short
+   - insecure production overrides are surfaced as warnings
+   - explicit runtime authority mismatches are surfaced as failures
+7. Probe the configured vector backend:
    - report reachability
    - when reachable, audit vector index consistency against `knowledge_base`
-6. Emit a combined status:
+8. Emit a combined status:
    - `pass` if all checks pass
    - `warn` if no failures but at least one warning exists
    - `fail` if any required check fails
@@ -51,6 +55,7 @@
 - `mock` and `ollama` are treated as local providers and do not require a remote API key.
 - Unknown providers produce a warning instead of a hard failure because doctor cannot infer the key contract.
 - The CLI build artifact check warns in ts-node/dev flows instead of failing.
+- Unreachable configured vector backends are failures because embedding-backed retrieval is materially degraded.
 - Reachable vector backends can still warn if the vector index has drifted from `knowledge_base`.
 
 ## Test Results

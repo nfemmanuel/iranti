@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 BASE_URL = "http://localhost:3001"
-API_KEY = os.getenv("IRANTI_API_KEY", "dev-benchmark-key")
+API_KEY = os.environ["IRANTI_API_KEY"]
 HEADERS = {"X-Iranti-Key": API_KEY, "Content-Type": "application/json"}
 ENTITY = "project/quantum_bridge"
 
@@ -67,5 +67,6 @@ print(f"Content verified: {passed}/3 ({'PASS' if passed == 3 else 'FAIL'})")
 print(f"\nOverall: {'PASSED' if score == 3 and passed == 3 else 'FAILED'}")
 print("\nConclusion: Iranti can be integrated with raw HTTP in 9 lines of Python.")
 print("No framework dependencies, no SDK required, just standard requests library.")
+
 
 

@@ -31,12 +31,12 @@ from iranti import IrantiClient
 
 client = IrantiClient(
     base_url="http://localhost:3001",
-    api_key="your_key_here"
+    api_key="replace-with-real-iranti-key"
 )
 
 # Or use environment variables
 # IRANTI_URL=http://localhost:3001
-# IRANTI_API_KEY=your_key_here
+# IRANTI_API_KEY=replace-with-real-iranti-key
 client = IrantiClient()
 
 # Check server is running
@@ -140,3 +140,4 @@ except IrantiError as e:
 ## License
 
 AGPL-3.0-or-later.
+

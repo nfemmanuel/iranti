@@ -55,7 +55,7 @@ and not present in any public dataset or LLM training corpus.
 
 iranti = IrantiClient(
     base_url='http://localhost:3001',
-    api_key=os.getenv("IRANTI_API_KEY", "dev-benchmark-key"),
+    api_key=os.environ["IRANTI_API_KEY"],
 )
 
 # ─── Iranti Tools ─────────────────────────────────────────────────────────────
@@ -301,3 +301,4 @@ def run_treatment_helix():
 
 if __name__ == "__main__":
     run_treatment_helix()
+

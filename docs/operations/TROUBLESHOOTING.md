@@ -154,7 +154,7 @@ cat .env | grep IRANTI_API_KEY
 echo $IRANTI_API_KEY  # If using env var
 
 # Test with curl
-curl -H "X-Iranti-Key: your_key_here" http://localhost:3001/health
+curl -H "X-Iranti-Key: replace-with-real-iranti-key" http://localhost:3001/health
 
 # Should return: {"status":"ok","version":"0.1.0","provider":"openai"}
 ```
@@ -307,7 +307,7 @@ from langchain_core.tools import tool
 echo $OPENAI_API_KEY
 
 # Set if missing
-export OPENAI_API_KEY=sk-...
+export OPENAI_API_KEY=replace-with-real-openai-key
 
 # Check key is valid
 curl https://api.openai.com/v1/models \
@@ -534,14 +534,14 @@ console.log('[Test] Extension loaded');
 
 # Check IRANTI_URL and API_KEY are correct
 const IRANTI_URL = 'http://localhost:3001';  // Must match server
-const IRANTI_API_KEY = 'dev_test_key_12345';  // Must match .env
+const IRANTI_API_KEY = 'replace-with-real-iranti-key';  // Must match .env
 
 # Test observe() manually
 fetch('http://localhost:3001/memory/observe', {
   method: 'POST',
   headers: {
     'Content-Type': 'application/json',
-    'X-Iranti-Key': 'dev_test_key_12345'
+    'X-Iranti-Key': 'replace-with-real-iranti-key'
   },
   body: JSON.stringify({
     agentId: 'test',
@@ -570,3 +570,4 @@ Include in your report:
 - Environment (OS, Node version, Python version)
 - Relevant code snippet
 - Server logs
+

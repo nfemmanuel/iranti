@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from python.iranti import IrantiClient, IrantiError
 
 BASE_URL = os.getenv('IRANTI_URL', 'http://localhost:3001')
-API_KEY = os.getenv('IRANTI_API_KEY', 'dev-benchmark-key')
+API_KEY = os.environ["IRANTI_API_KEY"]
 
 ENTITY = "project/nexus_prime"
 AGENT_ID = "nexus_observer"
@@ -176,3 +176,4 @@ def run():
 
 if __name__ == "__main__":
     run()
+
