@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.27 - Unreleased
+
+### Fixed
+
+- Regenerated the root `package-lock.json` under Linux/npm 11 semantics so CI and publish workflows no longer fail at `npm ci` over missing peer-installed Prisma Studio frontend packages.
+- Revalidated the clean Linux `npm ci` path in a fresh `node:24` container before release.
+
 ## 0.2.26 - Unreleased
 
 ### Changed
