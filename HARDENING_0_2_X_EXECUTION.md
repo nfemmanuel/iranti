@@ -135,7 +135,7 @@
 
 ## Integration Notes
 
-- Worker A and lead integration closed the Windows shell-join risk with direct or structured invocation rather than raw `cmd.exe /c` joins.
+- Worker A and lead integration closed the Windows shell-join risk in the lifecycle layer, and the final release pass corrected the remaining overclaim by moving `scripts/codex-setup.ts` off the last joined `cmd.exe /c` path onto `src/lib/commandInvocation.ts`.
 - Worker B’s stricter runtime authority model and worker E’s session/operator semantics were integrated without breaking build or contract checks.
 - Runtime lifecycle test cleanup required an extra Windows-specific fix: detached test runtimes are now terminated before temp-root cleanup.
 
@@ -172,7 +172,7 @@
 
 | Issue | Status | Notes |
 |---|---|---|
-| A | fixed | Verified by code audit plus `test:cli-process-safety`, runtime lifecycle coverage, and the constrained detached PowerShell handoff still in use on Windows. |
+| A | fixed | Verified by code audit plus `test:cli-process-safety`, runtime lifecycle coverage, `codex-setup` regression coverage, and the constrained detached PowerShell handoff still in use on Windows. |
 | B | fixed | The last CLI-owned direct config mutation (`.gitignore`) now uses the shared locked helper. |
 | C | fixed | Doctor now surfaces vector drift when reachable, and live validation showed truthful drift reporting on `iranti_dev`. |
 | D | fixed | Authority precedence remained correct for repo-local and user-root contexts. |

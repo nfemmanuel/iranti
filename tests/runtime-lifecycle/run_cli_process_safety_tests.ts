@@ -2,6 +2,7 @@ import assert from 'assert';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { spawnSync } from 'child_process';
 import { spawnSyncResolved } from '../../src/lib/commandInvocation';
 import { ensureFileContainsLinesLocked, writeTextFileLocked } from '../../src/lib/fileMutation';
 
@@ -113,6 +114,101 @@ async function testEnsureFileContainsLinesLocked(root: string): Promise<void> {
     assert.strictEqual(lines.filter((line) => line === '.env.iranti.local').length, 1, 'project ignore should not duplicate .env.iranti.local');
 }
 
+async function testCodexSetupLiteralWindowsArguments(root: string): Promise<void> {
+    if (process.platform !== 'win32') {
+        return;
+    }
+    const logPath = path.join(root, 'codex-setup-log.ndjson');
+    const shimScript = path.join(root, 'fake-tool-shim.js');
+    fs.writeFileSync(
+        shimScript,
+        `
+const fs = require('fs');
+const tool = process.argv[2];
+const args = process.argv.slice(3);
+const logPath = process.env.IRANTI_TEST_LOG;
+function log(entry) {
+  fs.appendFileSync(logPath, JSON.stringify(entry) + '\\n', 'utf8');
+}
+if (tool === 'codex') {
+  log({ tool, args });
+  if (args.length === 1 && args[0] === '--version') {
+    console.log('codex 0.0.0-test');
+    process.exit(0);
+  }
+  if (args[0] === 'mcp' && args[1] === 'get' && args.includes('--json')) {
+    process.exit(1);
+  }
+  if (args[0] === 'mcp' && args[1] === 'add') {
+    console.log('added');
+    process.exit(0);
+  }
+  if (args[0] === 'mcp' && args[1] === 'get') {
+    console.log('registered');
+    process.exit(0);
+  }
+  if (args[0] === 'mcp' && args[1] === 'remove') {
+    process.exit(0);
+  }
+}
+if (tool === 'iranti') {
+  log({ tool, args });
+  if (args[0] === 'mcp' && args[1] === '--help') {
+    console.log('iranti mcp help');
+    process.exit(0);
+  }
+}
+process.exit(1);
+`.trim(),
+        'utf8',
+    );
+
+    const specialAgent = 'codex "quoted" !bang! %TEMP% ^ &';
+    const specialSource = 'Codex ^ & %TEMP%';
+    const specialProvider = 'openai/test !provider!';
+    const specialName = 'iranti-codex-test';
+    const proc = spawnSync(
+        process.execPath,
+        [
+            '-r',
+            'ts-node/register/transpile-only',
+            path.join(process.cwd(), 'scripts', 'codex-setup.ts'),
+            '--name',
+            specialName,
+            '--agent',
+            specialAgent,
+            '--source',
+            specialSource,
+            '--provider',
+            specialProvider,
+        ],
+        {
+            cwd: process.cwd(),
+            encoding: 'utf8',
+            env: {
+                ...process.env,
+                IRANTI_TEST_LOG: logPath,
+                IRANTI_TEST_TOOL_SHIM: shimScript,
+            },
+            stdio: ['ignore', 'pipe', 'pipe'],
+        },
+    );
+
+    const stdout = typeof proc.stdout === 'string' ? proc.stdout : Buffer.from(proc.stdout ?? []).toString('utf8');
+    const stderr = typeof proc.stderr === 'string' ? proc.stderr : Buffer.from(proc.stderr ?? []).toString('utf8');
+    assert.strictEqual(proc.status, 0, `codex-setup should succeed with literal special arguments:\n${stdout}\n${stderr}`);
+
+    const entries = fs.readFileSync(logPath, 'utf8').trim().split(/\r?\n/).map((line) => JSON.parse(line) as { tool: string; args: string[] });
+    const addEntry = entries.find((entry) => entry.tool === 'codex' && entry.args[0] === 'mcp' && entry.args[1] === 'add');
+    assert.ok(addEntry, 'codex setup should invoke codex mcp add');
+
+    const args = addEntry?.args ?? [];
+    assert.ok(args.includes(specialName), 'codex mcp add should receive the MCP name literally');
+    assert.ok(args.includes(`IRANTI_MCP_DEFAULT_AGENT=${specialAgent}`), 'agent env should arrive literally');
+    assert.ok(args.includes(`IRANTI_MCP_DEFAULT_SOURCE=${specialSource}`), 'source env should arrive literally');
+    assert.ok(args.includes(`LLM_PROVIDER=${specialProvider}`), 'provider env should arrive literally');
+}
+
 async function main(): Promise<void> {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'iranti-cli-hardening-'));
     try {
@@ -121,6 +217,7 @@ async function main(): Promise<void> {
         await testStaleLockRecovery(root);
         await testFailedWritePreservesOriginal(root);
         await testEnsureFileContainsLinesLocked(root);
+        await testCodexSetupLiteralWindowsArguments(root);
         console.log('cli process safety tests passed');
     } finally {
         fs.rmSync(root, { recursive: true, force: true });

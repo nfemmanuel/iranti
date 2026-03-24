@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.26 - Unreleased
+
+### Changed
+
+- `iranti codex-setup` now uses the shared structured command invocation path on Windows instead of a joined `cmd.exe /c` string, keeping Codex MCP registration aligned with the rest of the hardened CLI execution layer.
+- The hardening and release-readiness ledgers now explicitly record the final `codex-setup` correction instead of overclaiming that the Windows command-path pass was already fully closed.
+
+### Fixed
+
+- Added a Windows-only regression that proves `iranti codex-setup` delivers literal special-character `--env` values through the Codex registration flow without shell expansion.
+- Re-verified the release baseline, fast hardening suite, fresh pgvector-backed DB suite, local secret scan, and `0.2.26` version coordination before release.
+
 ## 0.2.25 - Unreleased
 
 ### Changed

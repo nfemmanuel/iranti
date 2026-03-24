@@ -8,7 +8,7 @@ Recommended status: justified and ready once this validated tree is committed an
 
 ## What Was Verified As Fixed
 
-- Windows/process safety is now based on direct invocation and constrained detached handoff, not risky joined `cmd.exe /c` lifecycle execution.
+- Windows/process safety is now based on direct invocation and constrained detached handoff, not risky joined `cmd.exe /c` execution in release-critical flows. The final release pass corrected one remaining overclaimed path in `scripts/codex-setup.ts`.
 - Runtime authority precedence is converged and behaves consistently across repo-local and user-root runtime contexts.
 - Runtime metadata truthfulness is strong enough for operator use:
   - stale instances classify as `stale`
@@ -73,6 +73,6 @@ Reason:
 - `npm run build`
 - `npm run test:hardening-fast`
 - fresh pgvector-backed `npm run test:hardening-db`
-- `npm run release:check -- v0.2.25`
+- `npm run release:check -- v0.2.26`
 - local gitleaks scan
 - live runtime validation on `C:\Users\NF\.iranti-runtime`

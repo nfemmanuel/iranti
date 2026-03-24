@@ -1,6 +1,6 @@
-import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSyncResolved } from '../src/lib/commandInvocation';
 
 type SetupOptions = {
     name: string;
@@ -82,40 +82,28 @@ function printHelp(): void {
     ].join('\n'));
 }
 
-function quoteForCmd(arg: string): string {
-    if (arg.length === 0) return '""';
-    if (!/[ \t"&()<>|^]/.test(arg)) return arg;
-    return `"${arg.replace(/"/g, '\\"')}"`;
-}
-
 function run(command: string, args: string[], cwd: string): string {
-    const result = process.platform === 'win32'
-        ? spawnSync(process.env.ComSpec ?? 'cmd.exe', [
-            '/d',
-            '/c',
-            [command, ...args].map(quoteForCmd).join(' '),
-        ], {
-            cwd,
-            encoding: 'utf8',
-            stdio: ['ignore', 'pipe', 'pipe'],
-        })
-        : spawnSync(command, args, {
-            cwd,
-            encoding: 'utf8',
-            stdio: ['ignore', 'pipe', 'pipe'],
-        });
+    const result = spawnSyncResolved(command, args, {
+        cwd,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const stdout = typeof result.stdout === 'string'
+        ? result.stdout.trim()
+        : Buffer.from(result.stdout ?? []).toString('utf8').trim();
+    const stderr = typeof result.stderr === 'string'
+        ? result.stderr.trim()
+        : Buffer.from(result.stderr ?? []).toString('utf8').trim();
 
     if (result.error) {
         throw result.error;
     }
 
     if (result.status !== 0) {
-        const stderr = (result.stderr || '').trim();
-        const stdout = (result.stdout || '').trim();
         throw new Error(stderr || stdout || `${command} exited with status ${result.status}`);
     }
 
-    return (result.stdout || '').trim();
+    return stdout;
 }
 
 function tryRun(command: string, args: string[], cwd: string): string | null {

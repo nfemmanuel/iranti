@@ -10,6 +10,7 @@ This file records concrete validation evidence for the `0.2.x` hardening pass.
 
 - Code paths:
   - `scripts/iranti-cli.ts`
+  - `scripts/codex-setup.ts`
   - `src/lib/commandInvocation.ts`
 - Tests:
   - `npm run build`
@@ -17,6 +18,7 @@ This file records concrete validation evidence for the `0.2.x` hardening pass.
   - `npm run test:runtime-lifecycle`
 - Runtime validation:
   - Windows lifecycle commands now use direct invocation or structured detached handoff instead of joined `cmd.exe /c` strings for the corrected paths.
+  - Final release verification found one remaining joined-shell path in `scripts/codex-setup.ts`; it was moved onto `spawnSyncResolved()` and covered by a Windows-only regression that exercises literal `--env` argument delivery with `%`, `!`, `^`, `&`, quotes, and spaces.
 - Result:
   - fixed
 
@@ -324,7 +326,7 @@ Reason:
 
 - Verification:
   - `npm run test:cli-process-safety`
-  - code audit of `src/lib/commandInvocation.ts` and Windows detached restart/uninstall helpers in `scripts/iranti-cli.ts`
+  - code audit of `scripts/codex-setup.ts`, `src/lib/commandInvocation.ts`, and Windows detached restart/uninstall helpers in `scripts/iranti-cli.ts`
 - Result:
   - fixed
 
@@ -447,7 +449,7 @@ Reason:
   - `npm run build`
   - `npm run test:hardening-fast`
   - fresh pgvector-backed `npm run test:hardening-db`
-  - `npm run release:check -- v0.2.25`
+  - `npm run release:check -- v0.2.26`
   - local gitleaks scan
 - Result:
   - fixed
