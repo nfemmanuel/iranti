@@ -98,7 +98,49 @@ async function testConcurrentWrites() {
     console.log(`  - No duplicate archives or race conditions detected\n`);
 }
 
-testConcurrentWrites().catch(err => {
+async function testPendingReceiptCleanupOnError() {
+    console.log('🧹 Testing pending receipt cleanup on pre-write failure...\n');
+
+    bootstrapHarness();
+    const db = getDb();
+    const requestId = `pending_cleanup_${randomUUID()}`;
+
+    await db.writeReceipt.deleteMany({ where: { requestId } });
+
+    try {
+        await librarianWrite({
+            requestId,
+            entityType: 'system',
+            entityId: 'cleanup_probe',
+            key: 'forbidden_write',
+            valueRaw: { ok: false },
+            valueSummary: 'forbidden write',
+            confidence: 50,
+            createdBy: 'external_agent',
+            source: 'cleanup_test',
+        });
+        throw new Error('Expected librarianWrite to reject forbidden system write.');
+    } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (!message.includes('system namespace is staff-only')) {
+            throw err;
+        }
+    }
+
+    const receipt = await db.writeReceipt.findUnique({ where: { requestId } });
+    if (receipt) {
+        throw new Error(`Expected pending receipt cleanup after failed write, but found outcome=${receipt.outcome}.`);
+    }
+
+    console.log('✅ PASSED: Failed writes do not leave pending receipts behind\n');
+}
+
+async function main() {
+    await testConcurrentWrites();
+    await testPendingReceiptCleanupOnError();
+}
+
+main().catch(err => {
     console.error('Test failed:', err);
     process.exit(1);
 });

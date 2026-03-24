@@ -1012,13 +1012,27 @@ function detectPlaceholder(value: string | undefined): boolean {
     if (!value) return true;
     const normalized = value.trim().toLowerCase();
     if (normalized.length === 0) return true;
-    const weakPatterns = [
-        'yourpassword', 'replace_me', 'your_secret', 'your_key_here', 'your_api_key',
-        'changeme', 'placeholder', 'example', 'insert_key_here', 'add_your_key',
-        'todo', 'fixme', 'xxx', 'none', 'null', 'undefined', 'test', 'password',
-        'admin', 'secret', '1234', 'abcd',
+    const exactWeakValues = new Set([
+        'changeme',
+        'placeholder',
+        'example',
+        'todo',
+        'fixme',
+        'none',
+        'null',
+        'undefined',
+    ]);
+    if (exactWeakValues.has(normalized)) return true;
+    const weakFragments = [
+        'yourpassword',
+        'replace_me',
+        'your_secret',
+        'your_key_here',
+        'your_api_key',
+        'insert_key_here',
+        'add_your_key',
     ];
-    return weakPatterns.some((p) => normalized.includes(p));
+    return weakFragments.some((p) => normalized.includes(p));
 }
 
 function quoteSqlLiteral(value: string): string {
@@ -1226,6 +1240,8 @@ async function ensureInstanceConfigured(
         LLM_PROVIDER: config.provider,
         ...config.providerKeys,
     });
+
+    await syncInstanceMeta(root, name, config.port);
 
     return { envFile, instanceDir, created };
 }
@@ -1750,6 +1766,62 @@ async function chooseAvailablePort(session: PromptSession, promptText: string, p
         const next = await findNextAvailablePort(parsed + 1, '0.0.0.0', 50, allReserved);
         console.log(`${warnLabel()} Port ${parsed} is already in use. Try ${next} instead.`);
         suggested = next;
+    }
+}
+
+async function syncInstanceMeta(root: string, name: string, port: number): Promise<void> {
+    const { instanceDir, envFile, metaFile } = instancePaths(root, name);
+    const existingCreatedAt = fs.existsSync(metaFile)
+        ? await fsp.readFile(metaFile, 'utf-8')
+            .then((raw) => {
+                try {
+                    const parsed = JSON.parse(raw) as Partial<InstanceMeta>;
+                    return typeof parsed.createdAt === 'string' ? parsed.createdAt : undefined;
+                } catch {
+                    return undefined;
+                }
+            })
+        : undefined;
+
+    const meta: InstanceMeta = {
+        name,
+        createdAt: existingCreatedAt ?? new Date().toISOString(),
+        port,
+        envFile,
+        instanceDir,
+    };
+    await writeJson(metaFile, meta);
+}
+
+async function assertPortAssignable(root: string, port: number, currentInstanceName?: string): Promise<void> {
+    const reservedPorts = await readAllInstancePorts(root);
+    let allowCurrentRunningPort = false;
+
+    if (currentInstanceName) {
+        const { envFile } = instancePaths(root, currentInstanceName);
+        if (fs.existsSync(envFile)) {
+            try {
+                const env = await readEnvFile(envFile);
+                const currentPort = Number.parseInt(env.IRANTI_PORT ?? '', 10);
+                if (Number.isFinite(currentPort) && currentPort > 0) {
+                    reservedPorts.delete(currentPort);
+                    if (currentPort === port) {
+                        const runtime = await readInstanceRuntimeSummary(root, currentInstanceName);
+                        allowCurrentRunningPort = runtime.running && runtime.state?.port === port;
+                    }
+                }
+            } catch {
+                // Ignore unreadable current instance env and fall back to stricter validation.
+            }
+        }
+    }
+
+    if (reservedPorts.has(port)) {
+        throw new Error(`Port ${port} is already assigned to another Iranti instance.`);
+    }
+
+    if (!allowCurrentRunningPort && !(await isPortUsable(port, '0.0.0.0', listPublishedDockerHostPorts()))) {
+        throw new Error(`Port ${port} is already in use.`);
     }
 }
 
@@ -3059,8 +3131,9 @@ function launchDetachedWindowsPowerShellFile(scriptPath: string, cwd: string): v
 // C-5: postCommand must be a pre-escaped PowerShell snippet produced internally (never from raw user input).
 // Validate it against a strict allowlist pattern to prevent future injection if the call site changes.
 function validateDetachedPostCommand(postCommand: string): void {
-    // Allow only: alphanumeric, spaces, single-quotes, hyphens, underscores, dots, slashes, and & for PS call operator.
-    if (!/^[a-zA-Z0-9 '&_\-./:]+$/.test(postCommand)) {
+    // Allow only: alphanumeric, spaces, single-quotes, hyphens, underscores, dots, slashes,
+    // backslashes, colons, and & for PS call operator.
+    if (!/^[a-zA-Z0-9 '&_\-./:\\]+$/.test(postCommand)) {
         throw new Error(`Unsafe characters in detached post-command. Only pre-escaped PowerShell call expressions are permitted.`);
     }
 }
@@ -4868,6 +4941,7 @@ async function createInstanceCommand(args: ParsedArgs): Promise<void> {
     if (instanceAlreadyExisted && !hasFlag(args, 'force')) {
         throw new Error(`Instance '${name}' already exists at ${instanceDir}. Use --force to overwrite.`);
     }
+    await assertPortAssignable(root, port, instanceAlreadyExisted ? name : undefined);
 
     // H-7: Register rollback if the instance dir is new (so SIGINT cleans up partial state)
     if (!instanceAlreadyExisted) {
@@ -5017,6 +5091,23 @@ async function runInstanceCommand(args: ParsedArgs): Promise<void> {
             { instance: name, envFile }
         );
     }
+    const port = Number.parseInt(env.IRANTI_PORT ?? '3001', 10);
+    if (!Number.isFinite(port) || port <= 0) {
+        throw cliError(
+            'IRANTI_INSTANCE_PORT_INVALID',
+            `Instance '${name}' has invalid IRANTI_PORT in ${envFile}.`,
+            ['Run `iranti configure instance <name> --port <n>` to repair it.'],
+            { instance: name, envFile, port: env.IRANTI_PORT ?? null }
+        );
+    }
+    if (!(await isPortUsable(port, '0.0.0.0', listPublishedDockerHostPorts()))) {
+        throw cliError(
+            'IRANTI_INSTANCE_PORT_IN_USE',
+            `Cannot start instance '${name}' because port ${port} is already in use.`,
+            ['Run `iranti configure instance <name> --port <n>` or free the port before retrying.'],
+            { instance: name, envFile, port }
+        );
+    }
     await startInstanceRuntime(name, instanceDir, envFile, runtimeFile);
 }
 
@@ -5134,6 +5225,7 @@ async function configureInstanceCommand(args: ParsedArgs): Promise<void> {
     if (portRaw) {
         const port = Number.parseInt(portRaw, 10);
         if (!Number.isFinite(port) || port <= 0) throw new Error(`Invalid --port '${portRaw}'.`);
+        await assertPortAssignable(root, port, name);
         updates.IRANTI_PORT = String(port);
     }
 
@@ -5165,6 +5257,9 @@ async function configureInstanceCommand(args: ParsedArgs): Promise<void> {
     }
 
     await upsertEnvFile(envFile, updates);
+    if (updates.IRANTI_PORT) {
+        await syncInstanceMeta(root, name, Number.parseInt(updates.IRANTI_PORT, 10));
+    }
 
     const json = hasFlag(args, 'json');
     const result = {
@@ -6263,5 +6358,3 @@ main().catch((err) => {
     }
     process.exit(1);
 });
-
-

@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 import { randomBytes } from 'crypto';
 import { spawnSync } from 'child_process';
+import net from 'net';
 import { readInstanceRuntime } from '../../src/lib/runtimeLifecycle';
 import { parseDockerContainerNames, parsePublishedDockerHostPorts } from '../../src/lib/dockerCliParsing';
 import { loadRuntimeEnv } from '../../src/lib/runtimeEnv';
@@ -48,6 +49,20 @@ function writeText(filePath: string, value: string): void {
     fs.writeFileSync(filePath, value, 'utf8');
 }
 
+async function listenOnRandomPort(): Promise<{ server: net.Server; port: number }> {
+    const server = net.createServer();
+    await new Promise<void>((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(0, '0.0.0.0', () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === 'string') {
+        server.close();
+        throw new Error('Failed to allocate test port.');
+    }
+    return { server, port: address.port };
+}
+
 function withCleanEnv<T>(fn: () => T): T {
     const snapshot = { ...process.env };
     try {
@@ -66,8 +81,9 @@ function withCleanEnv<T>(fn: () => T): T {
     }
 }
 
-function main(): void {
+async function main(): Promise<void> {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'iranti-runtime-lifecycle-'));
+    const openServers: net.Server[] = [];
     try {
         const instancesDir = path.join(root, 'instances');
         const instanceDir = path.join(instancesDir, 'local');
@@ -230,10 +246,104 @@ function main(): void {
             'restart should refuse to operate on a stopped/stale instance'
         );
 
+        const createConflict = await listenOnRandomPort();
+        openServers.push(createConflict.server);
+        const createConflictRun = runCli(['instance', 'create', 'busy', '--port', String(createConflict.port), '--root', root], repoRoot);
+        assert.notStrictEqual(createConflictRun.status, 0, 'instance create unexpectedly accepted an occupied port');
+        assert.match(
+            `${createConflictRun.stdout}\n${createConflictRun.stderr}`,
+            /port .* already in use/i,
+            'instance create should fail cleanly when the requested port is occupied'
+        );
+        assert.ok(!fs.existsSync(path.join(root, 'instances', 'busy', '.env')), 'failed create should not leave an instance env behind');
+
+        const configDir = path.join(instancesDir, 'config-check');
+        const configEnvFile = path.join(configDir, '.env');
+        writeJson(path.join(configDir, 'instance.json'), {
+            name: 'config-check',
+            createdAt: now,
+            port: 3060,
+            envFile: configEnvFile,
+            instanceDir: configDir,
+        });
+        writeText(configEnvFile, [
+            'IRANTI_INSTANCE_NAME=config-check',
+            'IRANTI_PORT=3060',
+            'DATABASE_URL=postgresql://postgres:postgres@localhost:5432/iranti_config_check',
+            'LLM_PROVIDER=mock',
+            `IRANTI_ESCALATION_DIR=${path.join(configDir, 'escalation')}`,
+            `IRANTI_REQUEST_LOG_FILE=${path.join(configDir, 'logs', 'api-requests.log')}`,
+            'IRANTI_ARCHIVIST_WATCH=true',
+            'IRANTI_ARCHIVIST_DEBOUNCE_MS=60000',
+            'IRANTI_ARCHIVIST_INTERVAL_MS=0',
+            `IRANTI_API_KEY=test_${randomBytes(16).toString('hex')}`,
+            '',
+        ].join('\n'));
+
+        const configConflict = await listenOnRandomPort();
+        openServers.push(configConflict.server);
+        const configureConflictRun = runCli(['configure', 'instance', 'config-check', '--port', String(configConflict.port), '--root', root], repoRoot);
+        assert.notStrictEqual(configureConflictRun.status, 0, 'configure instance unexpectedly accepted an occupied port');
+        assert.match(
+            `${configureConflictRun.stdout}\n${configureConflictRun.stderr}`,
+            /port .* already in use/i,
+            'configure instance should fail cleanly when the requested port is occupied'
+        );
+
+        const freePortServer = await listenOnRandomPort();
+        const freePort = freePortServer.port;
+        await new Promise<void>((resolve) => freePortServer.server.close(() => resolve()));
+        const configureOkRun = runCli(['configure', 'instance', 'config-check', '--port', String(freePort), '--root', root], repoRoot);
+        assert.strictEqual(configureOkRun.status, 0, `configure instance failed:\n${configureOkRun.stdout}\n${configureOkRun.stderr}`);
+        const configuredMeta = JSON.parse(fs.readFileSync(path.join(configDir, 'instance.json'), 'utf8')) as { port: number };
+        assert.strictEqual(configuredMeta.port, freePort, 'instance.json should stay in sync with configured ports');
+
+        const runConflictDir = path.join(instancesDir, 'run-conflict');
+        const runConflictEnvFile = path.join(runConflictDir, '.env');
+        const runConflict = await listenOnRandomPort();
+        openServers.push(runConflict.server);
+        writeJson(path.join(runConflictDir, 'instance.json'), {
+            name: 'run-conflict',
+            createdAt: now,
+            port: runConflict.port,
+            envFile: runConflictEnvFile,
+            instanceDir: runConflictDir,
+        });
+        writeText(runConflictEnvFile, [
+            'IRANTI_INSTANCE_NAME=run-conflict',
+            `IRANTI_PORT=${runConflict.port}`,
+            'DATABASE_URL=postgresql://postgres:postgres@localhost:5432/iranti_run_conflict',
+            'LLM_PROVIDER=mock',
+            `IRANTI_ESCALATION_DIR=${path.join(runConflictDir, 'escalation')}`,
+            `IRANTI_REQUEST_LOG_FILE=${path.join(runConflictDir, 'logs', 'api-requests.log')}`,
+            'IRANTI_ARCHIVIST_WATCH=true',
+            'IRANTI_ARCHIVIST_DEBOUNCE_MS=60000',
+            'IRANTI_ARCHIVIST_INTERVAL_MS=0',
+            `IRANTI_API_KEY=test_${randomBytes(16).toString('hex')}`,
+            '',
+        ].join('\n'));
+        const runConflictRun = runCli(['run', '--instance', 'run-conflict', '--root', root], repoRoot);
+        assert.notStrictEqual(runConflictRun.status, 0, 'run unexpectedly started on an occupied port');
+        assert.match(
+            `${runConflictRun.stdout}\n${runConflictRun.stderr}`,
+            /port .* already in use/i,
+            'run should fail cleanly before app.listen when the configured port is occupied'
+        );
+
         console.log('runtime lifecycle CLI smoke passed');
     } finally {
+        for (const server of openServers) {
+            try {
+                server.close();
+            } catch {
+                // ignore test cleanup failures
+            }
+        }
         fs.rmSync(root, { recursive: true, force: true });
     }
 }
 
-main();
+main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+});

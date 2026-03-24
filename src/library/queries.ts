@@ -789,6 +789,16 @@ export async function claimWriteReceiptSlot(data: {
     }
 }
 
+export async function clearPendingWriteReceiptSlot(requestId: string, db?: DbClient): Promise<void> {
+    const client = db ?? getDb();
+    await client.writeReceipt.deleteMany({
+        where: {
+            requestId,
+            outcome: 'pending',
+        },
+    });
+}
+
 export async function updateWriteReceiptOutcome(requestId: string, outcome: string, resultEntryId?: number | null, escalationFile?: string | null, db?: DbClient): Promise<void> {
     const client = db ?? getDb();
     await client.writeReceipt.update({

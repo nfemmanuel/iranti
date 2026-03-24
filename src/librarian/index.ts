@@ -6,6 +6,7 @@ import {
     archiveEntry,
     canWriteToStaffNamespace,
     claimWriteReceiptSlot,
+    clearPendingWriteReceiptSlot,
     createEntry,
     deleteEntryById,
     findEntry,
@@ -175,192 +176,205 @@ export async function librarianWrite(input: EntryInput): Promise<{
     input.createdBy = input.createdBy.toLowerCase();
     validateTemporalInput(input);
 
-    if (input.entityType === 'agent' && input.key === 'attendant_state') {
-        const isStaff = new Set(['attendant', 'librarian', 'archivist', 'system', 'seed']).has(input.createdBy);
-        if (!isStaff) {
-            throw new Error('Write blocked: attendant_state is reserved for staff.');
-        }
-    }
-
-    if (input.requestId) {
-        // M-2: Pending-before-write pattern — claim the requestId slot before executing the write.
-        // This prevents two concurrent requests with the same requestId from both writing.
-        const claimed = await claimWriteReceiptSlot({
-            requestId: input.requestId,
-            entityType: input.entityType,
-            entityId: input.entityId,
-            key: input.key,
-        });
-
-        if (!claimed) {
-            // Another request already claimed this requestId
-            const receipt = await getWriteReceipt(input.requestId);
-            if (receipt && receipt.outcome !== 'pending') {
-                getStaffEventEmitter().emit({
-                    staffComponent: 'Librarian',
-                    actionType: 'write_deduplicated',
-                    agentId: input.createdBy,
-                    source: input.source,
-                    entityType: input.entityType,
-                    entityId: input.entityId,
-                    key: input.key,
-                    reason: 'Idempotent replay — requestId already processed.',
-                    level: 'debug',
-                    metadata: { requestId: input.requestId },
-                });
-                timeEnd('librarian.write_ms', t0);
-                return {
-                    action: receipt.outcome as WriteAction,
-                    reason: 'Idempotent replay of previous request',
-                    idempotentReplay: true,
-                };
+    try {
+        if (input.entityType === 'agent' && input.key === 'attendant_state') {
+            const isStaff = new Set(['attendant', 'librarian', 'archivist', 'system', 'seed']).has(input.createdBy);
+            if (!isStaff) {
+                throw new Error('Write blocked: attendant_state is reserved for staff.');
             }
-            // Receipt is still pending (in-flight race) — treat as duplicate
-            timeEnd('librarian.write_ms', t0);
-            return {
-                action: 'rejected' as WriteAction,
-                reason: 'Request is already being processed (duplicate requestId in flight).',
-                idempotentReplay: true,
-            };
         }
-    }
 
-    enforceWritePermissions({
-        entityType: input.entityType,
-        entityId: input.entityId,
-        key: input.key,
-        createdBy: input.createdBy,
-    });
-
-    const writeResult = await withIdentityLock(
-        { entityType: input.entityType, entityId: input.entityId, key: input.key },
-        async (tx): Promise<WriteResultInternal> => {
-            if (!canWriteToStaffNamespace(input.createdBy, input.entityType)) {
-                return {
-                    action: 'rejected',
-                    reason: `Staff namespace '${input.entityType}' is protected. Only staff writers can modify it.`,
-                };
-            }
-
-            const protectedEntry = await isProtectedEntry({
+        if (input.requestId) {
+            // M-2: Pending-before-write pattern — claim the requestId slot before executing the write.
+            // This prevents two concurrent requests with the same requestId from both writing.
+            const claimed = await claimWriteReceiptSlot({
+                requestId: input.requestId,
                 entityType: input.entityType,
                 entityId: input.entityId,
                 key: input.key,
-            }, tx);
+            });
 
-            if (protectedEntry) {
-                return {
-                    action: 'rejected',
-                    reason: 'Entry is protected. Only the seed script can write to the Staff Namespace.',
-                };
-            }
-
-            const existing = await findEntry({
-                entityType: input.entityType,
-                entityId: input.entityId,
-                key: input.key,
-            }, tx);
-
-            if (!existing) {
-                const contextualConflict = await detectContextualConflict(input, tx);
-                if (contextualConflict) {
-                    for (const matched of contextualConflict.matchedEntries) {
-                        await logDecision(
-                            matched.id,
-                            'CONTEXTUAL_CONFLICT_REJECTED',
-                            input,
-                            matched.confidence,
-                            input.confidence,
-                            contextualConflict.reason,
-                            false,
-                            tx
-                        );
-                    }
-                    await saveReceipt(input, 'rejected', contextualConflict.matchedEntries[0]?.id ?? null, tx);
-                    inc('librarian.rejected');
+            if (!claimed) {
+                // Another request already claimed this requestId
+                const receipt = await getWriteReceipt(input.requestId);
+                if (receipt && receipt.outcome !== 'pending') {
                     getStaffEventEmitter().emit({
                         staffComponent: 'Librarian',
-                        actionType: 'write_rejected',
+                        actionType: 'write_deduplicated',
                         agentId: input.createdBy,
                         source: input.source,
                         entityType: input.entityType,
                         entityId: input.entityId,
                         key: input.key,
-                        reason: contextualConflict.reason,
-                        level: 'audit',
-                        metadata: { rejectionReason: 'contextual_conflict' },
+                        reason: 'Idempotent replay — requestId already processed.',
+                        level: 'debug',
+                        metadata: { requestId: input.requestId },
                     });
+                    timeEnd('librarian.write_ms', t0);
+                    return {
+                        action: receipt.outcome as WriteAction,
+                        reason: 'Idempotent replay of previous request',
+                        idempotentReplay: true,
+                    };
+                }
+                // Receipt is still pending (in-flight race) — treat as duplicate
+                timeEnd('librarian.write_ms', t0);
+                return {
+                    action: 'rejected' as WriteAction,
+                    reason: 'Request is already being processed (duplicate requestId in flight).',
+                    idempotentReplay: true,
+                };
+            }
+        }
+
+        enforceWritePermissions({
+            entityType: input.entityType,
+            entityId: input.entityId,
+            key: input.key,
+            createdBy: input.createdBy,
+        });
+
+        const writeResult = await withIdentityLock(
+            { entityType: input.entityType, entityId: input.entityId, key: input.key },
+            async (tx): Promise<WriteResultInternal> => {
+                if (!canWriteToStaffNamespace(input.createdBy, input.entityType)) {
                     return {
                         action: 'rejected',
-                        reason: contextualConflict.reason,
-                        reliabilityUpdate: contextualConflict.matchedEntries[0]
-                            ? buildReliabilityUpdate(contextualConflict.matchedEntries[0].source, input.source)
-                            : undefined,
+                        reason: `Staff namespace '${input.entityType}' is protected. Only staff writers can modify it.`,
                     };
                 }
 
-                const entry = await createEntry({
-                    ...input,
-                    validFrom: input.validFrom ?? new Date(),
-                    validUntil: null,
+                const protectedEntry = await isProtectedEntry({
+                    entityType: input.entityType,
+                    entityId: input.entityId,
+                    key: input.key,
                 }, tx);
-                await updateStats(input.createdBy, 'created', input.confidence);
-                await saveReceipt(input, 'created', entry.id, tx);
-                inc('librarian.created');
+
+                if (protectedEntry) {
+                    return {
+                        action: 'rejected',
+                        reason: 'Entry is protected. Only the seed script can write to the Staff Namespace.',
+                    };
+                }
+
+                const existing = await findEntry({
+                    entityType: input.entityType,
+                    entityId: input.entityId,
+                    key: input.key,
+                }, tx);
+
+                if (!existing) {
+                    const contextualConflict = await detectContextualConflict(input, tx);
+                    if (contextualConflict) {
+                        for (const matched of contextualConflict.matchedEntries) {
+                            await logDecision(
+                                matched.id,
+                                'CONTEXTUAL_CONFLICT_REJECTED',
+                                input,
+                                matched.confidence,
+                                input.confidence,
+                                contextualConflict.reason,
+                                false,
+                                tx
+                            );
+                        }
+                        await saveReceipt(input, 'rejected', contextualConflict.matchedEntries[0]?.id ?? null, tx);
+                        inc('librarian.rejected');
+                        getStaffEventEmitter().emit({
+                            staffComponent: 'Librarian',
+                            actionType: 'write_rejected',
+                            agentId: input.createdBy,
+                            source: input.source,
+                            entityType: input.entityType,
+                            entityId: input.entityId,
+                            key: input.key,
+                            reason: contextualConflict.reason,
+                            level: 'audit',
+                            metadata: { rejectionReason: 'contextual_conflict' },
+                        });
+                        return {
+                            action: 'rejected',
+                            reason: contextualConflict.reason,
+                            reliabilityUpdate: contextualConflict.matchedEntries[0]
+                                ? buildReliabilityUpdate(contextualConflict.matchedEntries[0].source, input.source)
+                                : undefined,
+                        };
+                    }
+
+                    const entry = await createEntry({
+                        ...input,
+                        validFrom: input.validFrom ?? new Date(),
+                        validUntil: null,
+                    }, tx);
+                    await updateStats(input.createdBy, 'created', input.confidence);
+                    await saveReceipt(input, 'created', entry.id, tx);
+                    inc('librarian.created');
+                    getStaffEventEmitter().emit({
+                        staffComponent: 'Librarian',
+                        actionType: 'write_created',
+                        agentId: input.createdBy,
+                        source: input.source,
+                        entityType: input.entityType,
+                        entityId: input.entityId,
+                        key: input.key,
+                        reason: 'No existing entry found. Created.',
+                        level: 'audit',
+                        metadata: {
+                            confidence: input.confidence,
+                            valuePreview: JSON.stringify(input.valueRaw).slice(0, 200),
+                        },
+                    });
+                    return { action: 'created', entry, reason: 'No existing entry found. Created.' };
+                }
+
                 getStaffEventEmitter().emit({
                     staffComponent: 'Librarian',
-                    actionType: 'write_created',
+                    actionType: 'conflict_detected',
                     agentId: input.createdBy,
                     source: input.source,
                     entityType: input.entityType,
                     entityId: input.entityId,
                     key: input.key,
-                    reason: 'No existing entry found. Created.',
-                    level: 'audit',
-                    metadata: {
-                        confidence: input.confidence,
-                        valuePreview: JSON.stringify(input.valueRaw).slice(0, 200),
-                    },
+                    reason: 'Existing entry found. Beginning conflict resolution.',
+                    level: 'debug',
+                    metadata: { existingConfidence: existing.confidence, incomingConfidence: input.confidence },
                 });
-                return { action: 'created', entry, reason: 'No existing entry found. Created.' };
+                return resolveConflict(existing, input, tx);
             }
+        );
 
-            getStaffEventEmitter().emit({
-                staffComponent: 'Librarian',
-                actionType: 'conflict_detected',
-                agentId: input.createdBy,
-                source: input.source,
-                entityType: input.entityType,
-                entityId: input.entityId,
-                key: input.key,
-                reason: 'Existing entry found. Beginning conflict resolution.',
-                level: 'debug',
-                metadata: { existingConfidence: existing.confidence, incomingConfidence: input.confidence },
-            });
-            return resolveConflict(existing, input, tx);
+        if (writeResult.reliabilityUpdate) {
+            try {
+                await recordResolution(
+                    writeResult.reliabilityUpdate.winnerSource,
+                    writeResult.reliabilityUpdate.loserSource,
+                    writeResult.reliabilityUpdate.humanOverride
+                );
+            } catch (err) {
+                const reason = err instanceof Error ? err.message : String(err);
+                console.warn('[librarian] reliability update failed:', reason);
+            }
         }
-    );
 
-    if (writeResult.reliabilityUpdate) {
-        try {
-            await recordResolution(
-                writeResult.reliabilityUpdate.winnerSource,
-                writeResult.reliabilityUpdate.loserSource,
-                writeResult.reliabilityUpdate.humanOverride
-            );
-        } catch (err) {
-            const reason = err instanceof Error ? err.message : String(err);
-            console.warn('[librarian] reliability update failed:', reason);
+        if (writeResult.action === 'updated' || writeResult.action === 'rejected' || writeResult.action === 'escalated') {
+            await updateStats(input.createdBy, writeResult.action, input.confidence);
         }
-    }
 
-    if (writeResult.action === 'updated' || writeResult.action === 'rejected' || writeResult.action === 'escalated') {
-        await updateStats(input.createdBy, writeResult.action, input.confidence);
+        const { reliabilityUpdate: _ignored, ...publicResult } = writeResult;
+        timeEnd('librarian.write_ms', t0);
+        return publicResult;
+    } catch (err) {
+        if (input.requestId) {
+            try {
+                await clearPendingWriteReceiptSlot(input.requestId);
+            } catch (cleanupErr) {
+                const reason = cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr);
+                console.warn('[librarian] failed to clear pending write receipt after error:', reason);
+            }
+        }
+        timeEnd('librarian.write_ms', t0);
+        throw err;
     }
-
-    const { reliabilityUpdate: _ignored, ...publicResult } = writeResult;
-    timeEnd('librarian.write_ms', t0);
-    return publicResult;
 }
 
 async function resolveConflict(
