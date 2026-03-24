@@ -6012,6 +6012,7 @@ function printHelp(): void {
     ]);
 
     printRows('Diagnostics And Operator Tools', [
+        ['iranti version', 'Print the installed CLI version and exit.'],
         ['iranti doctor [--instance <name>] [--scope user|system] [--env <file>] [--json] [--debug]', 'Run environment and runtime diagnostics.'],
         ['iranti status [--scope user|system] [--json]', 'Show runtime roots, bindings, and known instances.'],
         ['iranti upgrade [--check] [--dry-run] [--yes] [--all] [--target auto|npm-global|npm-repo|python[,python]] [--json]', 'Check or run CLI/runtime/package upgrades.'],

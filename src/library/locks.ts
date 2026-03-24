@@ -2,6 +2,7 @@ import { getDb } from './client';
 import type { PrismaClient } from '../generated/prisma/client';
 
 type TransactionClient = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+const identityQueueTails = new Map<string, Promise<void>>();
 
 function parsePositiveInt(raw: string | undefined, fallback: number): number {
     const parsed = Number.parseInt(raw ?? '', 10);
@@ -33,18 +34,49 @@ async function executeWithIdentityLock<T>(
     }, transactionBudget());
 }
 
+function identityQueueKey(identity: { entityType: string; entityId: string; key: string }): string {
+    return `${identity.entityType}||${identity.entityId}||${identity.key}`;
+}
+
+async function withInProcessIdentityQueue<T>(
+    identity: { entityType: string; entityId: string; key: string },
+    fn: () => Promise<T>
+): Promise<T> {
+    const queueKey = identityQueueKey(identity);
+    const previous = identityQueueTails.get(queueKey);
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    identityQueueTails.set(queueKey, current);
+
+    try {
+        if (previous) {
+            await previous;
+        }
+        return await fn();
+    } finally {
+        release();
+        if (identityQueueTails.get(queueKey) === current) {
+            identityQueueTails.delete(queueKey);
+        }
+    }
+}
+
 export async function withIdentityLock<T>(
     identity: { entityType: string; entityId: string; key: string },
     fn: (tx: TransactionClient) => Promise<T>
 ): Promise<T> {
-    try {
-        return await executeWithIdentityLock(identity, fn);
-    } catch (err) {
-        if (!isAbortedTransactionError(err)) {
-            throw err;
+    return withInProcessIdentityQueue(identity, async () => {
+        try {
+            return await executeWithIdentityLock(identity, fn);
+        } catch (err) {
+            if (!isAbortedTransactionError(err)) {
+                throw err;
+            }
+            return executeWithIdentityLock(identity, fn);
         }
-        return executeWithIdentityLock(identity, fn);
-    }
+    });
 }
 
 function hashToBigInt(s: string): bigint {

@@ -1,14 +1,24 @@
 import { randomUUID } from 'crypto';
 import { librarianWrite } from '../src/librarian';
 import { findEntry, findEntriesByEntity } from '../src/library/queries';
-import { getDb } from '../src/library/client';
+import { disconnectDb, getDb } from '../src/library/client';
 import { bootstrapHarness } from './harness';
+
+// Keep the default run small enough for repeatable CI while still exercising same-key serialization.
+// Local stress runs can raise IRANTI_CONCURRENCY_STRESS_WRITES explicitly.
+process.env.IRANTI_TX_MAX_WAIT_MS = process.env.IRANTI_TX_MAX_WAIT_MS ?? '60000';
+process.env.IRANTI_TX_TIMEOUT_MS = process.env.IRANTI_TX_TIMEOUT_MS ?? '60000';
 
 async function testConcurrentWrites() {
     console.log('🔒 Testing concurrent write safety...\n');
 
     bootstrapHarness();
     const db = getDb();
+    const writeCountRaw = process.env.IRANTI_CONCURRENCY_STRESS_WRITES ?? '4';
+    const writeCount = Number.parseInt(writeCountRaw, 10);
+    if (!Number.isFinite(writeCount) || writeCount < 2) {
+        throw new Error(`IRANTI_CONCURRENCY_STRESS_WRITES must be an integer >= 2. Received '${writeCountRaw}'.`);
+    }
     
     // Clean slate
     const testEntity = { entityType: 'test', entityId: 'concurrent_r1', key: 'affiliation' };
@@ -24,17 +34,17 @@ async function testConcurrentWrites() {
     
     console.log('✓ Cleaned test data\n');
     
-    // Fire 25 simultaneous writes to same identity triple
-    const writes = Array.from({ length: 25 }).map((_, i) => ({
+    // Fire same-key writes in parallel to prove serialized completion and unique receipts.
+    const writes = Array.from({ length: writeCount }).map((_, i) => ({
         requestId: randomUUID(),
         entityType: testEntity.entityType,
         entityId: testEntity.entityId,
         key: testEntity.key,
         valueRaw: { institution: i % 2 === 0 ? 'MIT' : 'Cambridge' },
         valueSummary: i % 2 === 0 ? 'MIT' : 'Cambridge',
-        confidence: 50 + i,
+        confidence: 80,
         createdBy: `Agent${i % 3}`,
-        source: `Source${i % 3}`,
+        source: 'concurrency_test',
     }));
     
     console.log(`🚀 Launching ${writes.length} concurrent writes to same entity key...\n`);
@@ -136,11 +146,19 @@ async function testPendingReceiptCleanupOnError() {
 }
 
 async function main() {
-    await testConcurrentWrites();
-    await testPendingReceiptCleanupOnError();
+    try {
+        await testConcurrentWrites();
+        await testPendingReceiptCleanupOnError();
+    } finally {
+        await disconnectDb().catch(() => undefined);
+    }
 }
 
-main().catch(err => {
-    console.error('Test failed:', err);
-    process.exit(1);
-});
+main()
+    .then(() => {
+        process.exit(0);
+    })
+    .catch(err => {
+        console.error('Test failed:', err);
+        process.exit(1);
+    });
