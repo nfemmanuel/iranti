@@ -6019,6 +6019,11 @@ async function main(): Promise<void> {
         subcommand: args.subcommand,
         cwd: process.cwd(),
     });
+    if (args.command === '--version' || args.command === 'version' || hasFlag(args, 'version')) {
+        console.log(getPackageVersion());
+        return;
+    }
+
     if (!args.command || args.command === 'help' || args.command === '--help') {
         printHelp();
         return;
