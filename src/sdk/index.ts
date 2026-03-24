@@ -131,6 +131,16 @@ export interface SessionInspectionInput {
     recentMessages?: string[];
 }
 
+export type SessionListSort = 'operator' | 'updated_desc' | 'agent_asc';
+
+export interface SessionListInput {
+    agentId?: string;
+    operatorState?: SessionOperatorState;
+    staleOnly?: boolean;
+    limit?: number;
+    sort?: SessionListSort;
+}
+
 export interface SessionInspection {
     agentId: string;
     hasCheckpoint: boolean;
@@ -290,6 +300,48 @@ function resolveAgentId(input: { agent?: string; agentId?: string }, operation: 
         throw new Error(`${operation} requires agentId (agent is accepted as a legacy alias).`);
     }
     return agentId;
+}
+
+function sessionOperatorPriority(summary: SessionSummary): number {
+    switch (summary.operatorState) {
+        case 'interrupted':
+            return 0;
+        case 'active':
+            return 1;
+        case 'completed':
+            return 2;
+        case 'abandoned':
+            return 3;
+        case 'none':
+        default:
+            return 4;
+    }
+}
+
+function sessionTimestamp(summary: SessionSummary): number {
+    const candidate = summary.updatedAt
+        ?? summary.lastHeartbeatAt
+        ?? summary.startedAt
+        ?? summary.persistedBriefGeneratedAt
+        ?? null;
+    if (!candidate) return 0;
+    const parsed = new Date(candidate).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function compareSessionSummaries(a: SessionSummary, b: SessionSummary, sort: SessionListSort): number {
+    if (sort === 'agent_asc') {
+        return a.agentId.localeCompare(b.agentId);
+    }
+    if (sort === 'updated_desc') {
+        return sessionTimestamp(b) - sessionTimestamp(a) || a.agentId.localeCompare(b.agentId);
+    }
+
+    return (
+        sessionOperatorPriority(a) - sessionOperatorPriority(b)
+        || sessionTimestamp(b) - sessionTimestamp(a)
+        || a.agentId.localeCompare(b.agentId)
+    );
 }
 
 async function resolveQueryEntity(entity: string): Promise<{
@@ -502,9 +554,11 @@ export class Iranti {
         });
     }
 
-    async listSessions(): Promise<SessionSummary[]> {
-        const states = await listAttendantStateEntries();
-        return states
+    async listSessions(input: SessionListInput = {}): Promise<SessionSummary[]> {
+        const states = await listAttendantStateEntries(
+            input.agentId?.trim() ? { agentId: input.agentId.trim() } : undefined,
+        );
+        let sessions = states
             .map((entry) => {
                 const raw = entry.valueRaw as Partial<WorkingMemoryBrief> | null;
                 const checkpoint = raw?.sessionCheckpoint ?? null;
@@ -516,6 +570,21 @@ export class Iranti {
                 );
             })
             .filter((entry): entry is SessionSummary => Boolean(entry));
+
+        if (input.operatorState) {
+            sessions = sessions.filter((entry) => entry.operatorState === input.operatorState);
+        }
+        if (input.staleOnly) {
+            sessions = sessions.filter((entry) => entry.isStale);
+        }
+
+        sessions.sort((a, b) => compareSessionSummaries(a, b, input.sort ?? 'operator'));
+
+        if (typeof input.limit === 'number' && Number.isFinite(input.limit) && input.limit > 0) {
+            sessions = sessions.slice(0, Math.floor(input.limit));
+        }
+
+        return sessions;
     }
 
     getAttendant(agentId: string): AttendantInstance {

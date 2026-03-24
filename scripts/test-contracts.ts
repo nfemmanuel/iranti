@@ -149,7 +149,7 @@ function assertPythonClientContract(): void {
     expectIncludes(filePath, content, "self._post('/memory/resume'", 'Python client resumes via /memory/resume');
     expectIncludes(filePath, content, "self._post('/memory/complete'", 'Python client completes via /memory/complete');
     expectIncludes(filePath, content, "self._post('/memory/abandon'", 'Python client abandons via /memory/abandon');
-    expectIncludes(filePath, content, "self._get('/memory/sessions')", 'Python client lists /memory/sessions');
+    expectIncludes(filePath, content, "self._get('/memory/sessions' if not params else", 'Python client lists /memory/sessions');
     expectIncludes(filePath, content, "self._get(f'/memory/session/{agent_id}')", 'Python client inspects /memory/session/:agentId');
     expectIncludes(filePath, content, "self._post('/memory/attend'", 'Python client attends via /memory/attend');
     expectIncludes(filePath, content, "self._get(f'/memory/whoknows/{entity_type}/{entity_id}')", 'Python client reads /memory/whoknows/:type/:id');
@@ -213,7 +213,7 @@ function assertTypeScriptHttpClientContract(): void {
     expectIncludes(filePath, content, "'/memory/resume'", 'TypeScript client resumes via /memory/resume');
     expectIncludes(filePath, content, "'/memory/complete'", 'TypeScript client completes via /memory/complete');
     expectIncludes(filePath, content, "'/memory/abandon'", 'TypeScript client abandons via /memory/abandon');
-    expectIncludes(filePath, content, "'GET', '/memory/sessions'", 'TypeScript client lists /memory/sessions');
+    expectRegex(filePath, content, /'GET',\s*`?\/memory\/sessions/, 'TypeScript client lists /memory/sessions');
     expectIncludes(filePath, content, "'GET', `/memory/session/${params.agentId}`", 'TypeScript client inspects /memory/session/:agentId');
     expectIncludes(filePath, content, "'/memory/attend'", 'TypeScript client attends via /memory/attend');
     expectIncludes(filePath, content, "'/memory/observe'", 'TypeScript client observes via /memory/observe');

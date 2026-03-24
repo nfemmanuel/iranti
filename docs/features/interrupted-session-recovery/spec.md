@@ -25,6 +25,7 @@ Iranti currently persists durable knowledge and the Attendant's last saved brief
 | interrupted-session notice | handshake payload | Clear signal that a prior task appears to have been interrupted. |
 | recovery recommendation | handshake payload | Suggested resume action, including last known step and next step. |
 | session inspection payload | API response | Current persisted checkpoint/recovery state for one agent, exposed without forcing a new handshake. |
+| session inventory payload | API response | Operator-oriented list of persisted session checkpoints across agents, with filtering and sorting support. |
 | resolved recovery state | knowledge entry | Updated session/task status after resume, abandon, or supersession. |
 
 ## Decision Tree / Flow
@@ -51,10 +52,11 @@ Iranti currently persists durable knowledge and the Attendant's last saved brief
    - do not silently force-resume it
    - mark it superseded if the new task explicitly replaces it
 9. Operators may inspect the persisted session state directly through `GET /memory/session/:agentId` without triggering a new handshake.
-10. If the caller explicitly chooses resume:
+10. Operators may inventory persisted sessions through `GET /memory/sessions`, including filtered views such as interrupted-only or one-agent-only listings.
+11. If the caller explicitly chooses resume:
    - move the checkpoint back into active state
    - continue updating checkpoints throughout execution
-11. If the caller explicitly abandons the interrupted work:
+12. If the caller explicitly abandons the interrupted work:
    - preserve the checkpoint as historical evidence
    - mark the task abandoned rather than deleting it
 
@@ -78,6 +80,7 @@ Iranti currently persists durable knowledge and the Attendant's last saved brief
   - reconnect with different task and no accidental resume pollution
   - checkpoint persistence across full process restart
   - explicit resume, completion, and abandon flows
+  - operator session inventory filtering and sorting
 - Exercised by:
   - `scripts/test-attendant.ts`
   - `scripts/test-sdk.ts`

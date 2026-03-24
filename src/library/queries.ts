@@ -149,6 +149,7 @@ export async function findEntriesByEntity(
 }
 
 export async function listAttendantStateEntries(
+    filters?: { agentId?: string },
     db?: DbClient
 ): Promise<Array<Pick<KnowledgeEntry, 'entityId' | 'valueRaw' | 'updatedAt'>>> {
     const client = db ?? getDb();
@@ -156,13 +157,17 @@ export async function listAttendantStateEntries(
         where: {
             entityType: 'agent',
             key: 'attendant_state',
+            ...(filters?.agentId ? { entityId: filters.agentId } : {}),
         },
         select: {
             entityId: true,
             valueRaw: true,
             updatedAt: true,
         },
-        orderBy: { entityId: 'asc' },
+        orderBy: [
+            { updatedAt: 'desc' },
+            { entityId: 'asc' },
+        ],
     });
 }
 

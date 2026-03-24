@@ -74,7 +74,7 @@ const session = await client.inspectSession({
 
 console.log(session.hasCheckpoint);
 
-const sessions = await client.listSessions();
+const sessions = await client.listSessions({ operatorState: 'interrupted', sort: 'operator' });
 console.log(sessions.map((item) => `${item.agentId}:${item.operatorState}`));
 ```
 

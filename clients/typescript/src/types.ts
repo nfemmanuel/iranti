@@ -251,6 +251,16 @@ export interface SessionInspectionParams {
     agentId: string;
 }
 
+export type SessionListSort = 'operator' | 'updated_desc' | 'agent_asc';
+
+export interface SessionListParams {
+    agentId?: string;
+    operatorState?: SessionOperatorState;
+    staleOnly?: boolean;
+    limit?: number;
+    sort?: SessionListSort;
+}
+
 export type SessionOperatorState = 'none' | SessionStatus;
 
 export interface SessionCheckpointSummary {

@@ -49,7 +49,7 @@ async function main(): Promise<void> {
   );
 
   const slashObserve = await iranti.observe({
-    agent: agentId,
+    agentId,
     currentContext: `Need the API endpoint for ${slashEntity}.`,
     entityHints: [slashEntity],
     maxFacts: 5,
@@ -64,7 +64,7 @@ async function main(): Promise<void> {
   );
 
   const slashAttend = await iranti.attend({
-    agent: agentId,
+    agentId,
     currentContext: `Need the API endpoint for ${slashEntity}.`,
     latestMessage: 'What is the API endpoint?',
     entityHints: [slashEntity],
@@ -98,7 +98,7 @@ async function main(): Promise<void> {
   });
 
   const isolatedAttend = await iranti.attend({
-    agent: agentId,
+    agentId,
     currentContext: 'User: hello\nAssistant:',
     latestMessage: 'What is my favorite city?',
     entityHints: [personalEntity],

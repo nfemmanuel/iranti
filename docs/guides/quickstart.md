@@ -418,7 +418,7 @@ if (checkpointed.sessionRecovery?.available && checkpointed.sessionRecovery.reco
     });
 }
 
-const sessions = await iranti.listSessions();
+const sessions = await iranti.listSessions({ operatorState: 'interrupted', sort: 'operator' });
 console.log(sessions.map((session) => `${session.agentId}: ${session.operatorState}`));
 ```
 

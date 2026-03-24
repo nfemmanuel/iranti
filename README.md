@@ -754,7 +754,7 @@ Express server on port 3001 with endpoints:
 - `POST /memory/attend` - Decide whether to inject memory for this turn
 - `POST /memory/observe` - Context persistence (inject missing facts)
 - `POST /memory/handshake` - Working memory brief for agent session
-- `GET /memory/sessions` - List persisted operator-visible session checkpoints across agents
+- `GET /memory/sessions` - List persisted operator-visible session checkpoints across agents, with optional operator filters/sorting
 - `GET /memory/session/:agentId` - Inspect the current persisted session checkpoint/recovery state
 - `POST /kb/relate` - Create entity relationship
 - `GET /kb/related/:entityType/:entityId` - Get related entities

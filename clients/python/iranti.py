@@ -682,9 +682,27 @@ class IrantiClient:
             summary=self._parse_session_summary(summary_data) if isinstance(summary_data, dict) else None,
         )
 
-    def list_sessions(self) -> list[SessionSummary]:
+    def list_sessions(
+        self,
+        agent_id: Optional[str] = None,
+        operator_state: Optional[str] = None,
+        stale_only: Optional[bool] = None,
+        limit: Optional[int] = None,
+        sort: Optional[str] = None,
+    ) -> list[SessionSummary]:
         """List persisted operator-visible session checkpoints across agents."""
-        data = self._get('/memory/sessions')
+        params: dict[str, Any] = {}
+        if agent_id:
+            params['agentId'] = agent_id
+        if operator_state:
+            params['operatorState'] = operator_state
+        if stale_only is not None:
+            params['staleOnly'] = stale_only
+        if limit is not None:
+            params['limit'] = limit
+        if sort:
+            params['sort'] = sort
+        data = self._get('/memory/sessions' if not params else f"/memory/sessions?{requests.compat.urlencode(params)}")
         return [
             self._parse_session_summary(item)
             for item in data

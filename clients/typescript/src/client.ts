@@ -26,6 +26,7 @@ import type {
     SearchResult,
     SessionInspection,
     SessionInspectionParams,
+    SessionListParams,
     SessionSummary,
     SessionActionParams,
     SessionCheckpointParams,
@@ -370,8 +371,14 @@ export class IrantiClient {
         return this.request<SessionInspection>('GET', `/memory/session/${params.agentId}`);
     }
 
-    listSessions(): Promise<SessionSummary[]> {
-        return this.request<SessionSummary[]>('GET', '/memory/sessions');
+    listSessions(params: SessionListParams = {}): Promise<SessionSummary[]> {
+        return this.request<SessionSummary[]>('GET', `/memory/sessions${buildQuery({
+            agentId: params.agentId,
+            operatorState: params.operatorState,
+            staleOnly: params.staleOnly,
+            limit: params.limit,
+            sort: params.sort,
+        })}`);
     }
 
     observe(params: ObserveParams): Promise<ObserveResult> {

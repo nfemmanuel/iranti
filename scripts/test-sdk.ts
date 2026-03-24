@@ -88,6 +88,15 @@ async function test() {
         throw new Error('Expected inspectSession() to expose the persisted checkpoint.');
     }
 
+    const interruptedSessions = await iranti.listSessions({
+        operatorState: 'interrupted',
+        sort: 'operator',
+    });
+    console.log('  Interrupted sessions:', interruptedSessions.length);
+    if (!interruptedSessions.some((session) => session.agentId === recoveryAgent && session.operatorState === 'interrupted')) {
+        throw new Error('Expected listSessions() to filter interrupted sessions.');
+    }
+
     const resumedBrief = await iranti.resumeSession({
         agentId: recoveryAgent,
         sessionId: checkpointBrief.sessionCheckpoint?.sessionId,
@@ -95,6 +104,16 @@ async function test() {
     console.log('  Resumed status:', resumedBrief.sessionCheckpoint?.status);
     if (resumedBrief.sessionCheckpoint?.status !== 'active') {
         throw new Error('Expected resumeSession() to reactivate the checkpoint.');
+    }
+
+    const activeSessions = await iranti.listSessions({
+        agentId: recoveryAgent,
+        operatorState: 'active',
+        sort: 'updated_desc',
+        limit: 1,
+    });
+    if (activeSessions.length !== 1 || activeSessions[0].agentId !== recoveryAgent || activeSessions[0].operatorState !== 'active') {
+        throw new Error('Expected listSessions() to filter by agentId and active operator state.');
     }
 
     // Session actions also keep the legacy alias temporarily for compatibility.

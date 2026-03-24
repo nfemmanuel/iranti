@@ -4,6 +4,7 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
+import type { SessionListInput, SessionListSort, SessionOperatorState } from '../../sdk';
 
 // Validation schemas
 const schemas = {
@@ -194,6 +195,63 @@ export function validateInput(schemaName: keyof typeof schemas) {
 
     next();
   };
+}
+
+function readQueryValue(raw: unknown): string | undefined {
+  if (Array.isArray(raw)) {
+    return typeof raw[0] === 'string' ? raw[0] : undefined;
+  }
+  return typeof raw === 'string' ? raw : undefined;
+}
+
+export function validateSessionListQuery(query: Request['query']): SessionListInput {
+  const agentId = readQueryValue(query.agentId)?.trim();
+  const operatorStateRaw = readQueryValue(query.operatorState)?.trim();
+  const staleOnlyRaw = readQueryValue(query.staleOnly)?.trim().toLowerCase();
+  const limitRaw = readQueryValue(query.limit)?.trim();
+  const sortRaw = readQueryValue(query.sort)?.trim();
+
+  const result: SessionListInput = {};
+
+  if (agentId) {
+    if (agentId.length > 200) {
+      throw new Error('agentId exceeds maximum length of 200.');
+    }
+    result.agentId = agentId;
+  }
+
+  if (operatorStateRaw) {
+    const allowedStates: SessionOperatorState[] = ['none', 'active', 'interrupted', 'completed', 'abandoned'];
+    if (!allowedStates.includes(operatorStateRaw as SessionOperatorState)) {
+      throw new Error(`operatorState must be one of: ${allowedStates.join(', ')}`);
+    }
+    result.operatorState = operatorStateRaw as SessionOperatorState;
+  }
+
+  if (staleOnlyRaw !== undefined) {
+    if (staleOnlyRaw !== 'true' && staleOnlyRaw !== 'false') {
+      throw new Error('staleOnly must be true or false.');
+    }
+    result.staleOnly = staleOnlyRaw === 'true';
+  }
+
+  if (limitRaw) {
+    const parsed = Number.parseInt(limitRaw, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 100) {
+      throw new Error('limit must be an integer between 1 and 100.');
+    }
+    result.limit = parsed;
+  }
+
+  if (sortRaw) {
+    const allowedSorts: SessionListSort[] = ['operator', 'updated_desc', 'agent_asc'];
+    if (!allowedSorts.includes(sortRaw as SessionListSort)) {
+      throw new Error(`sort must be one of: ${allowedSorts.join(', ')}`);
+    }
+    result.sort = sortRaw as SessionListSort;
+  }
+
+  return result;
 }
 
 // Sanitize strings to prevent XSS

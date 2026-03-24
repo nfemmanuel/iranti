@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { Iranti } from '../../sdk';
 import { parseEntityString } from '../../library/entity-resolution';
-import { validateInput } from '../middleware/validation';
+import { validateInput, validateSessionListQuery } from '../middleware/validation';
 
 function normalizeAgent(req: Request): string | null {
     const fromAgent = req.body.agent;
@@ -91,9 +91,9 @@ export function memoryRoutes(iranti: Iranti): Router {
     });
 
     // GET /sessions
-    router.get('/sessions', async (_req: Request, res: Response) => {
+    router.get('/sessions', async (req: Request, res: Response) => {
         try {
-            const sessions = await iranti.listSessions();
+            const sessions = await iranti.listSessions(validateSessionListQuery(req.query));
             res.json(sessions);
         } catch (err) {
             res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
@@ -211,7 +211,7 @@ export function memoryRoutes(iranti: Iranti): Router {
             const entityHints = normalizeEntityHints(req.body.entityHints);
 
             if (!agent) {
-                return res.status(400).json({ error: 'agent (or agentId) is required.' });
+                return res.status(400).json({ error: 'agentId is required (agent is accepted as a legacy alias).' });
             }
 
             if (normalizedContext.trim().length === 0 && entityHints.length === 0) {
@@ -254,7 +254,7 @@ export function memoryRoutes(iranti: Iranti): Router {
             const entityHints = normalizeEntityHints(req.body.entityHints);
 
             if (!agent) {
-                return res.status(400).json({ error: 'agent (or agentId) is required.' });
+                return res.status(400).json({ error: 'agentId is required (agent is accepted as a legacy alias).' });
             }
 
             const result = await iranti.attend({

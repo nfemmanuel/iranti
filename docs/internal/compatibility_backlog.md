@@ -27,26 +27,30 @@ Turn compatibility from an informal expectation into a tested release gate.
 - Keep machine-readable runtime/config classifications stable within the major version.
 - Cover healthy/unhealthy runtime states plus complete/partial/invalid instance config states.
 
+6. Session inventory/operator contract checks
+- Keep `GET /memory/sessions` summary fields and operator-state semantics stable within the major version.
+- Cover query filtering/sorting across SDK, TypeScript client, and Python client surfaces.
+
 ## Priority 1
 
-6. Client compatibility matrix
+7. Client compatibility matrix
 - Verify current TypeScript and Python clients can talk to at least one prior compatible server release where practical.
 - Verify current server remains usable by at least one prior client release where practical.
 
-7. Deprecation mechanism
+8. Deprecation mechanism
 - Standard warning format for deprecated CLI flags and commands.
 - Standard release-note wording for deprecated API or config surfaces.
 
-8. Benchmark and site alignment checks
+9. Benchmark and site alignment checks
 - Ensure benchmark/site/control-plane repos do not depend on stale product-contract assumptions.
 
 ## Priority 2
 
-9. Compatibility CI job
+10. Compatibility CI job
 - Dedicated CI entry that runs contract and migration-oriented checks together.
 
-10. Release checklist expansion
+11. Release checklist expansion
 - Add compatibility signoff to release procedure.
 
-11. Migration docs index
+12. Migration docs index
 - Central index of past migrations and deprecations.

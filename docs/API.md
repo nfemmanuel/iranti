@@ -226,6 +226,14 @@ Handshake request body:
 
 `agent` is still accepted as a legacy alias, but `agentId` is the preferred field name for new integrations.
 
+`GET /memory/sessions` accepts optional query parameters:
+
+- `agentId` - exact agent filter
+- `operatorState` - one of `none`, `active`, `interrupted`, `completed`, `abandoned`
+- `staleOnly` - `true` or `false`
+- `limit` - integer `1..100`
+- `sort` - one of `operator`, `updated_desc`, `agent_asc`
+
 Session inventory response (`GET /memory/sessions`):
 
 ```json
