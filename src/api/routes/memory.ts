@@ -54,6 +54,35 @@ function normalizeEntityHints(rawEntityHints: unknown): string[] {
     return Array.from(dedup);
 }
 
+function readSingleQueryValue(raw: unknown): string | undefined {
+    if (Array.isArray(raw)) {
+        return typeof raw[0] === 'string' ? raw[0] : undefined;
+    }
+    return typeof raw === 'string' ? raw : undefined;
+}
+
+function normalizeSessionInspectQuery(query: Request['query']): { task?: string; recentMessages?: string[] } {
+    const task = readSingleQueryValue(query.task)?.trim();
+    const rawRecentMessages = query.recentMessages;
+    const recentMessages = Array.isArray(rawRecentMessages)
+        ? rawRecentMessages.filter((value): value is string => typeof value === 'string').map((value) => value.trim()).filter(Boolean)
+        : typeof rawRecentMessages === 'string'
+            ? rawRecentMessages.split('||').map((value) => value.trim()).filter(Boolean)
+            : [];
+
+    if (task && task.length > 1000) {
+        throw new Error('task exceeds maximum length of 1000.');
+    }
+    if (recentMessages.length > 100) {
+        throw new Error('recentMessages exceeds maximum length of 100.');
+    }
+
+    return {
+        task: task || undefined,
+        recentMessages: recentMessages.length > 0 ? recentMessages : undefined,
+    };
+}
+
 export function memoryRoutes(iranti: Iranti): Router {
     const router = Router();
 
@@ -107,7 +136,11 @@ export function memoryRoutes(iranti: Iranti): Router {
             if (!agentId || !agentId.trim()) {
                 return res.status(400).json({ error: 'agentId path parameter is required.' });
             }
-            const sessionState = await iranti.inspectSession({ agentId: agentId.trim() });
+            const inspectContext = normalizeSessionInspectQuery(req.query);
+            const sessionState = await iranti.inspectSession({
+                agentId: agentId.trim(),
+                ...inspectContext,
+            });
             res.json(sessionState);
         } catch (err) {
             res.status(400).json({ error: err instanceof Error ? err.message : String(err) });

@@ -64,6 +64,10 @@ const DEFAULT_VECTOR_FALLBACK_SCAN_LIMIT = 2000;
 
 let vectorBackend: VectorBackend | null = null;
 
+export function __setVectorBackendSingletonForTests(backend: VectorBackend | null): void {
+    vectorBackend = backend;
+}
+
 function coerceScore(value: number | string | null | undefined): number {
     if (value === null || value === undefined) return 0;
     const parsed = Number(value);
@@ -77,7 +81,10 @@ export function getVectorBackendSingleton(): VectorBackend {
     return vectorBackend;
 }
 
-async function saveEmbedding(entry: Pick<KnowledgeEntry, 'id' | 'entityType' | 'entityId' | 'key' | 'valueSummary' | 'valueRaw' | 'source'>): Promise<void> {
+async function saveEmbedding(
+    entry: Pick<KnowledgeEntry, 'id' | 'entityType' | 'entityId' | 'key' | 'valueSummary' | 'valueRaw' | 'source'>,
+    db?: DbClient
+): Promise<void> {
     const text = buildEmbeddingText(entry.key, entry.valueSummary, entry.valueRaw);
     await getVectorBackendSingleton().upsert({
         id: String(entry.id),
@@ -91,7 +98,7 @@ async function saveEmbedding(entry: Pick<KnowledgeEntry, 'id' | 'entityType' | '
             source: entry.source,
             text,
         },
-    });
+    }, db);
 }
 
 function defaultResolutionState(reason: ArchivedReason): ResolutionState {
@@ -239,6 +246,7 @@ export async function findArchiveHistory(
         orderBy: [
             { validFrom: 'asc' },
             { archivedAt: 'asc' },
+            { id: 'asc' },
         ],
     });
 }
@@ -256,7 +264,10 @@ export async function findPendingEscalation(
             archivedReason: ArchivedReason.escalated,
             resolutionState: ResolutionState.pending,
         },
-        orderBy: { archivedAt: 'desc' },
+        orderBy: [
+            { archivedAt: 'desc' },
+            { id: 'desc' },
+        ],
     });
 }
 
@@ -585,7 +596,7 @@ export async function createEntry(input: EntryInput, db?: DbClient): Promise<Kno
         },
     });
 
-    await saveEmbedding(entry);
+    await saveEmbedding(entry, db);
 
     return entry;
 }
@@ -621,20 +632,25 @@ export async function updateEntry(
         },
     });
 
-    await saveEmbedding(entry);
+    await saveEmbedding(entry, db);
 
     return entry;
 }
 
 export async function deleteEntryById(entryId: number, db?: DbClient): Promise<void> {
     const client = db ?? getDb();
-    await getVectorBackendSingleton().delete(String(entryId)).catch((err: unknown) => {
+    await getVectorBackendSingleton().delete(String(entryId), db).catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);
         console.error(`[vector] Failed to delete vector for entryId=${entryId}: ${message}`);
+        throw err;
     });
     await client.knowledgeEntry.delete({
         where: { id: entryId },
     });
+}
+
+function supportsInteractiveTransactions(client: DbClient): client is PrismaClient {
+    return typeof (client as PrismaClient).$transaction === 'function';
 }
 
 export async function insertArchiveFromCurrent(
@@ -680,15 +696,20 @@ export async function archiveEntry(
         validFrom: entry.validFrom,
         validUntil: entry.validUntil ?? new Date(),
     };
-    if (db) {
-        await insertArchiveFromCurrent(entry, archiveOptions, db);
-        await deleteEntryById(entry.id, db);
-    } else {
-        await getDb().$transaction(async (tx) => {
-            await insertArchiveFromCurrent(entry, archiveOptions, tx);
-            await deleteEntryById(entry.id, tx);
+    const client = db ?? getDb();
+    const runArchiveMutation = async (tx: DbClient) => {
+        await insertArchiveFromCurrent(entry, archiveOptions, tx);
+        await deleteEntryById(entry.id, tx);
+    };
+
+    if (supportsInteractiveTransactions(client)) {
+        await client.$transaction(async (tx) => {
+            await runArchiveMutation(tx);
         });
+        return;
     }
+
+    await runArchiveMutation(client);
 }
 
 export async function updateArchiveEntry(

@@ -33,7 +33,9 @@ Vector backends make the embedding-search portion of Iranti pluggable while leav
    3. call backend `upsert()`
 4. On archive/delete:
    1. call backend `delete()`
-   2. remove the KB row
+   2. when the backend is `pgvector`, run the embedding mutation on the active DB client/transaction
+   3. if vector deletion fails, abort the KB delete/archive mutation
+   4. only remove the KB row after vector cleanup succeeds
 5. On hybrid search:
    1. compute lexical candidates in PostgreSQL
    2. ask the configured backend for vector candidates
@@ -46,6 +48,7 @@ Vector backends make the embedding-search portion of Iranti pluggable while leav
 - Unknown backend: throws immediately with a clear error naming the invalid value.
 - Missing Qdrant URL: throws immediately when `qdrant` is selected.
 - Unreachable backend: `iranti doctor` reports it, and hybrid search falls back to lexical-only scoring.
+- Backend delete failure during archive/delete: the KB row is retained and the archive mutation fails rather than silently leaving stale external vectors behind.
 - Validation DB without pgvector: pgvector-specific test is skipped rather than reported as a false pass.
 - Switching backends: existing embeddings are not migrated automatically; re-ingest is required.
 

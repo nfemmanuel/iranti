@@ -202,7 +202,12 @@ export function evaluateEntityScopeAccess(
     // Bare wildcard '*' does not grant access to protected entity types (e.g. 'system').
     // Callers must use an explicit namespace-scoped grant for protected entities.
     const effectiveParsedScopes = isProtectedEntityType(entityType)
-        ? parsedScopes.filter((scope) => !scope.isWildcardAll)
+        ? parsedScopes.filter((scope) => {
+            if (scope.action === 'deny') return true;
+            if (scope.isWildcardAll) return false;
+            if (!scope.namespace) return false;
+            return true;
+        })
         : parsedScopes;
 
     const matchingResourceScopes = effectiveParsedScopes.filter((scope) => resourceMatches(scope, required.resource));

@@ -198,6 +198,17 @@ async function main(): Promise<void> {
 
     expect(codexHandshake.agentId === codexAgent, 'Expected Codex handshake to initialize the Codex agent.');
 
+    const codexSession = await iranti.inspectSession({
+        agentId: codexAgent,
+        task: 'Continue the shared runtime verification task handed off from Claude.',
+        recentMessages: [
+            `Resume work for ${taskEntity}.`,
+            'Read the shared handoff and continue implementation.',
+        ],
+    });
+    expect(codexSession.hasCheckpoint === false, 'Expected the receiver handshake to avoid inheriting the sender checkpoint.');
+    expect(codexSession.summary.operatorState === 'none', 'Expected the receiver session summary to show no private checkpoint until Codex creates one.');
+
     const nextStepQuery = await iranti.query(taskEntity, 'next_step');
     expect(nextStepQuery.found === true, 'Expected Codex to be able to query the shared next_step fact.');
     expect(
@@ -217,6 +228,13 @@ async function main(): Promise<void> {
     });
     expect(activeSessions.length === 1, 'Expected Claude session inventory filter to return a single active checkpoint.');
     expect(activeSessions[0]?.sessionId === checkpointedBrief.sessionCheckpoint?.sessionId, 'Expected session inventory to return the Claude checkpoint session id.');
+
+    const codexSessions = await iranti.listSessions({
+        agentId: codexAgent,
+        sort: 'operator',
+        limit: 5,
+    });
+    expect(codexSessions.length === 0, 'Expected session inventory to remain agent-scoped until the receiver checkpoints its own work.');
 
     const codexObserve = await iranti.observe({
         agentId: codexAgent,

@@ -38,7 +38,8 @@ Rules:
 - `*/entityId` is rejected
 - deny beats allow
 - exact namespace beats wildcard namespace
-- global scope (`kb:read`) is still the broadest allow and remains backward-compatible
+- global scope (`kb:read`) remains the broadest allow for normal namespaces
+- protected namespaces such as `system/*` require explicit namespace-scoped grants and are not covered by bare global KB scopes
 
 Examples:
 
@@ -51,6 +52,7 @@ Current limitation:
 
 - `GET /kb/search`, batch query, and `/memory/*` flows still use coarse global scopes in this pass
 - use global `kb:read` / `memory:read` for those endpoints
+- request logging can still expose entity IDs and search terms if `IRANTI_REQUEST_LOG_FILE` is enabled; keep request logs off shared machines and outside the repo until log redaction is hardened
 
 ## 3) Rotate keys on exposure
 
@@ -98,6 +100,7 @@ This keeps sensitive conflict artifacts and logs out of source control.
 
 - [ ] No placeholder API keys in `.env`
 - [ ] Per-service scoped keys
+- [ ] No reliance on global KB scopes for protected namespaces
 - [ ] Key rotation process documented
 - [ ] TLS/ingress configured
 - [ ] Runtime logs and escalation path outside repo

@@ -89,6 +89,57 @@ export IRANTI_PORT=3002
 npm run api
 ```
 
+### CLI Reports A File Lock Timeout
+
+**Symptom**: A CLI command that mutates config or bindings fails with a lock timeout such as `Timed out waiting for file lock`.
+
+**What it means**:
+- another Iranti process is already updating the same env/config/runtime metadata file
+- or a previous process crashed and left a stale `.lock` file behind
+
+**Solutions**:
+```bash
+# Inspect nearby lock files
+# Windows
+dir /s *.lock
+
+# Unix
+find . -name "*.lock"
+
+# Retry after the other CLI process finishes
+iranti status
+
+# If the lock file is stale, remove only the matching lock file
+# after confirming the owning process is gone.
+```
+
+Iranti now serializes env/config mutation with:
+- lock file acquisition
+- atomic temp write
+- rename
+
+So you should not work around this by running concurrent manual edits against the same binding or instance env file.
+
+### Windows Upgrade Or Restart Looks Scheduled But Never Completes
+
+**Symptom**: A Windows `upgrade` or `instance restart` path starts and then appears to stop making progress.
+
+**What changed**:
+- Iranti now prefers direct process invocation instead of `cmd.exe /c` string joins for lifecycle helpers.
+- Detached Windows upgrade/restart paths resolve concrete executables and verify that replacement runtimes become healthy before reporting success.
+
+**Solutions**:
+```bash
+iranti status --json
+iranti doctor --instance <name>
+```
+
+If the detached path still fails, check:
+- whether the resolved global `iranti` install still exists
+- whether the instance env is complete
+- whether the configured port is already occupied
+- whether the replacement runtime can pass `/health`
+
 ### 401 Unauthorized Errors
 
 **Symptom**: All API calls return 401

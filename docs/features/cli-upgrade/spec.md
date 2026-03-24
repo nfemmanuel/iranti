@@ -41,13 +41,16 @@
    - `npm-global`: `npm install -g iranti@latest`
    - `python`: `python -m pip install --upgrade iranti` (or `py -3 -m pip ...` on Windows)
 8. On Windows, if the currently running CLI is the same global npm install being upgraded, hand off the npm-global step to a detached updater process instead of attempting an in-place self-replacement that would fail with `EBUSY`.
-9. Verify the result:
+9. Resolve detached executables to concrete absolute paths before scheduling the PowerShell handoff; do not rely on a raw PATH token in the detached script.
+10. If `--restart --instance <name>` is also requested on that detached Windows path, generate the restart step from structured instance metadata rather than injecting an arbitrary post-command string.
+11. When `iranti instance restart` runs directly, wait for the replacement runtime to become healthy before reporting success.
+12. Verify the result:
    - npm-global via `npm list -g iranti`
    - Python via `pip show iranti`
    - repo target by requiring the build to complete successfully
-10. If the repo worktree is dirty, block `npm-repo --yes` rather than risking a destructive pull.
-11. After a successful or scheduled global npm upgrade, remind the user that an already-running old CLI process may need a fresh shell to pick up the new binary.
-12. Read runtime metadata for known instances under the active runtime root and report which ones are currently running versus stale or stopped.
+13. If the repo worktree is dirty, block `npm-repo --yes` rather than risking a destructive pull.
+14. After a successful or scheduled global npm upgrade, remind the user that an already-running old CLI process may need a fresh shell to pick up the new binary.
+15. Read runtime metadata for known instances under the active runtime root and report which ones are currently running versus stale or stopped.
 
 ## Edge Cases
 
@@ -59,6 +62,9 @@
 - `--dry-run` and `--check` always skip mutation even if `--yes` is also present.
 - After `npm install -g`, the already-running old CLI process may still be the binary handling the current command; the command prints a handoff hint instead of pretending that process replaced itself.
 - On Windows, when the running CLI itself is the global npm install being upgraded, the npm-global step is scheduled in a detached updater process to avoid `EBUSY` rename failures.
+- Detached Windows handoff resolves `npm`, `iranti`, and related executables to absolute paths before launch.
+- Detached Windows restart follow-up is generated from typed instance metadata rather than a free-form post-command string.
+- `iranti instance restart` now fails if the replacement process never becomes healthy; it no longer reports success immediately after the detached child is spawned.
 - If runtime metadata reports live instances, upgrade output lists them so the operator can tell whether a restart will be needed for those running runtimes to pick up a newly installed version.
 
 ## Test Results

@@ -1,4 +1,8 @@
 import { AttendantInstance, type WorkingMemoryBrief } from '../../src/attendant/AttendantInstance';
+import express from 'express';
+import { createServer } from 'http';
+import type { AddressInfo } from 'net';
+import { memoryRoutes } from '../../src/api/routes/memory';
 
 function expect(condition: unknown, message: string): asserts condition {
     if (!condition) {
@@ -70,6 +74,103 @@ async function main(): Promise<void> {
     expect(inspected.summary.operatorState === 'interrupted', 'Expected inspectSession() summary to classify stale active checkpoints as interrupted.');
     expect(inspected.summary.isStale === true, 'Expected inspectSession() summary to flag the stale checkpoint.');
     expect(inspected.summary.checkpointSummary?.openRiskCount === 1, 'Expected inspectSession() summary to expose checkpoint risk counts.');
+
+    const unscopedInspection = await attendant.inspectSession();
+    expect(unscopedInspection.hasCheckpoint === true, 'Expected inspectSession() without task context to keep exposing the checkpoint.');
+    expect(unscopedInspection.sessionRecovery === null, 'Expected inspectSession() without task context to omit task-match recovery advice.');
+    expect(unscopedInspection.summary.operatorState === 'interrupted', 'Expected inspectSession() summary to remain operator-interrupted without task context.');
+
+    const routeApp = express();
+    routeApp.use(express.json());
+    routeApp.use('/memory', memoryRoutes({
+        inspectSession: async (input: { agentId: string; task?: string; recentMessages?: string[] }) => ({
+            agentId: input.agentId,
+            hasCheckpoint: true,
+            sessionCheckpoint: {
+                sessionId,
+                task,
+                taskFingerprint: task.toLowerCase(),
+                status: 'active',
+                startedAt: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
+                lastHeartbeatAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+                updatedAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+                checkpoint: {
+                    currentStep: 'drafting launch checklist',
+                    nextStep: 'collect approvals',
+                    openRisks: ['Legal review pending'],
+                    recentOutputs: ['Outlined launch milestones'],
+                    entityTargets: ['project/project_atlas'],
+                    notes: 'Interrupted before sign-off.',
+                },
+            },
+            sessionRecovery: input.task ? {
+                available: true,
+                sessionId,
+                task,
+                taskFingerprint: task.toLowerCase(),
+                matchedCurrentTask: true,
+                matchConfidence: 100,
+                recommendation: 'resume',
+                summary: 'Resume the launch checklist.',
+                lastHeartbeatAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+                interruptedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+                checkpoint: {
+                    currentStep: 'drafting launch checklist',
+                    nextStep: 'collect approvals',
+                    openRisks: ['Legal review pending'],
+                    recentOutputs: ['Outlined launch milestones'],
+                    entityTargets: ['project/project_atlas'],
+                    notes: 'Interrupted before sign-off.',
+                },
+            } : null,
+            persistedBriefGeneratedAt: new Date().toISOString(),
+            summary: {
+                agentId: input.agentId,
+                hasCheckpoint: true,
+                sessionId,
+                task,
+                status: 'active',
+                operatorState: 'interrupted',
+                startedAt: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
+                lastHeartbeatAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+                updatedAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+                interruptedAt: null,
+                completedAt: null,
+                abandonedAt: null,
+                resumedAt: null,
+                isStale: true,
+                persistedBriefGeneratedAt: new Date().toISOString(),
+                checkpointSummary: {
+                    currentStep: 'drafting launch checklist',
+                    nextStep: 'collect approvals',
+                    openRiskCount: 1,
+                    entityTargetCount: 1,
+                },
+            },
+        }),
+        listSessions: async () => [],
+    } as any));
+
+    const server = createServer(routeApp);
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+
+    try {
+        const address = server.address() as AddressInfo;
+        const response = await fetch(
+            `http://127.0.0.1:${address.port}/memory/session/${agentId}?task=${encodeURIComponent(task)}&recentMessages=${encodeURIComponent('Need to continue the launch checklist.')}&recentMessages=${encodeURIComponent('Resume from the saved checkpoint.')}`
+        );
+        expect(response.ok, `Expected route inspection request to succeed, got ${response.status}.`);
+        const routeInspection = await response.json() as {
+            agentId: string;
+            sessionRecovery: { recommendation: string } | null;
+            summary: { operatorState: string };
+        };
+        expect(routeInspection.agentId === agentId, 'Expected route inspection to preserve the requested agentId.');
+        expect(routeInspection.sessionRecovery?.recommendation === 'resume', 'Expected route inspection to forward task context into recovery recommendation building.');
+        expect(routeInspection.summary.operatorState === 'interrupted', 'Expected route inspection summary to remain operator-oriented.');
+    } finally {
+        await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
 
     const liveAttendant: any = new AttendantInstance(agentId);
     liveAttendant.brief = recoveredBrief;

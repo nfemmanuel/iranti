@@ -1,5 +1,5 @@
 import { EMBEDDING_DIMENSIONS } from '../embeddings';
-import { VectorBackend, VectorSearchResult, VectorUpsertParams } from '../vectorBackend';
+import { VectorBackend, VectorMutationDbClient, VectorSearchResult, VectorUpsertParams } from '../vectorBackend';
 
 type QdrantConfig = {
     url: string;
@@ -74,7 +74,7 @@ export class QdrantBackend implements VectorBackend {
         this.collectionReady = true;
     }
 
-    async upsert(params: VectorUpsertParams): Promise<void> {
+    async upsert(params: VectorUpsertParams, _db?: VectorMutationDbClient): Promise<void> {
         await this.ensureCollection();
         await this.request('PUT', `/collections/${this.collection}/points`, {
             points: [{
@@ -85,7 +85,7 @@ export class QdrantBackend implements VectorBackend {
         });
     }
 
-    async delete(id: string): Promise<void> {
+    async delete(id: string, _db?: VectorMutationDbClient): Promise<void> {
         await this.ensureCollection();
         await this.request('POST', `/collections/${this.collection}/points/delete`, {
             points: [id],

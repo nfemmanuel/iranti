@@ -23,6 +23,7 @@ This feature formalizes how Claude Code and Codex collaborate through the same I
 | Shared durable handoff | knowledge entries | Facts written to `task/...` and optional `project/...` entities. |
 | Sender-local recovery state | checkpoint record | Claude's own session checkpoint, still resumable only by Claude's agent id. |
 | Receiver working-memory brief | handshake/attend output | Codex-visible memory populated from shared task/project facts. |
+| Operator session view | session inspection payload | Sender and receiver session state remain independently inspectable through `inspectSession()` and filtered `listSessions()`; no cross-agent checkpoint leakage is allowed. |
 | Follow-up status | knowledge entries | Receiver writes back progress such as `implementation_status` or `handoff_ack`. |
 
 ## Decision Tree / Flow
@@ -38,7 +39,8 @@ This feature formalizes how Claude Code and Codex collaborate through the same I
    - exact `query()` for known keys
    - `attend()` or `observe()` with explicit `entityHints`
 8. Codex continues work and writes durable progress back to the same task entity.
-9. Claude can later reconvene by querying or attending against the same task entity and seeing Codex's updates.
+9. Operators may inspect Claude's sender-local checkpoint through `inspectSession({ agentId: claudeAgentId, ... })`, but that checkpoint remains invisible to `inspectSession({ agentId: codexAgentId, ... })` and to Codex session inventory until Codex checkpoints its own work.
+10. Claude can later reconvene by querying or attending against the same task entity and seeing Codex's updates.
 
 ## Edge Cases
 
@@ -57,6 +59,7 @@ This feature formalizes how Claude Code and Codex collaborate through the same I
   - Claude writes shared handoff facts to `task/...`
   - Claude checkpoints its own session with the shared task in `entityTargets`
   - operator inspection can read Claude's persisted session state through `inspectSession()` and filtered `listSessions()`
+  - Codex does not inherit Claude's private checkpoint or session inventory automatically
   - Codex can query and attend against the shared task using explicit hints
   - Codex writes follow-up status back to the same task
   - Claude can attend later and recover the Codex follow-up

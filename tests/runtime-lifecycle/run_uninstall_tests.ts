@@ -198,7 +198,7 @@ if (tool === 'codex') {
 process.exit(1);
 `.trim());
 
-        for (const name of ['npm', 'py', 'python', 'codex']) {
+        for (const name of ['npm', 'py', 'python', 'python3', 'codex']) {
             writeFakeCommand(binDir, name, fakeToolScript);
         }
 
@@ -206,6 +206,7 @@ process.exit(1);
             PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}`,
             IRANTI_FAKE_STATE: fakeStateFile,
             IRANTI_FAKE_LOG: fakeLogFile,
+            IRANTI_TEST_TOOL_SHIM: fakeToolScript,
         };
 
         const dryRun = runCli([
@@ -268,7 +269,7 @@ process.exit(1);
 
         const logLines = fs.readFileSync(fakeLogFile, 'utf8').trim().split(/\r?\n/).map((line) => JSON.parse(line) as { tool: string; args: string[] });
         assert.ok(logLines.some((entry) => entry.tool === 'npm' && entry.args.includes('uninstall')), 'npm uninstall should run');
-        assert.ok(logLines.some((entry) => (entry.tool === 'py' || entry.tool === 'python') && entry.args.includes('uninstall')), 'python uninstall should run');
+        assert.ok(logLines.some((entry) => (entry.tool === 'py' || entry.tool === 'python' || entry.tool === 'python3') && entry.args.includes('uninstall')), 'python uninstall should run');
         assert.ok(logLines.some((entry) => entry.tool === 'codex' && entry.args.includes('remove')), 'codex remove should run');
 
         console.log('cli uninstall smoke passed');

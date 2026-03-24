@@ -1,5 +1,13 @@
 # Iranti Documentation
 
+## Canonical Sources Of Truth
+
+- `docs/guides/` explains operator and developer workflows.
+- `docs/features/*/spec.md` defines feature behavior, edge cases, and validation expectations.
+- `docs/decisions/` records architectural decisions and their consequences.
+- `docs/operations/` covers deployment, troubleshooting, and operational posture.
+- `docs/internal/` is supporting material only. It can contain useful validation notes and historical context, but it is not the canonical product contract unless a guide/spec/decision explicitly points to it.
+
 ## Getting Started
 
 - [Operator Manual](guides/manual.md) - Full install, binding, keys, integrations, and troubleshooting reference
@@ -10,6 +18,7 @@
 ## User Guides
 
 - [Chat Guide](guides/chat.md) - Built-in `iranti chat` session flow and slash commands
+- [Cross-Tool Handoffs](guides/cross-tool-handoffs.md) - Shared-task collaboration between Claude Code and Codex without cross-agent session leakage
 - [Conflict Resolution](guides/conflict-resolution.md) - How Iranti handles conflicting facts
 - [LLM Providers](guides/providers.md) - Configuring Gemini, OpenAI, Claude, etc.
 - [Security Quickstart](guides/security-quickstart.md) - Key scopes, rotation, and deployment baseline
@@ -59,6 +68,7 @@
 - [Chunking](features/chunking/) - Auto-chunking raw content into facts
 - [Compatibility Contracts](features/compatibility-contracts/) - Stability rules, deprecation discipline, and release-gate expectations
 - [Conflict Resolution](features/conflict-resolution/) - Librarian conflict handling
+- [Cross-Tool Handoffs](features/cross-tool-handoffs/) - Shared-task collaboration model for Claude Code and Codex
 - [Interrupted Session Recovery](features/interrupted-session-recovery/) - Checkpointed mid-task recovery on return
 - [Resolutionist](features/resolutionist/) - Human escalation review workflow
 - [Runtime Upgrades](features/runtime-upgrades/) - Staged upgrade plus supervised restart instead of live overwrite

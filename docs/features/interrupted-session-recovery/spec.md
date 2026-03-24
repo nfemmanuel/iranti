@@ -24,7 +24,7 @@ Iranti currently persists durable knowledge and the Attendant's last saved brief
 | persisted checkpoint record | knowledge entry | Latest resumable progress snapshot for the agent and task. |
 | interrupted-session notice | handshake payload | Clear signal that a prior task appears to have been interrupted. |
 | recovery recommendation | handshake payload | Suggested resume action, including last known step and next step. |
-| session inspection payload | API response | Current persisted checkpoint/recovery state for one agent, exposed without forcing a new handshake. |
+| session inspection payload | API response | Current persisted checkpoint/recovery state for one agent, exposed without forcing a new handshake; accepts optional task/recent-message context when an operator wants the same recovery matching logic as a real handshake. |
 | session inventory payload | API response | Operator-oriented list of persisted session checkpoints across agents, with filtering and sorting support. |
 | resolved recovery state | knowledge entry | Updated session/task status after resume, abandon, or supersession. |
 
@@ -52,6 +52,9 @@ Iranti currently persists durable knowledge and the Attendant's last saved brief
    - do not silently force-resume it
    - mark it superseded if the new task explicitly replaces it
 9. Operators may inspect the persisted session state directly through `GET /memory/session/:agentId` without triggering a new handshake.
+   - raw `sessionCheckpoint.status` remains the persisted checkpoint state
+   - derived `summary.operatorState` reflects operator-facing classification such as stale-active -> interrupted
+   - optional `task` and `recentMessages` query context lets the route compute the same task-match recovery recommendation as `inspectSession()` / `handshake()`
 10. Operators may inventory persisted sessions through `GET /memory/sessions`, including filtered views such as interrupted-only or one-agent-only listings.
 11. If the caller explicitly chooses resume:
    - move the checkpoint back into active state
@@ -72,12 +75,12 @@ Iranti currently persists durable knowledge and the Attendant's last saved brief
 
 ## Test Results
 
-- Implemented in the attendant, SDK, and client surfaces.
 - Implemented in the attendant, SDK, and client surfaces, with a dedicated memory-route inspection endpoint for operator tooling.
 - Coverage added for:
   - crash mid-task followed by first handshake on return
   - reconnect with same task and successful recovery suggestion
   - reconnect with different task and no accidental resume pollution
+  - route-level session inspection with task/recent-message query context
   - checkpoint persistence across full process restart
   - explicit resume, completion, and abandon flows
   - operator session inventory filtering and sorting

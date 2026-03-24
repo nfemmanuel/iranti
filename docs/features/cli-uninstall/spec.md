@@ -66,6 +66,7 @@
 - Invalid JSON in project integration files is treated as a warning, not a hard failure.
 - Best-effort process scanning may miss some Iranti processes; runtime-metadata-backed instance processes are still handled directly.
 - On Windows, self-uninstall from a live global npm install is detached instead of attempting an in-place uninstall that would fail while the CLI binary is still running.
+- Detached Windows uninstall resolves helper executables such as `npm` and `codex` to concrete absolute paths before launching the PowerShell handoff.
 
 ## Test Results
 

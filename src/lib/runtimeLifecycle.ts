@@ -3,6 +3,7 @@ import fsp from 'fs/promises';
 import http from 'http';
 import https from 'https';
 import path from 'path';
+import { writeTextFileLocked } from './fileMutation';
 
 export type InstanceRuntimeStatus = 'starting' | 'running' | 'stopping' | 'stopped';
 
@@ -47,6 +48,14 @@ export type RuntimeInspection = {
     health: RuntimeHealthProbe;
 };
 
+export type RuntimeAuthorityResolution = {
+    managed: boolean;
+    source: 'explicit' | 'derived' | 'adhoc' | 'invalid';
+    instanceDir: string | null;
+    runtimeFile: string | null;
+    detail: string;
+};
+
 export type InstanceRuntimeSnapshot = {
     runtimeFile: string;
     metadata: InstanceRuntimeMetadata | null;
@@ -62,12 +71,18 @@ export function runtimeFileForInstance(instanceDir: string): string {
 export function resolveInstanceDirFromRuntimeEnv(env: Record<string, string | undefined>): string | null {
     const escalationDir = env.IRANTI_ESCALATION_DIR?.trim();
     if (escalationDir) {
-        return path.resolve(path.join(escalationDir, '..'));
+        const resolved = path.resolve(escalationDir);
+        if (path.basename(resolved).toLowerCase() === 'escalation') {
+            return path.resolve(path.join(resolved, '..'));
+        }
     }
 
     const requestLogFile = env.IRANTI_REQUEST_LOG_FILE?.trim();
     if (requestLogFile) {
-        return path.resolve(path.join(path.dirname(requestLogFile), '..'));
+        const logsDir = path.resolve(path.dirname(requestLogFile));
+        if (path.basename(logsDir).toLowerCase() === 'logs') {
+            return path.resolve(path.join(logsDir, '..'));
+        }
     }
 
     return null;
@@ -76,6 +91,70 @@ export function resolveInstanceDirFromRuntimeEnv(env: Record<string, string | un
 export function resolveRuntimeFileFromRuntimeEnv(env: Record<string, string | undefined>): string | null {
     const instanceDir = resolveInstanceDirFromRuntimeEnv(env);
     return instanceDir ? runtimeFileForInstance(instanceDir) : null;
+}
+
+export function resolveRuntimeAuthorityFromEnv(env: Record<string, string | undefined>): RuntimeAuthorityResolution {
+    const explicitInstanceDir = env.IRANTI_INSTANCE_DIR?.trim() ? path.resolve(env.IRANTI_INSTANCE_DIR.trim()) : null;
+    const explicitRuntimeFile = env.IRANTI_INSTANCE_RUNTIME_FILE?.trim() ? path.resolve(env.IRANTI_INSTANCE_RUNTIME_FILE.trim()) : null;
+    const derivedInstanceDir = resolveInstanceDirFromRuntimeEnv(env);
+
+    if (explicitInstanceDir && explicitRuntimeFile) {
+        const runtimeInstanceDir = path.resolve(path.dirname(explicitRuntimeFile));
+        if (runtimeInstanceDir !== explicitInstanceDir) {
+            return {
+                managed: false,
+                source: 'invalid',
+                instanceDir: explicitInstanceDir,
+                runtimeFile: explicitRuntimeFile,
+                detail: `IRANTI_INSTANCE_DIR (${explicitInstanceDir}) does not match IRANTI_INSTANCE_RUNTIME_FILE parent (${runtimeInstanceDir})`,
+            };
+        }
+        return {
+            managed: true,
+            source: 'explicit',
+            instanceDir: explicitInstanceDir,
+            runtimeFile: explicitRuntimeFile,
+            detail: 'using explicit runtime authority',
+        };
+    }
+
+    if (explicitRuntimeFile) {
+        return {
+            managed: true,
+            source: 'explicit',
+            instanceDir: path.resolve(path.dirname(explicitRuntimeFile)),
+            runtimeFile: explicitRuntimeFile,
+            detail: 'using explicit runtime file authority',
+        };
+    }
+
+    if (explicitInstanceDir) {
+        return {
+            managed: true,
+            source: 'explicit',
+            instanceDir: explicitInstanceDir,
+            runtimeFile: runtimeFileForInstance(explicitInstanceDir),
+            detail: 'using explicit instance directory authority',
+        };
+    }
+
+    if (derivedInstanceDir) {
+        return {
+            managed: true,
+            source: 'derived',
+            instanceDir: derivedInstanceDir,
+            runtimeFile: runtimeFileForInstance(derivedInstanceDir),
+            detail: 'using derived runtime authority from runtime env paths',
+        };
+    }
+
+    return {
+        managed: false,
+        source: 'adhoc',
+        instanceDir: null,
+        runtimeFile: null,
+        detail: 'no managed runtime authority could be derived from the current environment',
+    };
 }
 
 export function isPidAlive(pid: number | null | undefined): boolean {
@@ -109,16 +188,36 @@ function asNumber(value: unknown): number | null {
     return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-function normalizeRuntimeStatus(value: unknown): InstanceRuntimeStatus {
-    return value === 'starting' || value === 'running' || value === 'stopping' || value === 'stopped'
-        ? value
-        : 'running';
+function asPositiveInteger(value: unknown): number | null {
+    const parsed = asNumber(value);
+    return parsed !== null && Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
-export function readInstanceRuntime(runtimeFile: string): InstanceRuntimeMetadata | null {
-    if (!fs.existsSync(runtimeFile)) return null;
+function asNonNegativeInteger(value: unknown): number | null {
+    const parsed = asNumber(value);
+    return parsed !== null && Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function asPort(value: unknown): number | null {
+    const parsed = asPositiveInteger(value);
+    return parsed !== null && parsed <= 65535 ? parsed : null;
+}
+
+function asIsoTimestamp(value: unknown): string | null {
+    const parsed = asString(value);
+    if (!parsed) return null;
+    return Number.isNaN(Date.parse(parsed)) ? null : parsed;
+}
+
+function normalizeRuntimeStatus(value: unknown): InstanceRuntimeStatus | null {
+    if (value === undefined || value === null || value === '') return 'running';
+    return value === 'starting' || value === 'running' || value === 'stopping' || value === 'stopped'
+        ? value
+        : null;
+}
+
+function parseInstanceRuntime(raw: string, runtimeFile: string): InstanceRuntimeMetadata | null {
     try {
-        const raw = fs.readFileSync(runtimeFile, 'utf8');
         const parsed = JSON.parse(raw) as Partial<InstanceRuntimeMetadata>;
         const inferredInstanceDir = path.dirname(runtimeFile);
         const instanceDir = asString(parsed.instanceDir) ?? inferredInstanceDir;
@@ -126,16 +225,17 @@ export function readInstanceRuntime(runtimeFile: string): InstanceRuntimeMetadat
         const envFile = asString(parsed.envFile) ?? path.join(instanceDir, '.env');
         const normalizedRuntimeFile = asString(parsed.runtimeFile) ?? runtimeFile;
         const version = asString(parsed.version);
-        const pid = asNumber(parsed.pid);
-        const port = asNumber(parsed.port);
-        const startedAt = asString(parsed.startedAt);
+        const pid = asPositiveInteger(parsed.pid);
+        const port = asPort(parsed.port);
+        const startedAt = asIsoTimestamp(parsed.startedAt);
+        const status = normalizeRuntimeStatus(parsed.status);
 
-        if (!version || pid === null || port === null || !startedAt) {
+        if (!version || pid === null || port === null || !startedAt || !status) {
             return null;
         }
 
-        const lastHeartbeatAt = asString(parsed.lastHeartbeatAt) ?? startedAt;
-        const updatedAt = asString(parsed.updatedAt) ?? lastHeartbeatAt;
+        const lastHeartbeatAt = asIsoTimestamp(parsed.lastHeartbeatAt) ?? startedAt;
+        const updatedAt = asIsoTimestamp(parsed.updatedAt) ?? lastHeartbeatAt;
 
         return {
             instanceName,
@@ -144,12 +244,12 @@ export function readInstanceRuntime(runtimeFile: string): InstanceRuntimeMetadat
             runtimeFile: normalizedRuntimeFile,
             version,
             pid,
-            ppid: asNumber(parsed.ppid) ?? 0,
+            ppid: asNonNegativeInteger(parsed.ppid) ?? 0,
             port,
             startedAt,
             lastHeartbeatAt,
             updatedAt,
-            status: normalizeRuntimeStatus(parsed.status),
+            status,
             healthUrl: asString(parsed.healthUrl) ?? undefined,
             exitCode: parsed.exitCode ?? undefined,
             exitSignal: asString(parsed.exitSignal) ?? undefined,
@@ -159,6 +259,12 @@ export function readInstanceRuntime(runtimeFile: string): InstanceRuntimeMetadat
     } catch {
         return null;
     }
+}
+
+export function readInstanceRuntime(runtimeFile: string): InstanceRuntimeMetadata | null {
+    if (!fs.existsSync(runtimeFile)) return null;
+    const raw = fs.readFileSync(runtimeFile, 'utf8');
+    return parseInstanceRuntime(raw, runtimeFile);
 }
 
 export async function readRuntimeState(runtimeFile: string): Promise<InstanceRuntimeState | null> {
@@ -289,8 +395,7 @@ export async function inspectRuntimeState(runtimeFile: string): Promise<RuntimeI
 }
 
 export async function writeInstanceRuntime(runtimeFile: string, metadata: InstanceRuntimeMetadata): Promise<void> {
-    await fsp.mkdir(path.dirname(runtimeFile), { recursive: true });
-    await fsp.writeFile(runtimeFile, `${JSON.stringify(metadata, null, 2)}\n`, 'utf8');
+    await writeTextFileLocked(runtimeFile, () => `${JSON.stringify(metadata, null, 2)}\n`);
 }
 
 export async function writeRuntimeState(runtimeFile: string, metadata: InstanceRuntimeState): Promise<void> {
@@ -301,11 +406,14 @@ export async function updateInstanceRuntime(
     runtimeFile: string,
     updater: (current: InstanceRuntimeMetadata | null) => InstanceRuntimeMetadata | null
 ): Promise<InstanceRuntimeMetadata | null> {
-    const current = readInstanceRuntime(runtimeFile);
-    const next = updater(current);
-    if (!next) return null;
-    await writeInstanceRuntime(runtimeFile, next);
-    return next;
+    let result: InstanceRuntimeMetadata | null = null;
+    await writeTextFileLocked(runtimeFile, (existingRaw) => {
+        const current = existingRaw.trim() ? parseInstanceRuntime(existingRaw, runtimeFile) : null;
+        const next = updater(current);
+        result = next;
+        return next ? `${JSON.stringify(next, null, 2)}\n` : existingRaw;
+    });
+    return result;
 }
 
 export async function markRuntimeStopped(runtimeFile: string, signal?: string | null): Promise<InstanceRuntimeState | null> {

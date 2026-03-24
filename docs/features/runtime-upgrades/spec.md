@@ -14,7 +14,7 @@ Iranti supports upgrading while API servers, MCP servers, or other Iranti-manage
 | `--instance <name>` | string | Declares which Iranti instance should be restarted or handed off after staging. |
 | `--graceful-timeout <seconds>` | integer | Maximum time to wait for a running process to drain before forcing restart. |
 | live process inventory | runtime state | Live or stale runtime metadata for instance-backed API servers detected under the active runtime root. |
-| instance metadata | runtime config | Runtime root, installed version, target version, PID records, and health endpoints. |
+| instance metadata | runtime config | Runtime root, managed-runtime authority, installed version, target version, PID records, and health endpoints. |
 
 ## Outputs
 
@@ -53,8 +53,11 @@ Iranti supports upgrading while API servers, MCP servers, or other Iranti-manage
    - the new version is healthy
    - no live processes still reference the old version
    - or a later cleanup command explicitly prunes it
-11. When `iranti run --instance <name>` starts an API server, write runtime metadata with PID, port, version, and health URL.
-12. When `iranti instance restart <name>` is invoked, refuse to restart stale or stopped instances and only restart instances that are actually running.
+11. Resolve runtime authority from explicit instance env/runtime vars first, then from well-formed runtime paths such as `<instance>/escalation` or `<instance>/logs/api-requests.log`.
+12. If managed runtime authority is invalid or ambiguous, do not silently write runtime metadata to an inferred location.
+13. When `iranti run --instance <name>` starts an API server, write runtime metadata with PID, port, version, and health URL.
+14. When `iranti instance restart <name>` is invoked, refuse to restart stale or stopped instances and only restart instances that are actually running.
+15. After spawning the replacement runtime, wait for healthy runtime metadata before returning success.
 
 ## Edge Cases
 
@@ -66,14 +69,19 @@ Iranti supports upgrading while API servers, MCP servers, or other Iranti-manage
 - Client-facing tools such as Claude Code or Codex may keep an MCP process alive; those clients must reconnect rather than expecting a magical hot swap.
 - The feature does not promise zero downtime. It promises safe staged upgrades plus predictable restart or handoff.
 - `iranti instance restart` only operates on a live instance process; stale runtime metadata is reported but not restarted.
+- `iranti instance restart` only reports success after the replacement runtime becomes healthy; a detached child that exits early is treated as a failed restart.
+- Invalid runtime metadata should be classified as invalid, not coerced into `running`.
+- Production startup must fail fast when runtime/security invariants required for operator trust are missing.
 
 ## Test Results
 
 - `npx tsc --noEmit`
 - `node -r ts-node/register/transpile-only tests/runtime-lifecycle/run_runtime_lifecycle_tests.ts`
 - Runtime metadata is now written to `runtime.json` for live instances.
+- Runtime authority is now resolved from a canonical explicit-or-derived model rather than loosely inferred from any nearby path.
 - `iranti status --json` reports running versus stale instance state.
 - `iranti instance restart <name>` refuses to operate on stale metadata and only restarts live instances.
+- `iranti instance restart <name>` fails when the replacement runtime cannot become healthy instead of reporting a scheduled restart as success.
 
 ## Related
 

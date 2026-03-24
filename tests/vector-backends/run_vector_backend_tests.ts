@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { bootstrapHarness } from '../../scripts/harness';
 import { createVectorBackend } from '../../src/library/backends';
-import { createEntry, deleteEntryById } from '../../src/library/queries';
+import { __setVectorBackendSingletonForTests, createEntry, deleteEntryById } from '../../src/library/queries';
 import { searchEntriesHybrid } from '../../src/library/queries';
 import { generateEmbedding } from '../../src/library/embeddings';
 
@@ -255,6 +255,7 @@ async function testHybridSearchCandidateMerge(): Promise<void> {
         __calls: 0,
     } as any;
 
+    __setVectorBackendSingletonForTests(null);
     backends.createVectorBackend = () => ({
         upsert: async () => undefined,
         delete: async () => undefined,
@@ -278,6 +279,7 @@ async function testHybridSearchCandidateMerge(): Promise<void> {
         expect(results[0].id === 77, 'Expected the merged candidate id to survive assembly.');
         expect(results[0].vectorScore > 0, 'Expected vector score to be preserved.');
     } finally {
+        __setVectorBackendSingletonForTests(null);
         backends.createVectorBackend = originalCreateVectorBackend;
     }
 }

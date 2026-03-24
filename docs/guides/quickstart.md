@@ -421,7 +421,18 @@ if (checkpointed.sessionRecovery?.available && checkpointed.sessionRecovery.reco
 
 const sessions = await iranti.listSessions({ operatorState: 'interrupted', sort: 'operator' });
 console.log(sessions.map((session) => `${session.agentId}: ${session.operatorState}`));
+
+const inspection = await iranti.inspectSession({
+    agentId: 'research_agent_001',
+    task: 'Research publication history for Dr. Jane Smith',
+    recentMessages: ['Still comparing affiliation sources.'],
+});
+
+console.log(inspection.summary.operatorState);
+console.log(inspection.sessionRecovery?.recommendation ?? 'no recovery recommendation');
 ```
+
+`inspectSession()` gives you both the raw persisted checkpoint and the operator-facing summary. A stale checkpoint can still have `sessionCheckpoint.status = 'active'` while `summary.operatorState = 'interrupted'`. `listSessions()` is the inventory view; `inspectSession()` is the one-agent drill-down.
 
 For Claude Code to hand work over to Codex, write the durable handoff into a shared `task/...` entity and keep any sender-local recovery in a normal checkpoint:
 

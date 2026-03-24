@@ -6,6 +6,9 @@ on:
       - main
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   npm_package:
     runs-on: ubuntu-latest
@@ -20,13 +23,13 @@ jobs:
           cache: npm
 
       - name: Install deps
-        run: npm ci --legacy-peer-deps
+        run: npm ci
 
       - name: Build
         run: npm run build
 
-      - name: Contract tests
-        run: npm run test:contracts
+      - name: Fast hardening suite
+        run: npm run test:hardening-fast
 
       - name: Pack
         run: npm pack
@@ -81,3 +84,43 @@ jobs:
           source .venv-smoke/bin/activate
           pip install clients/python/dist/iranti-*.whl
           python -c "import iranti; from iranti import IrantiClient; print(iranti.__version__); assert bool(IrantiClient)"
+
+  db_validation:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: iranti_validation
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d iranti_validation"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/iranti_validation
+      LLM_PROVIDER: mock
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Apply Prisma migrations
+        run: npx prisma migrate deploy --schema prisma/schema.prisma
+
+      - name: Seed staff namespace
+        run: npm run seed
+
+      - name: DB-backed hardening suite
+        run: npm run test:hardening-db

@@ -20,8 +20,8 @@ Iranti now tracks valid-time intervals for current and archived facts so callers
 
 ## Decision Tree / Flow
 1. On a clean write, insert a new current row with `validFrom` and open-ended `validUntil = NULL`.
-2. On supersession, archive the current row as `superseded`, delete it from `knowledge_base`, then insert the replacement current row.
-3. On challenger-win contradiction, archive the current row as `contradicted`, delete it from `knowledge_base`, then insert the challenger as current.
+2. On supersession, archive the current row as `superseded` and remove it from `knowledge_base` inside one database transaction, then insert the replacement current row.
+3. On challenger-win contradiction, archive the current row as `contradicted` and remove it from `knowledge_base` inside one database transaction, then insert the challenger as current.
 4. On challenger-loss contradiction, keep the current row untouched and record the rejected challenger only in conflict/audit paths.
 5. On unresolved escalation, archive two intervals:
    - a closed uncontested interval as `segment_closed`
@@ -35,6 +35,7 @@ Iranti now tracks valid-time intervals for current and archived facts so callers
 ## Edge Cases
 - Future `validFrom` is rejected.
 - Pending escalation rows keep `validUntil = NULL` until resolution closes them.
+- Archive history ordering is deterministic even when multiple rows share the same `validFrom` or `archivedAt` timestamp; row id is used as the final tie-breaker.
 - Rejected challengers do not enter temporal history.
 - Rejected challengers remain in conflict/audit traces only; they are intentionally excluded from `archive` in this MVP.
 - `expired` rows are excluded from `asOf` and `history()` unless explicitly requested.

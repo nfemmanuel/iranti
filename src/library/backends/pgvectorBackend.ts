@@ -1,7 +1,7 @@
 import { Prisma } from '../../generated/prisma/client';
 import { getDb } from '../client';
 import { toPgVectorLiteral } from '../embeddings';
-import { VectorBackend, VectorSearchResult, VectorUpsertParams } from '../vectorBackend';
+import { VectorBackend, VectorMutationDbClient, VectorSearchResult, VectorUpsertParams } from '../vectorBackend';
 
 let vectorSupportCache: boolean | null = null;
 
@@ -51,14 +51,14 @@ function buildFilters(filter?: Record<string, unknown>): Prisma.Sql[] {
 }
 
 export class PgvectorBackend implements VectorBackend {
-    async upsert(params: VectorUpsertParams): Promise<void> {
+    async upsert(params: VectorUpsertParams, db?: VectorMutationDbClient): Promise<void> {
         if (!(await hasVectorSupport())) {
             return;
         }
 
         try {
             const vectorLiteral = toPgVectorLiteral(params.vector);
-            await getDb().$executeRaw(Prisma.sql`
+            await (db ?? getDb()).$executeRaw(Prisma.sql`
                 UPDATE "knowledge_base"
                 SET "embedding" = ${vectorLiteral}::vector
                 WHERE "id" = ${Number.parseInt(params.id, 10)}
@@ -72,13 +72,13 @@ export class PgvectorBackend implements VectorBackend {
         }
     }
 
-    async delete(id: string): Promise<void> {
+    async delete(id: string, db?: VectorMutationDbClient): Promise<void> {
         if (!(await hasVectorSupport())) {
             return;
         }
 
         try {
-            await getDb().$executeRaw(Prisma.sql`
+            await (db ?? getDb()).$executeRaw(Prisma.sql`
                 UPDATE "knowledge_base"
                 SET "embedding" = NULL
                 WHERE "id" = ${Number.parseInt(id, 10)}

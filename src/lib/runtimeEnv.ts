@@ -12,9 +12,21 @@ type RuntimeEnvOptions = {
 
 type RuntimeEnvLoadResult = {
     loadedFiles: string[];
+    fallbackEnvFile?: string;
     projectEnvFile?: string;
     instanceEnvFile?: string;
+    authorityMode: 'environment-only' | 'instance-authoritative' | 'project-only';
 };
+
+const PROJECT_BINDING_KEYS = new Set([
+    'IRANTI_URL',
+    'IRANTI_API_KEY',
+    'IRANTI_AGENT_ID',
+    'IRANTI_MEMORY_ENTITY',
+    'IRANTI_PROJECT_MODE',
+    'IRANTI_INSTANCE',
+    'IRANTI_INSTANCE_ENV',
+]);
 
 function parseEnvFile(filePath: string): Record<string, string> {
     const raw = fs.readFileSync(filePath, 'utf-8');
@@ -119,13 +131,22 @@ export function loadRuntimeEnv(options: RuntimeEnvOptions = {}): RuntimeEnvLoadR
     }
 
     if (projectEnvFile && projectEnv) {
-        applyEnvVars(projectEnv, initialEnvKeys, { overrideExisting: true });
+        const projectVars = resolvedInstanceEnvFile
+            ? Object.fromEntries(Object.entries(projectEnv).filter(([key]) => PROJECT_BINDING_KEYS.has(key)))
+            : projectEnv;
+        applyEnvVars(projectVars, initialEnvKeys, { overrideExisting: true });
         loadedFiles.push(projectEnvFile);
     }
 
     return {
         loadedFiles,
+        fallbackEnvFile,
         projectEnvFile,
         instanceEnvFile: resolvedInstanceEnvFile,
+        authorityMode: resolvedInstanceEnvFile
+            ? 'instance-authoritative'
+            : projectEnvFile
+                ? 'project-only'
+                : 'environment-only',
     };
 }

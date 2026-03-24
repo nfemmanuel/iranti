@@ -259,6 +259,37 @@ async function main() {
             );
         }));
 
+        results.push(await runCase('Global kb:read does not grant protected system namespace access', async () => {
+            const token = await createScopedKey(['kb:read']);
+            const response = await requestJson(baseUrl, token, '/kb/query/system/library/schema_version');
+            expect(response.status === 403, `Expected 403 for protected namespace read, got ${response.status}.`);
+            expect(
+                response.body?.reason === 'Key does not have access to entity namespace system/library',
+                `Expected protected-namespace scope denial, got ${JSON.stringify(response.body)}.`
+            );
+        }));
+
+        results.push(await runCase('Global kb:write does not grant protected system namespace access', async () => {
+            const token = await createScopedKey(['kb:write']);
+            const response = await requestJson(baseUrl, token, '/kb/write', {
+                method: 'POST',
+                body: JSON.stringify({
+                    entity: 'system/access_control_guard',
+                    key: 'status',
+                    value: { state: 'blocked' },
+                    summary: 'Protected system write should be denied at scope layer.',
+                    confidence: 80,
+                    source: 'access_suite',
+                    agent: 'access_protected_write_agent',
+                }),
+            });
+            expect(response.status === 403, `Expected 403 for protected namespace write, got ${response.status}.`);
+            expect(
+                response.body?.reason === 'Key does not have access to entity namespace system/access_control_guard',
+                `Expected protected-namespace scope denial, got ${JSON.stringify(response.body)}.`
+            );
+        }));
+
         results.push(await runCase('Malformed scope rejected at key creation', async () => {
             let failed = false;
             try {

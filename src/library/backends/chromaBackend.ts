@@ -1,4 +1,4 @@
-import { VectorBackend, VectorSearchResult, VectorUpsertParams } from '../vectorBackend';
+import { VectorBackend, VectorMutationDbClient, VectorSearchResult, VectorUpsertParams } from '../vectorBackend';
 
 type ChromaConfig = {
     url: string;
@@ -74,7 +74,7 @@ export class ChromaBackend implements VectorBackend {
         return created.id;
     }
 
-    async upsert(params: VectorUpsertParams): Promise<void> {
+    async upsert(params: VectorUpsertParams, _db?: VectorMutationDbClient): Promise<void> {
         const collectionId = await this.ensureCollection();
         await this.request('POST', `${this.recordsRoute(collectionId)}/upsert`, {
             ids: [params.id],
@@ -84,7 +84,7 @@ export class ChromaBackend implements VectorBackend {
         });
     }
 
-    async delete(id: string): Promise<void> {
+    async delete(id: string, _db?: VectorMutationDbClient): Promise<void> {
         const collectionId = await this.ensureCollection();
         await this.request('POST', `${this.recordsRoute(collectionId)}/delete`, {
             ids: [id],

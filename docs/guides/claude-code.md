@@ -26,10 +26,15 @@ That writes `.env.iranti` with:
 - `IRANTI_AGENT_ID`
 - `IRANTI_INSTANCE_ENV`
 
-`iranti mcp` and `iranti claude-hook` automatically load `.env.iranti` from the current project directory and then load the linked instance env to recover:
+`iranti mcp` and `iranti claude-hook` automatically search upward for the nearest ancestor `.env.iranti`, then load the linked instance env to recover:
 - `DATABASE_URL`
 - `LLM_PROVIDER`
 - upstream provider API keys
+
+Authority model:
+- the instance env is authoritative for runtime/database/provider settings such as `DATABASE_URL` and `LLM_PROVIDER`
+- `.env.iranti` is authoritative for project binding settings such as `IRANTI_URL`, `IRANTI_API_KEY`, `IRANTI_AGENT_ID`, and `IRANTI_INSTANCE_ENV`
+- if both files are present, project-local binding values do not override linked instance runtime settings
 
 ## 1. Start the Iranti API instance
 

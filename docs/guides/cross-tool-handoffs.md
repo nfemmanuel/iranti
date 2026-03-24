@@ -93,7 +93,7 @@ Codex begins its own handshake:
 
 ```ts
 await iranti.handshake({
-  agent: 'codex_code_main',
+  agentId: 'codex_code_main',
   task: 'Continue the shared runtime verification pass.',
   recentMessages: [
     'Resume work for task/runtime_verification_pass.',
@@ -111,7 +111,7 @@ Example:
 
 ```ts
 const attend = await iranti.attend({
-  agent: 'codex_code_main',
+  agentId: 'codex_code_main',
   latestMessage: 'Continue work for task/runtime_verification_pass. What should I do next?',
   currentContext: 'We are continuing a shared task handoff between Claude Code and Codex.',
   entityHints: ['task/runtime_verification_pass', 'project/iranti'],
@@ -130,13 +130,33 @@ task/runtime_verification_pass / current_owner = codex_code_main
 
 That makes pickup visible to Claude and to any later operator inspection.
 
-## 6. Sender reconvenes from shared memory later
+## 6. Operators inspect sender and receiver separately
+
+Session inspection is still agent-scoped:
+
+- `inspectSession({ agentId: 'claude_code_main' })` shows Claude's private checkpoint
+- `inspectSession({ agentId: 'codex_code_main' })` should stay empty until Codex checkpoints its own work
+- `listSessions({ agentId: 'claude_code_main', operatorState: 'active' })` can inventory only Claude's checkpoint state
+
+If you want a recovery recommendation instead of raw checkpoint visibility, pass the same candidate task context you would use for a real handshake:
+
+```ts
+const claudeInspection = await iranti.inspectSession({
+  agentId: 'claude_code_main',
+  task: 'Prepare Codex handoff for runtime verification pass.',
+  recentMessages: ['Review the sender-local handoff checkpoint.'],
+});
+```
+
+That will not let Codex resume Claude's session. It only lets an operator or sender-side tool evaluate Claude's own checkpoint against a candidate return task.
+
+## 7. Sender reconvenes from shared memory later
 
 When Claude comes back, Claude should query or attend against the same shared task entity:
 
 ```ts
 const followUp = await iranti.attend({
-  agent: 'claude_code_main',
+  agentId: 'claude_code_main',
   latestMessage: 'Check whether Codex picked up task/runtime_verification_pass.',
   currentContext: 'Claude is reviewing the shared handoff state.',
   entityHints: ['task/runtime_verification_pass'],
@@ -167,6 +187,7 @@ That test proves:
 
 - Claude can write a shared handoff
 - Claude can checkpoint its own session
+- operator inspection can see Claude's checkpoint without leaking it into Codex
 - Codex can read the shared task through query and attend
 - Codex can write follow-up progress
 - Claude can recover the follow-up through shared memory

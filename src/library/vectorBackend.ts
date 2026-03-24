@@ -1,3 +1,5 @@
+import { PrismaClient } from '../generated/prisma/client';
+
 export interface VectorSearchResult {
     entityType: string;
     entityId: string;
@@ -12,9 +14,11 @@ export interface VectorUpsertParams {
     metadata: Record<string, unknown>;
 }
 
+export type VectorMutationDbClient = Pick<PrismaClient, '$executeRaw'>;
+
 export interface VectorBackend {
-    upsert(params: VectorUpsertParams): Promise<void>;
-    delete(id: string): Promise<void>;
+    upsert(params: VectorUpsertParams, db?: VectorMutationDbClient): Promise<void>;
+    delete(id: string, db?: VectorMutationDbClient): Promise<void>;
     search(
         vector: number[],
         topK: number,

@@ -35,14 +35,24 @@ If those do not match, publishing stops.
 
 1. Verifies all versions match.
 2. Builds the Node package.
-3. Runs contract tests.
-4. Packs the root npm tarball and smoke-installs the CLI.
-5. Builds the TypeScript client package.
-6. Packs the TypeScript client tarball and smoke-installs it.
-7. Builds the Python package.
-8. Runs `twine check`.
-9. Smoke-installs the wheel.
-10. If the trigger is a real GitHub Release:
+3. Runs the fast hardening gate:
+   - `npm run test:contracts`
+   - `npm run test:runtime-lifecycle`
+   - `npm run test:cli-process-safety`
+   - `npm run test:session-recovery`
+4. Runs the DB-backed hardening gate on pgvector-backed PostgreSQL:
+   - `npm run test:access-control`
+   - `npm run test:consistency`
+   - `npm run test:archive-vector-contracts`
+   - `npm run test:vector-backends`
+   - `npm run test:cross-tool-handoff`
+5. Packs the root npm tarball and smoke-installs the CLI.
+6. Builds the TypeScript client package.
+7. Packs the TypeScript client tarball and smoke-installs it.
+8. Builds the Python package.
+9. Runs `twine check`.
+10. Smoke-installs the wheel.
+11. If the trigger is a real GitHub Release:
    - publishes Node to npm
    - publishes `@iranti/sdk` to npm
    - publishes Python to PyPI
@@ -98,7 +108,8 @@ iranti status
 iranti doctor
 npm run build
 npm --prefix clients/typescript run build
-npm run test:contracts
+npm run test:hardening-fast
+npm run test:hardening-db
 npm run release:check -- v0.2.26
 npm pack
 npm pack ./clients/typescript
@@ -129,6 +140,12 @@ gh release create v0.2.26 --title "v0.2.26" --notes "Release notes here"
 You can manually run the workflow with `workflow_dispatch` to verify release readiness without publishing.
 
 If you provide `release_tag`, the workflow also checks the tag/version match.
+
+## Dependency Policy
+
+The active CI and release workflows use plain `npm ci`.
+
+`--legacy-peer-deps` is no longer part of the supported release path. If a clean install only works with that flag again, treat it as a repo-health regression and fix or explicitly document it before shipping.
 
 ## Important Constraint
 

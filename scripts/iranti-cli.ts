@@ -12,7 +12,9 @@ import { disconnectDb, initDb } from '../src/library/client';
 import { createOrRotateApiKey, formatApiKeyToken, generateApiKeySecret, listApiKeys, revokeApiKey } from '../src/security/apiKeys';
 import { getEscalationPaths } from '../src/lib/escalationPaths';
 import { parseDockerContainerNames, parsePublishedDockerHostPorts } from '../src/lib/dockerCliParsing';
+import { resolveCommandInvocation, spawnResolved, spawnSyncResolved } from '../src/lib/commandInvocation';
 import { loadRuntimeEnv } from '../src/lib/runtimeEnv';
+import { writeTextFileLocked } from '../src/lib/fileMutation';
 import { resolveInteractive } from '../src/resolutionist';
 import { startChatSession } from '../src/chat';
 import { createVectorBackend, resolveVectorBackendName } from '../src/library/backends';
@@ -113,6 +115,12 @@ type UpgradeExecutionResult = {
         status: 'pass' | 'warn' | 'fail';
         detail: string;
     };
+};
+
+type DetachedRestartPlan = {
+    instanceName: string;
+    scope: Scope;
+    root: string;
 };
 
 type UninstallProjectArtifact = {
@@ -640,24 +648,18 @@ async function handoffToScript(scriptName: string, rawArgs: string[]): Promise<v
         );
     }
 
-    await new Promise<void>((resolve, reject) => {
-        const child = spawn('npx', ['ts-node', sourcePath, ...rawArgs], {
+    try {
+        await spawnResolved('npx', ['ts-node', sourcePath, ...rawArgs], {
             stdio: 'inherit',
             env: process.env,
-            shell: process.platform === 'win32',
         });
-        child.on('error', reject);
-        child.on('exit', (code, signal) => {
-            if (signal) {
-                reject(new Error(`${scriptName} terminated with signal ${signal}`));
-                return;
-            }
-            if ((code ?? 0) !== 0) {
-                process.exit(code ?? 1);
-            }
-            resolve();
-        });
-    });
+    } catch (error) {
+        if (error instanceof Error && /exited with code/.test(error.message)) {
+            const match = error.message.match(/code (\d+)/);
+            process.exit(match ? Number.parseInt(match[1]!, 10) : 1);
+        }
+        throw error;
+    }
 }
 
 async function runBundledScript(scriptName: string, rawArgs: string[], extraEnv?: Record<string, string | undefined>): Promise<void> {
@@ -667,28 +669,13 @@ async function runBundledScript(scriptName: string, rawArgs: string[], extraEnv?
         if (!fs.existsSync(sourcePath)) {
             throw new Error(`Unable to locate bundled script: ${scriptName}`);
         }
-        await new Promise<void>((resolve, reject) => {
-            const child = spawn('npx', ['ts-node', sourcePath, ...rawArgs], {
-                stdio: 'inherit',
-                env: {
-                    ...process.env,
-                    ...extraEnv,
-                },
-                cwd: packageRoot(),
-                shell: process.platform === 'win32',
-            });
-            child.on('error', reject);
-            child.on('exit', (code, signal) => {
-                if (signal) {
-                    reject(new Error(`${scriptName} terminated with signal ${signal}`));
-                    return;
-                }
-                if ((code ?? 0) !== 0) {
-                    reject(new Error(`${scriptName} exited with code ${code ?? 1}`));
-                    return;
-                }
-                resolve();
-            });
+        await spawnResolved('npx', ['ts-node', sourcePath, ...rawArgs], {
+            stdio: 'inherit',
+            env: {
+                ...process.env,
+                ...extraEnv,
+            },
+            cwd: packageRoot(),
         });
         return;
     }
@@ -722,19 +709,11 @@ async function ensureDir(dir: string): Promise<void> {
 }
 
 async function writeJson(filePath: string, value: unknown): Promise<void> {
-    await fsp.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf-8');
+    await writeTextFileLocked(filePath, () => `${JSON.stringify(value, null, 2)}\n`);
 }
 
 async function writeText(filePath: string, content: string): Promise<void> {
-    // Atomic write: write to temp file then rename to avoid partial writes on crash
-    const tmpPath = `${filePath}.tmp${process.pid}`;
-    try {
-        await fsp.writeFile(tmpPath, content, { encoding: 'utf-8', flag: 'w' });
-        await fsp.rename(tmpPath, filePath);
-    } catch (err) {
-        await fsp.unlink(tmpPath).catch(() => undefined);
-        throw err;
-    }
+    await writeTextFileLocked(filePath, () => content);
 }
 
 const MAX_ENV_FILE_BYTES = 1_048_576; // 1 MiB
@@ -809,50 +788,51 @@ function vectorBackendUrl(name: string, env: Record<string, string>): string | n
 }
 
 async function upsertEnvFile(filePath: string, updates: Record<string, string | undefined>): Promise<void> {
-    const existingRaw = fs.existsSync(filePath) ? await fsp.readFile(filePath, 'utf-8') : '';
-    const lines = existingRaw.length > 0 ? existingRaw.split(/\r?\n/) : [];
-    const pending = new Map<string, string | undefined>(Object.entries(updates));
-    const nextLines: string[] = [];
+    await writeTextFileLocked(filePath, (existingRaw) => {
+        const lines = existingRaw.length > 0 ? existingRaw.split(/\r?\n/) : [];
+        const pending = new Map<string, string | undefined>(Object.entries(updates));
+        const nextLines: string[] = [];
 
-    for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith('#')) {
-            nextLines.push(line);
-            continue;
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith('#')) {
+                nextLines.push(line);
+                continue;
+            }
+
+            const idx = line.indexOf('=');
+            if (idx <= 0) {
+                nextLines.push(line);
+                continue;
+            }
+
+            const key = line.slice(0, idx).trim();
+            if (!pending.has(key)) {
+                nextLines.push(line);
+                continue;
+            }
+
+            const nextValue = pending.get(key);
+            pending.delete(key);
+            if (nextValue === undefined) {
+                continue;
+            }
+
+            nextLines.push(`${key}=${formatEnvValue(nextValue)}`);
         }
 
-        const idx = line.indexOf('=');
-        if (idx <= 0) {
-            nextLines.push(line);
-            continue;
+        for (const [key, value] of pending.entries()) {
+            if (value === undefined) continue;
+            nextLines.push(`${key}=${formatEnvValue(value)}`);
         }
 
-        const key = line.slice(0, idx).trim();
-        if (!pending.has(key)) {
-            nextLines.push(line);
-            continue;
-        }
+        const finalLines = nextLines
+            .join('\n')
+            .replace(/^\n+/, '')
+            .trimEnd();
 
-        const nextValue = pending.get(key);
-        pending.delete(key);
-        if (nextValue === undefined) {
-            continue;
-        }
-
-        nextLines.push(`${key}=${formatEnvValue(nextValue)}`);
-    }
-
-    for (const [key, value] of pending.entries()) {
-        if (value === undefined) continue;
-        nextLines.push(`${key}=${formatEnvValue(value)}`);
-    }
-
-    const finalLines = nextLines
-        .join('\n')
-        .replace(/^\n+/, '') // strip leading blank lines only
-        .trimEnd();          // strip trailing whitespace only — preserving internal blank line groups
-
-    await writeText(filePath, `${finalLines}\n`);
+        return `${finalLines}\n`;
+    });
 }
 
 function redactSecret(value: string | undefined): string {
@@ -1973,9 +1953,7 @@ async function writeClaudeCodeProjectFiles(projectPath: string, projectEnvPath?:
 
 function hasCodexInstalled(): boolean {
     try {
-        const proc = process.platform === 'win32'
-            ? spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/c', 'codex --version'], { stdio: 'ignore' })
-            : spawnSync('codex', ['--version'], { stdio: 'ignore' });
+        const proc = spawnSyncResolved('codex', ['--version'], { stdio: 'ignore' });
         return proc.status === 0;
     } catch {
         return false;
@@ -1984,9 +1962,7 @@ function hasCodexInstalled(): boolean {
 
 function hasDockerInstalled(): boolean {
     try {
-        const proc = process.platform === 'win32'
-            ? spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/c', 'docker --version'], { stdio: 'ignore' })
-            : spawnSync('docker', ['--version'], { stdio: 'ignore' });
+        const proc = spawnSyncResolved('docker', ['--version'], { stdio: 'ignore' });
         return proc.status === 0;
     } catch {
         return false;
@@ -2208,9 +2184,7 @@ async function runDockerPostgresContainer(options: {
     const names = parseDockerContainerNames(inspect.stdout ?? '');
 
     if (names.includes(options.containerName)) {
-        const start = process.platform === 'win32'
-            ? spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/c', [ 'docker', 'start', options.containerName ].map(quoteForCmd).join(' ')], { stdio: 'inherit' })
-            : spawnSync('docker', ['start', options.containerName], { stdio: 'inherit' });
+        const start = spawnSyncResolved('docker', ['start', options.containerName], { stdio: 'inherit' });
         if (start.status !== 0) {
             throw new Error(`Failed to start existing Docker container '${options.containerName}'.`);
         }
@@ -2230,9 +2204,7 @@ async function runDockerPostgresContainer(options: {
             `${options.hostPort}:5432`,
             'pgvector/pgvector:pg16',
         ];
-        const result = process.platform === 'win32'
-            ? spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/c', ['docker', ...args].join(' ')], { stdio: 'inherit' })
-            : spawnSync('docker', args, { stdio: 'inherit' });
+        const result = spawnSyncResolved('docker', args, { stdio: 'inherit' });
         if (result.status !== 0) {
             throw new Error(`Failed to start Docker PostgreSQL container '${options.containerName}'.`);
         }
@@ -2663,9 +2635,7 @@ function isPathInside(parentDir: string, childDir: string): boolean {
 
 function hasCommandInstalled(command: string): boolean {
     try {
-        const proc = process.platform === 'win32'
-            ? spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/c', `${command} --version`], { stdio: 'ignore' })
-            : spawnSync(command, ['--version'], { stdio: 'ignore' });
+        const proc = spawnSyncResolved(command, ['--version'], { stdio: 'ignore' });
         return proc.status === 0;
     } catch {
         return false;
@@ -2743,15 +2713,6 @@ function printDependencyChecks(checks: DependencyCheck[]): void {
     }
 }
 
-function quoteForCmd(arg: string): string {
-    if (arg.length === 0) return '""';
-    // Escape % to prevent CMD variable expansion (%VAR%)
-    const pctEscaped = arg.replace(/%/g, '%%');
-    if (!/[ \t"&()<>|^%!]/.test(arg)) return pctEscaped;
-    // Use "" for inner double quotes (CMD convention, not Unix \")
-    return `"${pctEscaped.replace(/"/g, '""')}"`;
-}
-
 function runCommandCapture(
     executable: string,
     args: string[],
@@ -2763,33 +2724,19 @@ function runCommandCapture(
         args: args.join(' '),
         cwd: cwd ?? process.cwd(),
     });
-    const proc = process.platform === 'win32'
-        ? spawnSync(process.env.ComSpec ?? 'cmd.exe', [
-            '/d',
-            '/c',
-            [executable, ...args].map(quoteForCmd).join(' '),
-        ], {
-            cwd,
-            encoding: 'utf8',
-            stdio: ['ignore', 'pipe', 'pipe'],
-            env: {
-                ...process.env,
-                ...extraEnv,
-            },
-        })
-        : spawnSync(executable, args, {
-            cwd,
-            encoding: 'utf8',
-            stdio: ['ignore', 'pipe', 'pipe'],
-            env: {
-                ...process.env,
-                ...extraEnv,
-            },
-        });
+    const proc = spawnSyncResolved(executable, args, {
+        cwd,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: {
+            ...process.env,
+            ...extraEnv,
+        },
+    });
     const result = {
         status: proc.status,
-        stdout: proc.stdout ?? '',
-        stderr: proc.stderr ?? '',
+        stdout: typeof proc.stdout === 'string' ? proc.stdout : Buffer.from(proc.stdout ?? []).toString('utf8'),
+        stderr: typeof proc.stderr === 'string' ? proc.stderr : Buffer.from(proc.stderr ?? []).toString('utf8'),
     };
     verboseLog('Subprocess finished (capture).', {
         executable,
@@ -2805,19 +2752,10 @@ function runCommandInteractive(step: UpgradeCommand): number | null {
         command: step.display,
         cwd: step.cwd ?? process.cwd(),
     });
-    const proc = process.platform === 'win32'
-        ? spawnSync(process.env.ComSpec ?? 'cmd.exe', [
-            '/d',
-            '/c',
-            [step.executable, ...step.args].map(quoteForCmd).join(' '),
-        ], {
-            cwd: step.cwd,
-            stdio: 'inherit',
-        })
-        : spawnSync(step.executable, step.args, {
-            cwd: step.cwd,
-            stdio: 'inherit',
-        });
+    const proc = spawnSyncResolved(step.executable, step.args, {
+        cwd: step.cwd,
+        stdio: 'inherit',
+    });
     verboseLog('Subprocess finished (interactive).', {
         label: step.label,
         status: proc.status ?? -1,
@@ -2843,21 +2781,59 @@ function currentCliInvocation(): { executable: string; args: string[] } {
     };
 }
 
-function spawnDetachedCli(args: string[], cwd?: string): number {
-    const invocation = currentCliInvocation();
-    const child = spawn(invocation.executable, [...invocation.args, ...args], {
+async function spawnDetachedCli(args: string[], cwd?: string): Promise<number> {
+    const current = currentCliInvocation();
+    const invocation = resolveCommandInvocation(current.executable, [...current.args, ...args]);
+    const child = spawn(invocation.executable, invocation.args, {
         detached: true,
         stdio: 'ignore',
         windowsHide: true,
         cwd: cwd ?? process.cwd(),
         env: process.env,
     });
-    child.unref();
     const pid = child.pid;
     if (!pid) {
         throw new Error(`Failed to spawn detached CLI process (executable: ${invocation.executable}). The process did not start.`);
     }
+    await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => {
+            cleanup();
+            resolve();
+        }, 750);
+        const cleanup = () => {
+            clearTimeout(timer);
+            child.removeAllListeners('error');
+            child.removeAllListeners('exit');
+        };
+        child.once('error', (error) => {
+            cleanup();
+            reject(error);
+        });
+        child.once('exit', (code, signal) => {
+            cleanup();
+            reject(new Error(
+                `Detached CLI process exited before startup verification completed (pid ${pid}, code ${code ?? 'null'}, signal ${signal ?? 'null'}).`
+            ));
+        });
+    });
+    child.unref();
     return pid;
+}
+
+async function waitForRestartedRuntime(runtimeFile: string, previousPid: number | null, timeoutMs: number): Promise<RuntimeInspection> {
+    const startedAt = Date.now();
+    let lastInspection = await inspectRuntimeState(runtimeFile);
+    while (Date.now() - startedAt < timeoutMs) {
+        lastInspection = await inspectRuntimeState(runtimeFile);
+        if (lastInspection.running && lastInspection.state?.pid && lastInspection.state.pid !== previousPid) {
+            return lastInspection;
+        }
+        if (lastInspection.classification === 'invalid') {
+            break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    throw new Error(`Restarted runtime did not become healthy within ${Math.ceil(timeoutMs / 1000)}s. Last observed state: ${lastInspection.classification} (${lastInspection.detail}).`);
 }
 
 async function restartInstanceRuntime(args: ParsedArgs, instanceName: string, scope: Scope, root: string): Promise<{
@@ -2891,7 +2867,8 @@ async function restartInstanceRuntime(args: ParsedArgs, instanceName: string, sc
         }
     }
 
-    const newPid = spawnDetachedCli([
+    const runtimeFile = instancePaths(root, instanceName).runtimeFile;
+    const newPid = await spawnDetachedCli([
         'run',
         '--instance',
         instanceName,
@@ -2900,6 +2877,7 @@ async function restartInstanceRuntime(args: ParsedArgs, instanceName: string, sc
         '--root',
         root,
     ], root);
+    await waitForRestartedRuntime(runtimeFile, previousPid, 15_000);
 
     return {
         previousPid,
@@ -3335,7 +3313,7 @@ async function chooseInteractiveUpgradeTargets(
 async function executeUpgradeTargets(
     targets: Exclude<UpgradeTarget, 'auto'>[],
     context: ReturnType<typeof detectUpgradeContext>,
-    options: { detachedPostCommand?: string } = {},
+    options: { detachedRestart?: DetachedRestartPlan } = {},
 ): Promise<UpgradeExecutionResult[]> {
     const results: UpgradeExecutionResult[] = [];
     for (const target of targets) {
@@ -3408,22 +3386,53 @@ function escapeForSingleQuotedPowerShell(value: string): string {
     return value.replace(/'/g, "''");
 }
 
+function windowsDetachedExecutableCandidates(executable: string): string[] {
+    const normalized = executable.trim();
+    const lower = normalized.toLowerCase();
+    const names = lower.endsWith('.cmd') || lower.endsWith('.exe')
+        ? [normalized]
+        : [`${normalized}.cmd`, `${normalized}.exe`, normalized];
+    const candidates = new Set<string>();
+
+    const addDirVariants = (dirPath: string | null | undefined) => {
+        if (!dirPath) return;
+        for (const name of names) {
+            candidates.add(path.join(dirPath, name));
+        }
+    };
+
+    addDirVariants(process.env.APPDATA ? path.join(process.env.APPDATA, 'npm') : null);
+    addDirVariants(detectGlobalNpmRoot() ? path.dirname(detectGlobalNpmRoot() as string) : null);
+    addDirVariants(path.dirname(process.execPath));
+
+    return Array.from(candidates);
+}
+
 function resolveWindowsDetachedExecutable(executable: string): string {
-    // H-5: Validate executable name — reject empty strings or strings with shell metacharacters
     if (!executable || /[;&|<>\n\r`$(){}[\]\\/"']/.test(executable)) {
         throw new Error(`Invalid executable name: "${executable}"`);
     }
     if (path.isAbsolute(executable)) {
+        if (!fs.existsSync(executable)) {
+            throw new Error(`Detached executable does not exist: ${executable}`);
+        }
         return executable;
     }
-    const candidates = executable.toLowerCase().endsWith('.cmd') || executable.toLowerCase().endsWith('.exe')
+
+    for (const candidate of windowsDetachedExecutableCandidates(executable)) {
+        if (fs.existsSync(candidate)) {
+            return path.resolve(candidate);
+        }
+    }
+
+    const fallbackCandidates = executable.toLowerCase().endsWith('.cmd') || executable.toLowerCase().endsWith('.exe')
         ? [executable]
         : [`${executable}.cmd`, `${executable}.exe`, executable];
-    for (const candidate of candidates) {
+    for (const candidate of fallbackCandidates) {
         const probe = spawnSync('where', [candidate], { encoding: 'utf8' });
         if (probe.status === 0) {
             const resolved = (probe.stdout ?? '').split(/\r?\n/).map((line) => line.trim()).find(Boolean);
-            if (resolved) {
+            if (resolved && path.isAbsolute(resolved) && fs.existsSync(resolved)) {
                 if (!path.extname(resolved)) {
                     const cmdVariant = `${resolved}.cmd`;
                     const exeVariant = `${resolved}.exe`;
@@ -3434,7 +3443,8 @@ function resolveWindowsDetachedExecutable(executable: string): string {
             }
         }
     }
-    return executable;
+
+    throw new Error(`Unable to resolve detached executable '${executable}' on Windows.`);
 }
 
 function resolveDetachedUpgradeCwd(command: UpgradeCommand): string {
@@ -3470,32 +3480,33 @@ function launchDetachedWindowsPowerShellFile(scriptPath: string, cwd: string): v
     }
 }
 
-// C-5: postCommand must be a pre-escaped PowerShell snippet produced internally (never from raw user input).
-// Validate it against a strict allowlist pattern to prevent future injection if the call site changes.
-function validateDetachedPostCommand(postCommand: string): void {
-    // Allow only: alphanumeric, spaces, single-quotes, hyphens, underscores, dots, slashes,
-    // backslashes, colons, and & for PS call operator.
-    if (!/^[a-zA-Z0-9 '&_\-./:\\]+$/.test(postCommand)) {
-        throw new Error(`Unsafe characters in detached post-command. Only pre-escaped PowerShell call expressions are permitted.`);
-    }
+function buildDetachedRestartCommand(plan: DetachedRestartPlan): string {
+    const irantiExecutable = escapeForSingleQuotedPowerShell(resolveWindowsDetachedExecutable('iranti'));
+    const instanceName = escapeForSingleQuotedPowerShell(plan.instanceName);
+    const scope = escapeForSingleQuotedPowerShell(plan.scope);
+    const root = escapeForSingleQuotedPowerShell(plan.root);
+    return [
+        `$irantiExe = '${irantiExecutable}'`,
+        "if (!(Test-Path -LiteralPath $irantiExe)) { throw 'Unable to resolve detached iranti executable for restart.' }",
+        `& $irantiExe instance restart '${instanceName}' --scope '${scope}' --root '${root}'`,
+        'if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
+    ].join(';\r\n');
 }
 
-function scheduleDetachedWindowsGlobalNpmUpgrade(command: UpgradeCommand, postCommand?: string): void {
-    if (postCommand !== undefined) {
-        validateDetachedPostCommand(postCommand);
-    }
+function scheduleDetachedWindowsGlobalNpmUpgrade(command: UpgradeCommand, detachedRestart?: DetachedRestartPlan): void {
     const neutralCwd = resolveDetachedUpgradeCwd(command);
     const parentPid = process.pid;
     const escapedCwd = escapeForSingleQuotedPowerShell(neutralCwd);
     const detachedExecutable = resolveWindowsDetachedExecutable(command.executable);
     const escapedExecutable = escapeForSingleQuotedPowerShell(detachedExecutable);
     const escapedArgs = command.args.map((arg) => `'${escapeForSingleQuotedPowerShell(arg)}'`).join(', ');
+    const restartScript = detachedRestart ? buildDetachedRestartCommand(detachedRestart) : null;
     const script = [
         `$parentPid = ${parentPid}`,
         'while (Get-Process -Id $parentPid -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 500 }',
         `Set-Location -LiteralPath '${escapedCwd}'`,
         `& '${escapedExecutable}' @(${escapedArgs})`,
-        ...(postCommand ? [`if ($LASTEXITCODE -eq 0) { ${postCommand} }`] : []),
+        ...(restartScript ? [`if ($LASTEXITCODE -eq 0) { ${restartScript} }`] : []),
         'exit $LASTEXITCODE',
     ].join(';\r\n');
     const scriptPath = writeDetachedWindowsScript('iranti-upgrade', `${script};\r\n`);
@@ -3512,7 +3523,7 @@ function verifyPythonInstall(command: UpgradeCommand): { status: 'pass' | 'warn'
 async function executeUpgradeTarget(
     target: Exclude<UpgradeTarget, 'auto'>,
     context: ReturnType<typeof detectUpgradeContext>,
-    options: { detachedPostCommand?: string } = {},
+    options: { detachedRestart?: DetachedRestartPlan } = {},
 ): Promise<UpgradeExecutionResult> {
     if (target === 'npm-repo' && repoIsDirty(context.packageRootPath)) {
         throw new Error('Repository worktree is dirty. Commit or stash changes before running `iranti upgrade --target npm-repo --yes`.');
@@ -3523,7 +3534,7 @@ async function executeUpgradeTarget(
     if (target === 'npm-global' && canScheduleWindowsGlobalNpmSelfUpgrade(context)) {
         const command = commands[0]!;
         console.log(`${infoLabel()} ${command.display} (scheduled in a detached updater because the current Windows CLI cannot replace its own live global install)`);
-        scheduleDetachedWindowsGlobalNpmUpgrade(command, options.detachedPostCommand);
+        scheduleDetachedWindowsGlobalNpmUpgrade(command, options.detachedRestart);
         steps.push({ label: `${command.label} (detached)`, command: command.display });
         return {
             target,
@@ -5165,8 +5176,12 @@ async function upgradeCommand(args: ParsedArgs): Promise<void> {
         const version = instance.runtime.state?.version;
         return Boolean(version && version !== context.currentVersion);
     });
-    const detachedRestartCommand = hasFlag(args, 'restart') && getFlag(args, 'instance')
-        ? `& 'iranti' instance restart '${escapeForSingleQuotedPowerShell(getFlag(args, 'instance')!)}' --scope '${normalizeScope(getFlag(args, 'scope'))}' --root '${escapeForSingleQuotedPowerShell(resolveInstallRoot(args, normalizeScope(getFlag(args, 'scope'))))}'`
+    const detachedRestart = hasFlag(args, 'restart') && getFlag(args, 'instance')
+        ? {
+            instanceName: getFlag(args, 'instance')!,
+            scope: normalizeScope(getFlag(args, 'scope')),
+            root: resolveInstallRoot(args, normalizeScope(getFlag(args, 'scope'))),
+        }
         : undefined;
 
     let execution: UpgradeExecutionResult[] = [];
@@ -5181,7 +5196,7 @@ async function upgradeCommand(args: ParsedArgs): Promise<void> {
             note = 'Execution skipped because --dry-run or --check was provided.';
         } else {
             execution = await executeUpgradeTargets(selectedTargets, context, {
-                detachedPostCommand: detachedRestartCommand,
+                detachedRestart,
             });
             if (hasFlag(args, 'restart')) {
                 const instanceName = getFlag(args, 'instance');
@@ -5572,7 +5587,7 @@ async function restartInstanceCommand(args: ParsedArgs): Promise<void> {
     const { envFile } = await loadInstanceEnv(root, name);
     const restarted = await restartInstanceRuntime(args, name, scope, root);
 
-    console.log(sectionTitle('Instance Restart Scheduled'));
+    console.log(sectionTitle('Instance Restarted'));
     console.log(`  status    ${okLabel()}`);
     console.log(`  instance  ${name}`);
     console.log(`  env       ${envFile}`);
@@ -5581,6 +5596,7 @@ async function restartInstanceCommand(args: ParsedArgs): Promise<void> {
     }
     console.log(`  new_pid   ${restarted.newPid || '(unknown)'}`);
     console.log(`  runtime   ${restarted.runtimeBefore.running ? 'was running' : restarted.runtimeBefore.state ? 'was stale/stopped' : 'no prior runtime metadata'}`);
+    console.log(`  health    verified`);
     printNextSteps([
         `iranti status --scope ${scope}${root ? ` --root "${root}"` : ''}`,
         `iranti doctor --instance ${name}${root ? ` --root "${root}"` : ''}`,

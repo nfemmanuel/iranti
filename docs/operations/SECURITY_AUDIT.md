@@ -1,8 +1,21 @@
 # Security Pass: Comprehensive Audit
 
-## Status: ✅ CRITICAL ISSUES FIXED
+## Status: follow-up hardening in progress
 
-All P0 security vulnerabilities have been addressed. This document provides a complete security checklist for production deployment.
+This document tracks the operator/security posture after the March 2026 audit passes.
+
+### 2026-03-24 follow-up
+
+- Added CI secret scanning with Gitleaks.
+- Removed `npm ci --legacy-peer-deps` from the active GitHub workflows because the install now succeeds cleanly without it.
+- Tightened namespace scope evaluation so protected namespaces such as `system/*` are not reachable through bare global KB scopes.
+- Added DB-backed access-control coverage for the protected-namespace scope rule in CI.
+- Remaining out-of-scope issues from the audit for this pass:
+  - request-log disclosure/redaction in `src/api/server.ts`
+  - CLI/operator lifecycle issues in `scripts/iranti-cli.ts`
+  - escalation write-surfacing in `src/librarian/index.ts`
+
+This document remains a production checklist, not a claim that every audit item is fully resolved.
 
 ---
 

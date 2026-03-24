@@ -193,6 +193,8 @@ If local PostgreSQL is available and pgvector-capable, setup can bootstrap a loc
 
 Long-running agents can now checkpoint and recover interrupted work. Programmatic session lifecycle methods are available through the SDK and REST API:
 - `checkpoint()`
+- `inspectSession()`
+- `listSessions()`
 - `resumeSession()`
 - `completeSession()`
 - `abandonSession()`
@@ -622,7 +624,7 @@ if result["shouldInject"]:
 ```python
 # At session start, get personalized brief for agent's current task
 brief = client.handshake(
-    agent="research_agent_001",
+    agent_id="research_agent_001",
     task="Research publication history for Dr. Jane Smith",
     recent_messages=["Starting literature review..."]
 )

@@ -62,6 +62,13 @@ Response:
     "startedAt": "2026-03-21T07:12:34.000Z",
     "lastHeartbeatAt": "2026-03-21T07:13:04.000Z",
     "healthUrl": "http://localhost:3001/health"
+  },
+  "authority": {
+    "managed": true,
+    "source": "explicit",
+    "detail": "using explicit runtime authority",
+    "instanceDir": "C:\\Users\\NF\\.iranti\\instances\\local",
+    "runtimeFile": "C:\\Users\\NF\\.iranti\\instances\\local\\runtime.json"
   }
 }
 ```

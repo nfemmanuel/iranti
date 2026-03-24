@@ -5,7 +5,7 @@ import path from 'path';
 import { randomBytes } from 'crypto';
 import { ChildProcess, spawn, spawnSync } from 'child_process';
 import net from 'net';
-import { inspectRuntimeState, readInstanceRuntime } from '../../src/lib/runtimeLifecycle';
+import { inspectRuntimeState, readInstanceRuntime, resolveRuntimeAuthorityFromEnv } from '../../src/lib/runtimeLifecycle';
 import { parseDockerContainerNames, parsePublishedDockerHostPorts } from '../../src/lib/dockerCliParsing';
 import { loadRuntimeEnv } from '../../src/lib/runtimeEnv';
 
@@ -17,6 +17,7 @@ type CliRun = {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const cliScript = path.join(repoRoot, 'scripts', 'iranti-cli.ts');
+const serverScript = path.join(repoRoot, 'src', 'api', 'server.ts');
 
 function runCli(args: string[], cwd: string): CliRun {
     const proc = spawnSync(
@@ -47,6 +48,73 @@ function writeJson(filePath: string, value: unknown): void {
 function writeText(filePath: string, value: string): void {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, value, 'utf8');
+}
+
+async function closeServer(server: net.Server): Promise<void> {
+    await new Promise<void>((resolve) => {
+        server.close(() => resolve());
+    });
+}
+
+async function terminateChildProcess(child: ChildProcess): Promise<void> {
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => resolve(), 2_000);
+        child.once('exit', () => {
+            clearTimeout(timer);
+            resolve();
+        });
+        try {
+            child.kill();
+        } catch {
+            clearTimeout(timer);
+            resolve();
+        }
+    });
+}
+
+async function removeDirWithRetry(dirPath: string, attempts: number = 5): Promise<void> {
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        try {
+            fs.rmSync(dirPath, { recursive: true, force: true });
+            return;
+        } catch (error) {
+            const code = (error as NodeJS.ErrnoException).code;
+            if ((code !== 'EPERM' && code !== 'ENOTEMPTY') || attempt === attempts) {
+                throw error;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 200));
+        }
+    }
+}
+
+async function terminateManagedRuntimeProcesses(root: string): Promise<void> {
+    const instancesDir = path.join(root, 'instances');
+    if (!fs.existsSync(instancesDir)) return;
+    const entries = fs.readdirSync(instancesDir, { withFileTypes: true });
+    for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const runtimeFile = path.join(instancesDir, entry.name, 'runtime.json');
+        if (!fs.existsSync(runtimeFile)) continue;
+        try {
+            const raw = JSON.parse(fs.readFileSync(runtimeFile, 'utf8')) as { pid?: unknown };
+            const pid = typeof raw.pid === 'number' ? raw.pid : null;
+            if (!pid || pid === process.pid) continue;
+            try {
+                process.kill(pid, 0);
+            } catch {
+                continue;
+            }
+            try {
+                process.kill(pid);
+            } catch {
+                // ignore kill failures during test cleanup
+            }
+        } catch {
+            // ignore unreadable runtime metadata during cleanup
+        }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
 }
 
 async function listenOnRandomPort(): Promise<{ server: net.Server; port: number }> {
@@ -134,7 +202,7 @@ function withCleanEnv<T>(fn: () => T): T {
 async function main(): Promise<void> {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'iranti-runtime-lifecycle-'));
     const openServers: net.Server[] = [];
-    const cleanupCallbacks: Array<() => void> = [];
+    const cleanupCallbacks: Array<() => Promise<void> | void> = [];
     try {
         const instancesDir = path.join(root, 'instances');
         const instanceDir = path.join(instancesDir, 'local');
@@ -255,11 +323,7 @@ async function main(): Promise<void> {
         assert.strictEqual(upgradePayload.restartRequiredInstances.length, 0);
 
         const healthyRuntime = await startHealthServerProcess();
-        cleanupCallbacks.push(() => {
-            if (!healthyRuntime.child.killed) {
-                healthyRuntime.child.kill();
-            }
-        });
+        cleanupCallbacks.push(() => terminateChildProcess(healthyRuntime.child));
         const healthyDir = path.join(instancesDir, 'healthy');
         const healthyEnvFile = path.join(healthyDir, '.env');
         writeJson(path.join(healthyDir, 'instance.json'), {
@@ -516,6 +580,7 @@ async function main(): Promise<void> {
             const runtimeEnvResult = loadRuntimeEnv({ cwd: nestedProjectDir });
             assert.strictEqual(runtimeEnvResult.projectEnvFile, projectEnvFile);
             assert.strictEqual(runtimeEnvResult.instanceEnvFile, envFile);
+            assert.strictEqual(runtimeEnvResult.authorityMode, 'instance-authoritative');
             assert.ok(runtimeEnvResult.loadedFiles.includes(projectEnvFile));
             assert.ok(runtimeEnvResult.loadedFiles.includes(envFile));
             assert.strictEqual(process.env.IRANTI_URL, 'http://localhost:3050');
@@ -534,11 +599,59 @@ async function main(): Promise<void> {
             const runtimeEnvResult = loadRuntimeEnv({ cwd: nestedProjectDir });
             assert.strictEqual(runtimeEnvResult.projectEnvFile, projectEnvFile);
             assert.strictEqual(runtimeEnvResult.instanceEnvFile, envFile);
+            assert.strictEqual(runtimeEnvResult.authorityMode, 'instance-authoritative');
             assert.strictEqual(process.env.DATABASE_URL, 'postgresql://postgres:postgres@localhost:5432/iranti_local');
             assert.strictEqual(process.env.LLM_PROVIDER, 'mock');
             assert.strictEqual(process.env.IRANTI_URL, 'http://localhost:3050');
             assert.strictEqual(process.env.IRANTI_API_KEY, 'project_key');
         });
+
+        writeText(projectEnvFile, [
+            'IRANTI_URL=http://localhost:3050',
+            'IRANTI_API_KEY=project_key',
+            `IRANTI_INSTANCE_ENV=${envFile}`,
+            'DATABASE_URL=postgresql://postgres:postgres@localhost:5432/project_override_should_not_win',
+            'LLM_PROVIDER=openai',
+            '',
+        ].join('\n'));
+        withCleanEnv(() => {
+            const runtimeEnvResult = loadRuntimeEnv({ cwd: nestedProjectDir });
+            assert.strictEqual(runtimeEnvResult.authorityMode, 'instance-authoritative');
+            assert.strictEqual(process.env.DATABASE_URL, 'postgresql://postgres:postgres@localhost:5432/iranti_local');
+            assert.strictEqual(process.env.LLM_PROVIDER, 'mock');
+            assert.strictEqual(process.env.IRANTI_URL, 'http://localhost:3050');
+        });
+
+        const explicitAuthority = resolveRuntimeAuthorityFromEnv({
+            IRANTI_INSTANCE_DIR: instanceDir,
+            IRANTI_INSTANCE_RUNTIME_FILE: runtimeFile,
+        });
+        assert.strictEqual(explicitAuthority.managed, true);
+        assert.strictEqual(explicitAuthority.source, 'explicit');
+        assert.strictEqual(explicitAuthority.instanceDir, instanceDir);
+        assert.strictEqual(explicitAuthority.runtimeFile, runtimeFile);
+
+        const derivedAuthority = resolveRuntimeAuthorityFromEnv({
+            IRANTI_ESCALATION_DIR: path.join(instanceDir, 'escalation'),
+        });
+        assert.strictEqual(derivedAuthority.managed, true);
+        assert.strictEqual(derivedAuthority.source, 'derived');
+        assert.strictEqual(derivedAuthority.instanceDir, instanceDir);
+        assert.strictEqual(derivedAuthority.runtimeFile, runtimeFile);
+
+        const invalidAuthority = resolveRuntimeAuthorityFromEnv({
+            IRANTI_INSTANCE_DIR: instanceDir,
+            IRANTI_INSTANCE_RUNTIME_FILE: path.join(root, 'foreign', 'runtime.json'),
+        });
+        assert.strictEqual(invalidAuthority.managed, false);
+        assert.strictEqual(invalidAuthority.source, 'invalid');
+
+        const looseDerivedAuthority = resolveRuntimeAuthorityFromEnv({
+            IRANTI_ESCALATION_DIR: path.join(instanceDir, 'not-escalation'),
+            IRANTI_REQUEST_LOG_FILE: path.join(instanceDir, 'not-logs', 'api-requests.log'),
+        });
+        assert.strictEqual(looseDerivedAuthority.managed, false);
+        assert.strictEqual(looseDerivedAuthority.source, 'adhoc');
 
         const projectStatusRun = runCli(['status', '--json'], nestedProjectDir);
         assert.strictEqual(projectStatusRun.status, 0, `project status failed:\n${projectStatusRun.stdout}\n${projectStatusRun.stderr}`);
@@ -598,6 +711,30 @@ async function main(): Promise<void> {
         assert.ok(mismatchStatus.otherRuntimeRoots.includes(isolatedRoot), 'Expected status JSON to report the alternate bound runtime root.');
         assert.strictEqual(mismatchStatus.discovery.boundRuntimeRoot, isolatedRoot);
         assert.strictEqual(mismatchStatus.discovery.rootMismatch, true);
+
+        const prodMissingPepper = spawnSync(
+            process.execPath,
+            ['-r', 'ts-node/register/transpile-only', serverScript],
+            {
+                cwd: repoRoot,
+                encoding: 'utf8',
+                env: {
+                    ...process.env,
+                    DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/iranti_runtime_guard',
+                    NODE_ENV: 'production',
+                    IRANTI_PORT: '3007',
+                    NO_COLOR: '1',
+                    IRANTI_API_KEY_PEPPER: '',
+                    IRANTI_ALLOW_INSECURE_STARTUP: '',
+                },
+            }
+        );
+        assert.notStrictEqual(prodMissingPepper.status, 0, 'server unexpectedly started in production without IRANTI_API_KEY_PEPPER');
+        assert.match(
+            `${prodMissingPepper.stdout}\n${prodMissingPepper.stderr}`,
+            /IRANTI_API_KEY_PEPPER.*Refusing to start in production/i,
+            'server should fail fast in production when API key pepper is missing'
+        );
 
         const publishedPorts = parsePublishedDockerHostPorts([
             '0.0.0.0:5435->5432/tcp, [::]:5435->5432/tcp',
@@ -702,23 +839,68 @@ async function main(): Promise<void> {
             'run should fail cleanly before app.listen when the configured port is occupied'
         );
 
+        const restartFailureRuntime = await startHealthServerProcess();
+        cleanupCallbacks.push(() => terminateChildProcess(restartFailureRuntime.child));
+        const restartFailureDir = path.join(instancesDir, 'restart-failure');
+        const restartFailureEnvFile = path.join(restartFailureDir, '.env');
+        const restartFailureRuntimeFile = path.join(restartFailureDir, 'runtime.json');
+        writeJson(path.join(restartFailureDir, 'instance.json'), {
+            name: 'restart-failure',
+            createdAt: now,
+            port: restartFailureRuntime.port,
+            envFile: restartFailureEnvFile,
+            instanceDir: restartFailureDir,
+        });
+        writeText(restartFailureEnvFile, [
+            'IRANTI_INSTANCE_NAME=restart-failure',
+            `IRANTI_PORT=${restartFailureRuntime.port}`,
+            'LLM_PROVIDER=mock',
+            `IRANTI_ESCALATION_DIR=${path.join(restartFailureDir, 'escalation')}`,
+            `IRANTI_REQUEST_LOG_FILE=${path.join(restartFailureDir, 'logs', 'api-requests.log')}`,
+            `IRANTI_API_KEY=test_${randomBytes(16).toString('hex')}`,
+            '',
+        ].join('\n'));
+        writeJson(restartFailureRuntimeFile, {
+            instanceName: 'restart-failure',
+            instanceDir: restartFailureDir,
+            envFile: restartFailureEnvFile,
+            runtimeFile: restartFailureRuntimeFile,
+            version: '0.2.15',
+            pid: restartFailureRuntime.child.pid,
+            ppid: process.pid,
+            port: restartFailureRuntime.port,
+            startedAt: now,
+            lastHeartbeatAt: now,
+            updatedAt: now,
+            status: 'running',
+            healthUrl: `http://127.0.0.1:${restartFailureRuntime.port}/health`,
+        });
+        const restartFailureRun = runCli(['instance', 'restart', 'restart-failure', '--root', root], root);
+        assert.notStrictEqual(restartFailureRun.status, 0, 'restart unexpectedly reported success when the replacement runtime could not start');
+        assert.match(
+            `${restartFailureRun.stdout}\n${restartFailureRun.stderr}`,
+            /did not become healthy|DATABASE_URL is required/i,
+            'restart should surface replacement-startup failure instead of pretending it succeeded'
+        );
+
         console.log('runtime lifecycle CLI smoke passed');
     } finally {
         for (const server of openServers) {
             try {
-                server.close();
+                await closeServer(server);
             } catch {
                 // ignore test cleanup failures
             }
         }
         for (const cleanup of cleanupCallbacks) {
             try {
-                cleanup();
+                await cleanup();
             } catch {
                 // ignore test cleanup failures
             }
         }
-        fs.rmSync(root, { recursive: true, force: true });
+        await terminateManagedRuntimeProcesses(root);
+        await removeDirWithRetry(root);
     }
 }
 

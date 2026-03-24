@@ -66,7 +66,7 @@ export const rateLimiter = new RateLimiter(
 );
 
 function getRequestIdentity(req: Request): string {
-  const auth = (req as any).irantiAuth;
+  const auth = req.irantiAuth;
   if (auth?.keyId) {
     return `key:${String(auth.keyId).toLowerCase()}`;
   }

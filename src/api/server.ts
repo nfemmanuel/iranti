@@ -23,8 +23,7 @@ import { getVectorBackendSingleton } from '../library/queries';
 import {
     InstanceRuntimeState,
     markRuntimeStopped,
-    resolveInstanceDirFromRuntimeEnv,
-    runtimeFileForInstance,
+    resolveRuntimeAuthorityFromEnv,
     writeRuntimeState,
 } from '../lib/runtimeLifecycle';
 
@@ -41,17 +40,40 @@ const ROUTES = {
 const REQUEST_LOG_FILE =
     process.env.IRANTI_REQUEST_LOG_FILE?.trim() ||
     path.join(process.cwd(), 'logs', 'api-requests.log');
-const INSTANCE_DIR = process.env.IRANTI_INSTANCE_DIR?.trim()
-    || resolveInstanceDirFromRuntimeEnv(process.env)
-    || null;
-const INSTANCE_RUNTIME_FILE = process.env.IRANTI_INSTANCE_RUNTIME_FILE?.trim()
-    || (INSTANCE_DIR ? runtimeFileForInstance(INSTANCE_DIR) : null);
+const RUNTIME_AUTHORITY = resolveRuntimeAuthorityFromEnv(process.env);
+const INSTANCE_DIR = RUNTIME_AUTHORITY.instanceDir;
+const INSTANCE_RUNTIME_FILE = RUNTIME_AUTHORITY.runtimeFile;
 const INSTANCE_NAME = process.env.IRANTI_INSTANCE_NAME?.trim() || (INSTANCE_DIR ? path.basename(INSTANCE_DIR) : 'adhoc');
 const VERSION = '0.2.25';
 
-// M-18: Warn at startup if API key pepper is not set (important for production security)
-if (!process.env.IRANTI_API_KEY_PEPPER) {
-    console.warn('[security] WARNING: IRANTI_API_KEY_PEPPER is not set. API key hashes have no pepper — set this env var in production.');
+function assertStartupSecurity(): void {
+    const pepper = process.env.IRANTI_API_KEY_PEPPER?.trim() ?? '';
+    const allowInsecure = process.env.IRANTI_ALLOW_INSECURE_STARTUP === 'true';
+    const productionLike = (process.env.NODE_ENV ?? '').trim().toLowerCase() === 'production';
+
+    if (!pepper) {
+        const message = 'IRANTI_API_KEY_PEPPER is not set. API key hashes have no pepper.';
+        if (productionLike && !allowInsecure) {
+            throw new Error(`${message} Refusing to start in production.`);
+        }
+        console.warn(`[security] WARNING: ${message} Set this env var in production.`);
+        return;
+    }
+
+    if (pepper.length < 32) {
+        const message = `IRANTI_API_KEY_PEPPER is too short (${pepper.length}). Expected at least 32 characters.`;
+        if (productionLike && !allowInsecure) {
+            throw new Error(`${message} Refusing to start in production.`);
+        }
+        console.warn(`[security] WARNING: ${message}`);
+    }
+}
+assertStartupSecurity();
+
+if (RUNTIME_AUTHORITY.source === 'invalid') {
+    console.error(`[runtime] managed runtime authority is invalid: ${RUNTIME_AUTHORITY.detail}`);
+} else if (!RUNTIME_AUTHORITY.managed) {
+    console.warn(`[runtime] ${RUNTIME_AUTHORITY.detail}`);
 }
 
 try {
@@ -140,6 +162,13 @@ app.get(ROUTES.health, (_req, res) => {
         version: VERSION,
         provider: process.env.LLM_PROVIDER ?? 'mock',
         runtime: runtimeHealthPayload(),
+        authority: {
+            managed: RUNTIME_AUTHORITY.managed,
+            source: RUNTIME_AUTHORITY.source,
+            detail: RUNTIME_AUTHORITY.detail,
+            instanceDir: INSTANCE_DIR,
+            runtimeFile: INSTANCE_RUNTIME_FILE,
+        },
     });
 });
 
@@ -225,7 +254,7 @@ const server = app.listen(PORT, () => {
     console.log(`Provider: ${process.env.LLM_PROVIDER ?? 'mock'}\n`);
     console.log(`Escalation root: ${getEscalationPaths().root}`);
     console.log(`Request log file: ${REQUEST_LOG_FILE}\n`);
-    if (INSTANCE_RUNTIME_FILE) {
+    if (RUNTIME_AUTHORITY.managed && INSTANCE_RUNTIME_FILE) {
         void persistRuntimeState('running').then(() => {
             if (runtimeHeartbeat) clearInterval(runtimeHeartbeat);
             runtimeHeartbeat = setInterval(() => {
@@ -260,7 +289,7 @@ async function shutdownRuntime(signal: string): Promise<void> {
         clearInterval(vectorHealthInterval);
         vectorHealthInterval = null;
     }
-    if (INSTANCE_RUNTIME_FILE) {
+    if (RUNTIME_AUTHORITY.managed && INSTANCE_RUNTIME_FILE) {
         try {
             await persistRuntimeState('stopping', signal);
             await markRuntimeStopped(INSTANCE_RUNTIME_FILE, signal);

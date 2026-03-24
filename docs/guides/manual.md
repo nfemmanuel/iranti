@@ -156,6 +156,8 @@ Use this when an agent is in the middle of a multi-step task and you do not want
 
 Available programmatic operations:
 - `checkpoint()`
+- `inspectSession()`
+- `listSessions()`
 - `resumeSession()`
 - `completeSession()`
 - `abandonSession()`
@@ -165,6 +167,17 @@ On the next handshake or checkpoint cycle, the Attendant can surface interrupted
 - whether the current task matches the interrupted task
 - a recommendation to resume, review, or ignore
 - the last saved checkpoint payload
+
+Operator inspection surfaces:
+- `GET /memory/session/:agentId` returns one agent's persisted checkpoint plus a derived summary
+- `GET /memory/sessions` returns operator-oriented checkpoint inventory across agents, with filters such as `agentId`, `operatorState`, and `staleOnly`
+
+Important distinction:
+- `sessionCheckpoint.status` is the raw persisted checkpoint status
+- `summary.operatorState` is the operator-facing classification
+
+That means a stale persisted checkpoint can still have `status = active` while the operator summary reports `operatorState = interrupted`.
+If you want `inspectSession()` to also derive a recovery recommendation for a candidate return task, pass the same task context you would give a real handshake.
 
 This preserves task continuity better, but it is not a workflow engine. Only what has been checkpointed or written through the Librarian is durable.
 
@@ -525,6 +538,7 @@ If upgrade behaves strangely on Windows:
 | Open local operator chat | `iranti chat` |
 | Resolve conflicts | `iranti resolve` |
 | Inspect Attendant state | `iranti handshake`, `iranti attend` |
+| Inspect persisted session state | `GET /memory/session/:agentId`, `GET /memory/sessions` |
 | Upgrade CLI/runtime | `iranti upgrade` |
 
 ---

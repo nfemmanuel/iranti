@@ -201,7 +201,7 @@ Before an agent starts a task, call `handshake()` to get a working memory brief:
 
 ```python
 brief = client.handshake(
-    agent="my_agent",
+    agent_id="my_agent",
     task="Research publication history for Dr. Jane Smith",
     recent_messages=["Starting literature review..."]
 )
@@ -451,7 +451,7 @@ researcher = Agent(
 
 # Before task execution, get working memory
 brief = iranti.handshake(
-    agent="researcher_agent",
+    agent_id="researcher_agent",
     task="Research Dr. Jane Smith's publication history",
     recent_messages=["Starting research task..."]
 )
@@ -529,7 +529,7 @@ agent = initialize_agent(tools, llm, agent="zero-shot-react-description", verbos
 
 # Get working memory before execution
 brief = iranti.handshake(
-    agent="langchain_agent",
+    agent_id="langchain_agent",
     task="Research and store academic profiles",
     recent_messages=["Starting LangChain agent..."]
 )
@@ -571,7 +571,7 @@ assistant = autogen.AssistantAgent(
 
 # Get working memory
 brief = iranti.handshake(
-    agent="autogen_assistant",
+    agent_id="autogen_assistant",
     task="Research academic profiles",
     recent_messages=["Starting AutoGen conversation..."]
 )
@@ -660,7 +660,7 @@ def main():
 
     # Get working memory
     brief = client.handshake(
-        agent="demo_agent",
+        agent_id="demo_agent",
         task="Research academic profiles",
         recent_messages=["Starting demo..."]
     )
