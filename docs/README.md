@@ -6,7 +6,7 @@
 - `docs/features/*/spec.md` defines feature behavior, edge cases, and validation expectations.
 - `docs/decisions/` records architectural decisions and their consequences.
 - `docs/operations/` covers deployment, troubleshooting, and operational posture.
-- `docs/internal/` is supporting material only. It can contain useful validation notes and historical context, but it is not the canonical product contract unless a guide/spec/decision explicitly points to it.
+- `docs/internal/` is supporting material only. Start with [`docs/internal/README.md`](internal/README.md) when you need internal notes; do not treat internal summaries as canonical product truth unless a guide/spec/decision explicitly points to them.
 
 ## Getting Started
 
@@ -40,14 +40,34 @@
 
 ## Internal
 
-- [Compatibility Backlog](internal/compatibility_backlog.md) - Compatibility gates, migration coverage, and release follow-ups
-- [Fixes Applied](internal/FIXES_APPLIED.md) - P0/P1 infrastructure fixes
-- [Implementation Summary](internal/IMPLEMENTATION_SUMMARY.md) - Architecture overview
+- [Internal Notes Index](internal/README.md) - Trust levels, categories, and where to look first inside `docs/internal/`
 - [Testing Guide](internal/TESTING.md) - Running tests
-- [Performance Analysis](internal/PERFORMANCE.md) - Benchmarks and optimization
-- [Validation Results](internal/validation_results.md) - Goal validation experiments
-- [Multi-Framework Validation](internal/MULTI_FRAMEWORK_VALIDATION.md) - CrewAI, LangChain, etc.
-- [Goal Validation Summary](internal/GOAL_VALIDATION_SUMMARY.md)
+- [Compatibility Backlog](internal/compatibility_backlog.md) - Compatibility gates, migration coverage, and release follow-ups
+- [Consistency Model](internal/consistency_model.md) - Internal consistency semantics and validation context
+- [Decay Design Note](internal/decay.md) - Memory-decay design note
+
+### Historical And Supporting Artifacts
+
+- [Implementation Summary](internal/IMPLEMENTATION_SUMMARY.md) - Historical implementation summary, not canonical product contract
+- [Fixes Applied](internal/FIXES_APPLIED.md) - Historical fixes ledger
+- [Validation Results](internal/validation_results.md) - Validation log and historical experiment record
+- [Multi-Framework Validation](internal/MULTI_FRAMEWORK_VALIDATION.md) - Framework-specific validation notes
+- [Goal Validation Summary](internal/GOAL_VALIDATION_SUMMARY.md) - Early validation summary
+- [Performance Analysis](internal/PERFORMANCE.md) - Performance notes and historical guidance
+
+## Historical Root Artifacts
+
+These files remain useful history, but they are not the canonical product contract:
+
+- `docs/AUDIT_2026_03_23.md`
+- `docs/FIXES_SUMMARY.md`
+- `docs/PRODUCTION_HARDENING.md`
+- `docs/CONCURRENCY_SAFETY.md`
+- `docs/POLICY_RESOLUTION.md`
+- `docs/issue_*_fix_verification.md`
+- `docs/BACKLOG.local.md`
+
+When these disagree with guides/specs/decisions/operations docs, prefer the canonical sources above.
 
 ## Architecture
 

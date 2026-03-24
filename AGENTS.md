@@ -244,6 +244,7 @@ iranti/
 â”‚   â”‚   â”œâ”€â”€ router.ts           â€” route() by TaskType, model profiles
 â”‚   â”‚   â”œâ”€â”€ runtimeEnv.ts       â€” Runtime env resolution for CLI/MCP/hook integrations
 â”‚   â”‚   â”œâ”€â”€ runtimeLifecycle.ts â€” Runtime metadata read/write, pid probes, restart helpers
+â”‚   â”‚   â”œâ”€â”€ cliHelpCatalog.ts   â€” Extracted command/help catalog text for CLI guidance surfaces
 â”‚   â”‚   â”œâ”€â”€ escalationPaths.ts  â€” Escalation runtime path resolution + folder bootstrap
 â”‚   â”‚   â””â”€â”€ providers/
 â”‚   â”‚       â”œâ”€â”€ mock.ts         â€” Local dev provider
@@ -552,7 +553,7 @@ Entity format: `"entityType/entityId"` e.g. `"researcher/jane_smith"`
   covering inputs, outputs, decision tree, edge cases, and test results.
 - **docs/engineering/** â€” Internal standards for contributors.
   `CODE_STANDARDS.md`, `COMMENTING_GUIDELINES.md`.
-- **docs/internal/** â€” Internal design notes, validation artifacts, and release/backward-compatibility backlogs.
+- **docs/internal/** â€” Internal design notes, validation artifacts, and release/backward-compatibility backlogs. `docs/internal/README.md` is the index for trust levels and categories inside this folder. Internal docs are supporting material, not canonical product contract, unless a guide/spec/decision explicitly points to them.
 - **README.md** â€” Public-facing overview. Updated only when public API or
   onboarding flow changes.
 - **AGENTS.md** â€” System context for AI agents and contributors. Updated
@@ -573,6 +574,7 @@ Entity format: `"entityType/entityId"` e.g. `"researcher/jane_smith"`
 | Breaking API change | Update README.md, `docs/guides/quickstart.md`, `clients/python/iranti.py` docstrings, bump version in `package.json` |
 | Compatibility or deprecation policy change | Update `docs/decisions/007-compatibility-policy.md`, `docs/features/compatibility-contracts/spec.md`, and `docs/internal/compatibility_backlog.md` |
 | New benchmark suite | Update AGENTS.md file structure and add methodology under `docs/internal/` |
+| New internal summary/backlog/audit artifact | Update `docs/internal/README.md` and, if discovery expectations changed, `docs/README.md` |
 
 ### ADR Format
 

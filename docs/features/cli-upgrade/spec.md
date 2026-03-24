@@ -72,6 +72,10 @@
 - `npx ts-node scripts/iranti-cli.ts upgrade --check --json`
 - `npx ts-node scripts/iranti-cli.ts upgrade --target npm-repo --dry-run`
 - `npx ts-node scripts/iranti-cli.ts upgrade --all --dry-run`
+- `npx ts-node tests/runtime-lifecycle/run_setup_upgrade_tests.ts`
+  - `upgrade --yes --target npm-global,python --json` executed against fake tool shims
+  - npm-global and python verification both returned `pass`
+  - runtime install metadata recorded `upgradedAt`
 - `npx tsc --noEmit`
 - `node -r ts-node/register/transpile-only tests/runtime-lifecycle/run_runtime_lifecycle_tests.ts`
 

@@ -19,7 +19,7 @@ import { buildEmbeddingText, cosineSimilarity, generateEmbedding } from './embed
 import { getScore, getReliabilityScores } from '../librarian/source-reliability';
 import { getDecayConfig, initialStabilityFromReliability, readOriginalConfidence } from '../lib/decay';
 import { createVectorBackend } from './backends';
-import { VectorBackend } from './vectorBackend';
+import { VectorBackend, VectorConsistencyFilter } from './vectorBackend';
 
 type DbClient = PrismaClient | Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
 
@@ -39,6 +39,22 @@ type HybridSearchRow = {
 };
 
 export type ArchiveHistoryEntry = Archive;
+
+export type VectorIndexConsistencyReport = {
+    backend: string;
+    reachable: boolean;
+    repairable: boolean;
+    consistent: boolean;
+    expectedCount: number;
+    indexedCount: number;
+    missingEntryIds: string[];
+    orphanedVectorIds: string[];
+};
+
+export type VectorIndexRepairReport = VectorIndexConsistencyReport & {
+    repairedMissingCount: number;
+    removedOrphanedCount: number;
+};
 
 type SupersededByPointer = {
     entityType: string;
@@ -647,6 +663,133 @@ export async function deleteEntryById(entryId: number, db?: DbClient): Promise<v
     await client.knowledgeEntry.delete({
         where: { id: entryId },
     });
+}
+
+function normalizeVectorConsistencyFilter(filter?: VectorConsistencyFilter): VectorConsistencyFilter | undefined {
+    if (!filter) return undefined;
+    const normalized: VectorConsistencyFilter = {};
+    if (typeof filter.entityType === 'string' && filter.entityType.trim().length > 0) {
+        normalized.entityType = filter.entityType.trim();
+    }
+    if (typeof filter.entityId === 'string' && filter.entityId.trim().length > 0) {
+        normalized.entityId = filter.entityId.trim();
+    }
+    return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
+async function listExpectedVectorEntryIds(filter?: VectorConsistencyFilter, db?: DbClient): Promise<string[]> {
+    const client = db ?? getDb();
+    const entries = await client.knowledgeEntry.findMany({
+        where: {
+            isProtected: false,
+            ...(filter?.entityType ? { entityType: filter.entityType } : {}),
+            ...(filter?.entityId ? { entityId: filter.entityId } : {}),
+        },
+        select: { id: true },
+        orderBy: { id: 'asc' },
+    });
+    return entries.map((entry) => String(entry.id));
+}
+
+async function loadEntriesForVectorRepair(entryIds: string[], db?: DbClient): Promise<Array<Pick<KnowledgeEntry, 'id' | 'entityType' | 'entityId' | 'key' | 'valueSummary' | 'valueRaw' | 'source'>>> {
+    const client = db ?? getDb();
+    const ids = Array.from(new Set(entryIds
+        .map((value) => Number.parseInt(value, 10))
+        .filter((value) => Number.isInteger(value) && value > 0)));
+    if (ids.length === 0) {
+        return [];
+    }
+
+    return client.knowledgeEntry.findMany({
+        where: { id: { in: ids } },
+        select: {
+            id: true,
+            entityType: true,
+            entityId: true,
+            key: true,
+            valueSummary: true,
+            valueRaw: true,
+            source: true,
+        },
+        orderBy: { id: 'asc' },
+    });
+}
+
+export async function auditVectorIndexConsistency(filter?: VectorConsistencyFilter, db?: DbClient): Promise<VectorIndexConsistencyReport> {
+    const normalizedFilter = normalizeVectorConsistencyFilter(filter);
+    const backend = getVectorBackendSingleton();
+    const backendName = process.env.IRANTI_VECTOR_BACKEND?.trim().toLowerCase() || 'pgvector';
+    const reachable = await backend.ping();
+    const expectedIds = await listExpectedVectorEntryIds(normalizedFilter, db);
+
+    if (!reachable) {
+        return {
+            backend: backendName,
+            reachable: false,
+            repairable: false,
+            consistent: false,
+            expectedCount: expectedIds.length,
+            indexedCount: 0,
+            missingEntryIds: expectedIds,
+            orphanedVectorIds: [],
+        };
+    }
+
+    const indexedIds = await backend.listIndexedIds(normalizedFilter);
+    const expectedSet = new Set(expectedIds);
+    const indexedSet = new Set(indexedIds);
+
+    const missingEntryIds = expectedIds.filter((id) => !indexedSet.has(id));
+    const orphanedVectorIds = indexedIds.filter((id) => !expectedSet.has(id));
+
+    return {
+        backend: backendName,
+        reachable: true,
+        repairable: true,
+        consistent: missingEntryIds.length === 0 && orphanedVectorIds.length === 0,
+        expectedCount: expectedIds.length,
+        indexedCount: indexedIds.length,
+        missingEntryIds,
+        orphanedVectorIds,
+    };
+}
+
+export async function repairVectorIndexConsistency(
+    filter?: VectorConsistencyFilter,
+    options: { repopulateMissing?: boolean; removeOrphaned?: boolean } = {},
+    db?: DbClient
+): Promise<VectorIndexRepairReport> {
+    const backend = getVectorBackendSingleton();
+    const repopulateMissing = options.repopulateMissing !== false;
+    const removeOrphaned = options.removeOrphaned !== false;
+    const baseline = await auditVectorIndexConsistency(filter, db);
+
+    let repairedMissingCount = 0;
+    let removedOrphanedCount = 0;
+
+    if (baseline.reachable) {
+        if (repopulateMissing && baseline.missingEntryIds.length > 0) {
+            const entries = await loadEntriesForVectorRepair(baseline.missingEntryIds, db);
+            for (const entry of entries) {
+                await saveEmbedding(entry, db);
+                repairedMissingCount += 1;
+            }
+        }
+
+        if (removeOrphaned && baseline.orphanedVectorIds.length > 0) {
+            for (const orphanedId of baseline.orphanedVectorIds) {
+                await backend.delete(orphanedId, db);
+                removedOrphanedCount += 1;
+            }
+        }
+    }
+
+    const after = await auditVectorIndexConsistency(filter, db);
+    return {
+        ...after,
+        repairedMissingCount,
+        removedOrphanedCount,
+    };
 }
 
 function supportsInteractiveTransactions(client: DbClient): client is PrismaClient {

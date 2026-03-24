@@ -1,7 +1,8 @@
 import 'dotenv/config';
 import { bootstrapHarness } from '../../scripts/harness';
 import { createVectorBackend } from '../../src/library/backends';
-import { __setVectorBackendSingletonForTests, createEntry, deleteEntryById } from '../../src/library/queries';
+import { getDb } from '../../src/library/client';
+import { __setVectorBackendSingletonForTests, auditVectorIndexConsistency, createEntry, deleteEntryById, repairVectorIndexConsistency } from '../../src/library/queries';
 import { searchEntriesHybrid } from '../../src/library/queries';
 import { generateEmbedding } from '../../src/library/embeddings';
 
@@ -93,6 +94,46 @@ async function testPgvectorBackend(): Promise<void> {
     }
 }
 
+async function testPgvectorConsistencyRepair(): Promise<void> {
+    process.env.LLM_PROVIDER = 'mock';
+    bootstrapHarness({ requireDb: true, forceLocalEscalationDir: true });
+
+    const entityId = uniqueId('vector_repair');
+    const entry = await createEntry({
+        entityType: 'project',
+        entityId,
+        key: 'summary',
+        valueRaw: { text: 'signal-rich telemetry workspace' },
+        valueSummary: 'Signal-rich telemetry workspace',
+        confidence: 90,
+        source: 'vector_repair_test',
+        createdBy: 'vector_test_runner',
+    });
+
+    try {
+        const backend = createVectorBackend({ vectorBackend: 'pgvector' });
+        if (!(await backend.ping())) {
+            throw new Error('SKIP: validation database does not expose pgvector support.');
+        }
+
+        await getDb().$executeRawUnsafe(`UPDATE "knowledge_base" SET "embedding" = NULL WHERE "id" = ${entry.id}`);
+
+        const auditBefore = await auditVectorIndexConsistency({ entityType: 'project', entityId });
+        expect(
+            auditBefore.missingEntryIds.includes(String(entry.id)),
+            `Expected audit to report missing embedding for ${entry.id}, got ${JSON.stringify(auditBefore.missingEntryIds)}.`
+        );
+
+        const repair = await repairVectorIndexConsistency({ entityType: 'project', entityId });
+        expect(repair.repairedMissingCount === 1, `Expected one repaired embedding, got ${repair.repairedMissingCount}.`);
+
+        const auditAfter = await auditVectorIndexConsistency({ entityType: 'project', entityId });
+        expect(auditAfter.consistent, `Expected pgvector consistency after repair, got ${JSON.stringify(auditAfter)}.`);
+    } finally {
+        await deleteEntryById(entry.id);
+    }
+}
+
 async function testFactorySelection(): Promise<void> {
     expect(createVectorBackend({ vectorBackend: 'pgvector' }).constructor.name === 'PgvectorBackend', 'Expected pgvector backend.');
     expect(
@@ -150,6 +191,17 @@ async function testQdrantBackend(): Promise<void> {
         if (url.endsWith('/collections') && init?.method === 'GET') {
             return new Response(JSON.stringify({ result: { collections: [] } }), { status: 200 });
         }
+        if (url.endsWith('/collections/iranti_facts/points/scroll') && init?.method === 'POST') {
+            return new Response(JSON.stringify({
+                result: {
+                    points: [
+                        { id: '17', payload: { id: 17 } },
+                        { id: '18', payload: { id: 18 } },
+                    ],
+                    next_page_offset: null,
+                },
+            }), { status: 200 });
+        }
         if (url.endsWith('/collections/iranti_facts/points/delete') && init?.method === 'POST') {
             return new Response(JSON.stringify({ status: 'ok' }), { status: 200 });
         }
@@ -167,11 +219,14 @@ async function testQdrantBackend(): Promise<void> {
             metadata: { id: 17, entityType: 'project', entityId: 'aurora', key: 'summary' },
         });
         const results = await backend.search([0.1, 0.2], 3, { entityType: 'project' });
+        const indexedIds = await backend.listIndexedIds({ entityType: 'project' });
         await backend.delete('17');
 
         expect(results.length === 1, 'Expected one Qdrant result.');
         expect(results[0].metadata.id === 17, 'Expected Qdrant metadata id mapping.');
+        expect(JSON.stringify(indexedIds) === JSON.stringify(['17', '18']), `Expected Qdrant scroll ids, got ${JSON.stringify(indexedIds)}.`);
         expect(seen.some((call) => call.url.endsWith('/collections/iranti_facts/points/query')), 'Expected Qdrant query endpoint call.');
+        expect(seen.some((call) => call.url.endsWith('/collections/iranti_facts/points/scroll')), 'Expected Qdrant scroll endpoint call.');
     });
 }
 
@@ -197,6 +252,12 @@ async function testChromaBackend(): Promise<void> {
                 distances: [[0.08]],
             }), { status: 200 });
         }
+        if (url.endsWith('/collection-1/get') && init?.method === 'POST') {
+            return new Response(JSON.stringify({
+                ids: ['22', '23'],
+                metadatas: [[{ id: 22 }, { id: 23 }]],
+            }), { status: 200 });
+        }
         if (url.endsWith('/collection-1/delete') && init?.method === 'POST') {
             return new Response(JSON.stringify({ ok: true }), { status: 200 });
         }
@@ -214,11 +275,14 @@ async function testChromaBackend(): Promise<void> {
             metadata: { id: 22, entityType: 'project', entityId: 'beacon', key: 'summary' },
         });
         const results = await backend.search([0.4, 0.6], 2, { entityType: 'project' });
+        const indexedIds = await backend.listIndexedIds({ entityType: 'project' });
         await backend.delete('22');
 
         expect(results.length === 1, 'Expected one Chroma result.');
         expect(results[0].metadata.id === 22, 'Expected Chroma metadata id mapping.');
+        expect(JSON.stringify(indexedIds) === JSON.stringify(['22', '23']), `Expected Chroma get ids, got ${JSON.stringify(indexedIds)}.`);
         expect(seen.some((call) => call.url.endsWith('/collection-1/query')), 'Expected Chroma query endpoint call.');
+        expect(seen.some((call) => call.url.endsWith('/collection-1/get')), 'Expected Chroma get endpoint call.');
     });
 }
 
@@ -259,6 +323,7 @@ async function testHybridSearchCandidateMerge(): Promise<void> {
     backends.createVectorBackend = () => ({
         upsert: async () => undefined,
         delete: async () => undefined,
+        listIndexedIds: async () => [],
         search: async () => [{
             entityType: 'project',
             entityId: 'vector_merge_case',
@@ -294,6 +359,7 @@ async function testEmbeddingNormalizationAvoidsPrototypeTrap(): Promise<void> {
 async function main(): Promise<void> {
     const results = [
         await runCase('pgvector backend returns stored fact from vector search', testPgvectorBackend),
+        await runCase('pgvector audit/repair restores missing embeddings', testPgvectorConsistencyRepair),
         await runCase('backend factory selects and validates backends', testFactorySelection),
         await runCase('qdrant backend maps REST responses correctly', testQdrantBackend),
         await runCase('chroma backend maps REST responses correctly', testChromaBackend),

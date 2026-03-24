@@ -1,4 +1,4 @@
-import { VectorBackend, VectorMutationDbClient, VectorSearchResult, VectorUpsertParams } from '../vectorBackend';
+import { VectorBackend, VectorConsistencyFilter, VectorMutationDbClient, VectorSearchResult, VectorUpsertParams } from '../vectorBackend';
 
 type ChromaConfig = {
     url: string;
@@ -110,6 +110,34 @@ export class ChromaBackend implements VectorBackend {
             score: 1 - Number(distances[index] ?? 1),
             metadata,
         }));
+    }
+
+    async listIndexedIds(filter?: VectorConsistencyFilter, pageSize: number = 256): Promise<string[]> {
+        const collectionId = await this.ensureCollection();
+        const ids: string[] = [];
+        let offset = 0;
+
+        while (true) {
+            const payload = await this.request<any>('POST', `${this.recordsRoute(collectionId)}/get`, {
+                where: filter ?? undefined,
+                limit: Math.max(1, pageSize),
+                offset,
+                include: ['metadatas'],
+            });
+
+            const batch = Array.isArray(payload?.ids)
+                ? payload.ids.map((id: unknown) => String(id))
+                : [];
+
+            ids.push(...batch);
+
+            if (batch.length < Math.max(1, pageSize)) {
+                break;
+            }
+            offset += batch.length;
+        }
+
+        return ids;
     }
 
     async ping(): Promise<boolean> {

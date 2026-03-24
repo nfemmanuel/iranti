@@ -1,9 +1,11 @@
 import {
     __setVectorBackendSingletonForTests,
+    auditVectorIndexConsistency,
     archiveEntry,
     deleteEntryById,
     findArchiveHistory,
     findPendingEscalation,
+    repairVectorIndexConsistency,
 } from '../../src/library/queries';
 import { ArchivedReason } from '../../src/generated/prisma/client';
 import { VectorBackend } from '../../src/library/vectorBackend';
@@ -39,6 +41,7 @@ function failingVectorBackend(message: string): VectorBackend {
         delete: async () => {
             throw new Error(message);
         },
+        listIndexedIds: async () => [],
         search: async () => [],
         ping: async () => true,
     };
@@ -188,6 +191,58 @@ async function main(): Promise<void> {
             JSON.stringify(pendingOrderBy) === JSON.stringify([{ archivedAt: 'desc' }, { id: 'desc' }]),
             `Expected deterministic pending escalation ordering, got ${JSON.stringify(pendingOrderBy)}.`
         );
+    }));
+
+    results.push(await runCase('vector audit reports missing and orphaned ids and repair reconciles both', async () => {
+        const upserted: string[] = [];
+        const deleted: string[] = [];
+        __setVectorBackendSingletonForTests({
+            upsert: async (params) => {
+                upserted.push(params.id);
+            },
+            delete: async (id) => {
+                deleted.push(id);
+            },
+            listIndexedIds: async () => ['2', '99'],
+            search: async () => [],
+            ping: async () => true,
+        });
+
+        try {
+            const fakeDb = {
+                knowledgeEntry: {
+                    findMany: async (args?: { select?: { id?: boolean } }) => {
+                        const selectKeys = args?.select ? Object.keys(args.select) : [];
+                        if (selectKeys.length === 1 && args?.select?.id) {
+                            return [{ id: 1 }, { id: 2 }];
+                        }
+                        return [{
+                            id: 1,
+                            entityType: 'project',
+                            entityId: 'vector_consistency_case',
+                            key: 'status',
+                            valueSummary: 'Status is healthy.',
+                            valueRaw: { state: 'healthy' },
+                            source: 'consistency_test',
+                        }];
+                    },
+                },
+                $executeRaw: async () => 1,
+            };
+
+            const audit = await auditVectorIndexConsistency(undefined, fakeDb as any);
+            expect(audit.reachable === true, 'Expected audit to treat mocked backend as reachable.');
+            expect(JSON.stringify(audit.missingEntryIds) === JSON.stringify(['1']), `Expected missing id 1, got ${JSON.stringify(audit.missingEntryIds)}.`);
+            expect(JSON.stringify(audit.orphanedVectorIds) === JSON.stringify(['99']), `Expected orphaned id 99, got ${JSON.stringify(audit.orphanedVectorIds)}.`);
+
+            const repair = await repairVectorIndexConsistency(undefined, undefined, fakeDb as any);
+            expect(repair.repairedMissingCount === 1, `Expected one repaired missing embedding, got ${repair.repairedMissingCount}.`);
+            expect(repair.removedOrphanedCount === 1, `Expected one removed orphan, got ${repair.removedOrphanedCount}.`);
+            expect(JSON.stringify(upserted) === JSON.stringify(['1']), `Expected missing id 1 to be re-upserted, got ${JSON.stringify(upserted)}.`);
+            expect(JSON.stringify(deleted) === JSON.stringify(['99']), `Expected orphaned id 99 to be deleted, got ${JSON.stringify(deleted)}.`);
+        } finally {
+            __setVectorBackendSingletonForTests(null);
+        }
     }));
 
     printSummary(results);

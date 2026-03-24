@@ -1,4 +1,4 @@
-# Hardening 0.2.x Validation
+﻿# Hardening 0.2.x Validation
 
 ## Validation Ledger
 
@@ -6,7 +6,7 @@ This file records concrete validation evidence for the `0.2.x` hardening pass.
 
 ## Fixed Issues And Evidence
 
-### Issue 1 — Windows shell-join risk in CLI
+### Issue 1 â€” Windows shell-join risk in CLI
 
 - Code paths:
   - `scripts/iranti-cli.ts`
@@ -20,7 +20,7 @@ This file records concrete validation evidence for the `0.2.x` hardening pass.
 - Result:
   - fixed
 
-### Issue 2 — Lock env/config mutation paths
+### Issue 2 â€” Lock env/config mutation paths
 
 - Code paths:
   - `src/lib/fileMutation.ts`
@@ -36,7 +36,7 @@ This file records concrete validation evidence for the `0.2.x` hardening pass.
 - Result:
   - fixed
 
-### Issue 3 — Transactional archive/delete behavior
+### Issue 3 â€” Transactional archive/delete behavior
 
 - Code paths:
   - `src/library/queries.ts`
@@ -51,7 +51,7 @@ This file records concrete validation evidence for the `0.2.x` hardening pass.
 - Result:
   - fixed
 
-### Issue 4 / 11 — CI truthfulness and critical suite gating
+### Issue 4 / 11 â€” CI truthfulness and critical suite gating
 
 - Code paths:
   - `.github/workflows/contracts.yml`
@@ -67,7 +67,7 @@ This file records concrete validation evidence for the `0.2.x` hardening pass.
 - Result:
   - fixed
 
-### Issue 5 — Remove `--legacy-peer-deps` dependency
+### Issue 5 â€” Remove `--legacy-peer-deps` dependency
 
 - Code paths:
   - active GitHub workflows
@@ -78,7 +78,7 @@ This file records concrete validation evidence for the `0.2.x` hardening pass.
 - Result:
   - fixed
 
-### Issue 6 — Production-grade API-key pepper enforcement
+### Issue 6 â€” Production-grade API-key pepper enforcement
 
 - Code paths:
   - `src/api/server.ts`
@@ -89,7 +89,7 @@ This file records concrete validation evidence for the `0.2.x` hardening pass.
 - Result:
   - fixed
 
-### Issue 7 — Secret scanning prevention
+### Issue 7 â€” Secret scanning prevention
 
 - Code paths:
   - `.github/workflows/secret-scan.yml`
@@ -99,7 +99,7 @@ This file records concrete validation evidence for the `0.2.x` hardening pass.
 - Result:
   - fixed
 
-### Issue 9 / 10 / 19 — Runtime authority, lifecycle semantics, truthful operator surfaces
+### Issue 9 / 10 / 19 â€” Runtime authority, lifecycle semantics, truthful operator surfaces
 
 - Code paths:
   - `src/lib/runtimeEnv.ts`
@@ -116,7 +116,44 @@ This file records concrete validation evidence for the `0.2.x` hardening pass.
 - Result:
   - fixed
 
-### Issue 15 — Remove auth typing leaks
+### Issue 12 â€” Docs truth-sprawl cleanup
+
+- Code paths:
+  - `docs/README.md`
+  - `docs/internal/README.md`
+  - `docs/internal/IMPLEMENTATION_SUMMARY.md`
+  - `docs/internal/FIXES_APPLIED.md`
+  - `docs/internal/GOAL_VALIDATION_SUMMARY.md`
+  - `docs/internal/validation_results.md`
+  - `AGENTS.md`
+- Validation:
+  - canonical docs map now points readers to guides/specs/decisions/operations first
+  - internal docs now have an index with trust-level guidance and category split
+  - major internal summary artifacts are explicitly labeled as historical/supporting rather than canonical contract
+  - root-level historical audit/fix artifacts are called out as non-canonical in `docs/README.md`
+- Result:
+  - fixed
+
+### Issue 14 — Vector-delete / vector-reconciliation semantics
+
+- Code paths:
+  - `src/library/queries.ts`
+  - `src/library/vectorBackend.ts`
+  - `src/library/backends/pgvectorBackend.ts`
+  - `src/library/backends/qdrantBackend.ts`
+  - `src/library/backends/chromaBackend.ts`
+  - `scripts/iranti-cli.ts`
+- Tests:
+  - `npm run test:archive-vector-contracts`
+  - `npm run test:vector-backends`
+  - `npm run test:hardening-db`
+- Runtime validation:
+  - `iranti doctor` now surfaces vector index consistency warnings after a successful backend reachability check
+  - fresh pgvector-backed validation proved audit + repair of missing embeddings and orphaned vector ids
+- Result:
+  - fixed
+
+### Issue 15 â€” Remove auth typing leaks
 
 - Code paths:
   - `src/api/middleware/rateLimit.ts`
@@ -127,7 +164,7 @@ This file records concrete validation evidence for the `0.2.x` hardening pass.
 - Result:
   - fixed
 
-### Issue 17 — Session/handshake/operator semantics
+### Issue 17 â€” Session/handshake/operator semantics
 
 - Code paths:
   - `src/api/routes/memory.ts`
@@ -142,7 +179,26 @@ This file records concrete validation evidence for the `0.2.x` hardening pass.
 - Result:
   - fixed
 
-### Issue 20 — Repo hygiene and release readiness discipline
+### Issue 18 — Install / upgrade / uninstall as first-class hardening flows
+
+- Code paths:
+  - `tests/runtime-lifecycle/run_setup_upgrade_tests.ts`
+  - `package.json`
+  - `docs/features/cli-setup-wizard/spec.md`
+  - `docs/features/cli-upgrade/spec.md`
+  - `docs/features/cli-uninstall/spec.md`
+- Tests:
+  - `npm run test:setup-upgrade-lifecycle`
+  - `npm run test:hardening-fast`
+- Runtime validation:
+  - fresh `install --root` smoke creates the runtime root and metadata
+  - repeated `setup --defaults` updates the same isolated instance idempotently
+  - targeted `upgrade --yes --target npm-global,python --json` executes successfully against fake tool shims and records `upgradedAt`
+  - uninstall cleanup remains covered by `npm run test:uninstall-lifecycle`
+- Result:
+  - fixed
+
+### Issue 20 â€” Repo hygiene and release readiness discipline
 
 - Code paths:
   - repo-root hardening artifacts
@@ -159,11 +215,8 @@ This file records concrete validation evidence for the `0.2.x` hardening pass.
 | Issue | Why Deferred | Current Mitigation |
 |---|---|---|
 | 8 | CLI still remains a large operational file after helper extraction. | Reduced shell/file-mutation blast radius via extracted helpers. |
-| 12 | Canonical docs are identified, but old summary artifacts still exist. | `docs/README.md` now marks `docs/internal/` as non-canonical supporting material. |
 | 13 | Not every warning/fail-open path was re-audited in this pass. | Production pepper posture and runtime authority warnings were tightened. |
-| 14 | Delete now fails closed, but reconciliation/remediation tooling is still missing. | Drift is prevented on corrected delete/archive paths; docs call out semantics. |
 | 16 | Placeholder review across docs/experiments is incomplete. | Secret scanning is active and allowlists are narrow. |
-| 18 | Restart/uninstall are stronger and covered, but full setup/install/upgrade end-to-end coverage is still incomplete. | `runtime-lifecycle` and `uninstall-lifecycle` gates now cover critical operator regressions. |
 
 ## Validation Commands Run
 
@@ -197,11 +250,8 @@ Result: `no leaks found`
 - The repo is substantially harder and tighter than it was at the start of this pass.
 - The remaining blockers are now mostly explicit deferrals rather than unknown reliability gaps:
   - CLI modularity follow-on
-  - doc truth-sprawl cleanup
   - warn/fail-open audit completion
-  - vector reconciliation tooling
   - placeholder cleanup
-  - full install/setup/upgrade end-to-end hardening coverage
 
 ## Release Recommendation
 
@@ -212,3 +262,7 @@ Reason:
 - critical lifecycle, runtime authority, access-control, session/operator, and CI trust surfaces are now materially stronger
 - the corrected surfaces are backed by code, tests, docs, and validation evidence
 - remaining work is real, but it is narrower and better isolated than the starting state
+
+
+
+

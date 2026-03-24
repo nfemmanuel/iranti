@@ -1,5 +1,8 @@
 # Security & Packaging Implementation Summary
 
+Status: historical implementation summary, not the canonical product contract.
+Use [`docs/README.md`](../README.md) for the docs map and [`docs/internal/README.md`](./README.md) for internal trust-level guidance.
+
 ## What Was Completed
 
 ### 1. Security Infrastructure ✅

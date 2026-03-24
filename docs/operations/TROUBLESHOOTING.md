@@ -420,6 +420,42 @@ psql $DATABASE_URL -c "SELECT * FROM archive WHERE entity_type='your_type' AND e
 psql $DATABASE_URL -c "INSERT INTO knowledge_base SELECT * FROM archive WHERE id='fact_id';"
 ```
 
+### Vector Search Looks Stale Or Returns Deleted Facts
+
+**Symptom**:
+- hybrid search misses facts that exact lookup can still find
+- vector search returns deleted facts
+- search quality drops after vector backend outages
+
+**What it means**:
+- `knowledge_base` and the configured vector backend have drifted
+- the usual causes are missing embeddings or orphaned backend vectors
+- `iranti doctor` now surfaces this as a vector index consistency warning when the backend is reachable
+
+**Recovery path**:
+Run the reconciliation helpers from the repo root:
+
+```ts
+import { auditVectorIndexConsistency, repairVectorIndexConsistency } from './src/library/queries';
+
+const audit = await auditVectorIndexConsistency();
+console.log(audit);
+
+if (!audit.consistent) {
+  const repaired = await repairVectorIndexConsistency();
+  console.log(repaired);
+}
+```
+
+Interpretation:
+- `missingEntryIds`: facts exist in `knowledge_base` but are absent from the vector backend
+- `orphanedVectorIds`: vectors exist in the backend for facts that no longer exist in `knowledge_base`
+- `consistent: true`: the KB and vector backend are aligned
+
+Current 0.2.x note:
+- `iranti doctor` detects drift
+- the repair path is still the library helper surface until a dedicated CLI fix flag exists
+
 ### Unicode/Emoji Issues
 
 **Symptom**: Facts with emoji or special characters fail

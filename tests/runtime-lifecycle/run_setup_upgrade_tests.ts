@@ -1,0 +1,287 @@
+import assert from 'assert';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import net from 'net';
+import { randomBytes } from 'crypto';
+import { spawnSync } from 'child_process';
+
+type CliRun = {
+    status: number | null;
+    stdout: string;
+    stderr: string;
+};
+
+const repoRoot = path.resolve(__dirname, '..', '..');
+const cliScript = path.join(repoRoot, 'scripts', 'iranti-cli.ts');
+
+function runCli(args: string[], cwd: string, extraEnv: Record<string, string> = {}): CliRun {
+    const proc = spawnSync(
+        process.execPath,
+        ['-r', 'ts-node/register/transpile-only', cliScript, ...args],
+        {
+            cwd,
+            encoding: 'utf8',
+            env: {
+                ...process.env,
+                ...extraEnv,
+                NO_COLOR: '1',
+            },
+        }
+    );
+
+    return {
+        status: proc.status,
+        stdout: proc.stdout ?? '',
+        stderr: proc.stderr ?? '',
+    };
+}
+
+function writeJson(filePath: string, value: unknown): void {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+}
+
+function writeText(filePath: string, value: string): void {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, value, 'utf8');
+}
+
+async function reservePort(): Promise<number> {
+    const server = net.createServer();
+    await new Promise<void>((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(0, '127.0.0.1', () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === 'string') {
+        server.close();
+        throw new Error('Failed to reserve a test port.');
+    }
+    const port = address.port;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    return port;
+}
+
+function readEnv(filePath: string): Record<string, string> {
+    const env: Record<string, string> = {};
+    const raw = fs.readFileSync(filePath, 'utf8');
+    for (const line of raw.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const index = trimmed.indexOf('=');
+        if (index <= 0) continue;
+        env[trimmed.slice(0, index)] = trimmed.slice(index + 1);
+    }
+    return env;
+}
+
+function parseJsonFromStdout(stdout: string): unknown {
+    const trimmed = stdout.trim();
+    const jsonStart = trimmed.indexOf('{');
+    if (jsonStart < 0) {
+        throw new Error(`No JSON payload found in stdout:\n${stdout}`);
+    }
+    return JSON.parse(trimmed.slice(jsonStart));
+}
+
+function writeFakeCommand(binDir: string, name: string, toolScript: string): void {
+    if (process.platform === 'win32') {
+        writeText(path.join(binDir, `${name}.cmd`), `@echo off\r\nnode "${toolScript}" ${name} %*\r\n`);
+        return;
+    }
+    const shellFile = path.join(binDir, name);
+    writeText(shellFile, `#!/usr/bin/env bash\nnode "${toolScript}" ${name} "$@"\n`);
+    fs.chmodSync(shellFile, 0o755);
+}
+
+async function main(): Promise<void> {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'iranti-setup-upgrade-'));
+    try {
+        const installOnlyRoot = path.join(tempRoot, 'install-only-runtime');
+        const installRun = runCli(['install', '--root', installOnlyRoot], repoRoot);
+        assert.strictEqual(installRun.status, 0, `install failed:\n${installRun.stdout}\n${installRun.stderr}`);
+        assert.ok(fs.existsSync(path.join(installOnlyRoot, 'install.json')), 'Expected install command to create install.json.');
+        assert.ok(fs.existsSync(path.join(installOnlyRoot, 'instances')), 'Expected install command to create instances directory.');
+
+        const runtimeRoot = path.join(tempRoot, 'runtime');
+        const projectDir = path.join(tempRoot, 'project');
+        const port = await reservePort();
+        const testApiKey = `test_${randomBytes(16).toString('hex')}`;
+
+        const setupRun = runCli([
+            'setup',
+            '--defaults',
+            '--mode',
+            'isolated',
+            '--root',
+            runtimeRoot,
+            '--instance',
+            'local',
+            '--port',
+            String(port),
+            '--db-mode',
+            'managed',
+            '--db-url',
+            'postgresql://postgres:postgres@localhost:5432/iranti_setup_smoke',
+            '--provider',
+            'mock',
+            '--api-key',
+            testApiKey,
+            '--projects',
+            projectDir,
+            '--claude-code',
+        ], repoRoot);
+        assert.strictEqual(setupRun.status, 0, `setup failed:\n${setupRun.stdout}\n${setupRun.stderr}`);
+
+        const setupRepeatRun = runCli([
+            'setup',
+            '--defaults',
+            '--mode',
+            'isolated',
+            '--root',
+            runtimeRoot,
+            '--instance',
+            'local',
+            '--port',
+            String(port),
+            '--db-mode',
+            'managed',
+            '--db-url',
+            'postgresql://postgres:postgres@localhost:5432/iranti_setup_smoke',
+            '--provider',
+            'mock',
+            '--api-key',
+            testApiKey,
+            '--projects',
+            projectDir,
+            '--claude-code',
+        ], repoRoot);
+        assert.strictEqual(setupRepeatRun.status, 0, `repeat setup failed:\n${setupRepeatRun.stdout}\n${setupRepeatRun.stderr}`);
+
+        const installMetaPath = path.join(runtimeRoot, 'install.json');
+        const instanceEnvPath = path.join(runtimeRoot, 'instances', 'local', '.env');
+        const bindingFile = path.join(projectDir, '.env.iranti');
+        const mcpFile = path.join(projectDir, '.mcp.json');
+        const claudeSettingsFile = path.join(projectDir, '.claude', 'settings.local.json');
+
+        assert.ok(fs.existsSync(installMetaPath), 'Expected setup to create install.json.');
+        assert.ok(fs.existsSync(instanceEnvPath), 'Expected setup to create instance env.');
+        assert.ok(fs.existsSync(bindingFile), 'Expected setup to create .env.iranti.');
+        assert.ok(fs.existsSync(mcpFile), 'Expected setup to scaffold .mcp.json.');
+        assert.ok(fs.existsSync(claudeSettingsFile), 'Expected setup to scaffold Claude settings.');
+
+        const bindingEnv = readEnv(bindingFile);
+        assert.strictEqual(bindingEnv.IRANTI_PROJECT_MODE, 'isolated');
+        assert.strictEqual(bindingEnv.IRANTI_INSTANCE, 'local');
+        assert.strictEqual(bindingEnv.IRANTI_INSTANCE_ENV, instanceEnvPath);
+        assert.strictEqual(bindingEnv.IRANTI_API_KEY, testApiKey);
+
+        const statusRun = runCli(['status', '--root', runtimeRoot, '--json'], repoRoot);
+        assert.strictEqual(statusRun.status, 0, `status failed after setup:\n${statusRun.stdout}\n${statusRun.stderr}`);
+        const statusPayload = parseJsonFromStdout(statusRun.stdout) as {
+            instances: Array<{
+                name: string;
+                config: { classification: string };
+                runtime: { classification: string; running: boolean };
+            }>;
+        };
+        const localInstance = statusPayload.instances.find((instance) => instance.name === 'local');
+        assert.ok(localInstance, 'Expected setup-created instance in status output.');
+        assert.strictEqual(localInstance?.config.classification, 'complete');
+        assert.strictEqual(localInstance?.runtime.running, false);
+        assert.ok(['missing', 'stopped'].includes(localInstance?.runtime.classification ?? ''), `Expected non-running setup instance, got ${localInstance?.runtime.classification}.`);
+
+        const fakeStateFile = path.join(tempRoot, 'fake-upgrade-state.json');
+        const fakeLogFile = path.join(tempRoot, 'fake-upgrade-log.ndjson');
+        const fakeGlobalRoot = path.join(tempRoot, 'global-node');
+        const fakeBinDir = path.join(tempRoot, 'bin');
+        fs.mkdirSync(fakeBinDir, { recursive: true });
+        writeJson(fakeStateFile, {
+            globalRoot: fakeGlobalRoot,
+            npmInstalled: true,
+            npmVersion: '0.2.17',
+            pythonInstalled: true,
+            pythonVersion: '0.2.17',
+            latestVersion: '0.2.25',
+        });
+        const fakeToolScript = path.join(fakeBinDir, 'fake-tool.js');
+        writeText(fakeToolScript, `
+const fs = require('fs');
+const statePath = process.env.IRANTI_FAKE_STATE;
+const logPath = process.env.IRANTI_FAKE_LOG;
+const tool = process.argv[2];
+const args = process.argv.slice(3);
+const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+function persist() { fs.writeFileSync(statePath, JSON.stringify(state, null, 2) + '\\n', 'utf8'); }
+function log(entry) { fs.appendFileSync(logPath, JSON.stringify(entry) + '\\n', 'utf8'); }
+if (tool === 'npm') {
+  if (args[0] === 'root' && args[1] === '-g') { console.log(state.globalRoot); process.exit(0); }
+  if (args[0] === 'list' && args[1] === '-g' && args[2] === 'iranti') {
+    if (!state.npmInstalled) process.exit(1);
+    console.log(JSON.stringify({ dependencies: { iranti: { version: state.npmVersion } } }));
+    process.exit(0);
+  }
+  if (args[0] === 'install' && args[1] === '-g' && args[2] === 'iranti@latest') {
+    state.npmInstalled = true; state.npmVersion = state.latestVersion; persist(); log({ tool, args }); process.exit(0);
+  }
+}
+if (tool === 'python' || tool === 'python3' || tool === 'py') {
+  if (args.join(' ') === '--version' || args.join(' ') === '-3 --version') { console.log('Python 3.14.0'); process.exit(0); }
+  if (args.includes('show') && args.includes('iranti')) {
+    if (!state.pythonInstalled) process.exit(1);
+    console.log('Name: iranti\\nVersion: ' + state.pythonVersion);
+    process.exit(0);
+  }
+  if (args.includes('install') && args.includes('--upgrade') && args.includes('iranti')) {
+    state.pythonInstalled = true; state.pythonVersion = state.latestVersion; persist(); log({ tool, args }); process.exit(0);
+  }
+}
+process.exit(1);
+`.trim());
+        for (const name of ['npm', 'python', 'python3', 'py']) {
+            writeFakeCommand(fakeBinDir, name, fakeToolScript);
+        }
+
+        const upgradeEnv = {
+            PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ''}`,
+            IRANTI_FAKE_STATE: fakeStateFile,
+            IRANTI_FAKE_LOG: fakeLogFile,
+            IRANTI_TEST_TOOL_SHIM: fakeToolScript,
+        };
+
+        const upgradeRun = runCli([
+            'upgrade',
+            '--yes',
+            '--target',
+            'npm-global,python',
+            '--json',
+            '--root',
+            runtimeRoot,
+        ], repoRoot, upgradeEnv);
+        assert.strictEqual(upgradeRun.status, 0, `upgrade execution failed:\n${upgradeRun.stdout}\n${upgradeRun.stderr}`);
+        const upgradePayload = parseJsonFromStdout(upgradeRun.stdout) as {
+            selectedTargets: string[];
+            execution: Array<{ target: string; verification: { status: string } }>;
+        };
+        assert.deepStrictEqual(upgradePayload.selectedTargets, ['npm-global', 'python']);
+        assert.strictEqual(upgradePayload.execution.length, 2, 'Expected upgrade execution results for npm-global and python.');
+        assert.ok(upgradePayload.execution.every((result) => result.verification.status === 'pass'), `Expected pass verification for upgrade execution, got ${JSON.stringify(upgradePayload.execution)}.`);
+
+        const installMeta = JSON.parse(fs.readFileSync(installMetaPath, 'utf8')) as { upgradedAt?: string };
+        assert.ok(installMeta.upgradedAt, 'Expected install metadata to record upgradedAt after executable upgrade paths.');
+
+        const logLines = fs.readFileSync(fakeLogFile, 'utf8').trim().split(/\r?\n/).map((line) => JSON.parse(line) as { tool: string; args: string[] });
+        assert.ok(logLines.some((entry) => entry.tool === 'npm' && entry.args.includes('install')), 'Expected npm global upgrade command to run.');
+        assert.ok(logLines.some((entry) => (entry.tool === 'python' || entry.tool === 'python3' || entry.tool === 'py') && entry.args.includes('install')), 'Expected python upgrade command to run.');
+
+        console.log('cli setup/upgrade smoke passed');
+    } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+}
+
+main().catch((error) => {
+    console.error('cli setup/upgrade smoke failed:', error);
+    process.exit(1);
+});

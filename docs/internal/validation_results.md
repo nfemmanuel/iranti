@@ -1,5 +1,8 @@
 # Validation Results Log
 
+Status: supporting validation ledger, not the canonical product contract.
+Use [`docs/README.md`](../README.md) for the docs map, [`docs/internal/README.md`](./README.md) for internal trust levels, and current guides/specs/README for live behavior claims.
+
 This document contains an auditable log of all Iranti validation experiments. Each entry records the test configuration, results, and status.
 
 ---

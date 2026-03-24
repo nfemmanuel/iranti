@@ -36,6 +36,9 @@
    - `IRANTI_API_KEY` or `IRANTI_URL` for project bindings
    - `LLM_PROVIDER`
    - provider-specific API key when required
+6. Probe the configured vector backend:
+   - report reachability
+   - when reachable, audit vector index consistency against `knowledge_base`
 6. Emit a combined status:
    - `pass` if all checks pass
    - `warn` if no failures but at least one warning exists
@@ -48,11 +51,13 @@
 - `mock` and `ollama` are treated as local providers and do not require a remote API key.
 - Unknown providers produce a warning instead of a hard failure because doctor cannot infer the key contract.
 - The CLI build artifact check warns in ts-node/dev flows instead of failing.
+- Reachable vector backends can still warn if the vector index has drifted from `knowledge_base`.
 
 ## Test Results
 
 - `iranti doctor` works against repo `.env`, project `.env.iranti`, and named instance env files.
 - `iranti doctor --json` emits machine-readable status for scripting and CI checks.
+- Vector backend consistency warnings are emitted when embeddings are missing or orphaned vectors are present.
 - Build and packaging smoke tests continue to pass with the new command included.
 
 ## Related

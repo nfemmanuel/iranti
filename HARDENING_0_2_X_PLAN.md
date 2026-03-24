@@ -35,17 +35,17 @@ This file is the canonical backlog and ownership map for the `0.2.x` stabilizati
 | 5 | Remove `--legacy-peer-deps` dependency from CI or justify and contain it | Worker A / D | fixed | Active workflows now run plain `npm ci`. |
 | 6 | Make API-key pepper enforcement production-grade | Worker D | fixed | Production startup now fails fast without a valid pepper unless explicitly overridden. |
 | 7 | Add repository secret scanning prevention | Worker D | fixed | Gitleaks workflow + config added; repo scan validated locally. |
-| 8 | Reduce lifecycle/operator monolith risk in `scripts/iranti-cli.ts` | Worker A | deferred | Risk reduced with extracted command/file-mutation helpers, but the CLI remains too large for this pass to call the issue closed. |
+| 8 | Reduce lifecycle/operator monolith risk in `scripts/iranti-cli.ts` | Worker A | deferred | Risk reduced with extracted command/file-mutation helpers and a new `src/lib/cliHelpCatalog.ts`, but the CLI remains too large for this pass to call the issue closed. |
 | 9 | Converge authority resolution into one canonical model | Worker B | fixed | Runtime authority precedence is now explicit, shared, and documented. |
 | 10 | Harden runtime metadata semantics | Worker A / B | fixed | Runtime states and health-backed classification are explicit and tested. |
 | 11 | Expand CI and tests around lifecycle/session/access-control/runtime | Worker D | fixed | Critical lifecycle/session/access-control/runtime coverage is now represented in CI. |
-| 12 | Consolidate docs to reduce truth sprawl | Worker E | deferred | Canonical docs are now identified, but old summary artifacts still need a separate cleanup/rehome pass. |
+| 12 | Consolidate docs to reduce truth sprawl | Worker E | fixed | Canonical docs are now indexed explicitly, internal material has a trust-level index, and major summary artifacts are marked as historical/supporting rather than current contract. |
 | 13 | Eliminate remaining unsafe warning-and-continue production behavior | Worker B | deferred | Major startup/runtime warning paths were tightened, but a full warn/fail-open audit still remains. |
-| 14 | Review and harden vector-delete / vector-reconciliation semantics | Worker C | deferred | Delete now fails closed, but explicit reconciliation/doctor remediation is still missing. |
+| 14 | Review and harden vector-delete / vector-reconciliation semantics | Worker C | fixed | Vector drift is now auditable, surfaced through `iranti doctor`, and repairable via `repairVectorIndexConsistency()`. |
 | 15 | Remove remaining `as any` auth typing leaks | Worker D | fixed | The auth middleware stack no longer relies on `as any` for `irantiAuth`. |
 | 16 | Review static placeholder test values and distinguish harmless placeholders from risky defaults | Worker D | deferred | Secret scanning is in place and allowlists are narrow, but placeholder review across experiments/docs is not fully closed. |
 | 17 | Validate and tighten session/handshake/operator semantics | Worker E | fixed | Route behavior, docs, and tests now align around actual handshake/session semantics. |
-| 18 | Review install / upgrade / uninstall as first-class hardening flows | Worker A | deferred | Restart/uninstall paths are stronger and covered, but full install/setup/upgrade end-to-end coverage is still incomplete. |
+| 18 | Review install / upgrade / uninstall as first-class hardening flows | Worker A | fixed | Fresh install, idempotent non-interactive setup, executable upgrade, and uninstall flows now have explicit lifecycle smoke coverage plus aligned specs. |
 | 19 | Review actual runtime/operator trust surfaces for truthfulness | Worker B / E | fixed | Health, status, runtime authority, and session/operator messaging are materially more truthful. |
 | 20 | Review repo hygiene for 0.2.x release readiness | Lead / A / D | fixed | Hardening artifacts, workflow policy, release docs, and validation evidence are aligned for a stabilization release. |
 

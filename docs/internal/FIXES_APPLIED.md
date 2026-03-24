@@ -1,5 +1,8 @@
 # P0 and P1 Fixes Applied
 
+Status: historical fixes ledger, not the canonical product contract.
+Use [`docs/README.md`](../README.md) for the docs map and [`docs/internal/README.md`](./README.md) for internal trust-level guidance.
+
 ## Summary
 
 All critical infrastructure issues identified in the deep code review have been fixed. These changes strengthen Iranti's core invariants around trust, auditability, and performance.

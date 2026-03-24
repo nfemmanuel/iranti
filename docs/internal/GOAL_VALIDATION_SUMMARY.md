@@ -1,5 +1,8 @@
 # Goal Validation Summary
 
+Status: historical validation summary, not the canonical product contract.
+Use [`docs/README.md`](../README.md) for the docs map, [`docs/internal/README.md`](./README.md) for internal trust levels, and current guides/specs/README for live product behavior.
+
 ## Overview
 
 All four stated goals for Iranti's open source release have been validated with definitive experiments using fictional entities and invented facts.

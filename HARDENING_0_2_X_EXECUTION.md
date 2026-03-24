@@ -16,17 +16,17 @@
 | 5 | fixed | `.github/workflows/*`, `docs/guides/releasing.md` |
 | 6 | fixed | `src/api/server.ts`, `tests/runtime-lifecycle/run_runtime_lifecycle_tests.ts`, security docs |
 | 7 | fixed | `.github/workflows/secret-scan.yml`, `.gitleaks.toml`, security docs |
-| 8 | deferred | `scripts/iranti-cli.ts`, `src/lib/commandInvocation.ts`, `src/lib/fileMutation.ts` |
+| 8 | deferred | `scripts/iranti-cli.ts`, `src/lib/commandInvocation.ts`, `src/lib/fileMutation.ts`, `src/lib/cliHelpCatalog.ts` |
 | 9 | fixed | `src/lib/runtimeEnv.ts`, `src/lib/runtimeLifecycle.ts`, `src/api/server.ts`, runtime docs |
 | 10 | fixed | `src/lib/runtimeLifecycle.ts`, `scripts/iranti-cli.ts`, runtime lifecycle tests/docs |
 | 11 | fixed | workflows, `package.json`, lifecycle/session/access-control/runtime tests |
-| 12 | deferred | `docs/README.md`, guides/spec docs |
+| 12 | fixed | `docs/README.md`, `docs/internal/README.md`, internal summary docs, `AGENTS.md` |
 | 13 | deferred | `src/api/server.ts`, runtime/operator docs |
-| 14 | deferred | `src/library/queries.ts`, vector backend docs/tests |
+| 14 | fixed | `src/library/queries.ts`, `src/library/vectorBackend.ts`, vector backend adapters, vector docs/tests, `scripts/iranti-cli.ts` |
 | 15 | fixed | `src/api/middleware/rateLimit.ts`, `src/security/scopes.ts`, access-control tests |
 | 16 | deferred | `.gitleaks.toml`, security docs, placeholder audit notes |
 | 17 | fixed | `src/api/routes/memory.ts`, session/cross-tool tests, guides/specs |
-| 18 | deferred | `scripts/iranti-cli.ts`, runtime/uninstall tests, lifecycle docs |
+| 18 | fixed | `tests/runtime-lifecycle/run_setup_upgrade_tests.ts`, `tests/runtime-lifecycle/run_uninstall_tests.ts`, lifecycle specs/docs |
 | 19 | fixed | runtime authority/runtime status/session/operator docs and tests |
 | 20 | fixed | repo-root hardening artifacts, release/testing/security docs, final validation runbook |
 
@@ -39,6 +39,7 @@
 - `src/api/routes/memory.ts`
 - `src/api/server.ts`
 - `src/lib/commandInvocation.ts`
+- `src/lib/cliHelpCatalog.ts`
 - `src/lib/fileMutation.ts`
 - `src/lib/runtimeEnv.ts`
 - `src/lib/runtimeLifecycle.ts`
@@ -56,6 +57,7 @@
 - `tests/consistency/run_archive_vector_contract_tests.ts`
 - `tests/cross-tool/run_cross_tool_handoff_tests.ts`
 - `tests/runtime-lifecycle/run_cli_process_safety_tests.ts`
+- `tests/runtime-lifecycle/run_setup_upgrade_tests.ts`
 - `tests/runtime-lifecycle/run_runtime_lifecycle_tests.ts`
 - `tests/runtime-lifecycle/run_uninstall_tests.ts`
 - `tests/session-recovery/run_session_recovery_tests.ts`
@@ -74,7 +76,10 @@
 - `README.md`
 - `docs/API.md`
 - `docs/README.md`
+- `docs/internal/README.md`
 - `docs/features/cli-uninstall/spec.md`
+- `docs/features/cli-doctor/spec.md`
+- `docs/features/cli-setup-wizard/spec.md`
 - `docs/features/cli-upgrade/spec.md`
 - `docs/features/cross-tool-handoffs/spec.md`
 - `docs/features/interrupted-session-recovery/spec.md`
@@ -90,11 +95,13 @@
 - `docs/guides/security-quickstart.md`
 - `docs/operations/SECURITY_AUDIT.md`
 - `docs/operations/TROUBLESHOOTING.md`
+- `AGENTS.md`
 
 ## Tests Added Or Updated
 
 - Added `test:runtime-lifecycle`
 - Added `test:cli-process-safety`
+- Added `test:setup-upgrade-lifecycle`
 - Added `test:uninstall-lifecycle`
 - Added `test:session-recovery`
 - Added `test:archive-vector-contracts`
@@ -105,19 +112,19 @@
 ## Docs Updated
 
 - Clarified canonical docs vs supporting material in `docs/README.md`
+- Added an internal docs index and trust-level map in `docs/internal/README.md`
+- Marked major internal summary artifacts as historical/supporting rather than canonical product contract
 - Documented runtime authority and `/health` authority reporting
 - Clarified handshake/session/operator semantics and cross-tool expectations
 - Updated release docs to reflect the real gating suites and `npm ci` policy
 - Added troubleshooting guidance for config lock conflicts and Windows detached lifecycle behavior
+- Added vector drift detection/reconciliation guidance and install/setup/upgrade lifecycle smoke coverage docs
 
 ## Remaining Blockers
 
 - Issue 8: `scripts/iranti-cli.ts` still needs a larger structural split beyond the helper extractions landed in this pass.
-- Issue 12: docs truth-sprawl is reduced but not fully cleaned up; older summary artifacts still exist.
 - Issue 13: there are still additional warn-vs-fail decisions worth auditing beyond the major startup/runtime posture fix.
-- Issue 14: vector drift now fails closed on delete, but explicit reconciliation/remediation tooling is still absent.
 - Issue 16: placeholder review is materially safer because of secret scanning, but the long tail of experimental/doc fixtures is not fully normalized.
-- Issue 18: restart/uninstall flows are materially stronger, but full setup/install/upgrade end-to-end hardening coverage is still incomplete.
 
 ## Integration Notes
 

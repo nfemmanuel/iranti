@@ -1,7 +1,7 @@
 import { Prisma } from '../../generated/prisma/client';
 import { getDb } from '../client';
 import { toPgVectorLiteral } from '../embeddings';
-import { VectorBackend, VectorMutationDbClient, VectorSearchResult, VectorUpsertParams } from '../vectorBackend';
+import { VectorBackend, VectorConsistencyFilter, VectorMutationDbClient, VectorSearchResult, VectorUpsertParams } from '../vectorBackend';
 
 let vectorSupportCache: boolean | null = null;
 
@@ -127,6 +127,31 @@ export class PgvectorBackend implements VectorBackend {
                 score: Number(row.score ?? 0),
                 metadata: { id: row.id },
             }));
+        } catch (error) {
+            if (isVectorRuntimeError(error)) {
+                vectorSupportCache = false;
+                return [];
+            }
+            throw error;
+        }
+    }
+
+    async listIndexedIds(filter?: VectorConsistencyFilter): Promise<string[]> {
+        if (!(await hasVectorSupport())) {
+            return [];
+        }
+
+        try {
+            const filters = buildFilters(filter);
+            const rows = await getDb().$queryRaw<Array<{ id: number }>>(Prisma.sql`
+                SELECT kb."id"
+                FROM "knowledge_base" kb
+                WHERE ${Prisma.join(filters, ' AND ')}
+                  AND kb."embedding" IS NOT NULL
+                ORDER BY kb."id" ASC
+            `);
+
+            return rows.map((row) => String(row.id));
         } catch (error) {
             if (isVectorRuntimeError(error)) {
                 vectorSupportCache = false;

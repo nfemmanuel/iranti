@@ -16,9 +16,15 @@ export interface VectorUpsertParams {
 
 export type VectorMutationDbClient = Pick<PrismaClient, '$executeRaw'>;
 
+export type VectorConsistencyFilter = {
+    entityType?: string;
+    entityId?: string;
+};
+
 export interface VectorBackend {
     upsert(params: VectorUpsertParams, db?: VectorMutationDbClient): Promise<void>;
     delete(id: string, db?: VectorMutationDbClient): Promise<void>;
+    listIndexedIds(filter?: VectorConsistencyFilter, pageSize?: number): Promise<string[]>;
     search(
         vector: number[],
         topK: number,

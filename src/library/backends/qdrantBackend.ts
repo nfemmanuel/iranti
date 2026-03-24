@@ -1,5 +1,5 @@
 import { EMBEDDING_DIMENSIONS } from '../embeddings';
-import { VectorBackend, VectorMutationDbClient, VectorSearchResult, VectorUpsertParams } from '../vectorBackend';
+import { VectorBackend, VectorConsistencyFilter, VectorMutationDbClient, VectorSearchResult, VectorUpsertParams } from '../vectorBackend';
 
 type QdrantConfig = {
     url: string;
@@ -114,6 +114,38 @@ export class QdrantBackend implements VectorBackend {
             score: Number(point.score ?? 0),
             metadata: point.payload ?? {},
         }));
+    }
+
+    async listIndexedIds(filter?: VectorConsistencyFilter, pageSize: number = 256): Promise<string[]> {
+        await this.ensureCollection();
+        const ids: string[] = [];
+        let offset: string | number | null | undefined = undefined;
+
+        while (true) {
+            const payload: any = await this.request<any>('POST', `/collections/${this.collection}/points/scroll`, {
+                limit: Math.max(1, pageSize),
+                offset,
+                with_payload: true,
+                with_vector: false,
+                filter: qdrantFilter(filter),
+            });
+
+            const points = Array.isArray(payload?.result?.points)
+                ? payload.result.points
+                : Array.isArray(payload?.result)
+                    ? payload.result
+                    : [];
+
+            ids.push(...points.map((point: any) => String(point.id)));
+
+            const nextOffset: string | number | null | undefined = payload?.result?.next_page_offset;
+            if (!nextOffset || points.length < Math.max(1, pageSize)) {
+                break;
+            }
+            offset = nextOffset;
+        }
+
+        return ids;
     }
 
     async ping(): Promise<boolean> {
