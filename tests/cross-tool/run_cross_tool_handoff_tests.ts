@@ -188,7 +188,7 @@ async function main(): Promise<void> {
     );
 
     const codexHandshake = await iranti.handshake({
-        agent: codexAgent,
+        agentId: codexAgent,
         task: 'Continue the shared runtime verification task handed off from Claude.',
         recentMessages: [
             `Resume work for ${taskEntity}.`,
@@ -205,8 +205,21 @@ async function main(): Promise<void> {
         'Expected next_step fact to mention the runtime verification pass.'
     );
 
+    const claudeSession = await iranti.inspectSession({ agentId: claudeAgent });
+    expect(claudeSession.hasCheckpoint === true, 'Expected inspectSession() to expose the Claude handoff checkpoint.');
+    expect(claudeSession.summary.operatorState === 'active', 'Expected Claude handoff checkpoint to remain operator-active.');
+
+    const activeSessions = await iranti.listSessions({
+        agentId: claudeAgent,
+        operatorState: 'active',
+        sort: 'operator',
+        limit: 5,
+    });
+    expect(activeSessions.length === 1, 'Expected Claude session inventory filter to return a single active checkpoint.');
+    expect(activeSessions[0]?.sessionId === checkpointedBrief.sessionCheckpoint?.sessionId, 'Expected session inventory to return the Claude checkpoint session id.');
+
     const codexObserve = await iranti.observe({
-        agent: codexAgent,
+        agentId: codexAgent,
         currentContext: '',
         entityHints: [taskEntity, projectEntity],
         maxFacts: 5,
@@ -218,7 +231,7 @@ async function main(): Promise<void> {
     );
 
     const codexAttend = await iranti.attend({
-        agent: codexAgent,
+        agentId: codexAgent,
         latestMessage: `Continue work for ${taskEntity}. What should I do next?`,
         currentContext: 'We are continuing a shared task handoff between Claude Code and Codex.',
         entityHints: [taskEntity, projectEntity],
@@ -245,7 +258,7 @@ async function main(): Promise<void> {
     expect(implementationStatus.found === true, 'Expected Claude to be able to query the Codex implementation_status fact.');
 
     const claudeObserve = await iranti.observe({
-        agent: claudeAgent,
+        agentId: claudeAgent,
         currentContext: '',
         entityHints: [taskEntity],
         maxFacts: 5,

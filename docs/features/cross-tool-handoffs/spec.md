@@ -56,6 +56,7 @@ This feature formalizes how Claude Code and Codex collaborate through the same I
 - The smoke test verifies:
   - Claude writes shared handoff facts to `task/...`
   - Claude checkpoints its own session with the shared task in `entityTargets`
+  - operator inspection can read Claude's persisted session state through `inspectSession()` and filtered `listSessions()`
   - Codex can query and attend against the shared task using explicit hints
   - Codex writes follow-up status back to the same task
   - Claude can attend later and recover the Codex follow-up
