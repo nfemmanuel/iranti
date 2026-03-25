@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.35 - Unreleased
+
+### Changed
+
+- Re-cut the coordinated package release so the root npm package, TypeScript client, and Python client advance together again after the `0.2.34` root npm provenance publish failed despite the other package publishes succeeding.
+
+### Fixed
+
+- Root npm package version alignment is restored by publishing the same release content under a fresh coordinated version instead of leaving npm behind PyPI and `@iranti/sdk`.
+
+### Validation
+
+- Re-ran `npm run build`, `npm run test:hardening-fast`, `npm run release:check -- v0.2.35`, `python -m build clients/python --outdir clients/python/dist`, and `python -m twine check clients/python/dist/*` locally before release.
+
 ## 0.2.34 - Unreleased
 
 ### Fixed
