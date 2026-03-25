@@ -56,6 +56,8 @@ This writes or refreshes:
 - `.mcp.json`
 - `.claude/settings.local.json`
 
+When a project binding is present, the generated `.mcp.json` now pins `IRANTI_PROJECT_ENV` to that local `.env.iranti` file so Claude Code and Codex IDE sessions resolve the same binding deterministically.
+
 Use `--force` if you want Iranti to overwrite existing scaffold files.
 
 Batch mode for a parent projects folder:
@@ -94,7 +96,10 @@ Create `.mcp.json` in the project root:
   "mcpServers": {
     "iranti": {
       "command": "iranti",
-      "args": ["mcp"]
+      "args": ["mcp"],
+      "env": {
+        "IRANTI_PROJECT_ENV": "/absolute/path/to/project/.env.iranti"
+      }
     }
   }
 }

@@ -60,6 +60,10 @@ function writeText(filePath: string, value: string): void {
     fs.writeFileSync(filePath, value, 'utf8');
 }
 
+function readJson<T>(filePath: string): T {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8')) as T;
+}
+
 async function reservePort(): Promise<number> {
     const server = net.createServer();
     await new Promise<void>((resolve, reject) => {
@@ -195,6 +199,18 @@ async function main(): Promise<void> {
         assert.strictEqual(bindingEnv.IRANTI_INSTANCE, 'local');
         assert.strictEqual(bindingEnv.IRANTI_INSTANCE_ENV, instanceEnvPath);
         assert.strictEqual(bindingEnv.IRANTI_API_KEY, testApiKey);
+        const mcpConfig = readJson<{
+            mcpServers: {
+                iranti: {
+                    command: string;
+                    args: string[];
+                    env?: Record<string, string>;
+                };
+            };
+        }>(mcpFile);
+        assert.strictEqual(mcpConfig.mcpServers.iranti.command, 'iranti');
+        assert.deepStrictEqual(mcpConfig.mcpServers.iranti.args, ['mcp']);
+        assert.strictEqual(mcpConfig.mcpServers.iranti.env?.IRANTI_PROJECT_ENV, bindingFile, 'Expected scaffolded .mcp.json to pin the project binding');
 
         const sharedSetupRun = runCli([
             'setup',
@@ -230,6 +246,14 @@ async function main(): Promise<void> {
             assert.strictEqual(sharedBinding.IRANTI_API_KEY, sharedApiKey);
             assert.ok(fs.existsSync(path.join(projectPath, '.mcp.json')), 'Expected shared setup to scaffold .mcp.json for each bound project.');
             assert.ok(fs.existsSync(path.join(projectPath, '.claude', 'settings.local.json')), 'Expected shared setup to scaffold Claude settings for each bound project.');
+            const sharedMcp = readJson<{
+                mcpServers: {
+                    iranti: {
+                        env?: Record<string, string>;
+                    };
+                };
+            }>(path.join(projectPath, '.mcp.json'));
+            assert.strictEqual(sharedMcp.mcpServers.iranti.env?.IRANTI_PROJECT_ENV, path.join(projectPath, '.env.iranti'), 'Expected shared scaffolding to pin each project binding in .mcp.json');
         }
 
         const statusRun = runCli(['status', '--root', runtimeRoot, '--json'], repoRoot);

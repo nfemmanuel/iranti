@@ -1636,10 +1636,17 @@ async function ensureInstanceConfigured(
     return { envFile, instanceDir, created };
 }
 
-function makeIrantiMcpServerConfig(): { command: string; args: string[] } {
+function makeIrantiMcpServerConfig(projectEnvPath?: string): { command: string; args: string[]; env?: Record<string, string> } {
     return {
         command: 'iranti',
         args: ['mcp'],
+        ...(projectEnvPath
+            ? {
+                env: {
+                    IRANTI_PROJECT_ENV: projectEnvPath,
+                },
+            }
+            : {}),
     };
 }
 
@@ -1973,7 +1980,10 @@ function makeClaudeHookSettings(projectEnvPath?: string, existing?: Record<strin
 async function writeClaudeCodeProjectFiles(projectPath: string, projectEnvPath?: string, force: boolean = false): Promise<ClaudeProjectScaffoldResult> {
     const mcpFile = path.join(projectPath, '.mcp.json');
     let mcpStatus: ClaudeScaffoldStatus = 'unchanged';
-    const irantiMcpServer = makeIrantiMcpServerConfig();
+    const resolvedProjectEnvPath = projectEnvPath && fs.existsSync(projectEnvPath)
+        ? projectEnvPath
+        : (fs.existsSync(path.join(projectPath, '.env.iranti')) ? path.join(projectPath, '.env.iranti') : undefined);
+    const irantiMcpServer = makeIrantiMcpServerConfig(resolvedProjectEnvPath);
     if (!fs.existsSync(mcpFile)) {
         await writeText(mcpFile, `${JSON.stringify({
             mcpServers: {

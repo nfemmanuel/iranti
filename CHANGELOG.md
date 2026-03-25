@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.32 - Unreleased
+
+### Changed
+
+- `iranti codex-setup` now writes or merges a project-local `.mcp.json` pinned to the active `.env.iranti` binding when setup runs from a bound workspace.
+- Iranti-generated `.mcp.json` files now include `IRANTI_PROJECT_ENV` when the local project binding is known, keeping Claude Code and Codex IDE sessions on the same resolved project context.
+
+### Fixed
+
+- Codex IDE sessions no longer have to rely on global MCP registration discovery alone; the bound workspace now carries a deterministic `iranti` MCP server entry with the default Codex agent/source and the resolved project binding.
+- Added regressions covering both `codex-setup` workspace-file generation and setup wizard `.mcp.json` scaffolding with pinned `IRANTI_PROJECT_ENV`.
+
+### Validation
+
+- Re-ran `npm run build`, `npm run test:cli-process-safety`, and `npx ts-node tests/runtime-lifecycle/run_setup_upgrade_tests.ts` locally after the workspace `.mcp.json` change.
+
 ## 0.2.31 - Unreleased
 
 ### Changed

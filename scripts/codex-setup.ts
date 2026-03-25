@@ -9,6 +9,7 @@ type SetupOptions = {
     provider?: string;
     projectEnv?: string;
     useLocalScript: boolean;
+    writeWorkspaceFile: boolean;
 };
 
 function parseArgs(argv: string[]): SetupOptions {
@@ -17,6 +18,7 @@ function parseArgs(argv: string[]): SetupOptions {
         agent: 'codex_code',
         source: 'Codex',
         useLocalScript: false,
+        writeWorkspaceFile: true,
     };
 
     for (let index = 0; index < argv.length; index += 1) {
@@ -51,6 +53,9 @@ function parseArgs(argv: string[]): SetupOptions {
             case '--local-script':
                 options.useLocalScript = true;
                 break;
+            case '--no-workspace-file':
+                options.writeWorkspaceFile = false;
+                break;
             case '--help':
             case '-h':
                 printHelp();
@@ -69,14 +74,16 @@ function printHelp(): void {
         'Configure Codex to use the local Iranti MCP server.',
         '',
         'Usage:',
-        '  ts-node scripts/codex-setup.ts [--name iranti] [--agent codex_code] [--source Codex] [--provider openai] [--project-env path] [--local-script]',
+        '  ts-node scripts/codex-setup.ts [--name iranti] [--agent codex_code] [--source Codex] [--provider openai] [--project-env path] [--local-script] [--no-workspace-file]',
         '',
         'Notes:',
         '  - Registers a global Codex MCP entry using `codex mcp add`.',
         '  - Prefers the installed CLI path: `iranti mcp`.',
+        '  - When a project binding is available, also writes or merges a project-local `.mcp.json` entry pinned to that binding.',
         '  - By default does not pin IRANTI_PROJECT_ENV, so Codex can resolve .env.iranti from the active project/workspace at runtime.',
         '  - Use --project-env only when you deliberately want to pin Codex globally to one project binding.',
         '  - Use --local-script only if you need to point Codex at this repo build directly.',
+        '  - Use --no-workspace-file only if you explicitly want global registration without a project-local `.mcp.json` update.',
         '  - Does not store DATABASE_URL in Codex config; iranti-mcp loads project/instance env at runtime.',
         '  - Replaces any existing MCP entry with the same name.',
     ].join('\n'));
@@ -140,6 +147,89 @@ function resolveProjectEnv(options: SetupOptions): string | undefined {
     return undefined;
 }
 
+function findClosestAncestorFile(startDir: string, fileName: string): string | undefined {
+    let current = path.resolve(startDir);
+    while (true) {
+        const candidate = path.join(current, fileName);
+        if (fs.existsSync(candidate)) {
+            return candidate;
+        }
+        const parent = path.dirname(current);
+        if (parent === current) {
+            return undefined;
+        }
+        current = parent;
+    }
+}
+
+function resolveWorkspaceProjectEnv(options: SetupOptions): string | undefined {
+    const explicit = resolveProjectEnv(options);
+    if (explicit) {
+        return explicit;
+    }
+    return findClosestAncestorFile(process.cwd(), '.env.iranti');
+}
+
+function makeWorkspaceMcpServer(options: SetupOptions, projectEnv: string): Record<string, unknown> {
+    const env: Record<string, string> = {
+        IRANTI_PROJECT_ENV: projectEnv,
+        IRANTI_MCP_DEFAULT_AGENT: options.agent,
+        IRANTI_MCP_DEFAULT_SOURCE: options.source,
+    };
+    if (options.provider) {
+        env.LLM_PROVIDER = options.provider;
+    }
+    return {
+        command: 'iranti',
+        args: ['mcp'],
+        env,
+    };
+}
+
+function writeWorkspaceMcpFile(projectEnv: string, options: SetupOptions): { filePath: string; status: 'created' | 'updated' | 'unchanged' } {
+    const projectPath = path.dirname(projectEnv);
+    const mcpFile = path.join(projectPath, '.mcp.json');
+    const nextServer = makeWorkspaceMcpServer(options, projectEnv);
+
+    if (!fs.existsSync(mcpFile)) {
+        fs.writeFileSync(mcpFile, `${JSON.stringify({
+            mcpServers: {
+                iranti: nextServer,
+            },
+        }, null, 2)}\n`, 'utf8');
+        return { filePath: mcpFile, status: 'created' };
+    }
+
+    let existing: Record<string, unknown>;
+    try {
+        existing = JSON.parse(fs.readFileSync(mcpFile, 'utf8')) as Record<string, unknown>;
+    } catch {
+        throw new Error(`Existing .mcp.json is not valid JSON: ${mcpFile}`);
+    }
+
+    if (!existing || typeof existing !== 'object' || Array.isArray(existing)) {
+        throw new Error(`Existing .mcp.json must contain a JSON object: ${mcpFile}`);
+    }
+
+    const existingServers =
+        existing.mcpServers && typeof existing.mcpServers === 'object' && !Array.isArray(existing.mcpServers)
+            ? existing.mcpServers as Record<string, unknown>
+            : {};
+    const currentIranti = existingServers.iranti;
+    if (JSON.stringify(currentIranti) === JSON.stringify(nextServer)) {
+        return { filePath: mcpFile, status: 'unchanged' };
+    }
+
+    fs.writeFileSync(mcpFile, `${JSON.stringify({
+        ...existing,
+        mcpServers: {
+            ...existingServers,
+            iranti: nextServer,
+        },
+    }, null, 2)}\n`, 'utf8');
+    return { filePath: mcpFile, status: 'updated' };
+}
+
 function canUseInstalledIranti(repoRoot: string): boolean {
     try {
         run('iranti', ['mcp', '--help'], repoRoot);
@@ -200,6 +290,13 @@ function main(): void {
     }
     run('codex', addArgs, repoRoot);
 
+    const workspaceProjectEnv = options.writeWorkspaceFile
+        ? resolveWorkspaceProjectEnv(options)
+        : undefined;
+    const workspaceMcpResult = workspaceProjectEnv
+        ? writeWorkspaceMcpFile(workspaceProjectEnv, options)
+        : null;
+
     const registered = run('codex', ['mcp', 'get', options.name], repoRoot);
     console.log(registered);
     console.log('');
@@ -221,6 +318,13 @@ function main(): void {
             console.log('Project binding: not pinned; `iranti mcp` will resolve `.env.iranti` from the active project/workspace at runtime.');
         }
         console.log(`Launch with: codex -C "${repoRoot}"`);
+    }
+    if (options.writeWorkspaceFile) {
+        if (workspaceMcpResult) {
+            console.log(`Workspace .mcp.json: ${workspaceMcpResult.status} (${workspaceMcpResult.filePath})`);
+        } else {
+            console.log('Workspace .mcp.json: unchanged (no project binding found from the current working directory)');
+        }
     }
 }
 

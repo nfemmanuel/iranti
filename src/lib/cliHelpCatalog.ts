@@ -238,9 +238,9 @@ export const INTEGRATIONS_HELP: HelpEntry[] = [
         scenario: 'Testing whether the SessionStart hook can resolve the right project binding.',
     },
     {
-        command: 'iranti codex-setup [--name iranti] [--agent codex_code] [--source Codex] [--provider openai] [--project-env <path>] [--local-script]',
-        description: 'Register Iranti with the Codex CLI.',
-        useWhen: 'Codex should see Iranti through its global MCP configuration.',
+        command: 'iranti codex-setup [--name iranti] [--agent codex_code] [--source Codex] [--provider openai] [--project-env <path>] [--local-script] [--no-workspace-file]',
+        description: 'Register Iranti with the Codex CLI and, by default, write a project-local `.mcp.json` when a binding is available.',
+        useWhen: 'Codex should see Iranti through its global MCP configuration and the current bound workspace should get a deterministic `.mcp.json` entry.',
         scenario: 'Making the `codex` CLI able to call Iranti tools from bound repos.',
     },
     {
@@ -256,7 +256,7 @@ export const INTEGRATIONS_HELP: HelpEntry[] = [
         scenario: 'Applying the same Claude scaffolding workflow under a directory tree.',
     },
     {
-        command: 'iranti integrate codex [--name iranti] [--agent codex_code] [--source Codex] [--provider openai] [--project-env <path>] [--local-script]',
+        command: 'iranti integrate codex [--name iranti] [--agent codex_code] [--source Codex] [--provider openai] [--project-env <path>] [--local-script] [--no-workspace-file]',
         description: 'Alias for Codex setup.',
         useWhen: 'same as `codex-setup`, but called through the integration command group.',
         scenario: 'Registering the Codex MCP server from a script that groups integrations under one verb.',
@@ -383,7 +383,7 @@ export const INTEGRATE_HELP: HelpEntry[] = [
         scenario: 'Applying Claude scaffolding across multiple repos under `Projects`.',
     },
     {
-        command: 'iranti integrate codex [--name iranti] [--agent codex_code] [--source Codex] [--provider openai] [--project-env <path>] [--local-script]',
+        command: 'iranti integrate codex [--name iranti] [--agent codex_code] [--source Codex] [--provider openai] [--project-env <path>] [--local-script] [--no-workspace-file]',
         description: 'Alias for Codex MCP setup.',
         useWhen: 'you want Codex integration but prefer the integration command group naming.',
         scenario: 'Registering Iranti with the global Codex MCP config.',

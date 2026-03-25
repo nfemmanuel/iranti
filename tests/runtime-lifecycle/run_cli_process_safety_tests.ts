@@ -215,6 +215,89 @@ process.exit(1);
     assert.ok(args.includes(`LLM_PROVIDER=${specialProvider}`), 'provider env should arrive literally');
 }
 
+async function testCodexSetupWritesWorkspaceMcpFile(root: string): Promise<void> {
+    const projectDir = path.join(root, 'workspace project');
+    fs.mkdirSync(projectDir, { recursive: true });
+    const projectEnv = path.join(projectDir, '.env.iranti');
+    fs.writeFileSync(projectEnv, 'IRANTI_URL=http://localhost:3500\nIRANTI_API_KEY=test\n', 'utf8');
+
+    const logPath = path.join(root, 'codex-setup-workspace-log.ndjson');
+    const shimScript = path.join(root, 'fake-tool-shim-workspace.js');
+    fs.writeFileSync(
+        shimScript,
+        `
+const fs = require('fs');
+const tool = process.argv[2];
+const args = process.argv.slice(3);
+const logPath = process.env.IRANTI_TEST_LOG;
+function log(entry) {
+  fs.appendFileSync(logPath, JSON.stringify(entry) + '\\n', 'utf8');
+}
+if (tool === 'codex') {
+  log({ tool, args });
+  if (args.length === 1 && args[0] === '--version') {
+    console.log('codex 0.0.0-test');
+    process.exit(0);
+  }
+  if (args[0] === 'mcp' && args[1] === 'get' && args.includes('--json')) {
+    process.exit(1);
+  }
+  if (args[0] === 'mcp' && args[1] === 'add') {
+    console.log('added');
+    process.exit(0);
+  }
+  if (args[0] === 'mcp' && args[1] === 'get') {
+    console.log('registered');
+    process.exit(0);
+  }
+  if (args[0] === 'mcp' && args[1] === 'remove') {
+    process.exit(0);
+  }
+}
+if (tool === 'iranti') {
+  if (args[0] === 'mcp' && args[1] === '--help') {
+    console.log('iranti mcp help');
+    process.exit(0);
+  }
+}
+process.exit(1);
+`.trim(),
+        'utf8',
+    );
+
+    const proc = spawnSync(
+        process.execPath,
+        codexSetupEntrypointArgs([]),
+        {
+            cwd: projectDir,
+            encoding: 'utf8',
+            env: {
+                ...process.env,
+                IRANTI_TEST_LOG: logPath,
+                IRANTI_TEST_TOOL_SHIM: shimScript,
+                TS_NODE_PROJECT: path.join(repoRoot, 'tsconfig.json'),
+                TS_NODE_TRANSPILE_ONLY: 'true',
+            },
+            stdio: ['ignore', 'pipe', 'pipe'],
+        },
+    );
+
+    const stdout = typeof proc.stdout === 'string' ? proc.stdout : Buffer.from(proc.stdout ?? []).toString('utf8');
+    const stderr = typeof proc.stderr === 'string' ? proc.stderr : Buffer.from(proc.stderr ?? []).toString('utf8');
+    assert.strictEqual(proc.status, 0, `codex-setup should write workspace .mcp.json when run from a bound project:\n${stdout}\n${stderr}`);
+
+    const mcpFile = path.join(projectDir, '.mcp.json');
+    assert.ok(fs.existsSync(mcpFile), 'codex-setup should create .mcp.json in the bound workspace');
+    const mcpConfig = JSON.parse(fs.readFileSync(mcpFile, 'utf8')) as {
+        mcpServers?: Record<string, { command?: string; args?: string[]; env?: Record<string, string> }>;
+    };
+    assert.deepStrictEqual(mcpConfig.mcpServers?.iranti?.args, ['mcp'], 'workspace .mcp.json should register iranti mcp');
+    assert.strictEqual(mcpConfig.mcpServers?.iranti?.command, 'iranti', 'workspace .mcp.json should use the installed iranti command');
+    assert.strictEqual(mcpConfig.mcpServers?.iranti?.env?.IRANTI_PROJECT_ENV, projectEnv, 'workspace .mcp.json should pin the local project binding');
+    assert.strictEqual(mcpConfig.mcpServers?.iranti?.env?.IRANTI_MCP_DEFAULT_AGENT, 'codex_code', 'workspace .mcp.json should carry the default Codex agent');
+    assert.strictEqual(mcpConfig.mcpServers?.iranti?.env?.IRANTI_MCP_DEFAULT_SOURCE, 'Codex', 'workspace .mcp.json should carry the default Codex source label');
+}
+
 async function testWindowsCodexResolutionPrefersExe(root: string): Promise<void> {
     if (process.platform !== 'win32') {
         return;
@@ -298,6 +381,7 @@ async function main(): Promise<void> {
         await testFailedWritePreservesOriginal(root);
         await testEnsureFileContainsLinesLocked(root);
         await testCodexSetupLiteralWindowsArguments(root);
+        await testCodexSetupWritesWorkspaceMcpFile(root);
         await testWindowsCodexResolutionPrefersExe(root);
         await testWindowsCodexResolutionFallsBackToPackageEntrypoint(root);
         await testWindowsIrantiResolutionUsesPackageBin();

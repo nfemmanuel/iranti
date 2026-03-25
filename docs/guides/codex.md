@@ -59,6 +59,7 @@ What it does:
 - on Windows, resolves Codex through a concrete CLI target such as a bundled `codex.exe` or the npm-installed Codex package entrypoint instead of relying on PowerShell-only shim resolution
 - replaces any existing MCP entry named `iranti`
 - registers the global installed CLI path `iranti mcp`
+- when run from a bound project, writes or merges a project-local `.mcp.json` pinned to that project's `.env.iranti`
 - stores only safe defaults like default agent/source in Codex config
 - does not pin `IRANTI_PROJECT_ENV` unless you explicitly pass `--project-env`
 
@@ -72,6 +73,8 @@ Use `--project-env` only when you deliberately want the global Codex MCP registr
 
 Use `--local-script` only if you deliberately want Codex bound to a repo checkout build instead of the installed package.
 
+Use `--no-workspace-file` only if you explicitly want the global Codex registration without touching the current project's `.mcp.json`.
+
 ## 3. Verify the MCP registration
 
 ```bash
@@ -84,6 +87,20 @@ You want the registration to show:
 - args: `mcp`
 - env: includes safe defaults such as agent/source
 - `IRANTI_PROJECT_ENV` only when you explicitly pinned a project with `--project-env`
+
+If setup ran from a bound project, you also want the workspace file to exist:
+
+```bash
+type .mcp.json
+```
+
+The project-local `.mcp.json` should contain:
+- command: `iranti`
+- args: `mcp`
+- env:
+  - `IRANTI_PROJECT_ENV=<absolute path to .env.iranti>`
+  - `IRANTI_MCP_DEFAULT_AGENT=<agent>`
+  - `IRANTI_MCP_DEFAULT_SOURCE=<source>`
 
 ## 4. Launch Codex in the bound project
 
