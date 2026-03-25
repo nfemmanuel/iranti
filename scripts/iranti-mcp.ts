@@ -3,6 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import * as z from 'zod/v4';
 import { Iranti } from '../src/sdk';
+import { rewriteCommandError } from '../src/lib/commandErrors';
 import { loadRuntimeEnv } from '../src/lib/runtimeEnv';
 
 type JsonRecord = Record<string, unknown>;
@@ -340,6 +341,7 @@ and may be resolved or escalated.`,
 }
 
 main().catch((error) => {
-    console.error('[iranti-mcp] fatal:', error instanceof Error ? error.message : String(error));
+    const formatted = rewriteCommandError('iranti mcp', error);
+    console.error('[iranti-mcp] fatal:', formatted.message);
     process.exit(1);
 });

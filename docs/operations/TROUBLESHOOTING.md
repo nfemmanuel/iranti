@@ -213,6 +213,28 @@ pkill -f "node.*api"
 npm run api
 ```
 
+### CLI Or MCP Fails With Missing Columns Or Tables
+
+**Symptom**: A DB-backed command such as `iranti mcp`, `iranti handshake`, or `iranti attend` fails with an error mentioning a missing column or relation, for example `validFrom does not exist in the current database`.
+
+**What it means**:
+- the Iranti code and the connected PostgreSQL schema are out of sync
+- the runtime is pointing at a database that has not had the current Prisma migrations applied
+
+**Solutions**:
+```bash
+# Apply the shipped migrations to the connected database
+npx prisma migrate deploy --schema prisma/schema.prisma
+
+# Regenerate the Prisma client for the current checkout
+npm run prisma:generate
+
+# Then retry the command
+iranti mcp --help
+```
+
+If this happens on a named instance, make sure you apply migrations to the database referenced by that instance's `DATABASE_URL`, not just the database in the current shell.
+
 ---
 
 ## Client Issues

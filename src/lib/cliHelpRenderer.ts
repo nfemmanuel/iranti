@@ -45,6 +45,18 @@ function printHelpEntries(style: CliHelpStyle, title: string, entries: HelpEntry
     console.log('');
 }
 
+function printSingleHelpEntry(style: CliHelpStyle, title: string, entry: HelpEntry): void {
+    printHelpEntries(style, title, [entry]);
+}
+
+function requireHelpEntry(entries: HelpEntry[], prefix: string): HelpEntry {
+    const match = entries.find((entry) => entry.command.startsWith(prefix));
+    if (!match) {
+        throw new Error(`Missing CLI help entry for prefix: ${prefix}`);
+    }
+    return match;
+}
+
 function printOptionGuide(style: CliHelpStyle, title: string, entries: OptionGuideEntry[]): void {
     console.log(style.sectionTitle(title));
     for (const entry of entries) {
@@ -112,6 +124,22 @@ export function printSetupHelp(style: CliHelpStyle): void {
     printOptionGuide(style, 'Setup Option Guide', SETUP_OPTION_GUIDE);
 }
 
+export function printInstallHelp(style: CliHelpStyle): void {
+    printSingleHelpEntry(
+        style,
+        'Install Command',
+        requireHelpEntry(SETUP_AND_RUNTIME_HELP, 'iranti install ')
+    );
+}
+
+export function printRunHelp(style: CliHelpStyle): void {
+    printSingleHelpEntry(
+        style,
+        'Run Command',
+        requireHelpEntry(SETUP_AND_RUNTIME_HELP, 'iranti run ')
+    );
+}
+
 export function printUninstallHelp(style: CliHelpStyle): void {
     printHelpEntries(style, 'Uninstall Command', UNINSTALL_HELP);
     printOptionGuide(style, 'Uninstall Option Guide', UNINSTALL_OPTION_GUIDE);
@@ -125,12 +153,124 @@ export function printConfigureHelp(style: CliHelpStyle): void {
     printHelpEntries(style, 'Configure Commands', CONFIGURE_HELP);
 }
 
+export function printConfigureInstanceHelp(style: CliHelpStyle): void {
+    printSingleHelpEntry(
+        style,
+        'Configure Instance Command',
+        requireHelpEntry(CONFIGURE_HELP, 'iranti configure instance ')
+    );
+}
+
+export function printConfigureProjectHelp(style: CliHelpStyle): void {
+    printSingleHelpEntry(
+        style,
+        'Configure Project Command',
+        requireHelpEntry(CONFIGURE_HELP, 'iranti configure project ')
+    );
+}
+
 export function printAuthHelp(style: CliHelpStyle): void {
     printHelpEntries(style, 'Auth Commands', AUTH_HELP);
 }
 
+export function printAuthCreateKeyHelp(style: CliHelpStyle): void {
+    printSingleHelpEntry(
+        style,
+        'Auth Create-Key Command',
+        requireHelpEntry(AUTH_HELP, 'iranti auth create-key ')
+    );
+}
+
+export function printAuthListKeysHelp(style: CliHelpStyle): void {
+    printSingleHelpEntry(
+        style,
+        'Auth List-Keys Command',
+        requireHelpEntry(AUTH_HELP, 'iranti auth list-keys ')
+    );
+}
+
+export function printAuthRevokeKeyHelp(style: CliHelpStyle): void {
+    printSingleHelpEntry(
+        style,
+        'Auth Revoke-Key Command',
+        requireHelpEntry(AUTH_HELP, 'iranti auth revoke-key ')
+    );
+}
+
 export function printIntegrateHelp(style: CliHelpStyle): void {
     printHelpEntries(style, 'Integrations', INTEGRATE_HELP);
+}
+
+export function printProjectInitHelp(style: CliHelpStyle): void {
+    printSingleHelpEntry(
+        style,
+        'Project Init Command',
+        requireHelpEntry(CONFIGURATION_HELP, 'iranti project init ')
+    );
+}
+
+export function printDoctorHelp(style: CliHelpStyle): void {
+    printSingleHelpEntry(
+        style,
+        'Doctor Command',
+        requireHelpEntry(DIAGNOSTICS_HELP, 'iranti doctor ')
+    );
+}
+
+export function printStatusHelp(style: CliHelpStyle): void {
+    printSingleHelpEntry(
+        style,
+        'Status Command',
+        requireHelpEntry(DIAGNOSTICS_HELP, 'iranti status ')
+    );
+}
+
+export function printUpgradeHelp(style: CliHelpStyle): void {
+    printSingleHelpEntry(
+        style,
+        'Upgrade Command',
+        requireHelpEntry(DIAGNOSTICS_HELP, 'iranti upgrade ')
+    );
+}
+
+export function printHandshakeHelp(style: CliHelpStyle): void {
+    printSingleHelpEntry(
+        style,
+        'Handshake Command',
+        requireHelpEntry(DIAGNOSTICS_HELP, 'iranti handshake ')
+    );
+}
+
+export function printAttendHelp(style: CliHelpStyle): void {
+    printSingleHelpEntry(
+        style,
+        'Attend Command',
+        requireHelpEntry(DIAGNOSTICS_HELP, 'iranti attend ')
+    );
+}
+
+export function printHandoffHelp(style: CliHelpStyle): void {
+    printSingleHelpEntry(
+        style,
+        'Handoff Command',
+        requireHelpEntry(DIAGNOSTICS_HELP, 'iranti handoff ')
+    );
+}
+
+export function printChatHelp(style: CliHelpStyle): void {
+    printSingleHelpEntry(
+        style,
+        'Chat Command',
+        requireHelpEntry(DIAGNOSTICS_HELP, 'iranti chat ')
+    );
+}
+
+export function printResolveHelp(style: CliHelpStyle): void {
+    printSingleHelpEntry(
+        style,
+        'Resolve Command',
+        requireHelpEntry(DIAGNOSTICS_HELP, 'iranti resolve ')
+    );
 }
 
 export function printProviderKeyHelp(style: CliHelpStyle): void {

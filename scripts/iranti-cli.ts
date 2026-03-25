@@ -12,18 +12,35 @@ import { disconnectDb, initDb } from '../src/library/client';
 import { createOrRotateApiKey, formatApiKeyToken, generateApiKeySecret, listApiKeys, revokeApiKey } from '../src/security/apiKeys';
 import {
     printAuthHelp as renderAuthHelp,
+    printAuthCreateKeyHelp as renderAuthCreateKeyHelp,
+    printAuthListKeysHelp as renderAuthListKeysHelp,
+    printAuthRevokeKeyHelp as renderAuthRevokeKeyHelp,
+    printAttendHelp as renderAttendHelp,
+    printChatHelp as renderChatHelp,
     printChoiceGuide as renderChoiceGuide,
     printConfigureHelp as renderConfigureHelp,
+    printConfigureInstanceHelp as renderConfigureInstanceHelp,
+    printConfigureProjectHelp as renderConfigureProjectHelp,
+    printDoctorHelp as renderDoctorHelp,
+    printHandshakeHelp as renderHandshakeHelp,
+    printHandoffHelp as renderHandoffHelp,
+    printInstallHelp as renderInstallHelp,
     printInstanceHelp as renderInstanceHelp,
     printIntegrateHelp as renderIntegrateHelp,
     printMainHelp as renderMainHelp,
+    printProjectInitHelp as renderProjectInitHelp,
     printProviderKeyHelp as renderProviderKeyHelp,
+    printResolveHelp as renderResolveHelp,
+    printRunHelp as renderRunHelp,
     printSetupHelp as renderSetupHelp,
+    printStatusHelp as renderStatusHelp,
     printUninstallHelp as renderUninstallHelp,
+    printUpgradeHelp as renderUpgradeHelp,
     printWizardNotes as renderWizardNotes,
 } from '../src/lib/cliHelpRenderer';
 import { getEscalationPaths } from '../src/lib/escalationPaths';
 import { parseDockerContainerNames, parsePublishedDockerHostPorts } from '../src/lib/dockerCliParsing';
+import { rewriteCommandError } from '../src/lib/commandErrors';
 import { resolveCommandInvocation, spawnResolved, spawnSyncResolved } from '../src/lib/commandInvocation';
 import { loadRuntimeEnv } from '../src/lib/runtimeEnv';
 import { ensureFileContainsLinesLocked, writeTextFileLocked } from '../src/lib/fileMutation';
@@ -6673,6 +6690,14 @@ function printSetupHelp(): void {
     renderSetupHelp({ sectionTitle, commandText });
 }
 
+function printInstallHelp(): void {
+    renderInstallHelp({ sectionTitle, commandText });
+}
+
+function printRunHelp(): void {
+    renderRunHelp({ sectionTitle, commandText });
+}
+
 function printUninstallHelp(): void {
     renderUninstallHelp({ sectionTitle, commandText });
 }
@@ -6685,12 +6710,68 @@ function printConfigureHelp(): void {
     renderConfigureHelp({ sectionTitle, commandText });
 }
 
+function printConfigureInstanceHelp(): void {
+    renderConfigureInstanceHelp({ sectionTitle, commandText });
+}
+
+function printConfigureProjectHelp(): void {
+    renderConfigureProjectHelp({ sectionTitle, commandText });
+}
+
 function printAuthHelp(): void {
     renderAuthHelp({ sectionTitle, commandText });
 }
 
+function printAuthCreateKeyHelp(): void {
+    renderAuthCreateKeyHelp({ sectionTitle, commandText });
+}
+
+function printAuthListKeysHelp(): void {
+    renderAuthListKeysHelp({ sectionTitle, commandText });
+}
+
+function printAuthRevokeKeyHelp(): void {
+    renderAuthRevokeKeyHelp({ sectionTitle, commandText });
+}
+
 function printIntegrateHelp(): void {
     renderIntegrateHelp({ sectionTitle, commandText });
+}
+
+function printProjectInitHelp(): void {
+    renderProjectInitHelp({ sectionTitle, commandText });
+}
+
+function printDoctorHelp(): void {
+    renderDoctorHelp({ sectionTitle, commandText });
+}
+
+function printStatusHelp(): void {
+    renderStatusHelp({ sectionTitle, commandText });
+}
+
+function printUpgradeHelp(): void {
+    renderUpgradeHelp({ sectionTitle, commandText });
+}
+
+function printHandshakeHelp(): void {
+    renderHandshakeHelp({ sectionTitle, commandText });
+}
+
+function printAttendHelp(): void {
+    renderAttendHelp({ sectionTitle, commandText });
+}
+
+function printHandoffHelp(): void {
+    renderHandoffHelp({ sectionTitle, commandText });
+}
+
+function printChatHelp(): void {
+    renderChatHelp({ sectionTitle, commandText });
+}
+
+function printResolveHelp(): void {
+    renderResolveHelp({ sectionTitle, commandText });
 }
 
 function printProviderKeyHelp(): void {
@@ -6716,6 +6797,10 @@ async function main(): Promise<void> {
     }
 
     if (args.command === 'install') {
+        if (hasFlag(args, 'help')) {
+            printInstallHelp();
+            return;
+        }
         await installCommand(args);
         return;
     }
@@ -6735,18 +6820,34 @@ async function main(): Promise<void> {
             return;
         }
         if (args.subcommand === 'create') {
+            if (hasFlag(args, 'help')) {
+                printInstanceHelp();
+                return;
+            }
             await createInstanceCommand(args);
             return;
         }
         if (args.subcommand === 'list') {
+            if (hasFlag(args, 'help')) {
+                printInstanceHelp();
+                return;
+            }
             await listInstancesCommand(args);
             return;
         }
         if (args.subcommand === 'show') {
+            if (hasFlag(args, 'help')) {
+                printInstanceHelp();
+                return;
+            }
             await showInstanceCommand(args);
             return;
         }
         if (args.subcommand === 'restart') {
+            if (hasFlag(args, 'help')) {
+                printInstanceHelp();
+                return;
+            }
             await restartInstanceCommand(args);
             return;
         }
@@ -6754,6 +6855,10 @@ async function main(): Promise<void> {
     }
 
     if (args.command === 'run') {
+        if (hasFlag(args, 'help')) {
+            printRunHelp();
+            return;
+        }
         await runInstanceCommand(args);
         return;
     }
@@ -6764,10 +6869,18 @@ async function main(): Promise<void> {
             return;
         }
         if (args.subcommand === 'instance') {
+            if (hasFlag(args, 'help')) {
+                printConfigureInstanceHelp();
+                return;
+            }
             await configureInstanceCommand(args);
             return;
         }
         if (args.subcommand === 'project') {
+            if (hasFlag(args, 'help')) {
+                printConfigureProjectHelp();
+                return;
+            }
             await configureProjectCommand(args);
             return;
         }
@@ -6780,14 +6893,26 @@ async function main(): Promise<void> {
             return;
         }
         if (args.subcommand === 'create-key') {
+            if (hasFlag(args, 'help')) {
+                printAuthCreateKeyHelp();
+                return;
+            }
             await authCreateKeyCommand(args);
             return;
         }
         if (args.subcommand === 'list-keys') {
+            if (hasFlag(args, 'help')) {
+                printAuthListKeysHelp();
+                return;
+            }
             await authListKeysCommand(args);
             return;
         }
         if (args.subcommand === 'revoke-key') {
+            if (hasFlag(args, 'help')) {
+                printAuthRevokeKeyHelp();
+                return;
+            }
             await authRevokeKeyCommand(args);
             return;
         }
@@ -6831,21 +6956,37 @@ async function main(): Promise<void> {
     }
 
     if (args.command === 'project' && args.subcommand === 'init') {
+        if (hasFlag(args, 'help')) {
+            printProjectInitHelp();
+            return;
+        }
         await projectInitCommand(args);
         return;
     }
 
     if (args.command === 'doctor') {
+        if (hasFlag(args, 'help')) {
+            printDoctorHelp();
+            return;
+        }
         await doctorCommand(args);
         return;
     }
 
     if (args.command === 'status') {
+        if (hasFlag(args, 'help')) {
+            printStatusHelp();
+            return;
+        }
         await statusCommand(args);
         return;
     }
 
     if (args.command === 'upgrade') {
+        if (hasFlag(args, 'help')) {
+            printUpgradeHelp();
+            return;
+        }
         await upgradeCommand(args);
         return;
     }
@@ -6860,26 +7001,46 @@ async function main(): Promise<void> {
     }
 
     if (args.command === 'handshake') {
+        if (hasFlag(args, 'help')) {
+            printHandshakeHelp();
+            return;
+        }
         await handshakeCommand(args);
         return;
     }
 
     if (args.command === 'attend') {
+        if (hasFlag(args, 'help')) {
+            printAttendHelp();
+            return;
+        }
         await attendCommand(args);
         return;
     }
 
     if (args.command === 'handoff') {
+        if (hasFlag(args, 'help')) {
+            printHandoffHelp();
+            return;
+        }
         await handoffCommand(args);
         return;
     }
 
     if (args.command === 'chat') {
+        if (hasFlag(args, 'help')) {
+            printChatHelp();
+            return;
+        }
         await chatCommand(args);
         return;
     }
 
     if (args.command === 'resolve') {
+        if (hasFlag(args, 'help')) {
+            printResolveHelp();
+            return;
+        }
         await resolveCommand(args);
         return;
     }
@@ -6929,7 +7090,8 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-    const message = err instanceof Error ? err.message : String(err);
+    const formattedError = rewriteCommandError('iranti', err);
+    const message = formattedError.message;
     const code = err instanceof CliError ? err.code : null;
     console.error(`${failLabel('ERROR')}${code ? ` [${code}]` : ''} ${message}`);
     if (err instanceof CliError && err.hints.length > 0) {
@@ -6943,9 +7105,9 @@ main().catch((err) => {
         console.error('');
         console.error(`${paint('[DEBUG]', 'gray')} ${JSON.stringify(err.details, null, 2)}`);
     }
-    if (CLI_DEBUG && err instanceof Error && err.stack) {
+    if (CLI_DEBUG && formattedError.stack) {
         console.error('');
-        console.error(err.stack);
+        console.error(formattedError.stack);
     }
     process.exit(1);
 });
