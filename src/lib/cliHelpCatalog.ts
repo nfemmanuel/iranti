@@ -152,8 +152,8 @@ export const KEY_HELP: HelpEntry[] = [
 export const DIAGNOSTICS_HELP: HelpEntry[] = [
     {
         command: 'iranti version',
-        description: 'Print the installed CLI version and exit.',
-        useWhen: 'you need to confirm which release is on PATH before debugging or upgrading.',
+        description: 'Print the installed CLI version and related package versions, while keeping non-interactive output script-friendly.',
+        useWhen: 'you need to confirm which release is on PATH before debugging or upgrading, or you want the terminal to show the matching Python and TypeScript package versions too.',
         scenario: 'Checking whether your global install picked up the latest npm release.',
     },
     {

@@ -327,6 +327,20 @@ function assertCliGuideContracts(): void {
         fail('Setup help output includes option guidance', 'Expected `node bin/iranti.js setup --help` to include the setup option guide.');
     }
 
+    const versionOutput = execFileSync('node', ['bin/iranti.js', '--version'], {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+    }).trim();
+    if (/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(versionOutput)) {
+        pass('CLI version output stays machine-readable when stdout is not a TTY');
+    } else {
+        fail('CLI version output stays machine-readable when stdout is not a TTY', `Expected plain semver from non-interactive \`iranti --version\`, received: ${versionOutput}`);
+    }
+
+    expectIncludes(cliFilePath, cliContent, "sectionTitle('Iranti Versions')", 'CLI version source includes rich TTY version summary');
+    expectIncludes(cliFilePath, cliContent, 'node package          ${getTypescriptClientVersion()} (@iranti/sdk)', 'CLI version source includes TypeScript package line');
+    expectIncludes(cliFilePath, cliContent, 'python package        ${getPythonClientVersion()} (iranti)', 'CLI version source includes Python package line');
+
     const quickstartPath = 'docs/guides/quickstart.md';
     const quickstartContent = readFile(quickstartPath);
     expectIncludes(quickstartPath, quickstartContent, 'iranti handoff task/runtime_verification_pass', 'Quickstart documents iranti handoff');

@@ -584,6 +584,49 @@ function getPackageVersion(): string {
     return '0.0.0';
 }
 
+function getTypescriptClientVersion(): string {
+    const fallback = getPackageVersion();
+    const packageJsonPath = path.join(packageRoot(), 'clients', 'typescript', 'package.json');
+    if (!fs.existsSync(packageJsonPath)) {
+        return fallback;
+    }
+    try {
+        const raw = fs.readFileSync(packageJsonPath, 'utf-8');
+        const pkg = JSON.parse(raw) as { version?: string };
+        return String(pkg.version ?? fallback);
+    } catch {
+        return fallback;
+    }
+}
+
+function getPythonClientVersion(): string {
+    const fallback = getPackageVersion();
+    const pyprojectPath = path.join(packageRoot(), 'clients', 'python', 'pyproject.toml');
+    if (!fs.existsSync(pyprojectPath)) {
+        return fallback;
+    }
+    try {
+        const raw = fs.readFileSync(pyprojectPath, 'utf-8');
+        const match = raw.match(/^\s*version\s*=\s*"([^"]+)"/m);
+        return match?.[1] ?? fallback;
+    } catch {
+        return fallback;
+    }
+}
+
+function printVersion(): void {
+    const irantiVersion = getPackageVersion();
+    if (!process.stdout.isTTY) {
+        console.log(irantiVersion);
+        return;
+    }
+
+    console.log(sectionTitle('Iranti Versions'));
+    console.log(`  iranti cli            ${irantiVersion}`);
+    console.log(`  node package          ${getTypescriptClientVersion()} (@iranti/sdk)`);
+    console.log(`  python package        ${getPythonClientVersion()} (iranti)`);
+}
+
 function packageRoot(): string {
     let dir = __dirname;
     for (let i = 0; i < 6; i++) {
@@ -6663,7 +6706,7 @@ async function main(): Promise<void> {
         cwd: process.cwd(),
     });
     if (args.command === '--version' || args.command === 'version' || hasFlag(args, 'version')) {
-        console.log(getPackageVersion());
+        printVersion();
         return;
     }
 

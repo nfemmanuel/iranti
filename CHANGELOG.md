@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.31 - Unreleased
+
+### Changed
+
+- `iranti --version` and `iranti version` now print a richer labeled version summary in an interactive terminal, including the Iranti CLI version plus the shipped TypeScript and Python package versions.
+
+### Fixed
+
+- Non-interactive `iranti --version` output remains a plain semver string so existing scripts and automation do not break while the terminal view gains the extra package-version detail.
+- Added a contract check covering the non-TTY semver output and source-level coverage for the richer TTY version summary.
+
+### Validation
+
+- Re-ran `npm run build` and `npm run test:contracts` locally after the CLI version output change.
+- Verified the interactive TTY path prints the labeled Iranti, Node package, and Python package versions.
+
 ## 0.2.30 - Unreleased
 
 ### Changed
