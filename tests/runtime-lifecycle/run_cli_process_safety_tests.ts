@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { spawnSync } from 'child_process';
-import { spawnSyncResolved } from '../../src/lib/commandInvocation';
+import { resolveCommandInvocation, spawnSyncResolved } from '../../src/lib/commandInvocation';
 import { ensureFileContainsLinesLocked, writeTextFileLocked } from '../../src/lib/fileMutation';
 const repoRoot = path.resolve(__dirname, '..', '..');
 const codexSetupScript = path.join(repoRoot, 'scripts', 'codex-setup.ts');
@@ -215,6 +215,80 @@ process.exit(1);
     assert.ok(args.includes(`LLM_PROVIDER=${specialProvider}`), 'provider env should arrive literally');
 }
 
+async function testWindowsCodexResolutionPrefersExe(root: string): Promise<void> {
+    if (process.platform !== 'win32') {
+        return;
+    }
+    const whereScript = path.join(root, 'fake-where.js');
+    const npmDir = path.join(root, 'npm');
+    const bundledExe = path.join(root, 'bundle', 'codex.exe');
+    fs.mkdirSync(npmDir, { recursive: true });
+    fs.mkdirSync(path.dirname(bundledExe), { recursive: true });
+    fs.writeFileSync(path.join(npmDir, 'codex.cmd'), '@echo off\r\n', 'utf8');
+    fs.writeFileSync(bundledExe, '', 'utf8');
+    fs.writeFileSync(
+        whereScript,
+        `
+process.stdout.write([
+  ${JSON.stringify(path.join(root, 'npm', 'codex'))},
+  ${JSON.stringify(path.join(root, 'npm', 'codex.cmd'))},
+  ${JSON.stringify(bundledExe)},
+].join('\\n'));
+`.trim(),
+        'utf8',
+    );
+
+    const previousWhere = process.env.IRANTI_TEST_WHERE_EXE;
+    const previousCodexCli = process.env.CODEX_CLI_PATH;
+    try {
+        process.env.IRANTI_TEST_WHERE_EXE = whereScript;
+        delete process.env.CODEX_CLI_PATH;
+        const invocation = resolveCommandInvocation('codex', ['--version']);
+        assert.strictEqual(invocation.executable, bundledExe, 'resolver should prefer a concrete codex.exe when PATH hits include one');
+        assert.deepStrictEqual(invocation.args, ['--version']);
+    } finally {
+        if (previousWhere === undefined) delete process.env.IRANTI_TEST_WHERE_EXE;
+        else process.env.IRANTI_TEST_WHERE_EXE = previousWhere;
+        if (previousCodexCli === undefined) delete process.env.CODEX_CLI_PATH;
+        else process.env.CODEX_CLI_PATH = previousCodexCli;
+    }
+}
+
+async function testWindowsCodexResolutionFallsBackToPackageEntrypoint(root: string): Promise<void> {
+    if (process.platform !== 'win32') {
+        return;
+    }
+    const codexCmd = path.join(root, 'npm', 'codex.cmd');
+    const packageEntrypoint = path.join(root, 'npm', 'node_modules', '@openai', 'codex', 'bin', 'codex.js');
+    fs.mkdirSync(path.dirname(packageEntrypoint), { recursive: true });
+    fs.writeFileSync(codexCmd, '@echo off\r\n', 'utf8');
+    fs.writeFileSync(packageEntrypoint, 'console.log("codex");\n', 'utf8');
+
+    const previousWhere = process.env.IRANTI_TEST_WHERE_EXE;
+    const previousCodexCli = process.env.CODEX_CLI_PATH;
+    try {
+        delete process.env.IRANTI_TEST_WHERE_EXE;
+        process.env.CODEX_CLI_PATH = codexCmd;
+        const invocation = resolveCommandInvocation('codex', ['mcp', 'get', 'iranti']);
+        assert.strictEqual(invocation.executable, process.execPath, 'cmd shim should resolve to the npm-installed codex.js entrypoint');
+        assert.deepStrictEqual(invocation.args, [packageEntrypoint, 'mcp', 'get', 'iranti']);
+    } finally {
+        if (previousWhere === undefined) delete process.env.IRANTI_TEST_WHERE_EXE;
+        else process.env.IRANTI_TEST_WHERE_EXE = previousWhere;
+        if (previousCodexCli === undefined) delete process.env.CODEX_CLI_PATH;
+        else process.env.CODEX_CLI_PATH = previousCodexCli;
+    }
+}
+
+async function testWindowsIrantiResolutionUsesPackageBin(): Promise<void> {
+    if (process.platform !== 'win32') {
+        return;
+    }
+    const invocation = resolveCommandInvocation('iranti', ['mcp', '--help']);
+    assert.strictEqual(invocation.executable, process.execPath, 'iranti child invocations should route through the current package bin on Windows');
+    assert.deepStrictEqual(invocation.args, [path.join(repoRoot, 'bin', 'iranti.js'), 'mcp', '--help']);
+}
+
 async function main(): Promise<void> {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'iranti-cli-hardening-'));
     try {
@@ -224,6 +298,9 @@ async function main(): Promise<void> {
         await testFailedWritePreservesOriginal(root);
         await testEnsureFileContainsLinesLocked(root);
         await testCodexSetupLiteralWindowsArguments(root);
+        await testWindowsCodexResolutionPrefersExe(root);
+        await testWindowsCodexResolutionFallsBackToPackageEntrypoint(root);
+        await testWindowsIrantiResolutionUsesPackageBin();
         console.log('cli process safety tests passed');
     } finally {
         fs.rmSync(root, { recursive: true, force: true });

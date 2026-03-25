@@ -29,17 +29,19 @@ This feature connects Codex to Iranti through Codex's MCP client using the insta
 1. Install Iranti globally and create a project binding with `iranti project init`.
 2. Run `iranti codex-setup` or `iranti integrate codex`.
 3. The setup script verifies `codex` is installed.
-4. If a Codex MCP entry with the target name already exists, remove it.
-5. Register a new global Codex MCP entry using `codex mcp add`.
-6. If `--project-env` is provided, validate and store it as `IRANTI_PROJECT_ENV`. Otherwise leave the registration unpinned.
-7. By default register `iranti mcp`; only use `--local-script` for repo-bound development.
-8. Store only safe defaults and any explicitly requested pinned `IRANTI_PROJECT_ENV` in the MCP entry.
-9. At runtime, `iranti mcp` loads `IRANTI_PROJECT_ENV` first when explicitly pinned and otherwise falls back to the active project/workspace.
-10. Launch Codex with `codex -C <project>` for the intended workspace context.
+4. On Windows, Codex resolution prefers a concrete CLI target such as `codex.exe`, otherwise falls back to the npm-installed Codex package entrypoint behind the shim.
+5. If a Codex MCP entry with the target name already exists, remove it.
+6. Register a new global Codex MCP entry using `codex mcp add`.
+7. If `--project-env` is provided, validate and store it as `IRANTI_PROJECT_ENV`. Otherwise leave the registration unpinned.
+8. By default register `iranti mcp`; only use `--local-script` for repo-bound development.
+9. Store only safe defaults and any explicitly requested pinned `IRANTI_PROJECT_ENV` in the MCP entry.
+10. At runtime, `iranti mcp` loads `IRANTI_PROJECT_ENV` first when explicitly pinned and otherwise falls back to the active project/workspace.
+11. Launch Codex with `codex -C <project>` for the intended workspace context.
 
 ## Edge Cases
 
 - If `codex` is not installed, setup fails fast with a direct error that tells the user to confirm `codex --version` before retrying.
+- If `codex --version` works in PowerShell on Windows but PATH resolution still differs for child-process execution, `CODEX_CLI_PATH` may be used to pin Iranti to a concrete `codex.exe` or npm shim target.
 - Setup succeeds without `--project-env`; the MCP server then relies on runtime cwd-based resolution.
 - If `--project-env` points to a missing file, setup fails fast.
 - If the installed `iranti` CLI does not expose `iranti mcp`, setup can fall back to `--local-script`.

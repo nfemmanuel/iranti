@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.30 - Unreleased
+
+### Changed
+
+- On Windows, `iranti codex-setup` now resolves Codex through a concrete CLI target such as a bundled `codex.exe` or the npm-installed Codex package entrypoint instead of relying on a PowerShell-only shim lookup.
+- `CODEX_CLI_PATH` may now be used to pin Iranti to a concrete Codex CLI path when PATH resolution is unusual on Windows.
+
+### Fixed
+
+- `iranti codex-setup` no longer falsely reports that Codex is missing on Windows when `codex --version` works in PowerShell but child-process resolution would otherwise stop at a `.ps1` or `.cmd` shim.
+- Windows `iranti codex-setup` now correctly prefers the installed `iranti mcp` registration target instead of falling back to a local script path when it probes the current CLI from inside the setup flow.
+- Added Windows-only regressions covering both direct `codex.exe` selection and npm-shim fallback to the installed Codex package entrypoint.
+
+### Validation
+
+- Re-ran `npm run build` and `npm run test:cli-process-safety` locally on Windows after the resolver change.
+- Verified the built `dist/scripts/codex-setup.js` path by registering and removing a disposable Codex MCP entry on this machine.
+- Installed `iranti-0.2.30.tgz` globally on Windows and verified that `iranti codex-setup` registers `command: iranti` with `args: mcp` through the packaged CLI path.
+
 ## 0.2.29 - Unreleased
 
 ### Fixed

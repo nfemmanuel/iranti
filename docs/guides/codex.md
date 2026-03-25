@@ -56,6 +56,7 @@ iranti integrate codex
 
 What it does:
 - verifies `codex` is installed
+- on Windows, resolves Codex through a concrete CLI target such as a bundled `codex.exe` or the npm-installed Codex package entrypoint instead of relying on PowerShell-only shim resolution
 - replaces any existing MCP entry named `iranti`
 - registers the global installed CLI path `iranti mcp`
 - stores only safe defaults like default agent/source in Codex config
@@ -135,6 +136,15 @@ If `iranti codex-setup` says `codex` is not installed or not on `PATH`, fix that
 ```bash
 codex --version
 ```
+
+On Windows, if `codex --version` works in PowerShell but `iranti codex-setup` still cannot find Codex, point Iranti at the concrete Codex CLI path and rerun setup:
+
+```powershell
+$env:CODEX_CLI_PATH = "C:\path\to\codex.exe"
+iranti codex-setup
+```
+
+Use a direct executable path when possible. If your install comes from global npm shims, `CODEX_CLI_PATH` may also point at the npm-installed `codex.cmd` path and Iranti will resolve the underlying Codex package entrypoint.
 
 2. Confirm the global MCP registration exists:
 

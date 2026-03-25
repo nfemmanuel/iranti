@@ -16,6 +16,31 @@ function windowsNodeToolScript(name: 'npm-cli.js' | 'npx-cli.js'): string {
     return candidate;
 }
 
+function findPackageRoot(startDir: string): string | null {
+    let current = startDir;
+    for (let depth = 0; depth < 8; depth += 1) {
+        const packageJson = path.join(current, 'package.json');
+        if (fs.existsSync(packageJson)) {
+            return current;
+        }
+        const parent = path.dirname(current);
+        if (parent === current) {
+            break;
+        }
+        current = parent;
+    }
+    return null;
+}
+
+function currentIrantiBin(): string | null {
+    const packageRoot = findPackageRoot(__dirname);
+    if (!packageRoot) {
+        return null;
+    }
+    const candidate = path.join(packageRoot, 'bin', 'iranti.js');
+    return fs.existsSync(candidate) ? candidate : null;
+}
+
 function windowsNodeToolOverride(envKey: 'IRANTI_TEST_NPM_CLI' | 'IRANTI_TEST_NPX_CLI', executable: string, args: string[]): CommandInvocation | null {
     const override = process.env[envKey]?.trim();
     if (!override) return null;
@@ -45,6 +70,123 @@ function genericTestToolShim(executable: string, args: string[]): CommandInvocat
     };
 }
 
+function spawnSyncText(command: string, args: string[]): { status: number | null; stdout: string; stderr: string; error?: Error } {
+    const result = spawnSync(command, args, {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        shell: false,
+        windowsHide: true,
+    });
+    return {
+        status: result.status,
+        stdout: typeof result.stdout === 'string' ? result.stdout : Buffer.from(result.stdout ?? []).toString('utf8'),
+        stderr: typeof result.stderr === 'string' ? result.stderr : Buffer.from(result.stderr ?? []).toString('utf8'),
+        error: result.error as Error | undefined,
+    };
+}
+
+function windowsWhereHits(executable: string): string[] {
+    const override = process.env.IRANTI_TEST_WHERE_EXE?.trim();
+    const whereArgs = [executable];
+    let result: { status: number | null; stdout: string; stderr: string; error?: Error };
+    if (override) {
+        const resolved = path.resolve(override);
+        if (!fs.existsSync(resolved)) {
+            throw new Error(`Configured IRANTI_TEST_WHERE_EXE does not exist: ${resolved}`);
+        }
+        if (/\.(cjs|mjs|js)$/i.test(resolved)) {
+            result = spawnSyncText(process.execPath, [resolved, ...whereArgs]);
+        } else {
+            result = spawnSyncText(resolved, whereArgs);
+        }
+    } else {
+        result = spawnSyncText('where.exe', whereArgs);
+    }
+
+    if (result.error || result.status !== 0) {
+        return [];
+    }
+
+    return result.stdout
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+}
+
+function normalizeWindowsCandidate(candidate: string): string[] {
+    const resolved = path.resolve(candidate);
+    const ext = path.extname(resolved).toLowerCase();
+    if (ext) {
+        return [resolved];
+    }
+
+    const options = [resolved];
+    for (const suffix of ['.exe', '.cmd', '.bat', '.ps1']) {
+        const sibling = `${resolved}${suffix}`;
+        if (fs.existsSync(sibling)) {
+            options.push(sibling);
+        }
+    }
+    return options;
+}
+
+function windowsCodexCandidates(rawCandidates: string[]): string[] {
+    return Array.from(new Set(
+        rawCandidates.flatMap((candidate) => normalizeWindowsCandidate(candidate)),
+    ));
+}
+
+function windowsCodexInvocationFromCandidates(candidates: string[], args: string[]): CommandInvocation | null {
+    for (const candidate of candidates) {
+        if (!fs.existsSync(candidate)) {
+            continue;
+        }
+        const ext = path.extname(candidate).toLowerCase();
+        if (ext === '.exe') {
+            return {
+                executable: candidate,
+                args: [...args],
+            };
+        }
+    }
+
+    for (const candidate of candidates) {
+        if (!fs.existsSync(candidate)) {
+            continue;
+        }
+        const ext = path.extname(candidate).toLowerCase();
+        if (ext === '.js' || ext === '.cjs' || ext === '.mjs') {
+            return {
+                executable: process.execPath,
+                args: [candidate, ...args],
+            };
+        }
+        if (ext === '.cmd' || ext === '.bat') {
+            const packageEntrypoint = path.join(path.dirname(candidate), 'node_modules', '@openai', 'codex', 'bin', 'codex.js');
+            if (fs.existsSync(packageEntrypoint)) {
+                return {
+                    executable: process.execPath,
+                    args: [packageEntrypoint, ...args],
+                };
+            }
+        }
+    }
+
+    return null;
+}
+
+function windowsCodexInvocation(args: string[]): CommandInvocation | null {
+    const explicit = process.env.CODEX_CLI_PATH?.trim();
+    if (explicit) {
+        const explicitInvocation = windowsCodexInvocationFromCandidates(windowsCodexCandidates([explicit]), args);
+        if (explicitInvocation) {
+            return explicitInvocation;
+        }
+    }
+
+    return windowsCodexInvocationFromCandidates(windowsCodexCandidates(windowsWhereHits('codex')), args);
+}
+
 export function resolveCommandInvocation(executable: string, args: string[]): CommandInvocation {
     if (process.platform !== 'win32') {
         return { executable, args: [...args] };
@@ -69,6 +211,21 @@ export function resolveCommandInvocation(executable: string, args: string[]): Co
             executable: process.execPath,
             args: [windowsNodeToolScript('npx-cli.js'), ...args],
         };
+    }
+
+    if (executable === 'iranti') {
+        const irantiBin = currentIrantiBin();
+        if (irantiBin) {
+            return {
+                executable: process.execPath,
+                args: [irantiBin, ...args],
+            };
+        }
+    }
+
+    if (executable === 'codex') {
+        const invocation = windowsCodexInvocation(args);
+        if (invocation) return invocation;
     }
 
     return { executable, args: [...args] };
