@@ -188,12 +188,12 @@ function windowsCodexInvocation(args: string[]): CommandInvocation | null {
 }
 
 export function resolveCommandInvocation(executable: string, args: string[]): CommandInvocation {
+    const shim = genericTestToolShim(executable, args);
+    if (shim) return shim;
+
     if (process.platform !== 'win32') {
         return { executable, args: [...args] };
     }
-
-    const shim = genericTestToolShim(executable, args);
-    if (shim) return shim;
 
     if (executable === 'npm') {
         const override = windowsNodeToolOverride('IRANTI_TEST_NPM_CLI', executable, args);

@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.33 - Unreleased
+
+### Fixed
+
+- The command-invocation test shim now works on Linux and macOS as well as Windows, so `codex-setup` workspace-file coverage no longer fails in CI before the actual setup logic runs.
+- Restored the `test:hardening-fast` release gate after the `codex-setup` workspace `.mcp.json` regression was added.
+
+### Validation
+
+- Re-ran `npm run test:cli-process-safety`, `npm run build`, and `npm run test:hardening-fast` locally after the cross-platform resolver fix.
+
 ## 0.2.32 - Unreleased
 
 ### Changed
