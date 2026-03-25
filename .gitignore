@@ -54,3 +54,4 @@ experiments/*.json
 tests/consistency/.runtime/
 tests/conflict/.runtime/
 tests/temporal/.runtime/
+.env.iranti

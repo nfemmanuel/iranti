@@ -221,6 +221,7 @@ function withCleanEnv<T>(fn: () => T): T {
 
 async function main(): Promise<void> {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'iranti-runtime-lifecycle-'));
+    const ambientFreeCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'iranti-runtime-cwd-'));
     const openServers: net.Server[] = [];
     const cleanupCallbacks: Array<() => Promise<void> | void> = [];
     try {
@@ -274,7 +275,7 @@ async function main(): Promise<void> {
             packageRoot: repoRoot,
         });
 
-        const statusRun = runCli(['status', '--root', root, '--json'], repoRoot);
+        const statusRun = runCli(['status', '--root', root, '--json'], ambientFreeCwd);
         assert.strictEqual(statusRun.status, 0, `status failed:\n${statusRun.stdout}\n${statusRun.stderr}`);
 
         const statusPayload = JSON.parse(statusRun.stdout.trim()) as {
@@ -330,7 +331,7 @@ async function main(): Promise<void> {
         assert.strictEqual(localStatus?.runtime.health.checked, false);
         assert.strictEqual(localStatus?.runtime.state?.pid, 999999);
 
-        const upgradeRun = runCli(['upgrade', '--check', '--json', '--root', root], repoRoot);
+        const upgradeRun = runCli(['upgrade', '--check', '--json', '--root', root], ambientFreeCwd);
         assert.strictEqual(upgradeRun.status, 0, `upgrade failed:\n${upgradeRun.stdout}\n${upgradeRun.stderr}`);
 
         const upgradePayload = JSON.parse(upgradeRun.stdout.trim()) as {
@@ -507,7 +508,7 @@ async function main(): Promise<void> {
             healthUrl: `http://127.0.0.1:${healthyRuntime.port}/health`,
         });
 
-        const statusWithVariantsRun = runCli(['status', '--root', root, '--json'], repoRoot);
+        const statusWithVariantsRun = runCli(['status', '--root', root, '--json'], ambientFreeCwd);
         assert.strictEqual(statusWithVariantsRun.status, 0, `status with variant instances failed:\n${statusWithVariantsRun.stdout}\n${statusWithVariantsRun.stderr}`);
         const statusWithVariants = JSON.parse(statusWithVariantsRun.stdout.trim()) as typeof statusPayload;
         const healthyStatus = statusWithVariants.instances.find((instance) => instance.name === 'healthy');
@@ -555,7 +556,7 @@ async function main(): Promise<void> {
         assert.strictEqual(misownedInspection.classification, 'invalid');
         assert.strictEqual(misownedInspection.health.checked, false);
 
-        const runPartialRun = runCli(['run', '--instance', 'partial', '--root', root], repoRoot);
+        const runPartialRun = runCli(['run', '--instance', 'partial', '--root', root], ambientFreeCwd);
         assert.notStrictEqual(runPartialRun.status, 0, 'run unexpectedly accepted a partial instance');
         assert.match(
             `${runPartialRun.stdout}\n${runPartialRun.stderr}`,
@@ -563,7 +564,7 @@ async function main(): Promise<void> {
             'run should reject incomplete instance configuration before reading env state'
         );
 
-        const restartInvalidRun = runCli(['instance', 'restart', 'invalid-config', '--root', root], repoRoot);
+        const restartInvalidRun = runCli(['instance', 'restart', 'invalid-config', '--root', root], ambientFreeCwd);
         assert.notStrictEqual(restartInvalidRun.status, 0, 'restart unexpectedly accepted an invalid instance');
         assert.match(
             `${restartInvalidRun.stdout}\n${restartInvalidRun.stderr}`,
@@ -571,7 +572,7 @@ async function main(): Promise<void> {
             'restart should reject invalid instance configuration before attempting lifecycle actions'
         );
 
-        const runMisownedRun = runCli(['run', '--instance', 'misowned-config', '--root', root], repoRoot);
+        const runMisownedRun = runCli(['run', '--instance', 'misowned-config', '--root', root], ambientFreeCwd);
         assert.notStrictEqual(runMisownedRun.status, 0, 'run unexpectedly accepted a misowned instance');
         assert.match(
             `${runMisownedRun.stdout}\n${runMisownedRun.stderr}`,
@@ -594,9 +595,9 @@ async function main(): Promise<void> {
             'postgresql://postgres:postgres@localhost:5432/iranti_partial',
             '--api-key',
             `test_${randomBytes(16).toString('hex')}`,
-        ], repoRoot);
+        ], ambientFreeCwd);
         assert.strictEqual(repairPartialRun.status, 0, `configure instance failed to repair partial config:\n${repairPartialRun.stdout}\n${repairPartialRun.stderr}`);
-        const repairedPartialStatusRun = runCli(['status', '--root', root, '--json'], repoRoot);
+        const repairedPartialStatusRun = runCli(['status', '--root', root, '--json'], ambientFreeCwd);
         assert.strictEqual(repairedPartialStatusRun.status, 0, `status after repair failed:\n${repairedPartialStatusRun.stdout}\n${repairedPartialStatusRun.stderr}`);
         const repairedPartialStatus = JSON.parse(repairedPartialStatusRun.stdout.trim()) as typeof statusPayload;
         const repairedPartial = repairedPartialStatus.instances.find((instance) => instance.name === 'partial');
@@ -772,7 +773,7 @@ async function main(): Promise<void> {
             process.execPath,
             serverEntrypointArgs(),
             {
-                cwd: repoRoot,
+                cwd: ambientFreeCwd,
                 encoding: 'utf8',
                 env: buildTsNodeEnv({
                     DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/iranti_runtime_guard',
@@ -795,7 +796,7 @@ async function main(): Promise<void> {
             process.execPath,
             serverEntrypointArgs(),
             {
-                cwd: repoRoot,
+                cwd: ambientFreeCwd,
                 encoding: 'utf8',
                 env: buildTsNodeEnv({
                     DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/iranti_runtime_guard',
@@ -825,7 +826,7 @@ async function main(): Promise<void> {
             `IRANTI_INSTANCE_RUNTIME_FILE=${path.join(root, 'foreign', 'runtime.json')}`,
             '',
         ].join('\n'));
-        const doctorProdRun = runCli(['doctor', '--env', doctorProdEnvFile, '--json'], repoRoot);
+        const doctorProdRun = runCli(['doctor', '--env', doctorProdEnvFile, '--json'], ambientFreeCwd);
         assert.notStrictEqual(doctorProdRun.status, 0, 'doctor should fail for production env with missing pepper and invalid runtime authority');
         const doctorProdPayload = JSON.parse(doctorProdRun.stdout.trim()) as {
             checks: Array<{ name: string; status: string; detail: string }>;
@@ -848,7 +849,7 @@ async function main(): Promise<void> {
         const containerNames = parseDockerContainerNames('alpha\r\nbeta\n\n gamma \n');
         assert.deepStrictEqual(containerNames, ['alpha', 'beta', 'gamma']);
 
-        const restartRun = runCli(['instance', 'restart', 'local', '--root', root], repoRoot);
+        const restartRun = runCli(['instance', 'restart', 'local', '--root', root], ambientFreeCwd);
         assert.notStrictEqual(restartRun.status, 0, 'restart unexpectedly succeeded');
         assert.match(
             `${restartRun.stdout}\n${restartRun.stderr}`,
@@ -858,7 +859,7 @@ async function main(): Promise<void> {
 
         const createConflict = await listenOnRandomPort();
         openServers.push(createConflict.server);
-        const createConflictRun = runCli(['instance', 'create', 'busy', '--port', String(createConflict.port), '--root', root], repoRoot);
+        const createConflictRun = runCli(['instance', 'create', 'busy', '--port', String(createConflict.port), '--root', root], ambientFreeCwd);
         assert.notStrictEqual(createConflictRun.status, 0, 'instance create unexpectedly accepted an occupied port');
         assert.match(
             `${createConflictRun.stdout}\n${createConflictRun.stderr}`,
@@ -892,7 +893,7 @@ async function main(): Promise<void> {
 
         const configConflict = await listenOnRandomPort();
         openServers.push(configConflict.server);
-        const configureConflictRun = runCli(['configure', 'instance', 'config-check', '--port', String(configConflict.port), '--root', root], repoRoot);
+        const configureConflictRun = runCli(['configure', 'instance', 'config-check', '--port', String(configConflict.port), '--root', root], ambientFreeCwd);
         assert.notStrictEqual(configureConflictRun.status, 0, 'configure instance unexpectedly accepted an occupied port');
         assert.match(
             `${configureConflictRun.stdout}\n${configureConflictRun.stderr}`,
@@ -903,7 +904,7 @@ async function main(): Promise<void> {
         const freePortServer = await listenOnRandomPort();
         const freePort = freePortServer.port;
         await new Promise<void>((resolve) => freePortServer.server.close(() => resolve()));
-        const configureOkRun = runCli(['configure', 'instance', 'config-check', '--port', String(freePort), '--root', root], repoRoot);
+        const configureOkRun = runCli(['configure', 'instance', 'config-check', '--port', String(freePort), '--root', root], ambientFreeCwd);
         assert.strictEqual(configureOkRun.status, 0, `configure instance failed:\n${configureOkRun.stdout}\n${configureOkRun.stderr}`);
         const configuredMeta = JSON.parse(fs.readFileSync(path.join(configDir, 'instance.json'), 'utf8')) as { port: number };
         assert.strictEqual(configuredMeta.port, freePort, 'instance.json should stay in sync with configured ports');
@@ -932,7 +933,7 @@ async function main(): Promise<void> {
             `IRANTI_API_KEY=test_${randomBytes(16).toString('hex')}`,
             '',
         ].join('\n'));
-        const runConflictRun = runCli(['run', '--instance', 'run-conflict', '--root', root], repoRoot);
+        const runConflictRun = runCli(['run', '--instance', 'run-conflict', '--root', root], ambientFreeCwd);
         assert.notStrictEqual(runConflictRun.status, 0, 'run unexpectedly started on an occupied port');
         assert.match(
             `${runConflictRun.stdout}\n${runConflictRun.stderr}`,
@@ -1008,6 +1009,7 @@ async function main(): Promise<void> {
         }
         await terminateManagedRuntimeProcesses(root);
         await removeDirWithRetry(root);
+        await removeDirWithRetry(ambientFreeCwd);
     }
 }
 

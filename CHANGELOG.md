@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.34 - Unreleased
+
+### Fixed
+
+- Runtime lifecycle smoke coverage no longer inherits the repo's ambient `.env.iranti` project binding when it is explicitly testing `--root` and isolated runtime authority behavior.
+- Repository-local `.env.iranti` files are now ignored so local project bindings do not show up as accidental release noise.
+
+### Validation
+
+- Re-ran `npm run build`, `npm run test:runtime-lifecycle`, `npm run test:hardening-fast`, `npm run release:check -- v0.2.34`, `python -m build clients/python --outdir clients/python/dist`, and `python -m twine check clients/python/dist/*` locally before release.
+
 ## 0.2.33 - Unreleased
 
 ### Fixed
