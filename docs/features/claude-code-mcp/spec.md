@@ -48,12 +48,14 @@ This feature exposes Iranti to Claude Code through the installed CLI surface: `i
 12. Expose Iranti memory and write operations as MCP tools.
 13. For hook usage, parse Claude Code hook stdin payload.
 14. On `SessionStart`, call `handshake()` and emit a compact working-memory brief.
-15. On `UserPromptSubmit`, if `IRANTI_AUTO_REMEMBER=true`, extract only narrow explicit prompt facts and write personal facts to `IRANTI_PERSONAL_MEMORY_ENTITY`/`user/main` while project facts still go to `IRANTI_MEMORY_ENTITY`, then retrieve memory.
-16. On `UserPromptSubmit`, call `attend()` and emit only relevant retrieved facts when injection is needed.
-17. On `Stop`, if `IRANTI_AUTO_REMEMBER=true`, extract only narrow assistant-response summary patterns from `last_assistant_message` and write project-scoped summaries to `IRANTI_MEMORY_ENTITY`.
-18. MCP clients may call `iranti_remember_response` explicitly to persist a strict assistant summary such as `The next step is ...` without relying on the Claude `Stop` hook path.
-19. MCP tool descriptions explicitly tell Claude-facing clients to consult Iranti for recall questions about remembered preferences, decisions, blockers, next steps, and prior project facts before guessing or saying they do not know.
-20. Keep durable writes explicit through MCP tool calls rather than auto-saving all turns; the hook never bulk-saves Claude responses.
+15. On `UserPromptSubmit`, if `IRANTI_AUTO_REMEMBER=true`, extract only narrow explicit prompt facts and write personal facts to `IRANTI_PERSONAL_MEMORY_ENTITY`/`user/main` while project facts still go to `IRANTI_MEMORY_ENTITY`.
+16. Prompt-captured personal facts are stored as direct user memory so later explicit user corrections can replace older hook-written values.
+17. On `UserPromptSubmit`, call `attend()` and emit only relevant retrieved facts when injection is needed.
+18. Recall-class prompts such as `what is my favorite ...`, `what is the next step`, `what did we decide`, and `what is the blocker` are treated as mandatory memory prompts and bypass the LLM memory-needed classifier.
+19. On `Stop`, if `IRANTI_AUTO_REMEMBER=true`, extract only narrow assistant-response summary patterns from `last_assistant_message` and write project-scoped summaries to `IRANTI_MEMORY_ENTITY`.
+20. MCP clients may call `iranti_remember_response` explicitly to persist a strict assistant summary such as `The next step is ...` without relying on the Claude `Stop` hook path.
+21. MCP tool descriptions explicitly tell Claude-facing clients to consult Iranti for recall questions about remembered preferences, decisions, blockers, next steps, and prior project facts before guessing or saying they do not know.
+22. Keep durable writes explicit through MCP tool calls rather than auto-saving all turns; the hook never bulk-saves Claude responses.
 
 ## Edge Cases
 - Missing `DATABASE_URL`: process exits with a fatal configuration error.

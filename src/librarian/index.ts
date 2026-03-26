@@ -31,6 +31,7 @@ import { recordResolution } from './source-reliability';
 import { inc, timeEnd, timeStart } from '../lib/metrics';
 import { ensureEscalationFolders } from '../lib/escalationPaths';
 import { detectContextualConflict } from './contextual-conflicts';
+import { isPersonalMemoryKey, USER_PROMPT_AUTO_REMEMBER_SOURCE } from '../lib/autoRemember';
 
 function clampConfidence(input: EntryInput): EntryInput {
     return {
@@ -72,6 +73,38 @@ function buildReliabilityUpdate(winnerSource: string, loserSource: string): Reli
         loserSource,
         humanOverride: winnerSource === 'HumanReview' || loserSource === 'HumanReview',
     };
+}
+
+function normalizeSource(source: string): string {
+    return source.trim().toLowerCase();
+}
+
+function isDirectUserMemorySource(source: string): boolean {
+    const normalized = normalizeSource(source);
+    return normalized === 'user_stated'
+        || normalized === 'user_corrected'
+        || normalized === normalizeSource(USER_PROMPT_AUTO_REMEMBER_SOURCE);
+}
+
+function isPersonalMemoryEntityType(entityType: string): boolean {
+    const normalized = entityType.trim().toLowerCase();
+    return normalized === 'user' || normalized === 'person';
+}
+
+function shouldPreferDirectUserPersonalCorrection(existing: KnowledgeEntry, candidate: EntryInput): boolean {
+    if (!isPersonalMemoryEntityType(candidate.entityType) || !isPersonalMemoryKey(candidate.key)) {
+        return false;
+    }
+
+    if (!isDirectUserMemorySource(candidate.source)) {
+        return false;
+    }
+
+    if (normalizeSource(existing.source) === 'humanreview') {
+        return false;
+    }
+
+    return JSON.stringify(existing.valueRaw) !== JSON.stringify(candidate.valueRaw);
 }
 
 function compareValidFrom(existing: KnowledgeEntry, incoming: EntryInput): 'existing' | 'incoming' | null {
@@ -384,6 +417,45 @@ async function resolveConflict(
 ): Promise<WriteResultInternal> {
     const policy = await getConflictPolicy(tx);
     const candidate: EntryInput = { ...incoming, validUntil: null };
+
+    if (shouldPreferDirectUserPersonalCorrection(existing, candidate)) {
+        const entry = await replaceEntry(existing, candidate, tx);
+        await logDecision(
+            entry.id,
+            'CONFLICT_REPLACED',
+            candidate,
+            existing.confidence,
+            candidate.confidence,
+            'Direct user personal-memory correction overrides prior non-human value.',
+            false,
+            tx
+        );
+        await saveReceipt(candidate, 'updated', entry.id, tx);
+        inc('librarian.updated');
+        getStaffEventEmitter().emit({
+            staffComponent: 'Librarian',
+            actionType: 'write_replaced',
+            agentId: candidate.createdBy,
+            source: candidate.source,
+            entityType: candidate.entityType,
+            entityId: candidate.entityId,
+            key: candidate.key,
+            reason: 'Direct user personal-memory correction overrides prior value.',
+            level: 'audit',
+            metadata: {
+                confidence: candidate.confidence,
+                priorConfidence: existing.confidence,
+                priorSource: existing.source,
+                valuePreview: JSON.stringify(candidate.valueRaw).slice(0, 200),
+            },
+        });
+        return {
+            action: 'updated',
+            entry,
+            reason: 'Direct user personal-memory correction overrides prior value.',
+            reliabilityUpdate: buildReliabilityUpdate(candidate.source, existing.source),
+        };
+    }
 
     if (existing.confidence === candidate.confidence) {
         if (existing.source === candidate.source) {

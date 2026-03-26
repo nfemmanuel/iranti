@@ -26,6 +26,27 @@ type AutoRememberResult = {
     skipped: Array<{ key: string; reason: string }>;
 };
 
+export type MandatoryRecallDecision = {
+    required: boolean;
+    scope: 'personal' | 'project' | null;
+    key?: string;
+    reason?: string;
+};
+
+export const USER_PROMPT_AUTO_REMEMBER_SOURCE = 'UserPromptAutoRemember';
+
+const PERSONAL_MEMORY_KEYS = new Set([
+    'name',
+    'email',
+    'phone',
+    'address',
+    'city',
+    'country',
+    'home_city',
+    'hometown',
+    'likes',
+]);
+
 export function canonicalizeMemoryKey(text: string): string {
     return normalizeKey(text)
         .replace(/favourite/g, 'favorite')
@@ -77,7 +98,7 @@ function stripDeclarativeLeadIns(text: string): string {
     const patterns = [
         /^(?:hey|hi|hello|yo)\s*,?\s*/i,
         /^(?:so|okay|ok|alright|well|right|btw|by the way)\s*,?\s*/i,
-        /^(?:actually|correction:|correction|for the record,)\s*/i,
+        /^(?:actually|correction:|correction|for the record)\s*,?\s*/i,
     ];
 
     let changed = true;
@@ -120,6 +141,76 @@ export function classifyMemoryScope(message: string): 'personal' | 'project' | n
         return 'project';
     }
     return null;
+}
+
+export function isPersonalMemoryKey(key: string): boolean {
+    const normalized = canonicalizeMemoryKey(key);
+    return normalized.startsWith('favorite_') || PERSONAL_MEMORY_KEYS.has(normalized);
+}
+
+export function detectMandatoryRecall(message: string): MandatoryRecallDecision {
+    const normalized = normalizePrompt(message).toLowerCase();
+    if (!normalized || normalized.startsWith('/')) {
+        return { required: false, scope: null };
+    }
+
+    const favoriteMatch = normalized.match(/\bwhat(?:'s| is| was)?\s+my\s+favou?rite\s+([a-z0-9_\-\s]+)\b/i);
+    if (favoriteMatch) {
+        return {
+            required: true,
+            scope: 'personal',
+            key: canonicalizeMemoryKey(`favorite_${favoriteMatch[1]}`),
+            reason: 'favorite_recall_prompt',
+        };
+    }
+
+    const myFieldMatch = normalized.match(/\bwhat(?:'s| is| was)?\s+my\s+([a-z0-9_\-\s]+)\b/i);
+    if (myFieldMatch) {
+        return {
+            required: true,
+            scope: 'personal',
+            key: canonicalizeMemoryKey(myFieldMatch[1]),
+            reason: 'personal_recall_prompt',
+        };
+    }
+
+    if (/\b(?:what|remind me)(?:[^.?!]*)\bnext step\b/i.test(normalized)) {
+        return {
+            required: true,
+            scope: 'project',
+            key: 'next_step',
+            reason: 'project_next_step_recall',
+        };
+    }
+
+    if (/\b(?:what|remind me)(?:[^.?!]*)\bblocker\b/i.test(normalized)) {
+        return {
+            required: true,
+            scope: 'project',
+            key: 'blocker',
+            reason: 'project_blocker_recall',
+        };
+    }
+
+    if (/\bwhat did we decide\b/i.test(normalized) || /\b(?:what|remind me)(?:[^.?!]*)\bdecision\b/i.test(normalized)) {
+        return {
+            required: true,
+            scope: 'project',
+            key: 'decision',
+            reason: 'project_decision_recall',
+        };
+    }
+
+    if (/\b(?:who(?:'s| is)?\s+(?:the|our)\s+current owner|who owns (?:this|that|it))\b/i.test(normalized)) {
+        return {
+            required: true,
+            scope: 'project',
+            key: 'current_owner',
+            reason: 'project_owner_recall',
+        };
+    }
+
+    return { required: false, scope: null };
 }
 
 export function extractExplicitPromptMemory(prompt: string): ExtractedMemoryFact[] {
@@ -281,6 +372,7 @@ async function persistExtractedFacts(params: {
     facts: ExtractedMemoryFact[];
     agent: string;
     source: string;
+    phase: 'user_prompt' | 'assistant_response';
     confidence: number;
     entity?: string | null;
     projectEntity?: string | null;
@@ -291,6 +383,7 @@ async function persistExtractedFacts(params: {
         facts,
         agent,
         source,
+        phase,
         confidence,
         entity,
         projectEntity,
@@ -316,13 +409,17 @@ async function persistExtractedFacts(params: {
             continue;
         }
 
+        const writeSource = phase === 'user_prompt' && fact.scope === 'personal'
+            ? USER_PROMPT_AUTO_REMEMBER_SOURCE
+            : source;
+
         await iranti.write({
             entity: targetEntity,
             key: fact.key,
             value: fact.value,
             summary: fact.summary,
             confidence,
-            source,
+            source: writeSource,
             agent,
         });
         written += 1;
@@ -374,6 +471,7 @@ export async function autoRememberPromptFacts(params: {
         facts,
         agent,
         source,
+        phase: 'user_prompt',
         confidence,
         entity,
         projectEntity,
@@ -417,6 +515,7 @@ export async function autoRememberAssistantFacts(params: {
         facts,
         agent,
         source,
+        phase: 'assistant_response',
         confidence,
         entity,
         projectEntity,
@@ -450,6 +549,7 @@ export async function rememberAssistantResponseFacts(params: {
         facts: extractExplicitAssistantMemory(response),
         agent,
         source,
+        phase: 'assistant_response',
         confidence,
         entity,
         projectEntity,

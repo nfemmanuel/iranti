@@ -72,7 +72,7 @@ function main(): void {
 
     writeText(pyProjectPath, replaceOrThrow(
         readText(pyProjectPath),
-        /^\s*version\s*=\s*"[^"]+"/m,
+        /^[ \t]*version[ \t]*=[ \t]*"[^"]+"/m,
         `version = "${targetVersion}"`,
         'clients/python/pyproject.toml version',
     ));

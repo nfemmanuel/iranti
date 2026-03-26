@@ -170,6 +170,7 @@ If you deliberately want narrow automatic writes, add `IRANTI_AUTO_REMEMBER=true
 - `UserPromptSubmit` saves only strict explicit prompt facts
 - `Stop` saves only strict assistant-response summaries such as `the next step is ...` or `the blocker is ...`
 - personal facts such as `my favorite book is ...` go to `IRANTI_PERSONAL_MEMORY_ENTITY` and default to `user/main`
+- prompt-captured personal facts are stored as direct user memory so later explicit user corrections can replace older hook-written values
 - project facts such as `we decided ...`, `the next step is ...`, and `the blocker is ...` go to `IRANTI_MEMORY_ENTITY`
 
 If you want the same strict assistant-summary persistence through the MCP tool surface instead of relying on the hook, call `iranti_remember_response` explicitly after you produce a final answer such as:
@@ -202,6 +203,7 @@ Optional explicit overrides:
 
 Use the integration like this:
 
+- treat recall prompts such as `what is my favorite ...`, `what is the next step`, `what did we decide`, and `what is the blocker` as mandatory Iranti turns
 - `iranti_query` when you know the exact entity and key
 - `iranti_search` when you do not know the key yet
 - `iranti_attend` or hooks for short-turn working-memory retrieval

@@ -107,6 +107,7 @@ Optional opt-in memory capture:
 - this lets the `iranti_attend` tool persist only narrow explicit prompt facts before retrieval
 - personal facts route to `IRANTI_PERSONAL_MEMORY_ENTITY` and default to `user/main`
 - project facts route to `IRANTI_MEMORY_ENTITY`
+- prompt-captured personal facts are stored as direct user memory so later explicit user corrections can replace older hook-written values
 - examples:
   - `my favorite snack is plantain chips`
   - `my home city is Lagos`
@@ -150,8 +151,10 @@ Important:
 
 Use the integration like this:
 
+- treat recall prompts such as `what is my favorite ...`, `what is the next step`, `what did we decide`, and `what is the blocker` as mandatory Iranti turns
 - `iranti_query` when you know the exact entity and key
 - `iranti_search` when you need discovery
+- `iranti_attend` before answers that depend on remembered state
 - `iranti_remember_response` when your own final answer contains a strict durable summary worth persisting
 - `iranti_write` only for durable facts
 - `iranti_ingest` only for stable content worth chunking

@@ -555,6 +555,8 @@ Entity format: `"entityType/entityId"` e.g. `"researcher/jane_smith"`
   deleted or edited after the fact â€” add a new ADR if a decision changes.
 - **docs/features/** â€” One subfolder per feature. Each contains `spec.md`
   covering inputs, outputs, decision tree, edge cases, and test results.
+  Current feature folders include Claude/Codex MCP integration, compatibility
+  contracts, and memory lifecycle policy.
 - **docs/engineering/** â€” Internal standards for contributors.
   `CODE_STANDARDS.md`, `COMMENTING_GUIDELINES.md`.
 - **docs/internal/** â€” Internal design notes, validation artifacts, and release/backward-compatibility backlogs. `docs/internal/README.md` is the index for trust levels and categories inside this folder. Internal docs are supporting material, not canonical product contract, unless a guide/spec/decision explicitly points to them.

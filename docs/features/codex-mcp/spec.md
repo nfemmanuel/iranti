@@ -44,9 +44,10 @@ This feature connects Codex to Iranti through Codex's MCP client using the insta
 11. Store only safe defaults and any explicitly requested pinned `IRANTI_PROJECT_ENV` in the global MCP entry.
 12. At runtime, `iranti mcp` loads `IRANTI_PROJECT_ENV` first when explicitly pinned and otherwise falls back to the active project/workspace.
 13. If `IRANTI_AUTO_REMEMBER=true`, `iranti_attend` first persists only narrow explicit prompt facts, routing personal facts to `IRANTI_PERSONAL_MEMORY_ENTITY`/`user/main` and project facts to `IRANTI_MEMORY_ENTITY`.
-14. For recall questions about remembered preferences, decisions, blockers, next steps, or prior project facts, the MCP tool descriptions instruct Codex to consult Iranti before answering or saying it does not know.
-15. If Codex's own final answer contains a strict durable summary such as `The next step is ...` or `We decided ...`, call `iranti_remember_response` explicitly because there is no Codex-side `Stop` hook.
-16. Launch Codex with `codex -C <project>` for the intended workspace context.
+14. Prompt-captured personal facts are stored as direct user memory so later explicit user corrections can replace older hook-written values.
+15. Recall questions about remembered preferences, decisions, blockers, next steps, or prior project facts are treated as mandatory memory prompts and bypass the LLM memory-needed classifier.
+16. If Codex's own final answer contains a strict durable summary such as `The next step is ...` or `We decided ...`, call `iranti_remember_response` explicitly because there is no Codex-side `Stop` hook.
+17. Launch Codex with `codex -C <project>` for the intended workspace context.
 
 ## Edge Cases
 

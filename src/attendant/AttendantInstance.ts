@@ -8,7 +8,7 @@ import { Prisma } from '../generated/prisma/client';
 import { EntryQuery, QueryResult } from '../types';
 import { timeStart, timeEnd } from '../lib/metrics';
 import { getConflictPolicy } from '../librarian/getPolicy';
-import { classifyMemoryScope, getPersonalMemoryEntity, getProjectMemoryEntity } from '../lib/autoRemember';
+import { classifyMemoryScope, detectMandatoryRecall, getPersonalMemoryEntity, getProjectMemoryEntity } from '../lib/autoRemember';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -157,6 +157,7 @@ export interface ObserveInput {
     currentContext: string;
     maxFacts?: number;          // default 5 — don't overwhelm context
     entityHints?: string[];     // deterministic canonical entities from caller
+    priorityKeys?: string[];    // exact keys to prioritize within resolved entities
 }
 
 export interface FactInjection {
@@ -989,6 +990,7 @@ export class AttendantInstance {
         const forceInject = input.forceInject === true;
         const effectiveEntityHints = this.resolveAttendEntityHints(input.entityHints, latestMessage);
         const observationContext = currentContext.trim().length > 0 ? currentContext : latestMessage;
+        const mandatoryRecall = detectMandatoryRecall(latestMessage);
 
         const decision = await this.decideMemoryNeed({
             currentContext,
@@ -1038,6 +1040,7 @@ export class AttendantInstance {
             currentContext: observationContext,
             maxFacts: input.maxFacts,
             entityHints: effectiveEntityHints,
+            priorityKeys: mandatoryRecall.key ? [mandatoryRecall.key] : [],
         });
 
         let reason: AttendResult['reason'] = 'memory_needed_injected';
@@ -1082,6 +1085,11 @@ export class AttendantInstance {
         const currentContext = input.currentContext ?? '';
         const entityHints = Array.isArray(input.entityHints)
             ? input.entityHints.filter((hint) => typeof hint === 'string' && hint.trim().length > 0)
+            : [];
+        const requestedPriorityKeys = Array.isArray(input.priorityKeys)
+            ? input.priorityKeys
+                .filter((key: string) => typeof key === 'string' && key.trim().length > 0)
+                .map((key: string) => key.trim())
             : [];
 
         if (currentContext.trim().length === 0 && entityHints.length === 0) {
@@ -1364,10 +1372,11 @@ ${detectionWindow}`,
             const allEntries = await findEntriesByEntity(resolvedInfo.entityType, resolvedInfo.entityId);
 
             // Priority keys first
-            const priorityKeys = policy.observeKeyPriority?.[resolvedInfo.entityType] ?? [];
-            const priorityEntries = allEntries.filter((e) => priorityKeys.includes(e.key));
+            const policyPriorityKeys = policy.observeKeyPriority?.[resolvedInfo.entityType] ?? [];
+            const priorityKeys = new Set([...policyPriorityKeys, ...requestedPriorityKeys]);
+            const priorityEntries = allEntries.filter((e) => priorityKeys.has(e.key));
             const remainingEntries = allEntries
-                .filter((e) => !priorityKeys.includes(e.key))
+                .filter((e) => !priorityKeys.has(e.key))
                 .sort((a, b) => b.confidence - a.confidence);
 
             const selectedEntries = [...priorityEntries, ...remainingEntries].slice(0, maxKeysPerEntity);
@@ -1472,6 +1481,16 @@ ${detectionWindow}`,
                 confidence: 1,
                 method: 'forced',
                 explanation: 'force_inject',
+            };
+        }
+
+        const mandatoryRecall = detectMandatoryRecall(input.latestMessage);
+        if (mandatoryRecall.required) {
+            return {
+                needed: true,
+                confidence: 0.99,
+                method: 'heuristic',
+                explanation: mandatoryRecall.reason ?? 'mandatory_recall_prompt',
             };
         }
 
