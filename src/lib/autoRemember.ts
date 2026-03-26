@@ -25,6 +25,12 @@ type AutoRememberResult = {
     skipped: Array<{ key: string; reason: string }>;
 };
 
+export function canonicalizeMemoryKey(text: string): string {
+    return normalizeKey(text)
+        .replace(/favourite/g, 'favorite')
+        .replace(/colour/g, 'color');
+}
+
 function normalizeKey(text: string): string {
     return text
         .trim()
@@ -45,7 +51,7 @@ function isQuestionLike(prompt: string): boolean {
 }
 
 function buildTextFact(key: string, value: string): ExtractedMemoryFact {
-    const cleanKey = normalizeKey(key);
+    const cleanKey = canonicalizeMemoryKey(key);
     const cleanValue = value.trim();
     return {
         key: cleanKey,
@@ -76,7 +82,7 @@ export function extractExplicitPromptMemory(prompt: string): ExtractedMemoryFact
     }
 
     const myFieldMatch = stripped.match(/^my ([a-z0-9_\-\s]+?) is (.+)$/i);
-    if (myFieldMatch && !facts.some((fact) => fact.key === normalizeKey(myFieldMatch[1]))) {
+    if (myFieldMatch && !facts.some((fact) => fact.key === canonicalizeMemoryKey(myFieldMatch[1]))) {
         facts.push(buildTextFact(myFieldMatch[1], myFieldMatch[2]));
     }
 
@@ -144,7 +150,7 @@ export function extractExplicitAssistantMemory(response: string): ExtractedMemor
     }
 
     const yourFieldMatch = lower.match(/^your ([a-z0-9_\-\s]+?) is (.+)$/i);
-    if (yourFieldMatch && !facts.some((fact) => fact.key === normalizeKey(yourFieldMatch[1]))) {
+    if (yourFieldMatch && !facts.some((fact) => fact.key === canonicalizeMemoryKey(yourFieldMatch[1]))) {
         facts.push(buildTextFact(yourFieldMatch[1], yourFieldMatch[2]));
     }
 

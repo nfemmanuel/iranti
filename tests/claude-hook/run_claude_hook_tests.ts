@@ -56,6 +56,37 @@ async function main(): Promise<void> {
         },
         async attend(input: { agent?: string; latestMessage: string; currentContext: string; entityHints?: string[] }) {
             calls.push(`attend:${input.agent}:${input.latestMessage}`);
+            if (/favorite movie/i.test(input.latestMessage)) {
+                return {
+                    shouldInject: true,
+                    reason: 'memory_needed_injected',
+                    decision: { needed: true },
+                    facts: [
+                        {
+                            entityKey: `${memoryEntity}/favorite_movie`,
+                            summary: 'favorite movie is zebra asteroid midnight',
+                            value: { text: 'zebra asteroid midnight' },
+                            confidence: 96,
+                            source: 'claude_hook_test',
+                        },
+                        {
+                            entityKey: `${memoryEntity}/favourite_movie`,
+                            summary: 'favourite movie is zebra asteroid midnight',
+                            value: { text: 'zebra asteroid midnight' },
+                            confidence: 96,
+                            source: 'claude_hook_test',
+                        },
+                    ],
+                    entitiesDetected: [],
+                    alreadyPresent: 0,
+                    totalFound: 2,
+                    entitiesResolved: input.entityHints ?? [],
+                    debug: {
+                        skipped: null,
+                        contextLength: input.currentContext.length,
+                    },
+                };
+            }
             return {
                 shouldInject: true,
                 reason: 'memory_needed_injected',
@@ -131,6 +162,10 @@ async function main(): Promise<void> {
             calls.some((call) => call.startsWith(`write:${memoryEntity}:favorite_snack:`)),
             'Expected opt-in auto-remember to write explicit prompt memory, including favourite/favorite spelling variants.'
         );
+        assert.ok(
+            !calls.some((call) => call.startsWith(`write:${memoryEntity}:favourite_snack:`)),
+            'Expected favourite/favorite variants to canonicalize to favorite_snack only.'
+        );
 
         const writesAfterFirstCapture = calls.filter((call) => call.startsWith(`write:${memoryEntity}:favorite_snack:`)).length;
         await buildHookAdditionalContext({
@@ -157,6 +192,24 @@ async function main(): Promise<void> {
         assert.ok(
             calls.some((call) => call.startsWith(`write:${memoryEntity}:next_step:`)),
             'Expected Stop hook auto-remember to persist strict assistant response facts.'
+        );
+
+        const retrievalAnswerContext = await buildHookAdditionalContext({
+            iranti: fakeIranti as never,
+            event: 'UserPromptSubmit',
+            payload: {
+                cwd: process.cwd(),
+                prompt: 'What is my favorite movie?',
+                recentMessages: [],
+            },
+        });
+        assert.ok(
+            retrievalAnswerContext.includes('Direct answer: favorite movie is zebra asteroid midnight.'),
+            'Expected self-memory question injection to include a direct answer candidate.'
+        );
+        assert.ok(
+            !retrievalAnswerContext.includes('/favourite_movie:'),
+            'Expected favourite_movie duplicate facts to be suppressed from injected context.'
         );
 
         console.log('Claude hook tests passed.');

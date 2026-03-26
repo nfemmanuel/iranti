@@ -2,7 +2,7 @@ import 'dotenv/config';
 import path from 'path';
 import { Iranti } from '../src/sdk';
 import { loadRuntimeEnv } from '../src/lib/runtimeEnv';
-import { autoRememberAssistantFacts, autoRememberPromptFacts, isAutoRememberEnabled } from '../src/lib/autoRemember';
+import { autoRememberAssistantFacts, autoRememberPromptFacts, canonicalizeMemoryKey, isAutoRememberEnabled } from '../src/lib/autoRemember';
 
 type HookEventName = 'SessionStart' | 'UserPromptSubmit' | 'Stop';
 type HookPayload = Record<string, unknown>;
@@ -268,10 +268,35 @@ function formatSessionContext(facts: HookFact[], cwd: string): string {
     return lines.join('\n');
 }
 
-function formatPromptContext(facts: HookFact[]): string {
+function extractSelfMemoryQueryKey(prompt: string): string | null {
+    const normalized = prompt.trim();
+    if (!normalized) return null;
+
+    const favoriteMatch = normalized.match(/\bwhat(?:'s| is| was)?\s+my\s+favou?rite\s+([a-z0-9_\-\s]+?)\??$/i);
+    if (favoriteMatch) {
+        return canonicalizeMemoryKey(`favorite_${favoriteMatch[1]}`);
+    }
+
+    const fieldMatch = normalized.match(/\bwhat(?:'s| is| was)?\s+my\s+([a-z0-9_\-\s]+?)\??$/i);
+    if (fieldMatch) {
+        return canonicalizeMemoryKey(fieldMatch[1]);
+    }
+
+    return null;
+}
+
+function formatPromptContext(facts: HookFact[], prompt?: string): string {
     if (facts.length === 0) return '';
 
     const lines = ['[Iranti Retrieved Memory]'];
+    const targetKey = prompt ? extractSelfMemoryQueryKey(prompt) : null;
+    if (targetKey) {
+        const answerCandidate = facts.find((fact) => canonicalizeMemoryKey(fact.key) === targetKey);
+        if (answerCandidate) {
+            lines.push(`Direct answer: ${answerCandidate.summary}.`);
+            lines.push('Use the direct answer above when it fully answers the user question.');
+        }
+    }
     for (const fact of facts) {
         lines.push(`- ${fact.entity}/${fact.key}: ${fact.summary}`);
     }
@@ -306,7 +331,7 @@ function shouldFetchMemory(prompt: string): boolean {
 function dedupeFacts(facts: HookFact[]): HookFact[] {
     const byKey = new Map<string, HookFact>();
     for (const fact of facts) {
-        const identity = `${fact.entity}/${fact.key}`;
+        const identity = `${fact.entity}/${canonicalizeMemoryKey(fact.key)}`;
         const existing = byKey.get(identity);
         if (!existing || fact.confidence > existing.confidence) {
             byKey.set(identity, fact);
@@ -423,7 +448,7 @@ export async function buildHookAdditionalContext(options: {
         confidence: fact.confidence,
         source: fact.source,
     })).filter((fact) => fact.entity.includes('/') && fact.key.length > 0);
-    return formatPromptContext(dedupeFacts(facts));
+    return formatPromptContext(dedupeFacts(facts), prompt);
 }
 
 async function main(): Promise<void> {

@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.38 - Unreleased
+
+### Fixed
+
+- Auto-remember now canonicalizes `favorite`/`favourite` style keys so duplicate spellings do not create parallel memory entries.
+- Claude self-memory retrieval injection now includes a direct answer candidate for questions like `what is my favorite movie?`, reducing model drift when the fact is already in Iranti.
+
 ## 0.2.37 - Unreleased
 
 ### Fixed
