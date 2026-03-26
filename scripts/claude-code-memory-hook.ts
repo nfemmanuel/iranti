@@ -392,7 +392,7 @@ export async function buildHookAdditionalContext(options: {
     }
 
     const prompt = getPrompt(payload);
-    if (!prompt || !shouldFetchMemory(prompt)) {
+    if (!prompt) {
         return '';
     }
 
@@ -403,6 +403,10 @@ export async function buildHookAdditionalContext(options: {
             agent,
             source: 'ClaudeCodeHook',
         });
+    }
+
+    if (!shouldFetchMemory(prompt)) {
+        return '';
     }
 
     const attend = await iranti.attend({

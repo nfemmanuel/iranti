@@ -70,7 +70,7 @@ export function extractExplicitPromptMemory(prompt: string): ExtractedMemoryFact
 
     const facts: ExtractedMemoryFact[] = [];
 
-    const favoriteMatch = stripped.match(/^my favorite ([a-z0-9_\-\s]+?) is (.+)$/i);
+    const favoriteMatch = stripped.match(/^my favou?rite ([a-z0-9_\-\s]+?) is (.+)$/i);
     if (favoriteMatch) {
         facts.push(buildTextFact(`favorite_${favoriteMatch[1]}`, favoriteMatch[2]));
     }
@@ -138,7 +138,7 @@ export function extractExplicitAssistantMemory(response: string): ExtractedMemor
     const lower = raw.toLowerCase();
     const facts: ExtractedMemoryFact[] = [];
 
-    const yourFavoriteMatch = lower.match(/^your favorite ([a-z0-9_\-\s]+?) is (.+)$/i);
+    const yourFavoriteMatch = lower.match(/^your favou?rite ([a-z0-9_\-\s]+?) is (.+)$/i);
     if (yourFavoriteMatch) {
         facts.push(buildTextFact(`favorite_${yourFavoriteMatch[1]}`, yourFavoriteMatch[2]));
     }

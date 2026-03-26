@@ -121,15 +121,15 @@ async function main(): Promise<void> {
             event: 'UserPromptSubmit',
             payload: {
                 cwd: process.cwd(),
-                prompt: 'My favorite snack is plantain chips.',
+                prompt: 'My favourite snack is plantain chips.',
                 recentMessages: ['assistant: Tell me something durable I should remember.'],
             },
         });
 
-        assert.ok(autoRememberContext.includes('[Iranti Retrieved Memory]'), 'Expected prompt auto-remember path to still emit retrieved memory context.');
+        assert.ok(autoRememberContext.includes('[Iranti Retrieved Memory]'), 'Expected declarative prompt auto-remember path to preserve retrieval injection.');
         assert.ok(
             calls.some((call) => call.startsWith(`write:${memoryEntity}:favorite_snack:`)),
-            'Expected opt-in auto-remember to write explicit prompt memory.'
+            'Expected opt-in auto-remember to write explicit prompt memory, including favourite/favorite spelling variants.'
         );
 
         const writesAfterFirstCapture = calls.filter((call) => call.startsWith(`write:${memoryEntity}:favorite_snack:`)).length;
@@ -138,7 +138,7 @@ async function main(): Promise<void> {
             event: 'UserPromptSubmit',
             payload: {
                 cwd: process.cwd(),
-                prompt: 'My favorite snack is plantain chips.',
+                prompt: 'My favourite snack is plantain chips.',
                 recentMessages: ['assistant: Repeating the same memory should not churn writes.'],
             },
         });

@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.37 - Unreleased
+
+### Fixed
+
+- Claude Code prompt auto-remember now runs for declarative prompts even when the retrieval path would not otherwise write anything.
+- Auto-remember prompt and assistant extraction now accept both `favorite` and `favourite` spellings for favorite-value facts.
+
 ## 0.2.36 - Unreleased
 
 ### Added
