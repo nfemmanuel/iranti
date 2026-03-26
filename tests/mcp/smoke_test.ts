@@ -34,6 +34,8 @@ async function main(): Promise<void> {
             LLM_PROVIDER: process.env.LLM_PROVIDER || 'mock',
             IRANTI_MCP_DEFAULT_AGENT: 'mcp_smoke_agent',
             IRANTI_MCP_DEFAULT_SOURCE: 'MCPSmoke',
+            IRANTI_MEMORY_ENTITY: 'project/mcp_smoke_project_memory',
+            IRANTI_PERSONAL_MEMORY_ENTITY: 'user/main',
             IRANTI_ESCALATION_DIR: process.env.IRANTI_ESCALATION_DIR || path.resolve(process.cwd(), 'tests', 'mcp', '.runtime', 'escalation'),
         } as Record<string, string>,
         stderr: 'pipe',
@@ -66,7 +68,7 @@ async function main(): Promise<void> {
 
         const tools = { tools: allTools };
         const toolNames = tools.tools.map((tool: { name: string }) => tool.name);
-        for (const required of ['iranti_handshake', 'iranti_attend', 'iranti_query', 'iranti_search', 'iranti_write', 'iranti_related', 'iranti_related_deep']) {
+        for (const required of ['iranti_handshake', 'iranti_attend', 'iranti_query', 'iranti_search', 'iranti_write', 'iranti_remember_response', 'iranti_related', 'iranti_related_deep']) {
             expect(toolNames.includes(required), `Expected MCP tool ${required} to be listed.`);
         }
 
@@ -77,6 +79,12 @@ agents, or sessions should retain. Requires: entity ("type/id"),
 key, value JSON, and summary. Confidence is optional and defaults
 to 85. Conflicts on the same entity+key are detected automatically
 and may be resolved or escalated.`,
+            iranti_remember_response: `Persist a strict durable summary from your own response.
+Use this after you decide to say something like "the next step is ...",
+"the blocker is ...", "we decided ...", or "the current owner is ...".
+This uses the same narrow summary extractor as the Claude Stop hook,
+but it is explicit and works for Codex or any MCP client. Do not use
+this for arbitrary prose or every turn.`,
             iranti_query: `Retrieve the current fact for an exact entity+key lookup.
 Use this when you already know both the entity and the key.
 Returns the current value, summary, confidence, source, and
@@ -172,6 +180,28 @@ for that task. Do not use this as a per-turn retrieval tool; use iranti_attend.`
         expect(
             JSON.stringify(search.structuredContent).includes(entity),
             'Expected iranti_search to surface the written entity.'
+        );
+
+        const rememberResponse = await client.callTool({
+            name: 'iranti_remember_response',
+            arguments: {
+                response: 'The next step is rerun the db validation.',
+                projectEntity: 'project/mcp_smoke_project_memory',
+            },
+        });
+        expect(!rememberResponse.isError, 'Expected iranti_remember_response to succeed.');
+
+        const rememberedNextStep = await client.callTool({
+            name: 'iranti_query',
+            arguments: {
+                entity: 'project/mcp_smoke_project_memory',
+                key: 'next_step',
+            },
+        });
+        expect(!rememberedNextStep.isError, 'Expected iranti_query for remembered next_step to succeed.');
+        expect(
+            JSON.stringify(rememberedNextStep.structuredContent).includes('rerun the db validation'),
+            'Expected iranti_remember_response to persist strict assistant summary facts.'
         );
 
         const related = await client.callTool({

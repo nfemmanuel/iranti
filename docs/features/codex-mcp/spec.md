@@ -2,7 +2,7 @@
 
 ## Overview
 
-This feature connects Codex to Iranti through Codex's MCP client using the installed Iranti CLI surface. It provides a repeatable setup path for registering `iranti mcp` globally in Codex through either `iranti codex-setup` or `iranti integrate codex`, while keeping project-specific runtime resolution in `.env.iranti` and the linked instance env. The default global registration is intentionally unpinned so one global Codex MCP entry can be reused across multiple bound repos, but the setup flow now also writes or merges a project-local `.mcp.json` pinned to the active project binding when one is available.
+This feature connects Codex to Iranti through Codex's MCP client using the installed Iranti CLI surface. It provides a repeatable setup path for registering `iranti mcp` globally in Codex through either `iranti codex-setup` or `iranti integrate codex`, while keeping project-specific runtime resolution in `.env.iranti` and the linked instance env. The default global registration is intentionally unpinned so one global Codex MCP entry can be reused across multiple bound repos, but the setup flow now also writes or merges a project-local `.mcp.json` pinned to the active project binding when one is available. Because Codex does not have the Claude `Stop` hook path, the MCP surface also exposes an explicit `iranti_remember_response` tool for strict assistant-summary persistence.
 
 ## Inputs
 
@@ -17,6 +17,7 @@ This feature connects Codex to Iranti through Codex's MCP client using the insta
 | `.env.iranti` | file | Project binding file containing `IRANTI_URL`, `IRANTI_API_KEY`, `IRANTI_AGENT_ID`, and `IRANTI_INSTANCE_ENV`. |
 | `IRANTI_AUTO_REMEMBER` | boolean? | Opt-in explicit prompt auto-save into `IRANTI_MEMORY_ENTITY` before `iranti_attend` retrieval. |
 | `IRANTI_PERSONAL_MEMORY_ENTITY` | string? | Optional personal-memory target for auto-remembered user facts. Defaults to `user/main`. |
+| `iranti_remember_response` | MCP tool | Explicit strict assistant-summary persistence for Codex and other MCP clients without a `Stop` hook; may optionally pin `projectEntity` or `personalEntity`. |
 | linked instance env | file | Instance environment file referenced by `IRANTI_INSTANCE_ENV`, containing `DATABASE_URL`, `LLM_PROVIDER`, and provider keys. |
 
 ## Outputs
@@ -44,7 +45,8 @@ This feature connects Codex to Iranti through Codex's MCP client using the insta
 12. At runtime, `iranti mcp` loads `IRANTI_PROJECT_ENV` first when explicitly pinned and otherwise falls back to the active project/workspace.
 13. If `IRANTI_AUTO_REMEMBER=true`, `iranti_attend` first persists only narrow explicit prompt facts, routing personal facts to `IRANTI_PERSONAL_MEMORY_ENTITY`/`user/main` and project facts to `IRANTI_MEMORY_ENTITY`.
 14. For recall questions about remembered preferences, decisions, blockers, next steps, or prior project facts, the MCP tool descriptions instruct Codex to consult Iranti before answering or saying it does not know.
-15. Launch Codex with `codex -C <project>` for the intended workspace context.
+15. If Codex's own final answer contains a strict durable summary such as `The next step is ...` or `We decided ...`, call `iranti_remember_response` explicitly because there is no Codex-side `Stop` hook.
+16. Launch Codex with `codex -C <project>` for the intended workspace context.
 
 ## Edge Cases
 
@@ -60,12 +62,14 @@ This feature connects Codex to Iranti through Codex's MCP client using the insta
 - `DATABASE_URL` is not written into Codex config; the MCP process resolves `.env.iranti` and linked instance env at runtime instead.
 - `IRANTI_AUTO_REMEMBER=true` without `IRANTI_MEMORY_ENTITY`: project-scoped auto-write is skipped rather than guessing an entity; personal facts still default to `user/main`.
 - Auto-remember ignores arbitrary narrative turns and only captures strict explicit prompt patterns.
+- `iranti_remember_response` also ignores arbitrary prose and persists only strict assistant-summary patterns.
 - In multi-repo setups, the default unpinned registration avoids accidentally pinning all Codex sessions to one repo's `.env.iranti`.
 - If the active project is missing `.env.iranti` or `IRANTI_INSTANCE_ENV`, MCP startup fails when Codex tries to connect.
 
 ## Test Results
 
 - `npm run build` passes with the updated Codex setup script included.
+- `npm run test:mcp-smoke` exercises `iranti_remember_response` and verifies it persists `next_step`.
 - `iranti codex-setup` successfully registers `iranti` in Codex MCP config.
 - `iranti codex-setup` writes or merges a project-local `.mcp.json` with a pinned `IRANTI_PROJECT_ENV` when run from a bound project.
 - `iranti integrate codex` resolves to the same setup path.

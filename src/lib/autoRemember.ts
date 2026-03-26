@@ -276,37 +276,27 @@ function comparableValue(value: unknown): string {
     }
 }
 
-export async function autoRememberPromptFacts(params: {
+async function persistExtractedFacts(params: {
     iranti: IrantiQueryClient;
-    prompt: string;
+    facts: ExtractedMemoryFact[];
     agent: string;
     source: string;
+    confidence: number;
     entity?: string | null;
     projectEntity?: string | null;
     personalEntity?: string | null;
-    confidence?: number;
 }): Promise<AutoRememberResult> {
     const {
         iranti,
-        prompt,
+        facts,
         agent,
         source,
+        confidence,
         entity,
         projectEntity,
         personalEntity,
-        confidence = 96,
     } = params;
 
-    if (!isAutoRememberEnabled()) {
-        return {
-            enabled: false,
-            extracted: 0,
-            written: 0,
-            skipped: [],
-        };
-    }
-
-    const facts = extractExplicitPromptMemory(prompt);
     const skipped: Array<{ key: string; reason: string }> = [];
     let written = 0;
     const writtenEntities = new Set<string>();
@@ -348,6 +338,49 @@ export async function autoRememberPromptFacts(params: {
     };
 }
 
+export async function autoRememberPromptFacts(params: {
+    iranti: IrantiQueryClient;
+    prompt: string;
+    agent: string;
+    source: string;
+    entity?: string | null;
+    projectEntity?: string | null;
+    personalEntity?: string | null;
+    confidence?: number;
+}): Promise<AutoRememberResult> {
+    const {
+        iranti,
+        prompt,
+        agent,
+        source,
+        entity,
+        projectEntity,
+        personalEntity,
+        confidence = 96,
+    } = params;
+
+    if (!isAutoRememberEnabled()) {
+        return {
+            enabled: false,
+            extracted: 0,
+            written: 0,
+            skipped: [],
+        };
+    }
+
+    const facts = extractExplicitPromptMemory(prompt);
+    return persistExtractedFacts({
+        iranti,
+        facts,
+        agent,
+        source,
+        confidence,
+        entity,
+        projectEntity,
+        personalEntity,
+    });
+}
+
 export async function autoRememberAssistantFacts(params: {
     iranti: IrantiQueryClient;
     response: string;
@@ -379,43 +412,47 @@ export async function autoRememberAssistantFacts(params: {
     }
 
     const facts = extractExplicitAssistantMemory(response);
-    const skipped: Array<{ key: string; reason: string }> = [];
-    let written = 0;
-    const writtenEntities = new Set<string>();
+    return persistExtractedFacts({
+        iranti,
+        facts,
+        agent,
+        source,
+        confidence,
+        entity,
+        projectEntity,
+        personalEntity,
+    });
+}
 
-    for (const fact of facts) {
-        const targetEntity = fact.scope === 'personal'
-            ? getPersonalMemoryEntity(personalEntity)
-            : getProjectMemoryEntity(projectEntity ?? entity);
-        if (!targetEntity) {
-            skipped.push({ key: fact.key, reason: 'missing_entity' });
-            continue;
-        }
+export async function rememberAssistantResponseFacts(params: {
+    iranti: IrantiQueryClient;
+    response: string;
+    agent: string;
+    source: string;
+    entity?: string | null;
+    projectEntity?: string | null;
+    personalEntity?: string | null;
+    confidence?: number;
+}): Promise<AutoRememberResult> {
+    const {
+        iranti,
+        response,
+        agent,
+        source,
+        entity,
+        projectEntity,
+        personalEntity,
+        confidence = 90,
+    } = params;
 
-        const existing: { found: boolean; value?: unknown } = await iranti.query(targetEntity, fact.key).catch(() => ({ found: false }));
-        if (existing.found && comparableValue(existing.value) === comparableValue(fact.value)) {
-            skipped.push({ key: fact.key, reason: 'unchanged' });
-            continue;
-        }
-
-        await iranti.write({
-            entity: targetEntity,
-            key: fact.key,
-            value: fact.value,
-            summary: fact.summary,
-            confidence,
-            source,
-            agent,
-        });
-        written += 1;
-        writtenEntities.add(targetEntity);
-    }
-
-    return {
-        enabled: true,
-        entity: writtenEntities.size === 1 ? Array.from(writtenEntities)[0] : undefined,
-        extracted: facts.length,
-        written,
-        skipped,
-    };
+    return persistExtractedFacts({
+        iranti,
+        facts: extractExplicitAssistantMemory(response),
+        agent,
+        source,
+        confidence,
+        entity,
+        projectEntity,
+        personalEntity,
+    });
 }

@@ -113,6 +113,17 @@ Optional opt-in memory capture:
   - `we decided to ship the patch release first`
   - `the next step is rerun the db validation`
 
+Codex does not have the Claude `Stop` hook path. If Codex itself is about to say a durable structured summary, use:
+- `iranti_remember_response`
+
+Good uses:
+- `The next step is rerun the db validation.`
+- `The blocker is missing provider credentials.`
+- `We decided to ship the patch release first.`
+- `The current owner is codex_code_main.`
+
+If Codex needs to pin the target explicitly instead of relying on the bound project defaults, pass `projectEntity` or `personalEntity` to `iranti_remember_response`.
+
 ## 4. Launch Codex in the bound project
 
 Open Codex in the project that contains `.env.iranti`:
@@ -141,11 +152,13 @@ Use the integration like this:
 
 - `iranti_query` when you know the exact entity and key
 - `iranti_search` when you need discovery
+- `iranti_remember_response` when your own final answer contains a strict durable summary worth persisting
 - `iranti_write` only for durable facts
 - `iranti_ingest` only for stable content worth chunking
 
 Do not auto-save every turn. That degrades retrieval quality quickly.
 If you enable `IRANTI_AUTO_REMEMBER=true`, treat it as a narrow convenience path for explicit prompt facts only, not a replacement for `iranti_write`.
+`iranti_remember_response` is the explicit Codex-side equivalent for strict post-response summaries; it is still intentionally narrow and should not be used for arbitrary prose.
 
 If Codex is receiving work from Claude Code, treat the handoff as shared durable memory, not as Claude session recovery. Read the shared `task/...` facts with `query()` or `attend()` plus explicit `entityHints`, then write your pickup/progress back to the same task entity.
 

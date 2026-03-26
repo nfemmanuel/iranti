@@ -23,7 +23,7 @@ This feature exposes Iranti to Claude Code through the installed CLI surface: `i
 ## Outputs
 | Output | Type | Description |
 |---|---|---|
-| MCP tools | stdio MCP server | Exposes `iranti_handshake`, `iranti_attend`, `iranti_observe`, `iranti_query`, `iranti_search`, `iranti_write`, `iranti_ingest`, `iranti_relate`, and `iranti_who_knows`. |
+| MCP tools | stdio MCP server | Exposes `iranti_handshake`, `iranti_attend`, `iranti_observe`, `iranti_query`, `iranti_search`, `iranti_write`, `iranti_remember_response`, `iranti_ingest`, `iranti_relate`, and `iranti_who_knows`. |
 | Hook context | JSON | Emits `hookSpecificOutput.additionalContext` for Claude Code hook events. |
 | Structured tool results | JSON | Returns tool output as both plain text and `structuredContent` for MCP clients. |
 | Claude scaffold files | filesystem | Writes `.mcp.json` and `.claude/settings.local.json` in the target project. |
@@ -51,8 +51,9 @@ This feature exposes Iranti to Claude Code through the installed CLI surface: `i
 15. On `UserPromptSubmit`, if `IRANTI_AUTO_REMEMBER=true`, extract only narrow explicit prompt facts and write personal facts to `IRANTI_PERSONAL_MEMORY_ENTITY`/`user/main` while project facts still go to `IRANTI_MEMORY_ENTITY`, then retrieve memory.
 16. On `UserPromptSubmit`, call `attend()` and emit only relevant retrieved facts when injection is needed.
 17. On `Stop`, if `IRANTI_AUTO_REMEMBER=true`, extract only narrow assistant-response summary patterns from `last_assistant_message` and write project-scoped summaries to `IRANTI_MEMORY_ENTITY`.
-18. MCP tool descriptions explicitly tell Claude-facing clients to consult Iranti for recall questions about remembered preferences, decisions, blockers, next steps, and prior project facts before guessing or saying they do not know.
-19. Keep durable writes explicit through MCP tool calls rather than auto-saving all turns; the hook never bulk-saves Claude responses.
+18. MCP clients may call `iranti_remember_response` explicitly to persist a strict assistant summary such as `The next step is ...` without relying on the Claude `Stop` hook path.
+19. MCP tool descriptions explicitly tell Claude-facing clients to consult Iranti for recall questions about remembered preferences, decisions, blockers, next steps, and prior project facts before guessing or saying they do not know.
+20. Keep durable writes explicit through MCP tool calls rather than auto-saving all turns; the hook never bulk-saves Claude responses.
 
 ## Edge Cases
 - Missing `DATABASE_URL`: process exits with a fatal configuration error.
@@ -62,6 +63,7 @@ This feature exposes Iranti to Claude Code through the installed CLI surface: `i
 - `IRANTI_AUTO_REMEMBER=true` without `IRANTI_MEMORY_ENTITY`: project-scoped auto-write is skipped rather than guessing a target entity; personal facts still default to `user/main`.
 - Auto-remember extracts only strict prompt patterns; arbitrary narrative text is ignored.
 - Assistant-response auto-remember extracts only strict summary patterns such as `the next step is ...`, `the blocker is ...`, `we decided ...`, or `your favorite ... is ...`.
+- `iranti_remember_response` also ignores arbitrary prose and persists only strict assistant-summary patterns.
 - Invalid `valueJson` or `propertiesJson`: MCP write/relate tools reject with a clear JSON parsing error.
 - Unregistered agent ids: auto-registration creates a stable Claude-facing agent profile.
 - Existing `.mcp.json`: the `iranti` server is merged in without removing other MCP servers, and pinned to the project binding when one is available.
@@ -77,7 +79,7 @@ This feature exposes Iranti to Claude Code through the installed CLI surface: `i
 - `iranti claude-setup --scan <dir>` reports created/updated/unchanged status per discovered project.
 - `iranti claude-setup --scan <dir> --recursive` finds nested Claude-enabled projects.
 - `iranti mcp --help` works through the installed CLI handoff path.
-- `npm run test:mcp-smoke` starts the stdio MCP server, lists tools, and successfully calls `iranti_handshake`, `iranti_write`, `iranti_query`, `iranti_search`, and `iranti_attend`.
+- `npm run test:mcp-smoke` starts the stdio MCP server, lists tools, and successfully calls `iranti_handshake`, `iranti_write`, `iranti_query`, `iranti_search`, `iranti_attend`, and `iranti_remember_response`.
 - `iranti claude-hook --help` works through the installed CLI handoff path.
 - Installed-package Claude Code integration no longer requires hardcoded `DATABASE_URL` in hook commands when `.env.iranti` points to a valid instance env.
 

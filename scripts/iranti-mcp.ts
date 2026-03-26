@@ -5,7 +5,7 @@ import * as z from 'zod/v4';
 import { Iranti } from '../src/sdk';
 import { rewriteCommandError } from '../src/lib/commandErrors';
 import { loadRuntimeEnv } from '../src/lib/runtimeEnv';
-import { autoRememberPromptFacts, isAutoRememberEnabled } from '../src/lib/autoRemember';
+import { autoRememberPromptFacts, isAutoRememberEnabled, rememberAssistantResponseFacts } from '../src/lib/autoRemember';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -128,7 +128,7 @@ async function main(): Promise<void> {
 
     const server = new McpServer({
         name: 'iranti-mcp',
-        version: '0.2.41',
+        version: '0.2.42',
     });
 
     server.registerTool('iranti_handshake', {
@@ -280,6 +280,34 @@ and may be resolved or escalated.`,
             agent: withDefaultAgent(agent),
             validFrom: parseIsoDate(validFrom),
             requestId,
+        });
+        return textResult(result);
+    });
+
+    server.registerTool('iranti_remember_response', {
+        description: `Persist a strict durable summary from your own response.
+Use this after you decide to say something like "the next step is ...",
+"the blocker is ...", "we decided ...", or "the current owner is ...".
+This uses the same narrow summary extractor as the Claude Stop hook,
+but it is explicit and works for Codex or any MCP client. Do not use
+this for arbitrary prose or every turn.`,
+        inputSchema: {
+            response: z.string().min(1).describe('The assistant response text to scan for strict durable summary patterns.'),
+            projectEntity: z.string().optional().describe('Optional explicit project entity target for project-scoped summaries.'),
+            personalEntity: z.string().optional().describe('Optional explicit personal entity target for personal summaries.'),
+            source: z.string().optional().describe('Optional provenance label override.'),
+            confidence: z.number().int().min(0).max(100).optional().describe('Raw confidence score for remembered summaries.'),
+            agent: z.string().optional().describe('Override the default agent id.'),
+        },
+    }, async ({ response, projectEntity, personalEntity, source, confidence, agent }) => {
+        const result = await rememberAssistantResponseFacts({
+            iranti,
+            response,
+            agent: withDefaultAgent(agent),
+            source: source?.trim() || defaultWriteSource(),
+            projectEntity,
+            personalEntity,
+            confidence: confidence ?? 90,
         });
         return textResult(result);
     });
