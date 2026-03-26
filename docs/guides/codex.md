@@ -104,7 +104,9 @@ The project-local `.mcp.json` should contain:
 
 Optional opt-in memory capture:
 - add `IRANTI_AUTO_REMEMBER=true` to the bound project's `.env.iranti`, or run `iranti configure project . --auto-remember true`
-- this lets the `iranti_attend` tool persist only narrow explicit prompt facts into `IRANTI_MEMORY_ENTITY` before retrieval
+- this lets the `iranti_attend` tool persist only narrow explicit prompt facts before retrieval
+- personal facts route to `IRANTI_PERSONAL_MEMORY_ENTITY` and default to `user/main`
+- project facts route to `IRANTI_MEMORY_ENTITY`
 - examples:
   - `my favorite snack is plantain chips`
   - `my home city is Lagos`

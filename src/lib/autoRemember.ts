@@ -12,6 +12,7 @@ type IrantiQueryClient = {
 };
 
 type ExtractedMemoryFact = {
+    scope: 'personal' | 'project';
     key: string;
     value: unknown;
     summary: string;
@@ -43,6 +44,11 @@ function normalizePrompt(prompt: string): string {
     return prompt.trim().replace(/\s+/g, ' ');
 }
 
+function normalizeEntity(entity: string | null | undefined): string | undefined {
+    const trimmed = entity?.trim();
+    return trimmed && trimmed.includes('/') ? trimmed : undefined;
+}
+
 function isQuestionLike(prompt: string): boolean {
     const trimmed = prompt.trim();
     if (!trimmed) return false;
@@ -50,10 +56,11 @@ function isQuestionLike(prompt: string): boolean {
     return /^(what|when|where|who|why|how|do|did|does|can|could|should|would|is|are|am|was|were)\b/i.test(trimmed);
 }
 
-function buildTextFact(key: string, value: string): ExtractedMemoryFact {
+function buildTextFact(key: string, value: string, scope: 'personal' | 'project' = 'personal'): ExtractedMemoryFact {
     const cleanKey = canonicalizeMemoryKey(key);
     const cleanValue = value.trim();
     return {
+        scope,
         key: cleanKey,
         value: { text: cleanValue },
         summary: `${cleanKey.replace(/_/g, ' ')} is ${cleanValue}`,
@@ -63,6 +70,33 @@ function buildTextFact(key: string, value: string): ExtractedMemoryFact {
 export function isAutoRememberEnabled(): boolean {
     const raw = process.env.IRANTI_AUTO_REMEMBER?.trim().toLowerCase();
     return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+}
+
+export function getPersonalMemoryEntity(explicit?: string | null): string {
+    return normalizeEntity(explicit)
+        ?? normalizeEntity(process.env.IRANTI_PERSONAL_MEMORY_ENTITY)
+        ?? 'user/main';
+}
+
+export function getProjectMemoryEntity(explicit?: string | null): string | undefined {
+    return normalizeEntity(explicit)
+        ?? normalizeEntity(process.env.IRANTI_MEMORY_ENTITY);
+}
+
+export function classifyMemoryScope(message: string): 'personal' | 'project' | null {
+    const normalized = normalizePrompt(message).toLowerCase();
+    if (!normalized) return null;
+
+    if (/\b(next step|blocker|decision|current owner)\b/.test(normalized)) {
+        return 'project';
+    }
+    if (/\b(my|me|i)\b/.test(normalized)) {
+        return 'personal';
+    }
+    if (/\b(our|we)\b/.test(normalized)) {
+        return 'project';
+    }
+    return null;
 }
 
 export function extractExplicitPromptMemory(prompt: string): ExtractedMemoryFact[] {
@@ -104,6 +138,7 @@ export function extractExplicitPromptMemory(prompt: string): ExtractedMemoryFact
     const decisionMatch = stripped.match(/^we decided(?: that)? (.+)$/i);
     if (decisionMatch) {
         facts.push({
+            scope: 'project',
             key: 'decision',
             value: { text: decisionMatch[1].trim() },
             summary: `decision is ${decisionMatch[1].trim()}`,
@@ -113,6 +148,7 @@ export function extractExplicitPromptMemory(prompt: string): ExtractedMemoryFact
     const nextStepMatch = stripped.match(/^(?:the )?next step is (.+)$/i);
     if (nextStepMatch) {
         facts.push({
+            scope: 'project',
             key: 'next_step',
             value: { instruction: nextStepMatch[1].trim() },
             summary: `next step is ${nextStepMatch[1].trim()}`,
@@ -122,6 +158,7 @@ export function extractExplicitPromptMemory(prompt: string): ExtractedMemoryFact
     const blockerMatch = stripped.match(/^(?:the )?blocker is (.+)$/i);
     if (blockerMatch) {
         facts.push({
+            scope: 'project',
             key: 'blocker',
             value: { text: blockerMatch[1].trim() },
             summary: `blocker is ${blockerMatch[1].trim()}`,
@@ -157,6 +194,7 @@ export function extractExplicitAssistantMemory(response: string): ExtractedMemor
     const decisionMatch = lower.match(/^we decided(?: that)? (.+)$/i);
     if (decisionMatch) {
         facts.push({
+            scope: 'project',
             key: 'decision',
             value: { text: decisionMatch[1].trim() },
             summary: `decision is ${decisionMatch[1].trim()}`,
@@ -166,6 +204,7 @@ export function extractExplicitAssistantMemory(response: string): ExtractedMemor
     const nextStepMatch = lower.match(/^(?:the )?next step is (.+)$/i);
     if (nextStepMatch) {
         facts.push({
+            scope: 'project',
             key: 'next_step',
             value: { instruction: nextStepMatch[1].trim() },
             summary: `next step is ${nextStepMatch[1].trim()}`,
@@ -175,6 +214,7 @@ export function extractExplicitAssistantMemory(response: string): ExtractedMemor
     const blockerMatch = lower.match(/^(?:the )?blocker is (.+)$/i);
     if (blockerMatch) {
         facts.push({
+            scope: 'project',
             key: 'blocker',
             value: { text: blockerMatch[1].trim() },
             summary: `blocker is ${blockerMatch[1].trim()}`,
@@ -184,6 +224,7 @@ export function extractExplicitAssistantMemory(response: string): ExtractedMemor
     const ownerMatch = lower.match(/^(?:the )?current owner is (.+)$/i);
     if (ownerMatch) {
         facts.push({
+            scope: 'project',
             key: 'current_owner',
             value: { text: ownerMatch[1].trim() },
             summary: `current owner is ${ownerMatch[1].trim()}`,
@@ -213,6 +254,8 @@ export async function autoRememberPromptFacts(params: {
     agent: string;
     source: string;
     entity?: string | null;
+    projectEntity?: string | null;
+    personalEntity?: string | null;
     confidence?: number;
 }): Promise<AutoRememberResult> {
     const {
@@ -220,11 +263,13 @@ export async function autoRememberPromptFacts(params: {
         prompt,
         agent,
         source,
-        entity = process.env.IRANTI_MEMORY_ENTITY?.trim(),
+        entity,
+        projectEntity,
+        personalEntity,
         confidence = 96,
     } = params;
 
-    if (!isAutoRememberEnabled() || !entity) {
+    if (!isAutoRememberEnabled()) {
         return {
             enabled: false,
             extracted: 0,
@@ -236,16 +281,25 @@ export async function autoRememberPromptFacts(params: {
     const facts = extractExplicitPromptMemory(prompt);
     const skipped: Array<{ key: string; reason: string }> = [];
     let written = 0;
+    const writtenEntities = new Set<string>();
 
     for (const fact of facts) {
-        const existing: { found: boolean; value?: unknown } = await iranti.query(entity, fact.key).catch(() => ({ found: false }));
+        const targetEntity = fact.scope === 'personal'
+            ? getPersonalMemoryEntity(personalEntity)
+            : getProjectMemoryEntity(projectEntity ?? entity);
+        if (!targetEntity) {
+            skipped.push({ key: fact.key, reason: 'missing_entity' });
+            continue;
+        }
+
+        const existing: { found: boolean; value?: unknown } = await iranti.query(targetEntity, fact.key).catch(() => ({ found: false }));
         if (existing.found && comparableValue(existing.value) === comparableValue(fact.value)) {
             skipped.push({ key: fact.key, reason: 'unchanged' });
             continue;
         }
 
         await iranti.write({
-            entity,
+            entity: targetEntity,
             key: fact.key,
             value: fact.value,
             summary: fact.summary,
@@ -254,11 +308,12 @@ export async function autoRememberPromptFacts(params: {
             agent,
         });
         written += 1;
+        writtenEntities.add(targetEntity);
     }
 
     return {
         enabled: true,
-        entity,
+        entity: writtenEntities.size === 1 ? Array.from(writtenEntities)[0] : undefined,
         extracted: facts.length,
         written,
         skipped,
@@ -271,6 +326,8 @@ export async function autoRememberAssistantFacts(params: {
     agent: string;
     source: string;
     entity?: string | null;
+    projectEntity?: string | null;
+    personalEntity?: string | null;
     confidence?: number;
 }): Promise<AutoRememberResult> {
     const {
@@ -278,11 +335,13 @@ export async function autoRememberAssistantFacts(params: {
         response,
         agent,
         source,
-        entity = process.env.IRANTI_MEMORY_ENTITY?.trim(),
+        entity,
+        projectEntity,
+        personalEntity,
         confidence = 90,
     } = params;
 
-    if (!isAutoRememberEnabled() || !entity) {
+    if (!isAutoRememberEnabled()) {
         return {
             enabled: false,
             extracted: 0,
@@ -294,16 +353,25 @@ export async function autoRememberAssistantFacts(params: {
     const facts = extractExplicitAssistantMemory(response);
     const skipped: Array<{ key: string; reason: string }> = [];
     let written = 0;
+    const writtenEntities = new Set<string>();
 
     for (const fact of facts) {
-        const existing: { found: boolean; value?: unknown } = await iranti.query(entity, fact.key).catch(() => ({ found: false }));
+        const targetEntity = fact.scope === 'personal'
+            ? getPersonalMemoryEntity(personalEntity)
+            : getProjectMemoryEntity(projectEntity ?? entity);
+        if (!targetEntity) {
+            skipped.push({ key: fact.key, reason: 'missing_entity' });
+            continue;
+        }
+
+        const existing: { found: boolean; value?: unknown } = await iranti.query(targetEntity, fact.key).catch(() => ({ found: false }));
         if (existing.found && comparableValue(existing.value) === comparableValue(fact.value)) {
             skipped.push({ key: fact.key, reason: 'unchanged' });
             continue;
         }
 
         await iranti.write({
-            entity,
+            entity: targetEntity,
             key: fact.key,
             value: fact.value,
             summary: fact.summary,
@@ -312,11 +380,12 @@ export async function autoRememberAssistantFacts(params: {
             agent,
         });
         written += 1;
+        writtenEntities.add(targetEntity);
     }
 
     return {
         enabled: true,
-        entity,
+        entity: writtenEntities.size === 1 ? Array.from(writtenEntities)[0] : undefined,
         extracted: facts.length,
         written,
         skipped,

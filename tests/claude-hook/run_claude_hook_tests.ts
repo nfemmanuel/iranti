@@ -8,14 +8,17 @@ function uniqueId(prefix: string): string {
 async function main(): Promise<void> {
     const priorAgentId = process.env.IRANTI_CLAUDE_AGENT_ID;
     const priorMemoryEntity = process.env.IRANTI_MEMORY_ENTITY;
+    const priorPersonalMemoryEntity = process.env.IRANTI_PERSONAL_MEMORY_ENTITY;
     const priorAutoRemember = process.env.IRANTI_AUTO_REMEMBER;
 
     const agentId = uniqueId('claude_hook_agent');
     const memoryEntity = `project/${uniqueId('claude_hook_project')}`;
+    const personalMemoryEntity = `user/${uniqueId('claude_hook_user')}`;
     const factSummary = 'Deployment mode is isolated runtime.';
 
     process.env.IRANTI_CLAUDE_AGENT_ID = agentId;
     process.env.IRANTI_MEMORY_ENTITY = memoryEntity;
+    process.env.IRANTI_PERSONAL_MEMORY_ENTITY = personalMemoryEntity;
 
     const calls: string[] = [];
     const queryValues = new Map<string, unknown>();
@@ -63,15 +66,8 @@ async function main(): Promise<void> {
                     decision: { needed: true },
                     facts: [
                         {
-                            entityKey: `${memoryEntity}/favorite_movie`,
+                            entityKey: `${personalMemoryEntity}/favorite_movie`,
                             summary: 'favorite movie is zebra asteroid midnight',
-                            value: { text: 'zebra asteroid midnight' },
-                            confidence: 96,
-                            source: 'claude_hook_test',
-                        },
-                        {
-                            entityKey: `${memoryEntity}/favourite_movie`,
-                            summary: 'favourite movie is zebra asteroid midnight',
                             value: { text: 'zebra asteroid midnight' },
                             confidence: 96,
                             source: 'claude_hook_test',
@@ -79,7 +75,7 @@ async function main(): Promise<void> {
                     ],
                     entitiesDetected: [],
                     alreadyPresent: 0,
-                    totalFound: 2,
+                    totalFound: 1,
                     entitiesResolved: input.entityHints ?? [],
                     debug: {
                         skipped: null,
@@ -159,15 +155,15 @@ async function main(): Promise<void> {
 
         assert.ok(autoRememberContext.includes('[Iranti Retrieved Memory]'), 'Expected declarative prompt auto-remember path to preserve retrieval injection.');
         assert.ok(
-            calls.some((call) => call.startsWith(`write:${memoryEntity}:favorite_snack:`)),
-            'Expected opt-in auto-remember to write explicit prompt memory, including favourite/favorite spelling variants.'
+            calls.some((call) => call.startsWith(`write:${personalMemoryEntity}:favorite_snack:`)),
+            'Expected opt-in auto-remember to write personal prompt memory to the personal memory entity.'
         );
         assert.ok(
-            !calls.some((call) => call.startsWith(`write:${memoryEntity}:favourite_snack:`)),
+            !calls.some((call) => call.startsWith(`write:${personalMemoryEntity}:favourite_snack:`)),
             'Expected favourite/favorite variants to canonicalize to favorite_snack only.'
         );
 
-        const writesAfterFirstCapture = calls.filter((call) => call.startsWith(`write:${memoryEntity}:favorite_snack:`)).length;
+        const writesAfterFirstCapture = calls.filter((call) => call.startsWith(`write:${personalMemoryEntity}:favorite_snack:`)).length;
         await buildHookAdditionalContext({
             iranti: fakeIranti as never,
             event: 'UserPromptSubmit',
@@ -177,7 +173,7 @@ async function main(): Promise<void> {
                 recentMessages: ['assistant: Repeating the same memory should not churn writes.'],
             },
         });
-        const writesAfterSecondCapture = calls.filter((call) => call.startsWith(`write:${memoryEntity}:favorite_snack:`)).length;
+        const writesAfterSecondCapture = calls.filter((call) => call.startsWith(`write:${personalMemoryEntity}:favorite_snack:`)).length;
         assert.equal(writesAfterSecondCapture, writesAfterFirstCapture, 'Expected unchanged explicit prompt memory to avoid duplicate writes.');
 
         const stopContext = await buildHookAdditionalContext({
@@ -224,6 +220,12 @@ async function main(): Promise<void> {
             delete process.env.IRANTI_MEMORY_ENTITY;
         } else {
             process.env.IRANTI_MEMORY_ENTITY = priorMemoryEntity;
+        }
+
+        if (priorPersonalMemoryEntity === undefined) {
+            delete process.env.IRANTI_PERSONAL_MEMORY_ENTITY;
+        } else {
+            process.env.IRANTI_PERSONAL_MEMORY_ENTITY = priorPersonalMemoryEntity;
         }
 
         if (priorAutoRemember === undefined) {

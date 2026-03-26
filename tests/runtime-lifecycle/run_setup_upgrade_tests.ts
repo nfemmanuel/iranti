@@ -202,6 +202,7 @@ async function main(): Promise<void> {
         assert.strictEqual(bindingEnv.IRANTI_INSTANCE, 'local');
         assert.strictEqual(bindingEnv.IRANTI_INSTANCE_ENV, instanceEnvPath);
         assert.strictEqual(bindingEnv.IRANTI_API_KEY, testApiKey);
+        assert.strictEqual(bindingEnv.IRANTI_PERSONAL_MEMORY_ENTITY, 'user/main');
         assert.strictEqual(bindingEnv.IRANTI_AUTO_REMEMBER, 'true');
         const mcpConfig = readJson<{
             mcpServers: {
@@ -252,6 +253,7 @@ async function main(): Promise<void> {
             assert.strictEqual(sharedBinding.IRANTI_INSTANCE, 'team');
             assert.strictEqual(sharedBinding.IRANTI_INSTANCE_ENV, sharedInstanceEnvPath);
             assert.strictEqual(sharedBinding.IRANTI_API_KEY, sharedApiKey);
+            assert.strictEqual(sharedBinding.IRANTI_PERSONAL_MEMORY_ENTITY, 'user/main');
             assert.strictEqual(sharedBinding.IRANTI_AUTO_REMEMBER, 'false');
             assert.ok(fs.existsSync(path.join(projectPath, '.mcp.json')), 'Expected shared setup to scaffold .mcp.json for each bound project.');
             assert.ok(fs.existsSync(path.join(projectPath, '.claude', 'settings.local.json')), 'Expected shared setup to scaffold Claude settings for each bound project.');
@@ -282,6 +284,7 @@ async function main(): Promise<void> {
         ], repoRoot);
         assert.strictEqual(projectInitRun.status, 0, `project init failed:\n${projectInitRun.stdout}\n${projectInitRun.stderr}`);
         const projectInitBinding = readEnv(path.join(projectInitDir, '.env.iranti'));
+        assert.strictEqual(projectInitBinding.IRANTI_PERSONAL_MEMORY_ENTITY, 'user/main');
         assert.strictEqual(projectInitBinding.IRANTI_AUTO_REMEMBER, 'false');
 
         const configureProjectRun = runCli([
@@ -295,6 +298,7 @@ async function main(): Promise<void> {
         ], repoRoot);
         assert.strictEqual(configureProjectRun.status, 0, `configure project failed:\n${configureProjectRun.stdout}\n${configureProjectRun.stderr}`);
         const configuredProjectBinding = readEnv(path.join(projectInitDir, '.env.iranti'));
+        assert.strictEqual(configuredProjectBinding.IRANTI_PERSONAL_MEMORY_ENTITY, 'user/main');
         assert.strictEqual(configuredProjectBinding.IRANTI_AUTO_REMEMBER, 'true');
 
         const statusRun = runCli(['status', '--root', runtimeRoot, '--json'], repoRoot);

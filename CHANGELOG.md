@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.40 - Unreleased
+
+### Added
+
+- Pending release notes.
+
 ## 0.2.39 - Unreleased
 
 ### Added

@@ -81,15 +81,21 @@ and may be resolved or escalated.`,
 Use this when you already know both the entity and the key.
 Returns the current value, summary, confidence, source, and
 temporal metadata when available. Prefer this over iranti_search
-when the target fact is already known.`,
+when the target fact is already known, and do not answer from
+memory alone before checking Iranti.`,
             iranti_search: `Search shared memory with natural language when the exact entity
 or key is unknown. Uses hybrid lexical and vector search across
-stored facts. Use this for discovery and recall, not exact lookup.`,
+stored facts. Use this for discovery and recall, not exact lookup.
+If the user asks what they previously told you and you do not know
+the exact key, use this before saying you do not know.`,
             iranti_attend: `Ask Iranti whether memory should be injected before the next LLM turn.
 Call this before each turn, passing the latest message and the current
-visible context window. Returns an injection decision plus any facts
-that should be added to context if relevant memory is missing.
-Omitting currentContext falls back to latestMessage only — pass the
+visible context window. If the user is asking you to recall a remembered
+fact (for example a preference, decision, blocker, next step, or prior
+project detail), use this before answering instead of guessing or saying
+you do not know. Returns an injection decision plus any facts that should
+be added to context if relevant memory is missing.
+Omitting currentContext falls back to latestMessage only; pass the
 full visible context when available.`,
             iranti_handshake: `Initialize or refresh an agent's working-memory brief for the current task.
 Call this at session start or when a new task begins, passing the task and
@@ -126,7 +132,7 @@ for that task. Do not use this as a per-turn retrieval tool; use iranti_attend.`
                 entity,
                 key: 'status',
                 valueJson: JSON.stringify({ phase: 'smoke_test' }),
-                summary: 'Smoke test project status is smoke_test.',
+                summary: `Smoke test project ${entity} status is smoke_test.`,
                 confidence: 88,
             },
         });
@@ -158,7 +164,7 @@ for that task. Do not use this as a per-turn retrieval tool; use iranti_attend.`
         const search = await client.callTool({
             name: 'iranti_search',
             arguments: {
-                query: 'smoke test project status',
+                query: `${entity} smoke_test`,
                 limit: 5,
             },
         });
@@ -215,3 +221,4 @@ main().catch((error) => {
     console.error('MCP smoke test failed:', error);
     process.exit(1);
 });
+

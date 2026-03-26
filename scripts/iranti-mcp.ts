@@ -29,7 +29,7 @@ function printHelp(): void {
         '  IRANTI_MCP_AGENT_DESCRIPTION  Default agent description',
         '  IRANTI_MCP_AGENT_MODEL        Default agent model label',
         '  IRANTI_MCP_DEFAULT_SOURCE     Default write source (default: ClaudeCode)',
-        '  IRANTI_AUTO_REMEMBER         Opt-in explicit prompt auto-save to IRANTI_MEMORY_ENTITY before attend()',
+        '  IRANTI_AUTO_REMEMBER         Opt-in explicit prompt auto-save before attend()',
         '',
         'This server is intended for Claude Code and other MCP clients over stdio.',
     ].join('\n'));
@@ -128,7 +128,7 @@ async function main(): Promise<void> {
 
     const server = new McpServer({
         name: 'iranti-mcp',
-        version: '0.2.39',
+        version: '0.2.40',
     });
 
     server.registerTool('iranti_handshake', {
@@ -153,9 +153,12 @@ for that task. Do not use this as a per-turn retrieval tool; use iranti_attend.`
     server.registerTool('iranti_attend', {
         description: `Ask Iranti whether memory should be injected before the next LLM turn.
 Call this before each turn, passing the latest message and the current
-visible context window. Returns an injection decision plus any facts
-that should be added to context if relevant memory is missing.
-Omitting currentContext falls back to latestMessage only — pass the
+visible context window. If the user is asking you to recall a remembered
+fact (for example a preference, decision, blocker, next step, or prior
+project detail), use this before answering instead of guessing or saying
+you do not know. Returns an injection decision plus any facts that should
+be added to context if relevant memory is missing.
+Omitting currentContext falls back to latestMessage only; pass the
 full visible context when available.`,
         inputSchema: {
             latestMessage: z.string().min(1).describe('The latest user or assistant message.'),
@@ -209,7 +212,8 @@ full visible context when available.`,
 Use this when you already know both the entity and the key.
 Returns the current value, summary, confidence, source, and
 temporal metadata when available. Prefer this over iranti_search
-when the target fact is already known.`,
+when the target fact is already known, and do not answer from
+memory alone before checking Iranti.`,
         inputSchema: {
             entity: z.string().min(1).describe('Entity in entityType/entityId format.'),
             key: z.string().min(1).describe('Fact key to retrieve.'),
@@ -222,7 +226,9 @@ when the target fact is already known.`,
     server.registerTool('iranti_search', {
         description: `Search shared memory with natural language when the exact entity
 or key is unknown. Uses hybrid lexical and vector search across
-stored facts. Use this for discovery and recall, not exact lookup.`,
+stored facts. Use this for discovery and recall, not exact lookup.
+If the user asks what they previously told you and you do not know
+the exact key, use this before saying you do not know.`,
         inputSchema: {
             query: z.string().min(1).describe('Natural language search phrase.'),
             entityType: z.string().optional().describe('Optional entity type filter.'),
@@ -356,3 +362,4 @@ main().catch((error) => {
     console.error('[iranti-mcp] fatal:', formatted.message);
     process.exit(1);
 });
+

@@ -14,6 +14,7 @@ This feature exposes Iranti to Claude Code through the installed CLI surface: `i
 | `IRANTI_MCP_DEFAULT_SOURCE` | string? | Default source label for MCP writes and ingests. |
 | `IRANTI_CLAUDE_AGENT_ID` | string? | Default agent id used by the Claude Code hook helper. |
 | `IRANTI_AUTO_REMEMBER` | boolean? | Opt-in explicit prompt auto-save into `IRANTI_MEMORY_ENTITY` before retrieval. |
+| `IRANTI_PERSONAL_MEMORY_ENTITY` | string? | Optional personal-memory target for auto-remembered user facts. Defaults to `user/main`. |
 | `--force` | boolean | Overwrite existing Claude scaffold files when running `iranti claude-setup`. |
 | `--scan` | string | Optional parent directory for batch Claude scaffold discovery. |
 | `--recursive` | boolean | Recursively scan nested project trees when used with `--scan`. |
@@ -47,17 +48,18 @@ This feature exposes Iranti to Claude Code through the installed CLI surface: `i
 12. Expose Iranti memory and write operations as MCP tools.
 13. For hook usage, parse Claude Code hook stdin payload.
 14. On `SessionStart`, call `handshake()` and emit a compact working-memory brief.
-15. On `UserPromptSubmit`, if `IRANTI_AUTO_REMEMBER=true`, extract only narrow explicit prompt facts and write them to `IRANTI_MEMORY_ENTITY` before retrieval.
+15. On `UserPromptSubmit`, if `IRANTI_AUTO_REMEMBER=true`, extract only narrow explicit prompt facts and write personal facts to `IRANTI_PERSONAL_MEMORY_ENTITY`/`user/main` while project facts still go to `IRANTI_MEMORY_ENTITY`, then retrieve memory.
 16. On `UserPromptSubmit`, call `attend()` and emit only relevant retrieved facts when injection is needed.
-17. On `Stop`, if `IRANTI_AUTO_REMEMBER=true`, extract only narrow assistant-response summary patterns from `last_assistant_message` and write them to `IRANTI_MEMORY_ENTITY`.
-18. Keep durable writes explicit through MCP tool calls rather than auto-saving all turns; the hook never bulk-saves Claude responses.
+17. On `Stop`, if `IRANTI_AUTO_REMEMBER=true`, extract only narrow assistant-response summary patterns from `last_assistant_message` and write project-scoped summaries to `IRANTI_MEMORY_ENTITY`.
+18. MCP tool descriptions explicitly tell Claude-facing clients to consult Iranti for recall questions about remembered preferences, decisions, blockers, next steps, and prior project facts before guessing or saying they do not know.
+19. Keep durable writes explicit through MCP tool calls rather than auto-saving all turns; the hook never bulk-saves Claude responses.
 
 ## Edge Cases
 - Missing `DATABASE_URL`: process exits with a fatal configuration error.
 - Missing `.env.iranti` in an installed-package project means the hook and MCP server must rely on direct environment configuration.
 - Empty `UserPromptSubmit` prompt: hook emits no additional context.
 - Empty `Stop` message: hook exits without writing.
-- `IRANTI_AUTO_REMEMBER=true` without `IRANTI_MEMORY_ENTITY`: the hook skips auto-write rather than guessing a target entity.
+- `IRANTI_AUTO_REMEMBER=true` without `IRANTI_MEMORY_ENTITY`: project-scoped auto-write is skipped rather than guessing a target entity; personal facts still default to `user/main`.
 - Auto-remember extracts only strict prompt patterns; arbitrary narrative text is ignored.
 - Assistant-response auto-remember extracts only strict summary patterns such as `the next step is ...`, `the blocker is ...`, `we decided ...`, or `your favorite ... is ...`.
 - Invalid `valueJson` or `propertiesJson`: MCP write/relate tools reject with a clear JSON parsing error.

@@ -1334,6 +1334,7 @@ type SetupProjectPlan = {
     path: string;
     agentId: string;
     memoryEntity: string;
+    personalMemoryEntity: string;
     projectMode: ProjectMemoryMode;
     autoRemember: boolean;
     claudeCode?: boolean;
@@ -2391,6 +2392,7 @@ async function executeSetupPlan(plan: SetupExecutionPlan): Promise<SetupExecutio
             IRANTI_API_KEY: plan.apiKey,
             IRANTI_AGENT_ID: project.agentId,
             IRANTI_MEMORY_ENTITY: project.memoryEntity,
+            IRANTI_PERSONAL_MEMORY_ENTITY: project.personalMemoryEntity,
             IRANTI_AUTO_REMEMBER: String(project.autoRemember),
             IRANTI_PROJECT_MODE: project.projectMode,
             IRANTI_INSTANCE: plan.instanceName,
@@ -2481,6 +2483,7 @@ function parseSetupConfig(filePath: string): SetupExecutionPlan {
         path: path.resolve(String(item?.path ?? process.cwd())),
         agentId: sanitizeIdentifier(String(item?.agentId ?? projectAgentDefault(String(item?.path ?? process.cwd()))), 'project_main'),
         memoryEntity: String(item?.memoryEntity ?? 'user/main'),
+        personalMemoryEntity: String(item?.personalMemoryEntity ?? 'user/main'),
         projectMode: normalizeProjectMode(String(item?.projectMode ?? mode), mode),
         autoRemember: parseOptionalBooleanValue(item?.autoRemember, 'projects[].autoRemember') ?? false,
         claudeCode: item?.claudeCode !== false,
@@ -2553,6 +2556,7 @@ function defaultsSetupPlan(args: ParsedArgs): SetupExecutionPlan {
             path: path.resolve(projectPath),
             agentId: projectAgentDefault(projectPath),
             memoryEntity: 'user/main',
+            personalMemoryEntity: 'user/main',
             projectMode: mode,
             autoRemember: resolveOptionalBooleanFlag(args, 'auto-remember') ?? false,
             claudeCode: hasFlag(args, 'claude-code'),
@@ -4884,12 +4888,14 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
                 'Use a narrower entity only when you intentionally want this project bound to some other memory namespace.',
             ]);
             const memoryEntity = await promptNonEmpty(prompt, 'Project memory entity', 'user/main');
+            const personalMemoryEntity = await promptNonEmpty(prompt, 'Personal memory entity', 'user/main');
             const autoRemember = await promptYesNo(prompt, 'Enable strict auto-remember for this project binding?', false);
             const claudeCode = await promptYesNo(prompt, 'Create Claude Code project files here now?', true);
             projects.push({
                 path: projectPath,
                 agentId,
                 memoryEntity,
+                personalMemoryEntity,
                 projectMode: setupMode,
                 autoRemember,
                 claudeCode,
@@ -5892,6 +5898,7 @@ async function projectInitCommand(args: ParsedArgs): Promise<void> {
         IRANTI_API_KEY: apiKey,
         IRANTI_AGENT_ID: agentId,
         IRANTI_MEMORY_ENTITY: 'user/main',
+        IRANTI_PERSONAL_MEMORY_ENTITY: getFlag(args, 'personal-memory-entity') ?? 'user/main',
         IRANTI_AUTO_REMEMBER: String(autoRemember),
         IRANTI_PROJECT_MODE: projectMode,
         IRANTI_INSTANCE: instanceName,
@@ -6055,6 +6062,7 @@ async function configureProjectCommand(args: ParsedArgs): Promise<void> {
     let explicitApiKey: string | undefined = getFlag(args, 'api-key');
     let explicitAgentId: string | undefined = getFlag(args, 'agent-id');
     let explicitMemoryEntity: string | undefined = getFlag(args, 'memory-entity');
+    let explicitPersonalMemoryEntity: string | undefined = getFlag(args, 'personal-memory-entity');
     let explicitProjectMode: string | undefined = getFlag(args, 'mode');
     let explicitAutoRemember: boolean | undefined = resolveOptionalBooleanFlag(args, 'auto-remember');
 
@@ -6073,6 +6081,7 @@ async function configureProjectCommand(args: ParsedArgs): Promise<void> {
             explicitApiKey = await prompt.secret('Project API key', explicitApiKey ?? existing.IRANTI_API_KEY);
             explicitAgentId = await prompt.line('Project agent ID', explicitAgentId ?? existing.IRANTI_AGENT_ID ?? projectAgentDefault(projectPath));
             explicitMemoryEntity = await prompt.line('Project memory entity', explicitMemoryEntity ?? existing.IRANTI_MEMORY_ENTITY ?? 'user/main');
+            explicitPersonalMemoryEntity = await prompt.line('Personal memory entity', explicitPersonalMemoryEntity ?? existing.IRANTI_PERSONAL_MEMORY_ENTITY ?? 'user/main');
             explicitAutoRemember = await promptYesNo(prompt, 'Enable strict auto-remember?', explicitAutoRemember ?? envFlagEnabled(existing.IRANTI_AUTO_REMEMBER));
             explicitProjectMode = await prompt.line('Project mode (isolated or shared)', explicitProjectMode ?? existing.IRANTI_PROJECT_MODE ?? inferProjectMode(projectPath, existing.IRANTI_INSTANCE_ENV));
         });
@@ -6095,6 +6104,7 @@ async function configureProjectCommand(args: ParsedArgs): Promise<void> {
         IRANTI_API_KEY: explicitApiKey ?? derivedApiKey,
         IRANTI_AGENT_ID: explicitAgentId ?? existing.IRANTI_AGENT_ID ?? projectAgentDefault(projectPath),
         IRANTI_MEMORY_ENTITY: explicitMemoryEntity ?? existing.IRANTI_MEMORY_ENTITY ?? 'user/main',
+        IRANTI_PERSONAL_MEMORY_ENTITY: explicitPersonalMemoryEntity ?? existing.IRANTI_PERSONAL_MEMORY_ENTITY ?? 'user/main',
         IRANTI_AUTO_REMEMBER: String(explicitAutoRemember ?? envFlagEnabled(existing.IRANTI_AUTO_REMEMBER)),
         IRANTI_PROJECT_MODE: normalizeProjectMode(explicitProjectMode, normalizeProjectMode(existing.IRANTI_PROJECT_MODE, inferProjectMode(projectPath, instanceEnvFile))),
         IRANTI_INSTANCE: instanceName,
@@ -6184,6 +6194,7 @@ async function authCreateKeyCommand(args: ParsedArgs): Promise<void> {
             IRANTI_API_KEY: created.token,
             IRANTI_AGENT_ID: agentId ?? existingBinding.IRANTI_AGENT_ID ?? 'my_agent',
             IRANTI_MEMORY_ENTITY: existingBinding.IRANTI_MEMORY_ENTITY ?? 'user/main',
+            IRANTI_PERSONAL_MEMORY_ENTITY: existingBinding.IRANTI_PERSONAL_MEMORY_ENTITY ?? 'user/main',
             IRANTI_AUTO_REMEMBER: existingBinding.IRANTI_AUTO_REMEMBER ?? 'false',
             IRANTI_INSTANCE: instanceName,
             IRANTI_INSTANCE_ENV: envFile,

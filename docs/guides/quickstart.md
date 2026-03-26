@@ -204,7 +204,7 @@ cd /path/to/chatbot-project
 iranti project init . --instance local --agent-id chatbot_main
 ```
 
-This writes `.env.iranti` with `IRANTI_URL`, `IRANTI_API_KEY`, `IRANTI_AGENT_ID`, `IRANTI_AUTO_REMEMBER`, and `IRANTI_PROJECT_MODE`.
+This writes `.env.iranti` with `IRANTI_URL`, `IRANTI_API_KEY`, `IRANTI_AGENT_ID`, `IRANTI_MEMORY_ENTITY`, `IRANTI_PERSONAL_MEMORY_ENTITY`, `IRANTI_AUTO_REMEMBER`, and `IRANTI_PROJECT_MODE`.
 
 Default manual binding mode is `isolated`. If you intentionally want a project to share memory with another project on the same instance, make that explicit:
 

@@ -91,13 +91,13 @@ export const CONFIGURATION_HELP: HelpEntry[] = [
         scenario: 'Switching from `mock` to `openai`, rotating provider keys, or moving the instance to a new port.',
     },
     {
-        command: 'iranti project init [path] --instance <name> [--api-key <token>] [--agent-id <id>] [--mode isolated|shared] [--auto-remember [true|false]] [--force]',
+        command: 'iranti project init [path] --instance <name> [--api-key <token>] [--agent-id <id>] [--mode isolated|shared] [--personal-memory-entity <entity>] [--auto-remember [true|false]] [--force]',
         description: 'Create a new `.env.iranti` binding for one project.',
         useWhen: 'a repo should point at an Iranti instance for Claude, Codex, MCP, or direct SDK/API use.',
         scenario: 'Binding `iranti-control-plane` or another repo root to `local` so it can use shared memory.',
     },
     {
-        command: 'iranti configure project [path] [--interactive] [--instance <name>] [--url <http://host:port>] [--api-key <token>] [--agent-id <id>] [--memory-entity <entity>] [--auto-remember [true|false]] [--mode isolated|shared] [--json]',
+        command: 'iranti configure project [path] [--interactive] [--instance <name>] [--url <http://host:port>] [--api-key <token>] [--agent-id <id>] [--memory-entity <entity>] [--personal-memory-entity <entity>] [--auto-remember [true|false]] [--mode isolated|shared] [--json]',
         description: 'Refresh or retarget an existing project binding.',
         useWhen: 'the project is already bound and you want to change its instance, URL, key, agent identity, or memory entity.',
         scenario: 'Moving a repo from `local` to `shared_team` or fixing a wrong `IRANTI_PROJECT_MODE`.',
@@ -342,7 +342,7 @@ export const CONFIGURE_HELP: HelpEntry[] = [
         scenario: 'Updating the database URL, port, provider, or provider key for `local`.',
     },
     {
-        command: 'iranti configure project [path] [--interactive] [--instance <name>] [--url <http://host:port>] [--api-key <token>] [--agent-id <id>] [--memory-entity <entity>] [--auto-remember [true|false]] [--mode isolated|shared] [--scope user|system] [--root <path>] [--json]',
+        command: 'iranti configure project [path] [--interactive] [--instance <name>] [--url <http://host:port>] [--api-key <token>] [--agent-id <id>] [--memory-entity <entity>] [--personal-memory-entity <entity>] [--auto-remember [true|false]] [--mode isolated|shared] [--scope user|system] [--root <path>] [--json]',
         description: 'Update one existing project binding.',
         useWhen: 'the project already has `.env.iranti` and should be retargeted or corrected.',
         scenario: 'Rebinding a repo from one instance to another or correcting the agent identity.',

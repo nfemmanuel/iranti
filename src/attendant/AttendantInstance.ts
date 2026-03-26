@@ -8,6 +8,7 @@ import { Prisma } from '../generated/prisma/client';
 import { EntryQuery, QueryResult } from '../types';
 import { timeStart, timeEnd } from '../lib/metrics';
 import { getConflictPolicy } from '../librarian/getPolicy';
+import { classifyMemoryScope, getPersonalMemoryEntity, getProjectMemoryEntity } from '../lib/autoRemember';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -1531,17 +1532,21 @@ Rules:
         const explicit = Array.isArray(entityHints)
             ? entityHints.filter((hint) => typeof hint === 'string' && hint.trim().length > 0)
             : [];
+        const scope = classifyMemoryScope(latestMessage);
 
         if (explicit.length > 0) {
             return explicit;
         }
 
-        if (/\b(my|our|we)\b/i.test(latestMessage)) {
-            const configured = process.env.IRANTI_MEMORY_ENTITY?.trim();
-            if (configured && configured.includes('/')) {
+        if (scope === 'personal') {
+            return [getPersonalMemoryEntity()];
+        }
+
+        if (scope === 'project') {
+            const configured = getProjectMemoryEntity();
+            if (configured) {
                 return [configured];
             }
-            return ['user/main'];
         }
 
         return [];

@@ -2,7 +2,15 @@ import 'dotenv/config';
 import path from 'path';
 import { Iranti } from '../src/sdk';
 import { loadRuntimeEnv } from '../src/lib/runtimeEnv';
-import { autoRememberAssistantFacts, autoRememberPromptFacts, canonicalizeMemoryKey, isAutoRememberEnabled } from '../src/lib/autoRemember';
+import {
+    autoRememberAssistantFacts,
+    autoRememberPromptFacts,
+    canonicalizeMemoryKey,
+    classifyMemoryScope,
+    getPersonalMemoryEntity,
+    getProjectMemoryEntity,
+    isAutoRememberEnabled,
+} from '../src/lib/autoRemember';
 
 type HookEventName = 'SessionStart' | 'UserPromptSubmit' | 'Stop';
 type HookPayload = Record<string, unknown>;
@@ -53,7 +61,7 @@ function printHelp(): void {
         '',
         'Reads Claude Code hook JSON from stdin and returns hookSpecificOutput.additionalContext on stdout.',
         'This helper retrieves working memory; durable KB writes still require explicit iranti_write/ingest calls.',
-        'Set IRANTI_AUTO_REMEMBER=true to auto-save only narrow explicit prompt facts into IRANTI_MEMORY_ENTITY.',
+        'Set IRANTI_AUTO_REMEMBER=true to auto-save narrow personal facts to IRANTI_PERSONAL_MEMORY_ENTITY/user/main and project summaries to IRANTI_MEMORY_ENTITY.',
     ].join('\n'));
 }
 
@@ -129,11 +137,16 @@ function getEntityHints(payload: HookPayload): string[] {
     const out = new Set<string>();
     const cwd = getCwd(payload);
     const projectHint = `project/${slugify(path.basename(cwd) || 'project')}`;
-    out.add(projectHint);
+    const scope = classifyMemoryScope(getPrompt(payload));
 
-    const memoryEntity = process.env.IRANTI_MEMORY_ENTITY?.trim();
-    if (memoryEntity) {
-        out.add(memoryEntity);
+    if (scope === 'personal') {
+        out.add(getPersonalMemoryEntity());
+    } else {
+        out.add(projectHint);
+        const memoryEntity = getProjectMemoryEntity();
+        if (memoryEntity) {
+            out.add(memoryEntity);
+        }
     }
 
     const envHints = (process.env.IRANTI_CLAUDE_ENTITY_HINTS ?? '')

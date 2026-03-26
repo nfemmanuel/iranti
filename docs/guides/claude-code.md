@@ -168,7 +168,8 @@ By default the hook remains retrieval-focused:
 If you deliberately want narrow automatic writes, add `IRANTI_AUTO_REMEMBER=true` to `.env.iranti` or run `iranti configure project . --auto-remember true`. Then:
 - `UserPromptSubmit` saves only strict explicit prompt facts
 - `Stop` saves only strict assistant-response summaries such as `the next step is ...` or `the blocker is ...`
-- all writes target `IRANTI_MEMORY_ENTITY`
+- personal facts such as `my favorite book is ...` go to `IRANTI_PERSONAL_MEMORY_ENTITY` and default to `user/main`
+- project facts such as `we decided ...`, `the next step is ...`, and `the blocker is ...` go to `IRANTI_MEMORY_ENTITY`
 
 Optional explicit overrides:
 

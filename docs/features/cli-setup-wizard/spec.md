@@ -63,6 +63,7 @@ The interactive wizard also explains high-friction choices inline before prompti
 Non-interactive variants:
 - `--defaults` derives values from flags and environment variables. It synthesizes a localhost or Docker `DATABASE_URL` automatically for `local` and `docker` modes, but still requires a real `DATABASE_URL` for `managed`.
 - `--defaults --auto-remember` writes `IRANTI_AUTO_REMEMBER=true` into each generated project binding. Omitting the flag writes `false`.
+- generated project bindings also include `IRANTI_PERSONAL_MEMORY_ENTITY=user/main` unless a setup config overrides it per project.
 - `--config <file>` reads a JSON plan and executes the same runtime/instance/project binding flow without prompts.
 - `--bootstrap-db` can be used with automated setup to run migrations and seeding immediately after instance configuration.
 
@@ -89,7 +90,7 @@ Non-interactive variants:
   - `setup --defaults` created install metadata, instance env, project binding, `.mcp.json`, and `.claude/settings.local.json`
   - repeating the same `setup --defaults` invocation updated the existing instance cleanly instead of failing on idempotent rerun
   - `setup --defaults --mode shared --projects <a>,<b>` bound multiple projects and tagged each binding `IRANTI_PROJECT_MODE=shared`
-  - generated project bindings now include `IRANTI_AUTO_REMEMBER=true|false`, so opt-in auto-remember can be decided during setup instead of by hand-editing `.env.iranti`
+  - generated project bindings now include `IRANTI_PERSONAL_MEMORY_ENTITY=user/main` plus `IRANTI_AUTO_REMEMBER=true|false`, so personal memory and opt-in auto-remember can be decided during setup instead of by hand-editing `.env.iranti`
   - `status --json` classified the created instance as configured but not running
 - `node dist/scripts/iranti-cli.js help` shows `iranti setup` in the machine-level command list.
 - `node dist/scripts/iranti-cli.js setup --defaults --root tests/tmp_cli_setup_runtime --instance cli_setup_smoke --provider mock --db-url <db> --projects tests/tmp_cli_setup_project --claude-code` completed and wrote the instance env plus project binding files.
