@@ -244,6 +244,7 @@ iranti/
 â”‚   â”‚   â”œâ”€â”€ router.ts           â€” route() by TaskType, model profiles
 â”‚   â”‚   â”œâ”€â”€ runtimeEnv.ts       â€” Runtime env resolution for CLI/MCP/hook integrations
 â”‚   â”‚   â”œâ”€â”€ runtimeLifecycle.ts â€” Runtime metadata read/write, pid probes, restart helpers
+â”‚   â”‚   â”œâ”€â”€ autoRemember.ts    â€” Opt-in explicit prompt memory capture for Claude/Codex integrations
 â”‚   â”‚   â”œâ”€â”€ cliHelpCatalog.ts   â€” Extracted command/help catalog text for CLI guidance surfaces
 â”‚   â”‚   â”œâ”€â”€ cliHelpRenderer.ts  â€” Shared CLI help rendering for command and wizard guidance
 â”‚   â”‚   â”œâ”€â”€ escalationPaths.ts  â€” Escalation runtime path resolution + folder bootstrap
@@ -336,6 +337,8 @@ iranti/
 ¦   ¦   +-- run_session_recovery_tests.ts — Stubbed attendant recovery validation without a live DB
 ¦   +-- cross-tool/
 ¦   ¦   +-- run_cross_tool_handoff_tests.ts — DB-backed Claude/Codex shared-memory handoff validation
+¦   +-- claude-hook/
+¦   ¦   +-- run_claude_hook_tests.ts — Claude hook handshake/attend contract regression test
 ¦   +-- memory-retrieval-regressions.ts — Slash-value retrieval and explicit-hint isolation regressions
 +-- AGENTS.md                   — This file
 â”œâ”€â”€ docker-compose.yml          â€” PostgreSQL for local dev

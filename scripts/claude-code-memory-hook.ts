@@ -2,8 +2,9 @@ import 'dotenv/config';
 import path from 'path';
 import { Iranti } from '../src/sdk';
 import { loadRuntimeEnv } from '../src/lib/runtimeEnv';
+import { autoRememberAssistantFacts, autoRememberPromptFacts, isAutoRememberEnabled } from '../src/lib/autoRemember';
 
-type HookEventName = 'SessionStart' | 'UserPromptSubmit';
+type HookEventName = 'SessionStart' | 'UserPromptSubmit' | 'Stop';
 type HookPayload = Record<string, unknown>;
 type HookFact = {
     entity: string;
@@ -11,6 +12,13 @@ type HookFact = {
     summary: string;
     confidence: number;
     source: string;
+};
+
+type HookWorkingMemoryEntry = {
+    entityKey?: unknown;
+    summary?: unknown;
+    confidence?: unknown;
+    source?: unknown;
 };
 
 const MEMORY_NEED_POSITIVE_PATTERNS: RegExp[] = [
@@ -36,6 +44,7 @@ function printHelp(): void {
         'Usage:',
         '  ts-node scripts/claude-code-memory-hook.ts --event SessionStart',
         '  ts-node scripts/claude-code-memory-hook.ts --event UserPromptSubmit',
+        '  ts-node scripts/claude-code-memory-hook.ts --event Stop',
         '',
         'Optional flags:',
         '  --project-env <path>   Explicit .env.iranti path',
@@ -43,6 +52,8 @@ function printHelp(): void {
         '  --env-file <path>      Explicit base .env path',
         '',
         'Reads Claude Code hook JSON from stdin and returns hookSpecificOutput.additionalContext on stdout.',
+        'This helper retrieves working memory; durable KB writes still require explicit iranti_write/ingest calls.',
+        'Set IRANTI_AUTO_REMEMBER=true to auto-save only narrow explicit prompt facts into IRANTI_MEMORY_ENTITY.',
     ].join('\n'));
 }
 
@@ -160,6 +171,80 @@ function getPrompt(payload: HookPayload): string {
     return '';
 }
 
+function getLastAssistantMessage(payload: HookPayload): string {
+    const candidates = [
+        payload.last_assistant_message,
+        payload.lastAssistantMessage,
+        payload.response,
+        payload.text,
+    ];
+    for (const candidate of candidates) {
+        if (typeof candidate === 'string' && candidate.trim()) {
+            return candidate.trim();
+        }
+    }
+    return '';
+}
+
+function getRecentMessages(payload: HookPayload): string[] {
+    const candidates = [
+        payload.recentMessages,
+        payload.messages,
+        payload.history,
+        payload.transcript,
+    ];
+
+    for (const candidate of candidates) {
+        if (!Array.isArray(candidate)) continue;
+        const normalized = candidate
+            .flatMap((entry) => {
+                if (typeof entry === 'string' && entry.trim()) {
+                    return [entry.trim()];
+                }
+
+                if (entry && typeof entry === 'object') {
+                    const content = (entry as { content?: unknown }).content;
+                    if (typeof content === 'string' && content.trim()) {
+                        const role = typeof (entry as { role?: unknown }).role === 'string'
+                            ? String((entry as { role?: unknown }).role).trim()
+                            : '';
+                        return [role ? `${role}: ${content.trim()}` : content.trim()];
+                    }
+                }
+
+                return [];
+            })
+            .slice(-12);
+
+        if (normalized.length > 0) {
+            return normalized;
+        }
+    }
+
+    return [];
+}
+
+function buildSessionTask(payload: HookPayload): string {
+    const explicit = process.env.IRANTI_CLAUDE_SESSION_TASK?.trim();
+    if (explicit) return explicit;
+
+    const payloadTask = typeof payload.task === 'string' && payload.task.trim().length > 0
+        ? payload.task.trim()
+        : null;
+    if (payloadTask) return payloadTask;
+
+    return `Claude Code session for ${path.basename(getCwd(payload)) || 'project'}`;
+}
+
+function buildCurrentContext(payload: HookPayload, prompt: string): string {
+    const recentMessages = getRecentMessages(payload);
+    if (recentMessages.length === 0) {
+        return prompt;
+    }
+
+    return [...recentMessages, `user: ${prompt}`].join('\n');
+}
+
 function getMaxFacts(): number {
     const raw = Number(process.env.IRANTI_CLAUDE_MAX_FACTS ?? 6);
     if (!Number.isFinite(raw) || raw < 1) return 6;
@@ -232,23 +317,15 @@ function dedupeFacts(facts: HookFact[]): HookFact[] {
         .slice(0, getMaxFacts());
 }
 
-async function loadAttendantStateFacts(iranti: Iranti, agent: string): Promise<HookFact[]> {
-    const state = await iranti.query(`agent/${agent}`, 'attendant_state');
-    if (!state.found || !state.value || typeof state.value !== 'object') {
-        return [];
-    }
-
-    const workingMemory = Array.isArray((state.value as { workingMemory?: unknown[] }).workingMemory)
-        ? (state.value as { workingMemory: Array<Record<string, unknown>> }).workingMemory
-        : [];
-
-    return workingMemory.flatMap((entry) => {
+function workingMemoryToFacts(entries: HookWorkingMemoryEntry[]): HookFact[] {
+    return entries.flatMap((entry) => {
         const entityKey = typeof entry.entityKey === 'string' ? entry.entityKey.trim() : '';
         const summary = typeof entry.summary === 'string' ? entry.summary.trim() : '';
         if (!entityKey || !summary) return [];
 
         const segments = entityKey.split('/');
         if (segments.length < 3) return [];
+
         return [{
             entity: `${segments[0]}/${segments[1]}`,
             key: segments.slice(2).join('/'),
@@ -278,28 +355,71 @@ async function loadEntityFacts(iranti: Iranti, entities: string[]): Promise<Hook
     return out;
 }
 
-async function searchPromptFacts(iranti: Iranti, prompt: string, entityHints: string[]): Promise<HookFact[]> {
-    if (!prompt.trim()) return [];
+export async function buildHookAdditionalContext(options: {
+    iranti: Iranti;
+    event: HookEventName;
+    payload: HookPayload;
+}): Promise<string> {
+    const { iranti, event, payload } = options;
+    const cwd = getCwd(payload);
+    const agent = await ensureHookAgent(iranti, payload);
+    const entityHints = getEntityHints(payload);
 
-    const results = await iranti.search({
-        query: prompt,
-        limit: getMaxFacts(),
-        minScore: Number(process.env.IRANTI_CLAUDE_MIN_SEARCH_SCORE ?? 0.05),
-    }).catch(() => []);
-
-    const searched = results.map((result) => ({
-        entity: result.entity,
-        key: result.key,
-        summary: result.summary,
-        confidence: result.confidence,
-        source: result.source,
-    }));
-
-    if (searched.length > 0) {
-        return searched;
+    if (event === 'SessionStart') {
+        const brief = await iranti.handshake({
+            agent,
+            task: buildSessionTask(payload),
+            recentMessages: getRecentMessages(payload),
+        });
+        const briefFacts = workingMemoryToFacts(brief.workingMemory as HookWorkingMemoryEntry[]);
+        const directFacts = briefFacts.length > 0
+            ? briefFacts
+            : await loadEntityFacts(iranti, entityHints);
+        return formatSessionContext(dedupeFacts(directFacts), cwd);
     }
 
-    return loadEntityFacts(iranti, entityHints);
+    if (event === 'Stop') {
+        const response = getLastAssistantMessage(payload);
+        if (response && isAutoRememberEnabled()) {
+            await autoRememberAssistantFacts({
+                iranti,
+                response,
+                agent,
+                source: 'ClaudeCodeHookStop',
+            });
+        }
+        return '';
+    }
+
+    const prompt = getPrompt(payload);
+    if (!prompt || !shouldFetchMemory(prompt)) {
+        return '';
+    }
+
+    if (isAutoRememberEnabled()) {
+        await autoRememberPromptFacts({
+            iranti,
+            prompt,
+            agent,
+            source: 'ClaudeCodeHook',
+        });
+    }
+
+    const attend = await iranti.attend({
+        agent,
+        latestMessage: prompt,
+        currentContext: buildCurrentContext(payload, prompt),
+        entityHints,
+        maxFacts: getMaxFacts(),
+    });
+    const facts = attend.facts.map((fact) => ({
+        entity: fact.entityKey.split('/').slice(0, 2).join('/'),
+        key: fact.entityKey.split('/').slice(2).join('/'),
+        summary: fact.summary,
+        confidence: fact.confidence,
+        source: fact.source,
+    })).filter((fact) => fact.entity.includes('/') && fact.key.length > 0);
+    return formatPromptContext(dedupeFacts(facts));
 }
 
 async function main(): Promise<void> {
@@ -310,8 +430,8 @@ async function main(): Promise<void> {
 
     const args = parseArgs(process.argv.slice(2));
     const event = args.event as HookEventName | undefined;
-    if (event !== 'SessionStart' && event !== 'UserPromptSubmit') {
-        throw new Error('--event must be SessionStart or UserPromptSubmit');
+    if (event !== 'SessionStart' && event !== 'UserPromptSubmit' && event !== 'Stop') {
+        throw new Error('--event must be SessionStart, UserPromptSubmit, or Stop');
     }
 
     const payload = parsePayload(await readStdin());
@@ -321,34 +441,15 @@ async function main(): Promise<void> {
         instanceEnvFile: args['instance-env'],
         explicitEnvFile: args['env-file'],
     });
-    const cwd = getCwd(payload);
     const iranti = new Iranti({
         connectionString: requireConnectionString(),
         llmProvider: process.env.LLM_PROVIDER,
     });
-    const agent = await ensureHookAgent(iranti, payload);
-    const entityHints = getEntityHints(payload);
-
-    if (event === 'SessionStart') {
-        const persistedFacts = await loadAttendantStateFacts(iranti, agent);
-        const directFacts = persistedFacts.length > 0
-            ? persistedFacts
-            : await loadEntityFacts(iranti, entityHints);
-        emitHookContext(event, formatSessionContext(dedupeFacts(directFacts), cwd));
-        process.exit(0);
-    }
-
-    const prompt = getPrompt(payload);
-    if (!prompt) {
-        process.exit(0);
-    }
-
-    if (!shouldFetchMemory(prompt)) {
-        process.exit(0);
-    }
-
-    const facts = await searchPromptFacts(iranti, prompt, entityHints);
-    const context = formatPromptContext(dedupeFacts(facts));
+    const context = await buildHookAdditionalContext({
+        iranti,
+        event,
+        payload,
+    });
     if (!context) {
         process.exit(0);
     }
@@ -356,7 +457,9 @@ async function main(): Promise<void> {
     process.exit(0);
 }
 
-main().catch((error) => {
-    console.error('[claude-code-memory-hook] fatal:', error instanceof Error ? error.message : String(error));
-    process.exit(1);
-});
+if (require.main === module) {
+    main().catch((error) => {
+        console.error('[claude-code-memory-hook] fatal:', error instanceof Error ? error.message : String(error));
+        process.exit(1);
+    });
+}

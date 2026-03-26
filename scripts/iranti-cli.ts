@@ -1907,7 +1907,7 @@ function quoteClaudeHookArg(value: string): string {
     return `"${value.replace(/(["\\])/g, '\\$1')}"`;
 }
 
-function makeClaudeHookCommand(event: 'SessionStart' | 'UserPromptSubmit', projectEnvPath?: string): string {
+function makeClaudeHookCommand(event: 'SessionStart' | 'UserPromptSubmit' | 'Stop', projectEnvPath?: string): string {
     const parts = ['iranti', 'claude-hook', '--event', event];
     if (projectEnvPath) {
         parts.push('--project-env', quoteClaudeHookArg(projectEnvPath));
@@ -1915,7 +1915,7 @@ function makeClaudeHookCommand(event: 'SessionStart' | 'UserPromptSubmit', proje
     return parts.join(' ');
 }
 
-function makeClaudeHookEntry(event: 'SessionStart' | 'UserPromptSubmit', projectEnvPath?: string): Record<string, unknown> {
+function makeClaudeHookEntry(event: 'SessionStart' | 'UserPromptSubmit' | 'Stop', projectEnvPath?: string): Record<string, unknown> {
     return {
         matcher: '',
         hooks: [
@@ -1950,7 +1950,7 @@ function needsClaudeHookSettingsUpgrade(value: unknown): boolean {
     if (!hooks) {
         return false;
     }
-    for (const event of ['SessionStart', 'UserPromptSubmit'] as const) {
+    for (const event of ['SessionStart', 'UserPromptSubmit', 'Stop'] as const) {
         const entries = hooks[event];
         if (!Array.isArray(entries) || entries.length === 0) {
             continue;
@@ -1973,6 +1973,7 @@ function makeClaudeHookSettings(projectEnvPath?: string, existing?: Record<strin
             ...existingHooks,
             SessionStart: [makeClaudeHookEntry('SessionStart', projectEnvPath)],
             UserPromptSubmit: [makeClaudeHookEntry('UserPromptSubmit', projectEnvPath)],
+            Stop: [makeClaudeHookEntry('Stop', projectEnvPath)],
         },
     };
 }
@@ -3944,7 +3945,7 @@ function removeIrantiClaudeHooksFromValue(value: Record<string, unknown>): Recor
     if (!hooks) return value;
 
     const nextHooks: Record<string, unknown> = { ...hooks };
-    for (const event of ['SessionStart', 'UserPromptSubmit'] as const) {
+    for (const event of ['SessionStart', 'UserPromptSubmit', 'Stop'] as const) {
         const entries = hooks[event];
         if (!Array.isArray(entries)) continue;
         const filtered = entries.filter((entry) => {
@@ -6520,7 +6521,7 @@ function hasIrantiClaudeHookSettings(value: unknown): boolean {
     const record = value as Record<string, unknown>;
     const hooks = isClaudeHooksObject(record.hooks) ? record.hooks : null;
     if (!hooks) return false;
-    for (const event of ['SessionStart', 'UserPromptSubmit'] as const) {
+    for (const event of ['SessionStart', 'UserPromptSubmit', 'Stop'] as const) {
         const entries = hooks[event];
         if (!Array.isArray(entries)) continue;
         for (const entry of entries) {

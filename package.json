@@ -1,6 +1,6 @@
 {
   "name": "iranti",
-  "version": "0.2.35",
+  "version": "0.2.36",
   "description": "Memory infrastructure for multi-agent AI systems",
   "main": "dist/src/sdk/index.js",
   "files": [
@@ -64,6 +64,7 @@
     "test:router": "ts-node scripts/test_router_enforcement.ts",
     "test:verify-authoritative": "ts-node scripts/verify_authoritative_resolution_parsing.ts",
     "test:mcp-smoke": "ts-node tests/mcp/smoke_test.ts",
+    "test:claude-hook": "ts-node tests/claude-hook/run_claude_hook_tests.ts",
     "test:conflict-benchmark": "ts-node tests/conflict/run_conflict_benchmark.ts",
     "test:decay": "ts-node tests/decay/run_decay_tests.ts",
     "test:ingest": "ts-node tests/ingest/run_ingest_tests.ts",
@@ -79,7 +80,7 @@
     "test:consistency": "ts-node tests/consistency/run_consistency_tests.ts",
     "test:cross-tool-handoff": "ts-node tests/cross-tool/run_cross_tool_handoff_tests.ts",
     "test:archive-vector-contracts": "node -r ts-node/register/transpile-only tests/consistency/run_archive_vector_contract_tests.ts",
-    "test:hardening-fast": "npm run test:contracts && npm run test:cli-surface && npm run test:runtime-lifecycle && npm run test:cli-process-safety && npm run test:setup-upgrade-lifecycle && npm run test:uninstall-lifecycle && npm run test:session-recovery",
+    "test:hardening-fast": "npm run test:contracts && npm run test:claude-hook && npm run test:cli-surface && npm run test:runtime-lifecycle && npm run test:cli-process-safety && npm run test:setup-upgrade-lifecycle && npm run test:uninstall-lifecycle && npm run test:session-recovery",
     "test:hardening-db": "npm run test:access-control && npm run test:consistency && npm run test:archive-vector-contracts && npm run test:vector-backends && npm run test:cross-tool-handoff",
     "release:check": "ts-node scripts/check-release-version.ts",
     "release:bump": "ts-node scripts/bump-version.ts",

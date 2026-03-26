@@ -5,6 +5,7 @@ import * as z from 'zod/v4';
 import { Iranti } from '../src/sdk';
 import { rewriteCommandError } from '../src/lib/commandErrors';
 import { loadRuntimeEnv } from '../src/lib/runtimeEnv';
+import { autoRememberPromptFacts, isAutoRememberEnabled } from '../src/lib/autoRemember';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -28,6 +29,7 @@ function printHelp(): void {
         '  IRANTI_MCP_AGENT_DESCRIPTION  Default agent description',
         '  IRANTI_MCP_AGENT_MODEL        Default agent model label',
         '  IRANTI_MCP_DEFAULT_SOURCE     Default write source (default: ClaudeCode)',
+        '  IRANTI_AUTO_REMEMBER         Opt-in explicit prompt auto-save to IRANTI_MEMORY_ENTITY before attend()',
         '',
         'This server is intended for Claude Code and other MCP clients over stdio.',
     ].join('\n'));
@@ -126,7 +128,7 @@ async function main(): Promise<void> {
 
     const server = new McpServer({
         name: 'iranti-mcp',
-        version: '0.2.35',
+        version: '0.2.36',
     });
 
     server.registerTool('iranti_handshake', {
@@ -164,8 +166,17 @@ full visible context when available.`,
             agent: z.string().optional().describe('Override the default agent id.'),
         },
     }, async ({ latestMessage, currentContext, entityHints, maxFacts, forceInject, agent }) => {
+        const resolvedAgent = withDefaultAgent(agent);
+        if (isAutoRememberEnabled()) {
+            await autoRememberPromptFacts({
+                iranti,
+                prompt: latestMessage,
+                agent: resolvedAgent,
+                source: defaultWriteSource(),
+            });
+        }
         const result = await iranti.attend({
-            agent: withDefaultAgent(agent),
+            agent: resolvedAgent,
             latestMessage,
             currentContext: currentContext ?? latestMessage,
             entityHints,

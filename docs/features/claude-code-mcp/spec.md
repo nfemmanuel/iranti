@@ -13,10 +13,11 @@ This feature exposes Iranti to Claude Code through the installed CLI surface: `i
 | `IRANTI_MCP_DEFAULT_AGENT` | string? | Default agent id for MCP tool calls. |
 | `IRANTI_MCP_DEFAULT_SOURCE` | string? | Default source label for MCP writes and ingests. |
 | `IRANTI_CLAUDE_AGENT_ID` | string? | Default agent id used by the Claude Code hook helper. |
+| `IRANTI_AUTO_REMEMBER` | boolean? | Opt-in explicit prompt auto-save into `IRANTI_MEMORY_ENTITY` before retrieval. |
 | `--force` | boolean | Overwrite existing Claude scaffold files when running `iranti claude-setup`. |
 | `--scan` | string | Optional parent directory for batch Claude scaffold discovery. |
 | `--recursive` | boolean | Recursively scan nested project trees when used with `--scan`. |
-| Claude Code hook stdin JSON | object | Claude Code event payload for `SessionStart` and `UserPromptSubmit`. |
+| Claude Code hook stdin JSON | object | Claude Code event payload for `SessionStart`, `UserPromptSubmit`, and `Stop`. |
 
 ## Outputs
 | Output | Type | Description |
@@ -46,20 +47,26 @@ This feature exposes Iranti to Claude Code through the installed CLI surface: `i
 12. Expose Iranti memory and write operations as MCP tools.
 13. For hook usage, parse Claude Code hook stdin payload.
 14. On `SessionStart`, call `handshake()` and emit a compact working-memory brief.
-15. On `UserPromptSubmit`, call `attend()` and emit only relevant retrieved facts when injection is needed.
-16. Keep durable writes explicit through MCP tool calls rather than auto-saving all turns.
+15. On `UserPromptSubmit`, if `IRANTI_AUTO_REMEMBER=true`, extract only narrow explicit prompt facts and write them to `IRANTI_MEMORY_ENTITY` before retrieval.
+16. On `UserPromptSubmit`, call `attend()` and emit only relevant retrieved facts when injection is needed.
+17. On `Stop`, if `IRANTI_AUTO_REMEMBER=true`, extract only narrow assistant-response summary patterns from `last_assistant_message` and write them to `IRANTI_MEMORY_ENTITY`.
+18. Keep durable writes explicit through MCP tool calls rather than auto-saving all turns; the hook never bulk-saves Claude responses.
 
 ## Edge Cases
 - Missing `DATABASE_URL`: process exits with a fatal configuration error.
 - Missing `.env.iranti` in an installed-package project means the hook and MCP server must rely on direct environment configuration.
 - Empty `UserPromptSubmit` prompt: hook emits no additional context.
+- Empty `Stop` message: hook exits without writing.
+- `IRANTI_AUTO_REMEMBER=true` without `IRANTI_MEMORY_ENTITY`: the hook skips auto-write rather than guessing a target entity.
+- Auto-remember extracts only strict prompt patterns; arbitrary narrative text is ignored.
+- Assistant-response auto-remember extracts only strict summary patterns such as `the next step is ...`, `the blocker is ...`, `we decided ...`, or `your favorite ... is ...`.
 - Invalid `valueJson` or `propertiesJson`: MCP write/relate tools reject with a clear JSON parsing error.
 - Unregistered agent ids: auto-registration creates a stable Claude-facing agent profile.
 - Existing `.mcp.json`: the `iranti` server is merged in without removing other MCP servers, and pinned to the project binding when one is available.
 - Existing `.claude/settings.local.json`: `iranti claude-setup` upgrades legacy Iranti hook entries to Claude Code's current `matcher` + `hooks` schema, and otherwise leaves the file untouched unless `--force` is supplied.
 - `--scan` mode does not create `.env.iranti`; it only broadens Claude scaffolding for already-Claude-enabled projects.
 - `--recursive` skips obvious non-project directories such as `.git`, `node_modules`, and build output folders to keep scan time reasonable.
-- Hook events other than `SessionStart` and `UserPromptSubmit`: helper rejects with an explicit error.
+- Hook events other than `SessionStart`, `UserPromptSubmit`, and `Stop`: helper rejects with an explicit error.
 - Protected Staff Namespace entries remain hidden from external agent query surfaces by design.
 
 ## Test Results

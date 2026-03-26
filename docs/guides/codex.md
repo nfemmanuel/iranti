@@ -102,6 +102,15 @@ The project-local `.mcp.json` should contain:
   - `IRANTI_MCP_DEFAULT_AGENT=<agent>`
   - `IRANTI_MCP_DEFAULT_SOURCE=<source>`
 
+Optional opt-in memory capture:
+- add `IRANTI_AUTO_REMEMBER=true` to the bound project's `.env.iranti`
+- this lets the `iranti_attend` tool persist only narrow explicit prompt facts into `IRANTI_MEMORY_ENTITY` before retrieval
+- examples:
+  - `my favorite snack is plantain chips`
+  - `my home city is Lagos`
+  - `we decided to ship the patch release first`
+  - `the next step is rerun the db validation`
+
 ## 4. Launch Codex in the bound project
 
 Open Codex in the project that contains `.env.iranti`:
@@ -134,6 +143,7 @@ Use the integration like this:
 - `iranti_ingest` only for stable content worth chunking
 
 Do not auto-save every turn. That degrades retrieval quality quickly.
+If you enable `IRANTI_AUTO_REMEMBER=true`, treat it as a narrow convenience path for explicit prompt facts only, not a replacement for `iranti_write`.
 
 If Codex is receiving work from Claude Code, treat the handoff as shared durable memory, not as Claude session recovery. Read the shared `task/...` facts with `query()` or `attend()` plus explicit `entityHints`, then write your pickup/progress back to the same task entity.
 

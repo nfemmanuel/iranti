@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.36 - Unreleased
+
+### Added
+
+- Opt-in `IRANTI_AUTO_REMEMBER` support for Claude Code and Codex prompt retrieval flows, with strict explicit-fact capture into `IRANTI_MEMORY_ENTITY`.
+- Claude hook regression coverage for `handshake()`, `attend()`, prompt auto-remember, and Stop-hook assistant summary capture.
+
+### Changed
+
+- `iranti claude-setup` now scaffolds a Claude `Stop` hook alongside `SessionStart` and `UserPromptSubmit`.
+- Claude and Codex integration docs now describe the limited auto-remember behavior and its write boundaries.
+
+### Fixed
+
+- Claude Code hook execution now uses `handshake()` on `SessionStart` and `attend()` on `UserPromptSubmit` instead of bypassing the attendant flow.
+- Command-surface error rewriting now turns database-unreachable failures into actionable operator guidance.
+
 ## 0.2.35 - Unreleased
 
 ### Changed

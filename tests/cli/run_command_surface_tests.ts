@@ -121,11 +121,24 @@ function testSchemaMismatchRewrite(): void {
     assertContains(formatted.message, 'npm run prisma:generate', 'schema mismatch prisma generate guidance');
 }
 
+function testDatabaseUnreachableRewrite(): void {
+    const error = Object.assign(
+        new Error('Prisma wrapped an unreachable database as an invalid invocation.'),
+        { code: 'ECONNREFUSED' },
+    );
+    const formatted = rewriteCommandError('iranti auth create-key', error);
+
+    assertContains(formatted.message, 'cannot reach the configured PostgreSQL database', 'db unreachable guidance');
+    assertContains(formatted.message, 'DATABASE_URL', 'db unreachable mentions database url');
+    assertContains(formatted.message, 'iranti doctor --debug', 'db unreachable doctor guidance');
+}
+
 function main(): void {
     testHelpMatrix();
     testHelpDoesNotMutate();
     testUnknownCommandFailsClearly();
     testSchemaMismatchRewrite();
+    testDatabaseUnreachableRewrite();
     console.log('command surface tests passed');
 }
 

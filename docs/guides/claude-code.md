@@ -144,12 +144,31 @@ Create `.claude/settings.local.json` in the same project:
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "iranti claude-hook --event Stop"
+          }
+        ]
+      }
     ]
   }
 }
 ```
 
 The hook uses `.env.iranti` in the current project automatically. You do not need to hardcode `DATABASE_URL` into the hook command.
+By default the hook remains retrieval-focused:
+- `SessionStart` loads working memory
+- `UserPromptSubmit` retrieves relevant facts before the turn
+- `Stop` does nothing unless auto-remember is enabled
+If you deliberately want narrow automatic writes, add `IRANTI_AUTO_REMEMBER=true` to `.env.iranti`. Then:
+- `UserPromptSubmit` saves only strict explicit prompt facts
+- `Stop` saves only strict assistant-response summaries such as `the next step is ...` or `the blocker is ...`
+- all writes target `IRANTI_MEMORY_ENTITY`
 
 Optional explicit overrides:
 
@@ -182,6 +201,8 @@ Use the integration like this:
 - `iranti_ingest` for larger stable text blocks worth chunking
 
 Do not auto-save every Claude turn. That will pollute the Library and reduce retrieval quality over time.
+If you expect new facts to persist, Claude must call `iranti_write` or `iranti_ingest` explicitly through MCP.
+The only built-in exception is the opt-in `IRANTI_AUTO_REMEMBER=true` path above, which is intentionally limited to explicit prompt patterns.
 
 ## 6. Suggested Claude standing instruction
 

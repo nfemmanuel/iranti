@@ -211,6 +211,10 @@ async function main(): Promise<void> {
         assert.strictEqual(mcpConfig.mcpServers.iranti.command, 'iranti');
         assert.deepStrictEqual(mcpConfig.mcpServers.iranti.args, ['mcp']);
         assert.strictEqual(mcpConfig.mcpServers.iranti.env?.IRANTI_PROJECT_ENV, bindingFile, 'Expected scaffolded .mcp.json to pin the project binding');
+        const claudeSettings = readJson<{ hooks?: Record<string, unknown> }>(claudeSettingsFile);
+        assert.ok(claudeSettings.hooks?.SessionStart, 'Expected scaffolded Claude settings to include SessionStart hook.');
+        assert.ok(claudeSettings.hooks?.UserPromptSubmit, 'Expected scaffolded Claude settings to include UserPromptSubmit hook.');
+        assert.ok(claudeSettings.hooks?.Stop, 'Expected scaffolded Claude settings to include Stop hook.');
 
         const sharedSetupRun = runCli([
             'setup',
@@ -254,6 +258,8 @@ async function main(): Promise<void> {
                 };
             }>(path.join(projectPath, '.mcp.json'));
             assert.strictEqual(sharedMcp.mcpServers.iranti.env?.IRANTI_PROJECT_ENV, path.join(projectPath, '.env.iranti'), 'Expected shared scaffolding to pin each project binding in .mcp.json');
+            const sharedClaudeSettings = readJson<{ hooks?: Record<string, unknown> }>(path.join(projectPath, '.claude', 'settings.local.json'));
+            assert.ok(sharedClaudeSettings.hooks?.Stop, 'Expected shared Claude scaffolding to include Stop hook.');
         }
 
         const statusRun = runCli(['status', '--root', runtimeRoot, '--json'], repoRoot);

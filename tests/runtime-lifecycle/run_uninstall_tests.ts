@@ -153,6 +153,14 @@ function buildFixture(): Fixture {
                     ],
                 },
             ],
+            Stop: [
+                {
+                    matcher: '',
+                    hooks: [
+                        { type: 'command', command: 'iranti claude-hook --event Stop' },
+                    ],
+                },
+            ],
         },
     });
 
@@ -290,6 +298,7 @@ function testConservativeUninstall(): void {
         assert.ok(mcpPayload.mcpServers?.iranti, 'Iranti MCP server should remain during conservative uninstall');
         const claudePayload = JSON.parse(fs.readFileSync(fixture.claudeSettingsFile, 'utf8')) as { hooks?: Record<string, unknown> };
         assert.ok(claudePayload.hooks?.UserPromptSubmit, 'Iranti Claude hooks should remain during conservative uninstall');
+        assert.ok(claudePayload.hooks?.Stop, 'Iranti Claude Stop hook should remain during conservative uninstall');
 
         const logLines = readLogLines(fixture.fakeLogFile);
         assert.ok(logLines.some((entry) => entry.tool === 'npm' && entry.args.includes('uninstall')), 'npm uninstall should run during conservative uninstall');
@@ -357,6 +366,7 @@ function testFullUninstall(): void {
         };
         assert.strictEqual(claudePayload.theme, 'test');
         assert.ok(!claudePayload.hooks?.UserPromptSubmit, 'Iranti-only hook block should be removed');
+        assert.ok(!claudePayload.hooks?.Stop, 'Iranti Stop hook block should be removed');
         const sessionStart = claudePayload.hooks?.SessionStart as Array<{ hooks?: Array<{ command?: string }> }> | undefined;
         assert.strictEqual(sessionStart?.[0]?.hooks?.length, 1);
         assert.strictEqual(sessionStart?.[0]?.hooks?.[0]?.command, 'other-hook --event SessionStart');

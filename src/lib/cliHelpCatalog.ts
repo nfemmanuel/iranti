@@ -232,7 +232,7 @@ export const INTEGRATIONS_HELP: HelpEntry[] = [
         scenario: 'Bootstrapping several repos in `C:\\Users\\NF\\Documents\\Projects` at once.',
     },
     {
-        command: 'iranti claude-hook --event SessionStart|UserPromptSubmit [--project-env <path>] [--instance-env <path>] [--env-file <path>]',
+        command: 'iranti claude-hook --event SessionStart|UserPromptSubmit|Stop [--project-env <path>] [--instance-env <path>] [--env-file <path>]',
         description: 'Run the Claude Code hook helper directly.',
         useWhen: 'you are debugging Claude hook behavior or invoking the hook outside normal Claude execution.',
         scenario: 'Testing whether the SessionStart hook can resolve the right project binding.',

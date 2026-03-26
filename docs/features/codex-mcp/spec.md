@@ -15,6 +15,7 @@ This feature connects Codex to Iranti through Codex's MCP client using the insta
 | `--project-env` | string | Optional explicit `.env.iranti` path to pin the global Codex MCP server to one project. |
 | `--no-workspace-file` | boolean | Skip writing or merging a project-local `.mcp.json` file. |
 | `.env.iranti` | file | Project binding file containing `IRANTI_URL`, `IRANTI_API_KEY`, `IRANTI_AGENT_ID`, and `IRANTI_INSTANCE_ENV`. |
+| `IRANTI_AUTO_REMEMBER` | boolean? | Opt-in explicit prompt auto-save into `IRANTI_MEMORY_ENTITY` before `iranti_attend` retrieval. |
 | linked instance env | file | Instance environment file referenced by `IRANTI_INSTANCE_ENV`, containing `DATABASE_URL`, `LLM_PROVIDER`, and provider keys. |
 
 ## Outputs
@@ -40,7 +41,8 @@ This feature connects Codex to Iranti through Codex's MCP client using the insta
 10. The project-local `.mcp.json` pins `IRANTI_PROJECT_ENV` and carries the default Codex agent/source so Codex IDE sessions do not have to rediscover the server from global state alone.
 11. Store only safe defaults and any explicitly requested pinned `IRANTI_PROJECT_ENV` in the global MCP entry.
 12. At runtime, `iranti mcp` loads `IRANTI_PROJECT_ENV` first when explicitly pinned and otherwise falls back to the active project/workspace.
-13. Launch Codex with `codex -C <project>` for the intended workspace context.
+13. If `IRANTI_AUTO_REMEMBER=true`, `iranti_attend` first persists only narrow explicit prompt facts into `IRANTI_MEMORY_ENTITY`.
+14. Launch Codex with `codex -C <project>` for the intended workspace context.
 
 ## Edge Cases
 
@@ -54,6 +56,8 @@ This feature connects Codex to Iranti through Codex's MCP client using the insta
 - If a project-local `.mcp.json` already exists, setup merges the `iranti` entry without removing unrelated MCP servers.
 - If a bound project cannot be resolved from the current working directory and `--project-env` is not supplied, setup leaves the global registration intact and skips the workspace-file write.
 - `DATABASE_URL` is not written into Codex config; the MCP process resolves `.env.iranti` and linked instance env at runtime instead.
+- `IRANTI_AUTO_REMEMBER=true` without `IRANTI_MEMORY_ENTITY`: the MCP process skips auto-write rather than guessing an entity.
+- Auto-remember ignores arbitrary narrative turns and only captures strict explicit prompt patterns.
 - In multi-repo setups, the default unpinned registration avoids accidentally pinning all Codex sessions to one repo's `.env.iranti`.
 - If the active project is missing `.env.iranti` or `IRANTI_INSTANCE_ENV`, MCP startup fails when Codex tries to connect.
 
