@@ -176,6 +176,28 @@ async function main(): Promise<void> {
         const writesAfterSecondCapture = calls.filter((call) => call.startsWith(`write:${personalMemoryEntity}:favorite_snack:`)).length;
         assert.equal(writesAfterSecondCapture, writesAfterFirstCapture, 'Expected unchanged explicit prompt memory to avoid duplicate writes.');
 
+        const conversationalAutoRememberContext = await buildHookAdditionalContext({
+            iranti: fakeIranti as never,
+            event: 'UserPromptSubmit',
+            payload: {
+                cwd: process.cwd(),
+                prompt: 'Hey, so my favorite tv show is Bojack Horseman.',
+                recentMessages: ['assistant: Mention another durable preference.'],
+            },
+        });
+        assert.ok(
+            conversationalAutoRememberContext.includes('[Iranti Retrieved Memory]'),
+            'Expected conversational lead-ins to still preserve retrieval injection.'
+        );
+        assert.ok(
+            calls.some((call) => call.startsWith(`write:${personalMemoryEntity}:favorite_tv_show:`)),
+            'Expected conversational lead-ins to still write canonical favorite_tv_show memory.'
+        );
+        assert.ok(
+            !calls.some((call) => call.startsWith(`write:${personalMemoryEntity}:tv_show:`)),
+            'Expected favorite prompts not to also emit a duplicate tv_show fact.'
+        );
+
         const stopContext = await buildHookAdditionalContext({
             iranti: fakeIranti as never,
             event: 'Stop',

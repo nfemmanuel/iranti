@@ -72,6 +72,29 @@ export function isAutoRememberEnabled(): boolean {
     return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
 }
 
+function stripDeclarativeLeadIns(text: string): string {
+    let value = text.trim();
+    const patterns = [
+        /^(?:hey|hi|hello|yo)\s*,?\s*/i,
+        /^(?:so|okay|ok|alright|well|right|btw|by the way)\s*,?\s*/i,
+        /^(?:actually|correction:|correction|for the record,)\s*/i,
+    ];
+
+    let changed = true;
+    while (changed) {
+        changed = false;
+        for (const pattern of patterns) {
+            const next = value.replace(pattern, '');
+            if (next !== value) {
+                value = next.trim();
+                changed = true;
+            }
+        }
+    }
+
+    return value;
+}
+
 export function getPersonalMemoryEntity(explicit?: string | null): string {
     return normalizeEntity(explicit)
         ?? normalizeEntity(process.env.IRANTI_PERSONAL_MEMORY_ENTITY)
@@ -105,8 +128,7 @@ export function extractExplicitPromptMemory(prompt: string): ExtractedMemoryFact
     if (isQuestionLike(raw)) return [];
 
     const lower = raw.toLowerCase();
-    const prefixes = ['actually ', 'correction: ', 'correction ', 'for the record, '];
-    const stripped = prefixes.reduce((value, prefix) => value.startsWith(prefix) ? value.slice(prefix.length) : value, lower);
+    const stripped = stripDeclarativeLeadIns(lower);
 
     const facts: ExtractedMemoryFact[] = [];
 
@@ -116,7 +138,10 @@ export function extractExplicitPromptMemory(prompt: string): ExtractedMemoryFact
     }
 
     const myFieldMatch = stripped.match(/^my ([a-z0-9_\-\s]+?) is (.+)$/i);
-    if (myFieldMatch && !facts.some((fact) => fact.key === canonicalizeMemoryKey(myFieldMatch[1]))) {
+    if (myFieldMatch && !facts.some((fact) => {
+        const fieldKey = canonicalizeMemoryKey(myFieldMatch[1]);
+        return fact.key === fieldKey || fact.key === canonicalizeMemoryKey(`favorite_${myFieldMatch[1]}`);
+    })) {
         facts.push(buildTextFact(myFieldMatch[1], myFieldMatch[2]));
     }
 
@@ -187,7 +212,10 @@ export function extractExplicitAssistantMemory(response: string): ExtractedMemor
     }
 
     const yourFieldMatch = lower.match(/^your ([a-z0-9_\-\s]+?) is (.+)$/i);
-    if (yourFieldMatch && !facts.some((fact) => fact.key === canonicalizeMemoryKey(yourFieldMatch[1]))) {
+    if (yourFieldMatch && !facts.some((fact) => {
+        const fieldKey = canonicalizeMemoryKey(yourFieldMatch[1]);
+        return fact.key === fieldKey || fact.key === canonicalizeMemoryKey(`favorite_${yourFieldMatch[1]}`);
+    })) {
         facts.push(buildTextFact(yourFieldMatch[1], yourFieldMatch[2]));
     }
 
