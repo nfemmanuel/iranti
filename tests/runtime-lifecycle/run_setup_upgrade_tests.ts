@@ -123,6 +123,7 @@ async function main(): Promise<void> {
 
         const runtimeRoot = path.join(tempRoot, 'runtime');
         const projectDir = path.join(tempRoot, 'project');
+        const projectInitDir = path.join(tempRoot, 'project-init');
         const sharedRuntimeRoot = path.join(tempRoot, 'shared-runtime');
         const sharedProjectA = path.join(tempRoot, 'shared-project-a');
         const sharedProjectB = path.join(tempRoot, 'shared-project-b');
@@ -152,6 +153,7 @@ async function main(): Promise<void> {
             testApiKey,
             '--projects',
             projectDir,
+            '--auto-remember',
             '--claude-code',
         ], repoRoot);
         assert.strictEqual(setupRun.status, 0, `setup failed:\n${setupRun.stdout}\n${setupRun.stderr}`);
@@ -178,6 +180,7 @@ async function main(): Promise<void> {
             testApiKey,
             '--projects',
             projectDir,
+            '--auto-remember',
             '--claude-code',
         ], repoRoot);
         assert.strictEqual(setupRepeatRun.status, 0, `repeat setup failed:\n${setupRepeatRun.stdout}\n${setupRepeatRun.stderr}`);
@@ -199,6 +202,7 @@ async function main(): Promise<void> {
         assert.strictEqual(bindingEnv.IRANTI_INSTANCE, 'local');
         assert.strictEqual(bindingEnv.IRANTI_INSTANCE_ENV, instanceEnvPath);
         assert.strictEqual(bindingEnv.IRANTI_API_KEY, testApiKey);
+        assert.strictEqual(bindingEnv.IRANTI_AUTO_REMEMBER, 'true');
         const mcpConfig = readJson<{
             mcpServers: {
                 iranti: {
@@ -248,6 +252,7 @@ async function main(): Promise<void> {
             assert.strictEqual(sharedBinding.IRANTI_INSTANCE, 'team');
             assert.strictEqual(sharedBinding.IRANTI_INSTANCE_ENV, sharedInstanceEnvPath);
             assert.strictEqual(sharedBinding.IRANTI_API_KEY, sharedApiKey);
+            assert.strictEqual(sharedBinding.IRANTI_AUTO_REMEMBER, 'false');
             assert.ok(fs.existsSync(path.join(projectPath, '.mcp.json')), 'Expected shared setup to scaffold .mcp.json for each bound project.');
             assert.ok(fs.existsSync(path.join(projectPath, '.claude', 'settings.local.json')), 'Expected shared setup to scaffold Claude settings for each bound project.');
             const sharedMcp = readJson<{
@@ -261,6 +266,36 @@ async function main(): Promise<void> {
             const sharedClaudeSettings = readJson<{ hooks?: Record<string, unknown> }>(path.join(projectPath, '.claude', 'settings.local.json'));
             assert.ok(sharedClaudeSettings.hooks?.Stop, 'Expected shared Claude scaffolding to include Stop hook.');
         }
+
+        const projectInitRun = runCli([
+            'project',
+            'init',
+            projectInitDir,
+            '--instance',
+            'local',
+            '--root',
+            runtimeRoot,
+            '--scope',
+            'user',
+            '--auto-remember',
+            'false',
+        ], repoRoot);
+        assert.strictEqual(projectInitRun.status, 0, `project init failed:\n${projectInitRun.stdout}\n${projectInitRun.stderr}`);
+        const projectInitBinding = readEnv(path.join(projectInitDir, '.env.iranti'));
+        assert.strictEqual(projectInitBinding.IRANTI_AUTO_REMEMBER, 'false');
+
+        const configureProjectRun = runCli([
+            'configure',
+            'project',
+            projectInitDir,
+            '--root',
+            runtimeRoot,
+            '--auto-remember',
+            'true',
+        ], repoRoot);
+        assert.strictEqual(configureProjectRun.status, 0, `configure project failed:\n${configureProjectRun.stdout}\n${configureProjectRun.stderr}`);
+        const configuredProjectBinding = readEnv(path.join(projectInitDir, '.env.iranti'));
+        assert.strictEqual(configuredProjectBinding.IRANTI_AUTO_REMEMBER, 'true');
 
         const statusRun = runCli(['status', '--root', runtimeRoot, '--json'], repoRoot);
         assert.strictEqual(statusRun.status, 0, `status failed after setup:\n${statusRun.stdout}\n${statusRun.stderr}`);

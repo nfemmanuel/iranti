@@ -50,7 +50,7 @@
 - Commands fail fast when the instance does not exist or still uses a placeholder `DATABASE_URL`.
 - `create-key` is idempotent for `keyId` in the sense that rerunning it rotates the secret and replaces the prior registry record.
 - Malformed namespaced scopes such as `kb:read:` or `kb:read:*/acme` are rejected at key-creation time.
-- Project sync preserves an existing project binding's current `IRANTI_AGENT_ID` and `IRANTI_MEMORY_ENTITY` unless the user overrides them.
+- Project sync preserves an existing project binding's current `IRANTI_AGENT_ID`, `IRANTI_MEMORY_ENTITY`, and `IRANTI_AUTO_REMEMBER` unless the user overrides them elsewhere.
 - Revoking a non-existent key returns a clear error.
 
 ## Test Results

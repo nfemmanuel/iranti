@@ -224,11 +224,18 @@ Bind explicitly in shared mode:
 iranti project init . --instance team_memory --mode shared
 ```
 
+Bind and opt into strict auto-remember:
+
+```bash
+iranti project init . --instance local --auto-remember
+```
+
 Update an existing binding:
 
 ```bash
 iranti configure project . --instance local
 iranti configure project . --mode shared
+iranti configure project . --auto-remember true
 iranti configure project . --interactive
 ```
 
@@ -240,6 +247,7 @@ Key fields in that file:
 - `IRANTI_API_KEY`
 - `IRANTI_AGENT_ID`
 - `IRANTI_MEMORY_ENTITY`
+- `IRANTI_AUTO_REMEMBER`
 - `IRANTI_PROJECT_MODE`
 - `IRANTI_INSTANCE`
 - `IRANTI_INSTANCE_ENV`

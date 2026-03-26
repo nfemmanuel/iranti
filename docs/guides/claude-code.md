@@ -165,7 +165,7 @@ By default the hook remains retrieval-focused:
 - `SessionStart` loads working memory
 - `UserPromptSubmit` retrieves relevant facts before the turn
 - `Stop` does nothing unless auto-remember is enabled
-If you deliberately want narrow automatic writes, add `IRANTI_AUTO_REMEMBER=true` to `.env.iranti`. Then:
+If you deliberately want narrow automatic writes, add `IRANTI_AUTO_REMEMBER=true` to `.env.iranti` or run `iranti configure project . --auto-remember true`. Then:
 - `UserPromptSubmit` saves only strict explicit prompt facts
 - `Stop` saves only strict assistant-response summaries such as `the next step is ...` or `the blocker is ...`
 - all writes target `IRANTI_MEMORY_ENTITY`

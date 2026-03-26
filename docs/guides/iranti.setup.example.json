@@ -17,6 +17,7 @@
       "path": "C:/Users/YOUR_USER/Documents/Projects/my-app",
       "agentId": "my_app_main",
       "memoryEntity": "user/main",
+      "autoRemember": true,
       "projectMode": "isolated",
       "claudeCode": true
     }

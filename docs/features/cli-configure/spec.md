@@ -21,6 +21,7 @@
 | `--url` | string | Explicitly sets `IRANTI_URL` for a project binding. |
 | `--agent-id` | string | Replaces `IRANTI_AGENT_ID` in the project binding. |
 | `--memory-entity` | string | Replaces `IRANTI_MEMORY_ENTITY` in the project binding. |
+| `--auto-remember` | boolean/string | Sets `IRANTI_AUTO_REMEMBER` in the project binding. Accepts bare flag for `true` or an explicit boolean-like value. |
 | `--json` | boolean | Emits machine-readable output. |
 
 ## Outputs
@@ -46,6 +47,7 @@
 4. For project bindings:
    - derive `IRANTI_URL` and `IRANTI_INSTANCE_ENV` from the named instance when `--instance` is provided
    - preserve existing values when the user does not override them
+   - preserve or update `IRANTI_AUTO_REMEMBER`, defaulting new bindings to `false`
 5. When an instance port changes or a broken `instance.json` is being repaired, rewrite `instance.json` so metadata stays in sync with the repaired env.
 6. Write the resulting env file and ensure `.env.iranti` is listed in `.gitignore` for project bindings.
 7. Emit text or JSON output.
@@ -59,6 +61,7 @@
 - Interactive secret entry is masked in the terminal, but it is still intended for local onboarding rather than non-interactive automation.
 - `configure project` can create a new `.env.iranti`, but it requires either an existing instance or an explicit `--url` plus `--api-key`.
 - Existing project bindings retain their current agent identity and memory entity unless new values are provided.
+- Interactive `configure project` asks whether strict auto-remember should be enabled and writes the answer into `.env.iranti`.
 
 ## Test Results
 

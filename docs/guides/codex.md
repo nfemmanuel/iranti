@@ -103,7 +103,7 @@ The project-local `.mcp.json` should contain:
   - `IRANTI_MCP_DEFAULT_SOURCE=<source>`
 
 Optional opt-in memory capture:
-- add `IRANTI_AUTO_REMEMBER=true` to the bound project's `.env.iranti`
+- add `IRANTI_AUTO_REMEMBER=true` to the bound project's `.env.iranti`, or run `iranti configure project . --auto-remember true`
 - this lets the `iranti_attend` tool persist only narrow explicit prompt facts into `IRANTI_MEMORY_ENTITY` before retrieval
 - examples:
   - `my favorite snack is plantain chips`

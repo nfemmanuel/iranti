@@ -14,6 +14,7 @@ The interactive wizard also explains high-friction choices inline before prompti
 | `--defaults` | `boolean` | Runs setup non-interactively using defaults plus environment/flag input. |
 | `--config` | `string` | Path to a JSON setup plan used for repeatable non-interactive bootstrap. |
 | `--db-mode` | `local \| managed \| docker` | Selects how PostgreSQL should be sourced during automated setup. |
+| `--auto-remember` | `boolean \| string` | Writes `IRANTI_AUTO_REMEMBER` into each generated project binding. Bare flag means `true`. |
 | `--bootstrap-db` | `boolean` | Runs migrations and seeding after non-interactive setup when the database is reachable. |
 | terminal answers | interactive text | User-provided answers for runtime mode, instance name, database URL, providers, secrets, and project paths. |
 
@@ -52,6 +53,7 @@ The interactive wizard also explains high-friction choices inline before prompti
 16. Optionally bootstrap the database schema and seed data.
 17. Offer to bind project folders by writing `.env.iranti`, tagging each binding with `IRANTI_PROJECT_MODE`.
    - Before prompting, explain that binding targets one specific repo/app root rather than a broad parent directory.
+   - Ask whether strict auto-remember should be enabled for each project binding and write `IRANTI_AUTO_REMEMBER=true|false`.
 18. In isolated mode, allow one bound project. Shared mode may bind multiple projects.
 19. For each bound project, optionally scaffold Claude Code MCP and hook files.
 20. If Codex is installed and at least one project was bound, optionally register Codex globally against the first bound project.
@@ -60,6 +62,7 @@ The interactive wizard also explains high-friction choices inline before prompti
 
 Non-interactive variants:
 - `--defaults` derives values from flags and environment variables. It synthesizes a localhost or Docker `DATABASE_URL` automatically for `local` and `docker` modes, but still requires a real `DATABASE_URL` for `managed`.
+- `--defaults --auto-remember` writes `IRANTI_AUTO_REMEMBER=true` into each generated project binding. Omitting the flag writes `false`.
 - `--config <file>` reads a JSON plan and executes the same runtime/instance/project binding flow without prompts.
 - `--bootstrap-db` can be used with automated setup to run migrations and seeding immediately after instance configuration.
 
@@ -86,6 +89,7 @@ Non-interactive variants:
   - `setup --defaults` created install metadata, instance env, project binding, `.mcp.json`, and `.claude/settings.local.json`
   - repeating the same `setup --defaults` invocation updated the existing instance cleanly instead of failing on idempotent rerun
   - `setup --defaults --mode shared --projects <a>,<b>` bound multiple projects and tagged each binding `IRANTI_PROJECT_MODE=shared`
+  - generated project bindings now include `IRANTI_AUTO_REMEMBER=true|false`, so opt-in auto-remember can be decided during setup instead of by hand-editing `.env.iranti`
   - `status --json` classified the created instance as configured but not running
 - `node dist/scripts/iranti-cli.js help` shows `iranti setup` in the machine-level command list.
 - `node dist/scripts/iranti-cli.js setup --defaults --root tests/tmp_cli_setup_runtime --instance cli_setup_smoke --provider mock --db-url <db> --projects tests/tmp_cli_setup_project --claude-code` completed and wrote the instance env plus project binding files.

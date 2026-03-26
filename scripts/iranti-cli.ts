@@ -383,6 +383,32 @@ function hasFlag(args: ParsedArgs, key: string): boolean {
     return Boolean(args.flags.get(key));
 }
 
+function parseBooleanInput(raw: string, label: string): boolean {
+    const normalized = raw.trim().toLowerCase();
+    if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+    if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+    throw new Error(`${label} must be true/false, yes/no, on/off, or 1/0.`);
+}
+
+function resolveOptionalBooleanFlag(args: ParsedArgs, key: string): boolean | undefined {
+    const value = args.flags.get(key);
+    if (value === undefined) return undefined;
+    if (typeof value === 'boolean') return true;
+    return parseBooleanInput(value, `--${key}`);
+}
+
+function parseOptionalBooleanValue(value: unknown, label: string): boolean | undefined {
+    if (value === undefined || value === null || value === '') return undefined;
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'string') return parseBooleanInput(value, label);
+    throw new Error(`${label} must be a boolean or boolean-like string.`);
+}
+
+function envFlagEnabled(raw: string | undefined): boolean {
+    if (!raw?.trim()) return false;
+    return parseBooleanInput(raw, 'environment value');
+}
+
 function normalizeScope(raw: string | undefined): Scope {
     if (!raw) return 'user';
     const normalized = raw.trim().toLowerCase();
@@ -1297,6 +1323,7 @@ type SetupProjectBinding = {
     envFile: string;
     agentId: string;
     projectMode: ProjectMemoryMode;
+    autoRemember: boolean;
 };
 
 type ProjectMemoryMode = 'isolated' | 'shared';
@@ -1308,6 +1335,7 @@ type SetupProjectPlan = {
     agentId: string;
     memoryEntity: string;
     projectMode: ProjectMemoryMode;
+    autoRemember: boolean;
     claudeCode?: boolean;
 };
 
@@ -2363,11 +2391,18 @@ async function executeSetupPlan(plan: SetupExecutionPlan): Promise<SetupExecutio
             IRANTI_API_KEY: plan.apiKey,
             IRANTI_AGENT_ID: project.agentId,
             IRANTI_MEMORY_ENTITY: project.memoryEntity,
+            IRANTI_AUTO_REMEMBER: String(project.autoRemember),
             IRANTI_PROJECT_MODE: project.projectMode,
             IRANTI_INSTANCE: plan.instanceName,
             IRANTI_INSTANCE_ENV: configured.envFile,
         });
-        bindings.push({ projectPath, envFile: written, agentId: project.agentId, projectMode: project.projectMode });
+        bindings.push({
+            projectPath,
+            envFile: written,
+            agentId: project.agentId,
+            projectMode: project.projectMode,
+            autoRemember: project.autoRemember,
+        });
         if (project.claudeCode) {
             await writeClaudeCodeProjectFiles(projectPath);
         }
@@ -2447,6 +2482,7 @@ function parseSetupConfig(filePath: string): SetupExecutionPlan {
         agentId: sanitizeIdentifier(String(item?.agentId ?? projectAgentDefault(String(item?.path ?? process.cwd()))), 'project_main'),
         memoryEntity: String(item?.memoryEntity ?? 'user/main'),
         projectMode: normalizeProjectMode(String(item?.projectMode ?? mode), mode),
+        autoRemember: parseOptionalBooleanValue(item?.autoRemember, 'projects[].autoRemember') ?? false,
         claudeCode: item?.claudeCode !== false,
     }));
 
@@ -2518,6 +2554,7 @@ function defaultsSetupPlan(args: ParsedArgs): SetupExecutionPlan {
             agentId: projectAgentDefault(projectPath),
             memoryEntity: 'user/main',
             projectMode: mode,
+            autoRemember: resolveOptionalBooleanFlag(args, 'auto-remember') ?? false,
             claudeCode: hasFlag(args, 'claude-code'),
         }))
         : [];
@@ -4847,12 +4884,14 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
                 'Use a narrower entity only when you intentionally want this project bound to some other memory namespace.',
             ]);
             const memoryEntity = await promptNonEmpty(prompt, 'Project memory entity', 'user/main');
+            const autoRemember = await promptYesNo(prompt, 'Enable strict auto-remember for this project binding?', false);
             const claudeCode = await promptYesNo(prompt, 'Create Claude Code project files here now?', true);
             projects.push({
                 path: projectPath,
                 agentId,
                 memoryEntity,
                 projectMode: setupMode,
+                autoRemember,
                 claudeCode,
             });
             if (setupMode === 'shared') {
@@ -4912,7 +4951,7 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
     } else {
         console.log('  projects');
         for (const binding of finalResult.bindings) {
-            console.log(`    - ${binding.projectPath} (${binding.agentId}, ${binding.projectMode})`);
+            console.log(`    - ${binding.projectPath} (${binding.agentId}, ${binding.projectMode}, auto-remember=${binding.autoRemember ? 'true' : 'false'})`);
         }
     }
     const nextSteps = [
@@ -5836,6 +5875,7 @@ async function projectInitCommand(args: ParsedArgs): Promise<void> {
     const apiKey = getFlag(args, 'api-key') ?? instanceEnv.IRANTI_API_KEY ?? 'replace_me_with_api_key';
     const agentId = getFlag(args, 'agent-id') ?? projectAgentDefault(projectPath);
     const projectMode = normalizeProjectMode(getFlag(args, 'mode'), 'isolated');
+    const autoRemember = resolveOptionalBooleanFlag(args, 'auto-remember') ?? false;
 
     const outFile = path.join(projectPath, '.env.iranti');
     if (fs.existsSync(outFile) && !hasFlag(args, 'force')) {
@@ -5852,6 +5892,7 @@ async function projectInitCommand(args: ParsedArgs): Promise<void> {
         IRANTI_API_KEY: apiKey,
         IRANTI_AGENT_ID: agentId,
         IRANTI_MEMORY_ENTITY: 'user/main',
+        IRANTI_AUTO_REMEMBER: String(autoRemember),
         IRANTI_PROJECT_MODE: projectMode,
         IRANTI_INSTANCE: instanceName,
         IRANTI_INSTANCE_ENV: envFile,
@@ -6015,6 +6056,7 @@ async function configureProjectCommand(args: ParsedArgs): Promise<void> {
     let explicitAgentId: string | undefined = getFlag(args, 'agent-id');
     let explicitMemoryEntity: string | undefined = getFlag(args, 'memory-entity');
     let explicitProjectMode: string | undefined = getFlag(args, 'mode');
+    let explicitAutoRemember: boolean | undefined = resolveOptionalBooleanFlag(args, 'auto-remember');
 
     if (hasFlag(args, 'interactive')) {
         await withPromptSession(async (prompt) => {
@@ -6031,6 +6073,7 @@ async function configureProjectCommand(args: ParsedArgs): Promise<void> {
             explicitApiKey = await prompt.secret('Project API key', explicitApiKey ?? existing.IRANTI_API_KEY);
             explicitAgentId = await prompt.line('Project agent ID', explicitAgentId ?? existing.IRANTI_AGENT_ID ?? projectAgentDefault(projectPath));
             explicitMemoryEntity = await prompt.line('Project memory entity', explicitMemoryEntity ?? existing.IRANTI_MEMORY_ENTITY ?? 'user/main');
+            explicitAutoRemember = await promptYesNo(prompt, 'Enable strict auto-remember?', explicitAutoRemember ?? envFlagEnabled(existing.IRANTI_AUTO_REMEMBER));
             explicitProjectMode = await prompt.line('Project mode (isolated or shared)', explicitProjectMode ?? existing.IRANTI_PROJECT_MODE ?? inferProjectMode(projectPath, existing.IRANTI_INSTANCE_ENV));
         });
     }
@@ -6052,6 +6095,7 @@ async function configureProjectCommand(args: ParsedArgs): Promise<void> {
         IRANTI_API_KEY: explicitApiKey ?? derivedApiKey,
         IRANTI_AGENT_ID: explicitAgentId ?? existing.IRANTI_AGENT_ID ?? projectAgentDefault(projectPath),
         IRANTI_MEMORY_ENTITY: explicitMemoryEntity ?? existing.IRANTI_MEMORY_ENTITY ?? 'user/main',
+        IRANTI_AUTO_REMEMBER: String(explicitAutoRemember ?? envFlagEnabled(existing.IRANTI_AUTO_REMEMBER)),
         IRANTI_PROJECT_MODE: normalizeProjectMode(explicitProjectMode, normalizeProjectMode(existing.IRANTI_PROJECT_MODE, inferProjectMode(projectPath, instanceEnvFile))),
         IRANTI_INSTANCE: instanceName,
         IRANTI_INSTANCE_ENV: instanceEnvFile,
@@ -6071,6 +6115,7 @@ async function configureProjectCommand(args: ParsedArgs): Promise<void> {
         envFile: written,
         url: updates.IRANTI_URL,
         agentId: updates.IRANTI_AGENT_ID,
+        autoRemember: updates.IRANTI_AUTO_REMEMBER === 'true',
         projectMode: updates.IRANTI_PROJECT_MODE,
         instance: updates.IRANTI_INSTANCE ?? null,
     };
@@ -6086,6 +6131,7 @@ async function configureProjectCommand(args: ParsedArgs): Promise<void> {
     console.log(`  env      ${written}`);
     console.log(`  url      ${updates.IRANTI_URL}`);
     console.log(`  agent    ${updates.IRANTI_AGENT_ID}`);
+    console.log(`  remember ${updates.IRANTI_AUTO_REMEMBER}`);
     console.log(`  mode     ${updates.IRANTI_PROJECT_MODE}`);
     if (updates.IRANTI_INSTANCE) {
         console.log(`  instance ${updates.IRANTI_INSTANCE}`);
@@ -6138,6 +6184,7 @@ async function authCreateKeyCommand(args: ParsedArgs): Promise<void> {
             IRANTI_API_KEY: created.token,
             IRANTI_AGENT_ID: agentId ?? existingBinding.IRANTI_AGENT_ID ?? 'my_agent',
             IRANTI_MEMORY_ENTITY: existingBinding.IRANTI_MEMORY_ENTITY ?? 'user/main',
+            IRANTI_AUTO_REMEMBER: existingBinding.IRANTI_AUTO_REMEMBER ?? 'false',
             IRANTI_INSTANCE: instanceName,
             IRANTI_INSTANCE_ENV: envFile,
         });

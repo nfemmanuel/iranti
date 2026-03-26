@@ -204,12 +204,18 @@ cd /path/to/chatbot-project
 iranti project init . --instance local --agent-id chatbot_main
 ```
 
-This writes `.env.iranti` with `IRANTI_URL`, `IRANTI_API_KEY`, `IRANTI_AGENT_ID`, and `IRANTI_PROJECT_MODE`.
+This writes `.env.iranti` with `IRANTI_URL`, `IRANTI_API_KEY`, `IRANTI_AGENT_ID`, `IRANTI_AUTO_REMEMBER`, and `IRANTI_PROJECT_MODE`.
 
 Default manual binding mode is `isolated`. If you intentionally want a project to share memory with another project on the same instance, make that explicit:
 
 ```bash
 iranti project init . --instance shared_team --agent-id chatbot_main --mode shared
+```
+
+If you want strict prompt/summary auto-remember from the start, make that explicit at bind time:
+
+```bash
+iranti project init . --instance local --agent-id chatbot_main --auto-remember
 ```
 
 To rotate a bound project key later:
@@ -222,6 +228,7 @@ To change the project agent identity or rebind to another instance:
 
 ```bash
 iranti configure project . --instance local --agent-id chatbot_worker
+iranti configure project . --auto-remember true
 iranti configure project . --mode shared
 iranti configure project . --interactive
 ```
