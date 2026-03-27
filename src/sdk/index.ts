@@ -419,7 +419,11 @@ export class Iranti {
 
         // Register the emitter once at construction time. All Staff components
         // read from the module-level registry — no threading required.
-        setStaffEventEmitter(config.staffEventEmitter ?? new NoopEventEmitter());
+        // Do not downgrade an already-installed concrete emitter back to the
+        // default no-op just because a later SDK consumer omitted the option.
+        if (config.staffEventEmitter) {
+            setStaffEventEmitter(config.staffEventEmitter);
+        }
     }
 
     // ── Write ───────────────────────────────────────────────────────────────

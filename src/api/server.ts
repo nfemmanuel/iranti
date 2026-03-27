@@ -26,6 +26,7 @@ import {
     resolveRuntimeAuthorityFromEnv,
     writeRuntimeState,
 } from '../lib/runtimeLifecycle';
+import { DbStaffEventEmitter } from '../lib/dbStaffEventEmitter';
 
 const app = express();
 
@@ -252,6 +253,7 @@ app.get(ROUTES.health, (_req, res) => {
 const iranti = new Iranti({
     connectionString: process.env.DATABASE_URL!,
     llmProvider: (process.env.LLM_PROVIDER as 'gemini' | 'openai' | 'mock') ?? 'mock',
+    staffEventEmitter: new DbStaffEventEmitter(),
 });
 
 let stopArchivistScheduler: (() => void) | null = null;
