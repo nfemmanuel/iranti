@@ -16,6 +16,7 @@ Internal files are useful when you need implementation history, validation evide
 These are the internal files most likely to stay useful during normal development:
 
 - [`TESTING.md`](./TESTING.md) - how to run the current test surfaces
+- [`manual-release-validation-checklist.md`](./manual-release-validation-checklist.md) - the human release gate for CLI, memory, and cross-interface validation
 - [`compatibility_backlog.md`](./compatibility_backlog.md) - follow-up compatibility work and release gating
 - [`consistency_model.md`](./consistency_model.md) - current consistency model explanation
 - [`decay.md`](./decay.md) - current memory-decay design note

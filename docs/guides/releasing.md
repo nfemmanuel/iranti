@@ -9,6 +9,9 @@ This does **not** mean already-installed copies auto-update themselves. It means
 - when you publish a new release correctly, new installs get that latest published version
 - existing installs still need a reinstall or upgrade command
 
+For the human side of release gating, use the companion checklist:
+- [`docs/internal/manual-release-validation-checklist.md`](../internal/manual-release-validation-checklist.md)
+
 ## What Triggers Publishing
 
 Publishing is driven by the GitHub Actions workflow:
