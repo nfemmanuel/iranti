@@ -44,6 +44,7 @@ import { rewriteCommandError } from '../src/lib/commandErrors';
 import { resolveCommandInvocation, spawnResolved, spawnSyncResolved } from '../src/lib/commandInvocation';
 import { loadRuntimeEnv } from '../src/lib/runtimeEnv';
 import { ensureFileContainsLinesLocked, writeTextFileLocked } from '../src/lib/fileMutation';
+import { describeInstanceDependency, ensureInstanceDependenciesHealthy, InstanceDependency, parseInstanceDependencies } from '../src/lib/runtimeDependencies';
 import { resolveInteractive } from '../src/resolutionist';
 import { startChatSession } from '../src/chat';
 import { createVectorBackend, resolveVectorBackendName } from '../src/library/backends';
@@ -75,6 +76,7 @@ type InstanceMeta = {
     port: number;
     envFile: string;
     instanceDir: string;
+    dependencies?: InstanceDependency[];
 };
 
 type InstanceRuntimeSummary = RuntimeInspection;
@@ -200,6 +202,7 @@ type ClaudeScaffoldStatus = 'created' | 'updated' | 'unchanged';
 
 type ClaudeProjectScaffoldResult = {
     mcp: ClaudeScaffoldStatus;
+    vscodeMcp: ClaudeScaffoldStatus;
     settings: ClaudeScaffoldStatus;
 };
 
@@ -841,6 +844,16 @@ async function readEnvFile(filePath: string): Promise<Record<string, string>> {
     return out;
 }
 
+async function readInstanceMetaFile(metaFile: string): Promise<Partial<InstanceMeta> | null> {
+    if (!fs.existsSync(metaFile)) return null;
+    try {
+        const raw = await fsp.readFile(metaFile, 'utf8');
+        return JSON.parse(raw) as Partial<InstanceMeta>;
+    } catch {
+        return null;
+    }
+}
+
 function makeInstanceEnv(name: string, port: number, dbUrl: string, apiKey: string | undefined, instanceDir: string): string {
     const lines = [
         '# Iranti instance env',
@@ -1039,6 +1052,10 @@ async function inspectInstanceConfig(root: string, name: string): Promise<Instan
                 }
                 if (typeof parsed.envFile === 'string' && path.resolve(parsed.envFile) !== path.resolve(envFile)) {
                     ownershipIssues.push(`instance.json envFile points to ${parsed.envFile}`);
+                }
+                const dependencyValidation = parseInstanceDependencies(parsed.dependencies);
+                if (dependencyValidation.errors.length > 0) {
+                    ownershipIssues.push(`instance.json dependencies invalid: ${dependencyValidation.errors.join(', ')}`);
                 }
             }
         } catch {
@@ -1357,6 +1374,7 @@ type SetupExecutionPlan = {
     bootstrapDatabase?: boolean;
     dockerContainerName?: string;
     databaseProvisioned?: boolean;
+    dependencies?: InstanceDependency[];
 };
 
 type SetupExecutionResult = {
@@ -1497,6 +1515,11 @@ function sanitizeIdentifier(input: string, fallback: string): string {
     return value || fallback;
 }
 
+function normalizeDockerContainerName(input: string | undefined, fallback: string): string {
+    const trimmed = input?.trim() ?? '';
+    return trimmed || fallback;
+}
+
 function projectAgentDefault(projectPath: string): string {
     return `${sanitizeIdentifier(path.basename(projectPath), 'project')}_main`;
 }
@@ -1630,6 +1653,7 @@ async function ensureInstanceConfigured(
         provider: string;
         providerKeys: Record<string, string>;
         apiKey: string;
+        dependencies?: InstanceDependency[];
     }
 ): Promise<{ envFile: string; instanceDir: string; created: boolean }> {
     const { instanceDir, envFile, metaFile } = instancePaths(root, name);
@@ -1648,6 +1672,7 @@ async function ensureInstanceConfigured(
             port: config.port,
             envFile,
             instanceDir,
+            ...(config.dependencies && config.dependencies.length > 0 ? { dependencies: config.dependencies } : {}),
         };
         await writeJson(metaFile, meta);
     }
@@ -1660,7 +1685,9 @@ async function ensureInstanceConfigured(
         ...config.providerKeys,
     });
 
-    await syncInstanceMeta(root, name, config.port);
+    await syncInstanceMeta(root, name, config.port, {
+        ...(config.dependencies !== undefined ? { dependencies: config.dependencies } : {}),
+    });
 
     return { envFile, instanceDir, created };
 }
@@ -1676,6 +1703,30 @@ function makeIrantiMcpServerConfig(projectEnvPath?: string): { command: string; 
                 },
             }
             : {}),
+    };
+}
+
+function makeVsCodeIrantiMcpServerConfig(projectPath: string, projectEnvPath?: string): {
+    type: 'stdio';
+    command: string;
+    args: string[];
+    envFile?: string;
+    env?: Record<string, string>;
+} {
+    const resolvedProjectEnvPath = projectEnvPath ? path.resolve(projectEnvPath) : undefined;
+    const localProjectEnvPath = path.join(projectPath, '.env.iranti');
+    const env: Record<string, string> = {};
+    if (resolvedProjectEnvPath && path.resolve(localProjectEnvPath) !== resolvedProjectEnvPath) {
+        env.IRANTI_PROJECT_ENV = resolvedProjectEnvPath;
+    }
+    return {
+        type: 'stdio',
+        command: 'iranti',
+        args: ['mcp'],
+        ...(resolvedProjectEnvPath && path.resolve(localProjectEnvPath) === resolvedProjectEnvPath
+            ? { envFile: '${workspaceFolder}/.env.iranti' }
+            : {}),
+        ...(Object.keys(env).length > 0 ? { env } : {}),
     };
 }
 
@@ -2052,6 +2103,49 @@ async function writeClaudeCodeProjectFiles(projectPath: string, projectEnvPath?:
         }
     }
 
+    const vscodeDir = path.join(projectPath, '.vscode');
+    const vscodeMcpFile = path.join(vscodeDir, 'mcp.json');
+    let vscodeMcpStatus: ClaudeScaffoldStatus = 'unchanged';
+    const vscodeMcpServer = makeVsCodeIrantiMcpServerConfig(projectPath, resolvedProjectEnvPath);
+    await ensureDir(vscodeDir);
+    if (!fs.existsSync(vscodeMcpFile)) {
+        await writeText(vscodeMcpFile, `${JSON.stringify({
+            servers: {
+                iranti: vscodeMcpServer,
+            },
+        }, null, 2)}\n`);
+        vscodeMcpStatus = 'created';
+    } else {
+        const existing = readJsonFile<Record<string, unknown>>(vscodeMcpFile);
+        if (!existing || typeof existing !== 'object' || Array.isArray(existing)) {
+            if (!force) {
+                throw new Error(`Existing .vscode/mcp.json is not valid JSON. Re-run with --force to overwrite it: ${vscodeMcpFile}`);
+            }
+            await writeText(vscodeMcpFile, `${JSON.stringify({
+                servers: {
+                    iranti: vscodeMcpServer,
+                },
+            }, null, 2)}\n`);
+            vscodeMcpStatus = 'updated';
+        } else {
+            const existingServers =
+                existing.servers && typeof existing.servers === 'object' && !Array.isArray(existing.servers)
+                    ? existing.servers as Record<string, unknown>
+                    : {};
+            const hasIranti = Object.prototype.hasOwnProperty.call(existingServers, 'iranti');
+            if (!hasIranti || force) {
+                await writeText(vscodeMcpFile, `${JSON.stringify({
+                    ...existing,
+                    servers: {
+                        ...existingServers,
+                        iranti: vscodeMcpServer,
+                    },
+                }, null, 2)}\n`);
+                vscodeMcpStatus = 'updated';
+            }
+        }
+    }
+
     const claudeDir = path.join(projectPath, '.claude');
     await ensureDir(claudeDir);
     const settingsFile = path.join(claudeDir, 'settings.local.json');
@@ -2074,6 +2168,7 @@ async function writeClaudeCodeProjectFiles(projectPath: string, projectEnvPath?:
 
     return {
         mcp: mcpStatus,
+        vscodeMcp: vscodeMcpStatus,
         settings: settingsStatus,
     };
 }
@@ -2214,19 +2309,16 @@ async function chooseAvailablePort(session: PromptSession, promptText: string, p
     }
 }
 
-async function syncInstanceMeta(root: string, name: string, port: number): Promise<void> {
+async function syncInstanceMeta(
+    root: string,
+    name: string,
+    port: number,
+    options: { dependencies?: InstanceDependency[] } = {},
+): Promise<void> {
     const { instanceDir, envFile, metaFile } = instancePaths(root, name);
-    const existingCreatedAt = fs.existsSync(metaFile)
-        ? await fsp.readFile(metaFile, 'utf-8')
-            .then((raw) => {
-                try {
-                    const parsed = JSON.parse(raw) as Partial<InstanceMeta>;
-                    return typeof parsed.createdAt === 'string' ? parsed.createdAt : undefined;
-                } catch {
-                    return undefined;
-                }
-            })
-        : undefined;
+    const existing = await readInstanceMetaFile(metaFile);
+    const existingCreatedAt = typeof existing?.createdAt === 'string' ? existing.createdAt : undefined;
+    const existingDependencies = parseInstanceDependencies(existing?.dependencies).dependencies;
 
     const meta: InstanceMeta = {
         name,
@@ -2234,6 +2326,11 @@ async function syncInstanceMeta(root: string, name: string, port: number): Promi
         port,
         envFile,
         instanceDir,
+        ...(options.dependencies !== undefined
+            ? { dependencies: options.dependencies }
+            : existingDependencies.length > 0
+                ? { dependencies: existingDependencies }
+                : {}),
     };
     await writeJson(metaFile, meta);
 }
@@ -2353,6 +2450,7 @@ async function executeSetupPlan(plan: SetupExecutionPlan): Promise<SetupExecutio
         provider: plan.provider,
         providerKeys: plan.providerKeys,
         apiKey: plan.apiKey,
+        dependencies: plan.dependencies,
     });
 
     if (plan.bootstrapDatabase) {
@@ -2504,6 +2602,12 @@ function parseSetupConfig(filePath: string): SetupExecutionPlan {
         codex: Boolean(raw?.codex),
         codexAgent: raw?.codexAgent ? sanitizeIdentifier(String(raw.codexAgent), 'codex_code') : undefined,
         bootstrapDatabase: Boolean(raw?.bootstrapDatabase),
+        dependencies: inferSetupDependencies({
+            databaseMode,
+            databaseUrl,
+            dockerContainerName: typeof raw?.dockerContainerName === 'string' ? raw.dockerContainerName : undefined,
+            instanceName,
+        }),
     };
 }
 
@@ -2582,6 +2686,12 @@ function defaultsSetupPlan(args: ParsedArgs): SetupExecutionPlan {
         codex: hasFlag(args, 'codex'),
         codexAgent: sanitizeIdentifier(getFlag(args, 'codex-agent') ?? 'codex_code', 'codex_code'),
         bootstrapDatabase: hasFlag(args, 'bootstrap-db'),
+        dependencies: inferSetupDependencies({
+            databaseMode,
+            databaseUrl,
+            dockerContainerName: getFlag(args, 'docker-container-name'),
+            instanceName,
+        }),
     };
 }
 
@@ -2688,6 +2798,44 @@ function summarizeStatus(checks: DoctorCheck[]): DoctorStatus {
     return 'pass';
 }
 
+function detectVsCodeMcpWorkspaceCheck(projectEnvPath: string): DoctorCheck {
+    const vscodeMcpPath = path.join(path.dirname(projectEnvPath), '.vscode', 'mcp.json');
+    if (!fs.existsSync(vscodeMcpPath)) {
+        return {
+            name: 'vscode mcp workspace',
+            status: 'warn',
+            detail: `VS Code MCP workspace file is missing: ${vscodeMcpPath}. Codex VS Code sessions may not expose Iranti tools even when Codex CLI works.`,
+        };
+    }
+
+    const parsed = readJsonFile<Record<string, unknown>>(vscodeMcpPath);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return {
+            name: 'vscode mcp workspace',
+            status: 'warn',
+            detail: `.vscode/mcp.json is not valid JSON: ${vscodeMcpPath}`,
+        };
+    }
+
+    const servers =
+        parsed.servers && typeof parsed.servers === 'object' && !Array.isArray(parsed.servers)
+            ? parsed.servers as Record<string, unknown>
+            : {};
+    if (!Object.prototype.hasOwnProperty.call(servers, 'iranti')) {
+        return {
+            name: 'vscode mcp workspace',
+            status: 'warn',
+            detail: `.vscode/mcp.json exists but does not expose an \`iranti\` server: ${vscodeMcpPath}`,
+        };
+    }
+
+    return {
+        name: 'vscode mcp workspace',
+        status: 'pass',
+        detail: `VS Code MCP workspace file is present and exposes \`iranti\`: ${vscodeMcpPath}`,
+    };
+}
+
 function collectDoctorRemediations(
     checks: DoctorCheck[],
     envSource: string,
@@ -2727,6 +2875,9 @@ function collectDoctorRemediations(
         }
         if (check.name === 'bound instance env' && check.status !== 'pass') {
             add('Run `iranti configure project` to refresh the project binding, or set IRANTI_INSTANCE_ENV in `.env.iranti` so doctor can inspect the bound local instance.');
+        }
+        if (check.name === 'vscode mcp workspace' && check.status !== 'pass') {
+            add('Run `iranti codex-setup` from the project root to scaffold `.vscode/mcp.json`, or add an `iranti` server entry there manually for VS Code MCP clients.');
         }
         if (check.name === 'api key' && check.status !== 'pass') {
             add(envSource === 'project-binding'
@@ -3102,6 +3253,30 @@ function deriveDatabaseUrlForMode(
         return `postgresql://${user}:${password}@localhost:5432/iranti_${instanceName}`;
     }
     return `postgresql://${user}:${password}@localhost:5432/iranti_${instanceName}`;
+}
+
+function inferSetupDependencies(plan: {
+    databaseMode: DatabaseSetupMode;
+    databaseUrl: string;
+    dockerContainerName?: string;
+    instanceName: string;
+}): InstanceDependency[] {
+    if (plan.databaseMode !== 'docker') {
+        return [];
+    }
+
+    const parsed = parsePostgresConnectionString(plan.databaseUrl);
+    const hostPort = Number.parseInt(parsed.port || '5432', 10);
+    const containerName = normalizeDockerContainerName(
+        plan.dockerContainerName,
+        `iranti_${plan.instanceName}_db`
+    );
+
+    return [{
+        kind: 'docker-container',
+        name: containerName,
+        ...(Number.isFinite(hostPort) && hostPort > 0 ? { healthTcpPort: hostPort } : {}),
+    }];
 }
 
 async function ensurePostgresDatabaseExists(databaseUrl: string): Promise<void> {
@@ -4935,6 +5110,12 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
             bootstrapDatabase,
             dockerContainerName,
             databaseProvisioned,
+            dependencies: inferSetupDependencies({
+                databaseMode,
+                databaseUrl: dbUrl,
+                dockerContainerName,
+                instanceName,
+            }),
         });
     });
 
@@ -5117,6 +5298,7 @@ async function doctorCommand(args: ParsedArgs): Promise<void> {
                     status: 'pass',
                     detail: `IRANTI_URL=${env.IRANTI_URL}`,
                 });
+            checks.push(detectVsCodeMcpWorkspaceCheck(envFile));
         }
 
         if (treatAsProjectBinding) {
@@ -5754,6 +5936,8 @@ async function showInstanceCommand(args: ParsedArgs): Promise<void> {
     const env = config.state.envPresent && config.state.envReadable
         ? await readEnvFile(envFile)
         : {};
+    const meta = await readInstanceMetaFile(instancePaths(root, name).metaFile);
+    const dependencies = parseInstanceDependencies(meta?.dependencies).dependencies;
     const runtime = await readInstanceRuntimeSummary(root, name);
     console.log(bold(`Instance: ${name}`));
     console.log(`  dir : ${instanceDir}`);
@@ -5762,6 +5946,9 @@ async function showInstanceCommand(args: ParsedArgs): Promise<void> {
     console.log(`  port: ${env.IRANTI_PORT ?? '3001'}`);
     console.log(`  db  : ${env.DATABASE_URL ?? '(missing)'}`);
     console.log(`  esc : ${env.IRANTI_ESCALATION_DIR ?? '(missing)'}`);
+    if (dependencies.length > 0) {
+        console.log(`  deps: ${dependencies.map((dependency) => describeInstanceDependency(dependency)).join(', ')}`);
+    }
     console.log(`  runtime: ${describeInstanceRuntime(runtime)}`);
     if (runtime.state?.healthUrl) {
         console.log(`  health: ${runtime.state.healthUrl}`);
@@ -5781,6 +5968,8 @@ async function runInstanceCommand(args: ParsedArgs): Promise<void> {
     const scope = normalizeScope(getFlag(args, 'scope'));
     const root = resolveInstallRoot(args, scope);
     const { instanceDir, envFile, runtimeFile, env } = await loadInstanceEnv(root, name);
+    const meta = await readInstanceMetaFile(instancePaths(root, name).metaFile);
+    const dependencies = parseInstanceDependencies(meta?.dependencies).dependencies;
     const runtime = await readInstanceRuntimeSummary(root, name);
     if (runtime.running) {
         throw cliError(
@@ -5829,6 +6018,16 @@ async function runInstanceCommand(args: ParsedArgs): Promise<void> {
             ['Run `iranti configure instance <name> --port <n>` or free the port before retrying.'],
             { instance: name, envFile, port }
         );
+    }
+    if (dependencies.length > 0) {
+        console.log(`${infoLabel()} Ensuring instance dependencies are ready...`);
+        const ensured = await ensureInstanceDependenciesHealthy(dependencies, { cwd: instanceDir });
+        if (ensured.started.length > 0) {
+            console.log(`${okLabel()} Started dependency containers: ${ensured.started.join(', ')}`);
+        }
+        if (ensured.alreadyRunning.length > 0) {
+            console.log(`${infoLabel()} Dependency containers already running: ${ensured.alreadyRunning.join(', ')}`);
+        }
     }
     await startInstanceRuntime(name, instanceDir, envFile, runtimeFile);
 }
@@ -5924,6 +6123,8 @@ async function configureInstanceCommand(args: ParsedArgs): Promise<void> {
     const scope = normalizeScope(getFlag(args, 'scope'));
     const root = resolveInstallRoot(args, scope);
     const { instanceDir, envFile, env, config } = await loadInstanceEnv(root, name, { allowRepair: true });
+    const currentMeta = await readInstanceMetaFile(instancePaths(root, name).metaFile);
+    const currentDependencies = parseInstanceDependencies(currentMeta?.dependencies).dependencies;
     const updates: Record<string, string | undefined> = {};
 
     let portRaw = getFlag(args, 'port');
@@ -5932,6 +6133,9 @@ async function configureInstanceCommand(args: ParsedArgs): Promise<void> {
     let providerInput = getFlag(args, 'provider');
     let providerKey = getFlag(args, 'provider-key');
     let clearProviderKey = hasFlag(args, 'clear-provider-key');
+    let dockerContainerName = getFlag(args, 'docker-container');
+    let dockerHealthPortRaw = getFlag(args, 'docker-health-port');
+    const clearDockerContainer = hasFlag(args, 'clear-docker-container');
 
     if (hasFlag(args, 'interactive')) {
         await withPromptSession(async (prompt) => {
@@ -5941,6 +6145,7 @@ async function configureInstanceCommand(args: ParsedArgs): Promise<void> {
                 'DATABASE_URL points at the PostgreSQL database for this instance.',
                 'LLM provider and provider key control which model backend Iranti uses.',
                 'Iranti API key is the client credential other tools and project bindings use to authenticate.',
+                'Optional Docker dependency settings let `iranti run --instance` start a recorded backing container before the API boots.',
             ]);
             portRaw = await prompt.line('API port', portRaw ?? env.IRANTI_PORT);
             dbUrl = await prompt.line('DATABASE_URL', dbUrl ?? env.DATABASE_URL);
@@ -5951,6 +6156,9 @@ async function configureInstanceCommand(args: ParsedArgs): Promise<void> {
                 providerKey = await prompt.secret(`${providerDisplayName(interactiveProvider)} API key`, providerKey ?? env[interactiveProviderEnvKey]);
             }
             apiKey = await prompt.secret('Iranti API key', apiKey ?? env.IRANTI_API_KEY);
+            const currentDockerDependency = currentDependencies.find((dependency) => dependency.kind === 'docker-container');
+            dockerContainerName = await prompt.line('Docker dependency container (optional)', dockerContainerName ?? currentDockerDependency?.name);
+            dockerHealthPortRaw = await prompt.line('Docker dependency health TCP port (optional)', dockerHealthPortRaw ?? (currentDockerDependency?.healthTcpPort ? String(currentDockerDependency.healthTcpPort) : ''));
         });
         clearProviderKey = false;
     }
@@ -5985,8 +6193,49 @@ async function configureInstanceCommand(args: ParsedArgs): Promise<void> {
         updates[envKey] = undefined;
     }
 
+    let nextDependencies = currentDependencies;
+    if (clearDockerContainer) {
+        nextDependencies = currentDependencies.filter((dependency) => dependency.kind !== 'docker-container');
+    }
+
+    if (dockerHealthPortRaw && !dockerContainerName) {
+        throw new Error('--docker-health-port requires --docker-container <name>.');
+    }
+
+    if (dockerContainerName) {
+        const normalizedName = normalizeDockerContainerName(dockerContainerName, 'iranti_db');
+        const dockerHealthPortCandidate = dockerHealthPortRaw
+            ? Number.parseInt(dockerHealthPortRaw, 10)
+            : undefined;
+        if (
+            dockerHealthPortRaw
+            && (
+                dockerHealthPortCandidate === undefined
+                || !Number.isFinite(dockerHealthPortCandidate)
+                || dockerHealthPortCandidate <= 0
+            )
+        ) {
+            throw new Error(`Invalid --docker-health-port '${dockerHealthPortRaw}'.`);
+        }
+        const dockerHealthPort = typeof dockerHealthPortCandidate === 'number' && dockerHealthPortCandidate > 0
+            ? dockerHealthPortCandidate
+            : undefined;
+        const withoutDocker = currentDependencies.filter((dependency) => dependency.kind !== 'docker-container');
+        nextDependencies = [
+            ...withoutDocker,
+            {
+                kind: 'docker-container',
+                name: normalizedName,
+                ...(dockerHealthPort ? { healthTcpPort: dockerHealthPort } : {}),
+            },
+        ];
+    }
+
     if (Object.keys(updates).length === 0) {
-        throw new Error('No changes provided. Use flags like --provider, --provider-key, --api-key, --db-url, or --port.');
+        const dependenciesUnchanged = JSON.stringify(nextDependencies) === JSON.stringify(currentDependencies);
+        if (dependenciesUnchanged) {
+            throw new Error('No changes provided. Use flags like --provider, --provider-key, --api-key, --db-url, --port, or the Docker dependency flags.');
+        }
     }
 
     const nextEnv: Record<string, string> = { ...env };
@@ -6019,7 +6268,7 @@ async function configureInstanceCommand(args: ParsedArgs): Promise<void> {
 
     await ensureDir(instanceDir);
     await upsertEnvFile(envFile, updates);
-    await syncInstanceMeta(root, name, nextPort);
+    await syncInstanceMeta(root, name, nextPort, { dependencies: nextDependencies });
 
     const json = hasFlag(args, 'json');
     const result = {
@@ -6029,6 +6278,7 @@ async function configureInstanceCommand(args: ParsedArgs): Promise<void> {
         provider: updates.LLM_PROVIDER ?? env.LLM_PROVIDER ?? 'mock',
         apiKeyChanged: Boolean(apiKey),
         providerKeyChanged: Boolean(providerKey) || hasFlag(args, 'clear-provider-key'),
+        dependencies: nextDependencies.map((dependency) => describeInstanceDependency(dependency)),
     };
 
     if (json) {
@@ -6040,6 +6290,9 @@ async function configureInstanceCommand(args: ParsedArgs): Promise<void> {
     console.log(`  status   ${okLabel()}`);
     console.log(`  env      ${envFile}`);
     console.log(`  keys     ${result.updatedKeys.join(', ')}`);
+    if (result.dependencies.length > 0) {
+        console.log(`  deps     ${result.dependencies.join(', ')}`);
+    }
     if (apiKey) {
         console.log(`  api key  ${redactSecret(apiKey)}`);
     }
@@ -6485,7 +6738,7 @@ async function handoffCommand(args: ParsedArgs): Promise<void> {
 function printClaudeSetupHelp(): void {
     console.log([
         'Scaffold Claude Code MCP and hook files for the current project.',
-        'Use this when a bound repo should be ready for Claude Code without hand-editing `.mcp.json` or `.claude/settings.local.json`.',
+        'Use this when a bound repo should be ready for Claude Code without hand-editing `.mcp.json`, `.vscode/mcp.json`, or `.claude/settings.local.json`.',
         '',
         'Usage:',
         '  iranti claude-setup [path] [--project-env <path>] [--force]',
@@ -6499,8 +6752,8 @@ function printClaudeSetupHelp(): void {
         '',
         'Notes:',
         '  - Expects a project binding at .env.iranti unless --project-env is supplied.',
-        '  - Writes .mcp.json and .claude/settings.local.json.',
-        '  - Adds the Iranti MCP server to existing .mcp.json files without removing other servers.',
+        '  - Writes .mcp.json, .vscode/mcp.json, and .claude/settings.local.json.',
+        '  - Adds the Iranti MCP server to existing .mcp.json / .vscode/mcp.json files without removing other servers.',
         '  - Leaves existing Claude hook files untouched unless --force is supplied.',
         '',
         'Scan mode (--scan):',
@@ -6672,6 +6925,8 @@ async function claudeSetupCommand(args: ParsedArgs): Promise<void> {
         console.log(`${okLabel()} Scanning ${scanDir} - found ${candidates.length} project(s) with .claude${recursive ? ' (recursive)' : ''}`);
         let createdMcp = 0;
         let updatedMcp = 0;
+        let createdVsCodeMcp = 0;
+        let updatedVsCodeMcp = 0;
         let createdSettings = 0;
         let updatedSettings = 0;
         let unchanged = 0;
@@ -6679,11 +6934,14 @@ async function claudeSetupCommand(args: ParsedArgs): Promise<void> {
             const result = await writeClaudeCodeProjectFiles(projectPath, undefined, force);
             if (result.mcp === 'created') createdMcp += 1;
             if (result.mcp === 'updated') updatedMcp += 1;
+            if (result.vscodeMcp === 'created') createdVsCodeMcp += 1;
+            if (result.vscodeMcp === 'updated') updatedVsCodeMcp += 1;
             if (result.settings === 'created') createdSettings += 1;
             if (result.settings === 'updated') updatedSettings += 1;
-            if (result.mcp === 'unchanged' && result.settings === 'unchanged') unchanged += 1;
+            if (result.mcp === 'unchanged' && result.vscodeMcp === 'unchanged' && result.settings === 'unchanged') unchanged += 1;
             console.log(`  ${projectPath}`);
             console.log(`    mcp       ${result.mcp}`);
+            console.log(`    vscode    ${result.vscodeMcp}`);
             console.log(`    settings  ${result.settings}`);
         }
         console.log('');
@@ -6691,6 +6949,8 @@ async function claudeSetupCommand(args: ParsedArgs): Promise<void> {
         console.log(`  projects          ${candidates.length}`);
         console.log(`  mcp created       ${createdMcp}`);
         console.log(`  mcp updated       ${updatedMcp}`);
+        console.log(`  vscode created    ${createdVsCodeMcp}`);
+        console.log(`  vscode updated    ${updatedVsCodeMcp}`);
         console.log(`  settings created  ${createdSettings}`);
         console.log(`  settings updated  ${updatedSettings}`);
         console.log(`  unchanged         ${unchanged}`);
@@ -6723,8 +6983,10 @@ async function claudeSetupCommand(args: ParsedArgs): Promise<void> {
     console.log(`  project   ${projectPath}`);
     console.log(`  binding   ${projectEnvPath}`);
     console.log(`  mcp       ${path.join(projectPath, '.mcp.json')}`);
+    console.log(`  vscode    ${path.join(projectPath, '.vscode', 'mcp.json')}`);
     console.log(`  settings  ${path.join(projectPath, '.claude', 'settings.local.json')}`);
     console.log(`  mcp status      ${result.mcp}`);
+    console.log(`  vscode status   ${result.vscodeMcp}`);
     console.log(`  settings status ${result.settings}`);
     console.log(`${infoLabel()} Next: open Claude Code in this project and verify Iranti tools are available.`);
 }

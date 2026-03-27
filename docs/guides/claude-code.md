@@ -54,9 +54,14 @@ iranti claude-setup
 
 This writes or refreshes:
 - `.mcp.json`
+- `.vscode/mcp.json`
 - `.claude/settings.local.json`
 
-When a project binding is present, the generated `.mcp.json` now pins `IRANTI_PROJECT_ENV` to that local `.env.iranti` file so Claude Code and Codex IDE sessions resolve the same binding deterministically.
+When a project binding is present:
+- the generated `.mcp.json` pins `IRANTI_PROJECT_ENV` to that local `.env.iranti` file
+- the generated `.vscode/mcp.json` exposes the same `iranti` server through VS Code's native workspace MCP surface
+
+That keeps Claude Code, Codex CLI, and VS Code MCP clients pointed at the same binding deterministically.
 
 Use `--force` if you want Iranti to overwrite existing scaffold files.
 
@@ -76,7 +81,7 @@ Scan mode:
 - checks immediate subdirectories only
 - add `--recursive` to walk nested project folders too
 - only touches directories that already contain `.claude/`
-- adds or merges an `iranti` MCP server into `.mcp.json`
+- adds or merges an `iranti` MCP server into `.mcp.json` and `.vscode/mcp.json`
 - only creates `.claude/settings.local.json` when it is missing, unless `--force` is supplied
 
 Equivalent alias:
@@ -100,6 +105,21 @@ Create `.mcp.json` in the project root:
       "env": {
         "IRANTI_PROJECT_ENV": "/absolute/path/to/project/.env.iranti"
       }
+    }
+  }
+}
+```
+
+Create `.vscode/mcp.json` in the project root if you want VS Code MCP clients to expose the same server without relying on cross-app discovery:
+
+```json
+{
+  "servers": {
+    "iranti": {
+      "type": "stdio",
+      "command": "iranti",
+      "args": ["mcp"],
+      "envFile": "${workspaceFolder}/.env.iranti"
     }
   }
 }

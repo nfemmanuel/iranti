@@ -1,6 +1,6 @@
 {
   "name": "iranti",
-  "version": "0.2.43",
+  "version": "0.2.44",
   "description": "Memory infrastructure for multi-agent AI systems",
   "main": "dist/src/sdk/index.js",
   "files": [
@@ -70,6 +70,7 @@
     "test:ingest": "ts-node tests/ingest/run_ingest_tests.ts",
     "test:access-control": "ts-node tests/access-control/run_access_control_tests.ts",
     "test:runtime-lifecycle": "ts-node tests/runtime-lifecycle/run_runtime_lifecycle_tests.ts",
+    "test:instance-dependencies": "ts-node tests/runtime-lifecycle/run_instance_dependency_tests.ts",
     "test:cli-surface": "ts-node tests/cli/run_command_surface_tests.ts",
     "test:cli-process-safety": "ts-node tests/runtime-lifecycle/run_cli_process_safety_tests.ts",
     "test:setup-upgrade-lifecycle": "ts-node tests/runtime-lifecycle/run_setup_upgrade_tests.ts",

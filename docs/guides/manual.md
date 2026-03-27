@@ -93,6 +93,7 @@ iranti status
 Use `doctor` when something feels wrong.
 Use `status` when you want to see what this machine and current directory are bound to.
 `status` and `instance show` now also surface runtime metadata for live or stale instance-backed API processes.
+Instances can also record explicit Docker container dependencies so `iranti run --instance <name>` starts the backing container before the API boots.
 
 When a command fails and you need more detail:
 

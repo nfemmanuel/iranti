@@ -189,12 +189,14 @@ async function main(): Promise<void> {
         const instanceEnvPath = path.join(runtimeRoot, 'instances', 'local', '.env');
         const bindingFile = path.join(projectDir, '.env.iranti');
         const mcpFile = path.join(projectDir, '.mcp.json');
+        const vscodeMcpFile = path.join(projectDir, '.vscode', 'mcp.json');
         const claudeSettingsFile = path.join(projectDir, '.claude', 'settings.local.json');
 
         assert.ok(fs.existsSync(installMetaPath), 'Expected setup to create install.json.');
         assert.ok(fs.existsSync(instanceEnvPath), 'Expected setup to create instance env.');
         assert.ok(fs.existsSync(bindingFile), 'Expected setup to create .env.iranti.');
         assert.ok(fs.existsSync(mcpFile), 'Expected setup to scaffold .mcp.json.');
+        assert.ok(fs.existsSync(vscodeMcpFile), 'Expected setup to scaffold .vscode/mcp.json.');
         assert.ok(fs.existsSync(claudeSettingsFile), 'Expected setup to scaffold Claude settings.');
 
         const bindingEnv = readEnv(bindingFile);
@@ -216,6 +218,21 @@ async function main(): Promise<void> {
         assert.strictEqual(mcpConfig.mcpServers.iranti.command, 'iranti');
         assert.deepStrictEqual(mcpConfig.mcpServers.iranti.args, ['mcp']);
         assert.strictEqual(mcpConfig.mcpServers.iranti.env?.IRANTI_PROJECT_ENV, bindingFile, 'Expected scaffolded .mcp.json to pin the project binding');
+        const vscodeMcpConfig = readJson<{
+            servers: {
+                iranti: {
+                    type: string;
+                    command: string;
+                    args: string[];
+                    envFile?: string;
+                    env?: Record<string, string>;
+                };
+            };
+        }>(vscodeMcpFile);
+        assert.strictEqual(vscodeMcpConfig.servers.iranti.type, 'stdio');
+        assert.strictEqual(vscodeMcpConfig.servers.iranti.command, 'iranti');
+        assert.deepStrictEqual(vscodeMcpConfig.servers.iranti.args, ['mcp']);
+        assert.strictEqual(vscodeMcpConfig.servers.iranti.envFile, '${workspaceFolder}/.env.iranti', 'Expected scaffolded .vscode/mcp.json to load the local binding via envFile');
         const claudeSettings = readJson<{ hooks?: Record<string, unknown> }>(claudeSettingsFile);
         assert.ok(claudeSettings.hooks?.SessionStart, 'Expected scaffolded Claude settings to include SessionStart hook.');
         assert.ok(claudeSettings.hooks?.UserPromptSubmit, 'Expected scaffolded Claude settings to include UserPromptSubmit hook.');
@@ -256,6 +273,7 @@ async function main(): Promise<void> {
             assert.strictEqual(sharedBinding.IRANTI_PERSONAL_MEMORY_ENTITY, 'user/main');
             assert.strictEqual(sharedBinding.IRANTI_AUTO_REMEMBER, 'false');
             assert.ok(fs.existsSync(path.join(projectPath, '.mcp.json')), 'Expected shared setup to scaffold .mcp.json for each bound project.');
+            assert.ok(fs.existsSync(path.join(projectPath, '.vscode', 'mcp.json')), 'Expected shared setup to scaffold .vscode/mcp.json for each bound project.');
             assert.ok(fs.existsSync(path.join(projectPath, '.claude', 'settings.local.json')), 'Expected shared setup to scaffold Claude settings for each bound project.');
             const sharedMcp = readJson<{
                 mcpServers: {
@@ -265,6 +283,14 @@ async function main(): Promise<void> {
                 };
             }>(path.join(projectPath, '.mcp.json'));
             assert.strictEqual(sharedMcp.mcpServers.iranti.env?.IRANTI_PROJECT_ENV, path.join(projectPath, '.env.iranti'), 'Expected shared scaffolding to pin each project binding in .mcp.json');
+            const sharedVsCodeMcp = readJson<{
+                servers: {
+                    iranti: {
+                        envFile?: string;
+                    };
+                };
+            }>(path.join(projectPath, '.vscode', 'mcp.json'));
+            assert.strictEqual(sharedVsCodeMcp.servers.iranti.envFile, '${workspaceFolder}/.env.iranti', 'Expected shared scaffolding to pin each project binding in .vscode/mcp.json');
             const sharedClaudeSettings = readJson<{ hooks?: Record<string, unknown> }>(path.join(projectPath, '.claude', 'settings.local.json'));
             assert.ok(sharedClaudeSettings.hooks?.Stop, 'Expected shared Claude scaffolding to include Stop hook.');
         }
