@@ -280,7 +280,7 @@ iranti/
 â”‚   â”œâ”€â”€ check-release-version.ts â€” Verifies Node/Python/package tag version alignment before publish
 â”‚   â”œâ”€â”€ iranti-cli.ts           â€” Machine install, configure/auth/status/diagnostics/upgrade, instance/project binding, provider-key management, MCP and Claude hook CLI
 â”‚   â”œâ”€â”€ iranti-mcp.ts           â€” Stdio MCP server for Claude Code, Codex, and other MCP clients
-â”‚   â”œâ”€â”€ codex-setup.ts          â€” Registers Iranti MCP with Codex global config, preferring the installed CLI path
+â”‚   â”œâ”€â”€ codex-setup.ts          â€” Registers Iranti MCP with Codex global config and writes workspace `.mcp.json` / `.vscode/mcp.json` files when a binding is available
 â”‚   â”œâ”€â”€ claude-code-memory-hook.ts â€” Claude Code hook helper for SessionStart/UserPromptSubmit
 â”‚   â”œâ”€â”€ demo.ts                 â€” Full system demo with two agents
 â”‚   â”œâ”€â”€ test-librarian.ts       â€” Librarian smoke tests
@@ -556,7 +556,7 @@ Entity format: `"entityType/entityId"` e.g. `"researcher/jane_smith"`
 - **docs/features/** â€” One subfolder per feature. Each contains `spec.md`
   covering inputs, outputs, decision tree, edge cases, and test results.
   Current feature folders include Claude/Codex MCP integration, compatibility
-  contracts, and memory lifecycle policy.
+  contracts, memory lifecycle policy, and instance runtime dependencies.
 - **docs/engineering/** â€” Internal standards for contributors.
   `CODE_STANDARDS.md`, `COMMENTING_GUIDELINES.md`.
 - **docs/internal/** â€” Internal design notes, validation artifacts, and release/backward-compatibility backlogs. `docs/internal/README.md` is the index for trust levels and categories inside this folder. Internal docs are supporting material, not canonical product contract, unless a guide/spec/decision explicitly points to them.

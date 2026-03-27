@@ -26,7 +26,7 @@ This feature exposes Iranti to Claude Code through the installed CLI surface: `i
 | MCP tools | stdio MCP server | Exposes `iranti_handshake`, `iranti_attend`, `iranti_observe`, `iranti_query`, `iranti_search`, `iranti_write`, `iranti_remember_response`, `iranti_ingest`, `iranti_relate`, and `iranti_who_knows`. |
 | Hook context | JSON | Emits `hookSpecificOutput.additionalContext` for Claude Code hook events. |
 | Structured tool results | JSON | Returns tool output as both plain text and `structuredContent` for MCP clients. |
-| Claude scaffold files | filesystem | Writes `.mcp.json` and `.claude/settings.local.json` in the target project. |
+| Claude scaffold files | filesystem | Writes `.mcp.json`, `.vscode/mcp.json`, and `.claude/settings.local.json` in the target project. |
 | Batch scan summary | text | Reports how many discovered projects had MCP/settings created, updated, or left unchanged. |
 
 ## Decision Tree / Flow
@@ -34,11 +34,12 @@ This feature exposes Iranti to Claude Code through the installed CLI surface: `i
 2. Optional batch mode: `iranti claude-setup --scan <dir>` inspects immediate subdirectories that already contain `.claude/`.
 3. Optional recursive batch mode: add `--recursive` to walk nested project trees while skipping `node_modules`, `.git`, build output, and other obvious non-project directories.
 4. Write or merge `.mcp.json` so it contains an `iranti` MCP server entry.
-5. When a project binding is known, pin `IRANTI_PROJECT_ENV` in that MCP entry so project-local IDE sessions resolve the correct binding deterministically.
-6. Write `.claude/settings.local.json` using Claude Code's `matcher` + `hooks` schema, pointing hooks at `iranti claude-hook` when the file is missing.
-7. If an existing settings file contains the older Iranti-generated `command` + `args` hook shape, upgrade it in place to the current Claude Code schema.
-8. Start the stdio MCP server through `iranti mcp`.
-9. Load runtime configuration from:
+5. Write or merge `.vscode/mcp.json` so VS Code-native MCP clients expose the same `iranti` server from the workspace.
+6. When a project binding is known, pin `IRANTI_PROJECT_ENV` in `.mcp.json` and use `${workspaceFolder}/.env.iranti` in `.vscode/mcp.json` when the binding lives in the project root.
+7. Write `.claude/settings.local.json` using Claude Code's `matcher` + `hooks` schema, pointing hooks at `iranti claude-hook` when the file is missing.
+8. If an existing settings file contains the older Iranti-generated `command` + `args` hook shape, upgrade it in place to the current Claude Code schema.
+9. Start the stdio MCP server through `iranti mcp`.
+10. Load runtime configuration from:
    - explicit env variables, if present
    - fallback `.env`
    - linked instance env from `.env.iranti`
@@ -69,6 +70,7 @@ This feature exposes Iranti to Claude Code through the installed CLI surface: `i
 - Invalid `valueJson` or `propertiesJson`: MCP write/relate tools reject with a clear JSON parsing error.
 - Unregistered agent ids: auto-registration creates a stable Claude-facing agent profile.
 - Existing `.mcp.json`: the `iranti` server is merged in without removing other MCP servers, and pinned to the project binding when one is available.
+- Existing `.vscode/mcp.json`: the `iranti` server is merged in without removing other MCP servers.
 - Existing `.claude/settings.local.json`: `iranti claude-setup` upgrades legacy Iranti hook entries to Claude Code's current `matcher` + `hooks` schema, and otherwise leaves the file untouched unless `--force` is supplied.
 - `--scan` mode does not create `.env.iranti`; it only broadens Claude scaffolding for already-Claude-enabled projects.
 - `--recursive` skips obvious non-project directories such as `.git`, `node_modules`, and build output folders to keep scan time reasonable.
@@ -80,6 +82,7 @@ This feature exposes Iranti to Claude Code through the installed CLI surface: `i
 - `iranti claude-setup --help` works through the installed CLI surface.
 - `iranti claude-setup --scan <dir>` reports created/updated/unchanged status per discovered project.
 - `iranti claude-setup --scan <dir> --recursive` finds nested Claude-enabled projects.
+- `iranti claude-setup` writes both `.mcp.json` and `.vscode/mcp.json` when a bound project is available.
 - `iranti mcp --help` works through the installed CLI handoff path.
 - `npm run test:mcp-smoke` starts the stdio MCP server, lists tools, and successfully calls `iranti_handshake`, `iranti_write`, `iranti_query`, `iranti_search`, `iranti_attend`, and `iranti_remember_response`.
 - `iranti claude-hook --help` works through the installed CLI handoff path.

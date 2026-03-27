@@ -15,6 +15,9 @@
 | `--provider` | string | Replaces `LLM_PROVIDER` in the instance env. |
 | `--provider-key` | string | Writes the provider-specific remote API key for the selected provider. |
 | `--clear-provider-key` | boolean | Removes the selected provider's remote API key from the instance env. |
+| `--docker-container` | string | Records one Docker container dependency for the instance. |
+| `--docker-health-port` | integer | Records one host TCP port to wait on before starting the API. |
+| `--clear-docker-container` | boolean | Removes the recorded Docker container dependency. |
 | `--interactive` | boolean | Prompts for configuration values in the terminal instead of requiring every flag up front. |
 | `configure project [path]` | command | Targets `.env.iranti` in a project directory. |
 | `--instance` | string | Rebinds the project to a named instance and derives local URL/env metadata from it. |
@@ -45,19 +48,24 @@
    - if `--interactive` is enabled, explain the meaning of each field, then prompt for missing/current values before applying updates
 3. For `configure instance`, allow repair of partial or invalid instance directories by loading whatever readable env state exists and requiring the repaired result to contain a valid `IRANTI_PORT` and `DATABASE_URL`.
 4. Merge requested updates into the env file while preserving unrelated keys and comments where possible.
+5. For instance dependency flags:
+   - preserve existing dependency metadata unless the user explicitly changes it
+   - `--docker-health-port` requires `--docker-container`
+   - `--clear-docker-container` removes the recorded Docker container dependency
 4. For project bindings:
    - derive `IRANTI_URL` and `IRANTI_INSTANCE_ENV` from the named instance when `--instance` is provided
    - preserve existing values when the user does not override them
    - preserve or update `IRANTI_PERSONAL_MEMORY_ENTITY`, defaulting new bindings to `user/main`
    - preserve or update `IRANTI_AUTO_REMEMBER`, defaulting new bindings to `false`
-5. When an instance port changes or a broken `instance.json` is being repaired, rewrite `instance.json` so metadata stays in sync with the repaired env.
-6. Write the resulting env file and ensure `.env.iranti` is listed in `.gitignore` for project bindings.
-7. Emit text or JSON output.
+6. When an instance port changes, dependency metadata changes, or a broken `instance.json` is being repaired, rewrite `instance.json` so metadata stays in sync with the repaired env.
+7. Write the resulting env file and ensure `.env.iranti` is listed in `.gitignore` for project bindings.
+8. Emit text or JSON output.
 
 ## Edge Cases
 
 - `configure instance` fails if the named instance does not exist.
 - `configure instance` can repair an instance directory with a missing or unreadable `.env`, but it refuses to finish until the repaired result has a valid `IRANTI_PORT` and `DATABASE_URL`.
+- `--docker-health-port` fails without `--docker-container`.
 - `--provider-key` fails for providers that do not use remote API keys (`mock`, `ollama`).
 - `--interactive` requires a real terminal session and is not intended for piped/non-TTY automation.
 - Interactive secret entry is masked in the terminal, but it is still intended for local onboarding rather than non-interactive automation.

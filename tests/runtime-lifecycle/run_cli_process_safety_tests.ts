@@ -287,7 +287,9 @@ process.exit(1);
     assert.strictEqual(proc.status, 0, `codex-setup should write workspace .mcp.json when run from a bound project:\n${stdout}\n${stderr}`);
 
     const mcpFile = path.join(projectDir, '.mcp.json');
+    const vscodeMcpFile = path.join(projectDir, '.vscode', 'mcp.json');
     assert.ok(fs.existsSync(mcpFile), 'codex-setup should create .mcp.json in the bound workspace');
+    assert.ok(fs.existsSync(vscodeMcpFile), 'codex-setup should create .vscode/mcp.json in the bound workspace');
     const mcpConfig = JSON.parse(fs.readFileSync(mcpFile, 'utf8')) as {
         mcpServers?: Record<string, { command?: string; args?: string[]; env?: Record<string, string> }>;
     };
@@ -296,6 +298,21 @@ process.exit(1);
     assert.strictEqual(mcpConfig.mcpServers?.iranti?.env?.IRANTI_PROJECT_ENV, projectEnv, 'workspace .mcp.json should pin the local project binding');
     assert.strictEqual(mcpConfig.mcpServers?.iranti?.env?.IRANTI_MCP_DEFAULT_AGENT, 'codex_code', 'workspace .mcp.json should carry the default Codex agent');
     assert.strictEqual(mcpConfig.mcpServers?.iranti?.env?.IRANTI_MCP_DEFAULT_SOURCE, 'Codex', 'workspace .mcp.json should carry the default Codex source label');
+    const vscodeMcpConfig = JSON.parse(fs.readFileSync(vscodeMcpFile, 'utf8')) as {
+        servers?: Record<string, {
+            type?: string;
+            command?: string;
+            args?: string[];
+            envFile?: string;
+            env?: Record<string, string>;
+        }>;
+    };
+    assert.strictEqual(vscodeMcpConfig.servers?.iranti?.type, 'stdio', 'workspace .vscode/mcp.json should register a stdio server');
+    assert.strictEqual(vscodeMcpConfig.servers?.iranti?.command, 'iranti', 'workspace .vscode/mcp.json should use the installed iranti command');
+    assert.deepStrictEqual(vscodeMcpConfig.servers?.iranti?.args, ['mcp'], 'workspace .vscode/mcp.json should register iranti mcp');
+    assert.strictEqual(vscodeMcpConfig.servers?.iranti?.envFile, '${workspaceFolder}/.env.iranti', 'workspace .vscode/mcp.json should load the project binding through envFile');
+    assert.strictEqual(vscodeMcpConfig.servers?.iranti?.env?.IRANTI_MCP_DEFAULT_AGENT, 'codex_code', 'workspace .vscode/mcp.json should carry the default Codex agent');
+    assert.strictEqual(vscodeMcpConfig.servers?.iranti?.env?.IRANTI_MCP_DEFAULT_SOURCE, 'Codex', 'workspace .vscode/mcp.json should carry the default Codex source label');
 }
 
 async function testWindowsCodexResolutionPrefersExe(root: string): Promise<void> {

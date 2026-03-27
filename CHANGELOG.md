@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.44 - Unreleased
+
+### Added
+
+- Instance runtime metadata now supports first-class Docker container dependencies, and `iranti run --instance ...` will start recorded Docker-backed dependencies before booting the API.
+- `iranti setup --db-mode docker` and `iranti configure instance --docker-container ...` can now record Docker dependency metadata for managed instances.
+- Codex and Claude scaffolding now writes VS Code-native `.vscode/mcp.json` files alongside `.mcp.json` so workspace MCP clients do not rely on cross-app discovery alone.
+- `iranti doctor` now warns when a bound repo is missing `.vscode/mcp.json` or the file does not expose the `iranti` MCP server.
+- Added validation artifacts for cross-interface memory behavior and the instance runtime dependency design/implementation plan.
+
+### Fixed
+
+- `iranti codex-setup` now scaffolds the MCP files Codex VS Code actually needs, closing the gap where Codex CLI worked but VS Code sessions did not expose Iranti tools.
+
 ## 0.2.42 - Unreleased
 
 ### Added

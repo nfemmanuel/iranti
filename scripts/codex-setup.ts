@@ -12,6 +12,11 @@ type SetupOptions = {
     writeWorkspaceFile: boolean;
 };
 
+type WorkspaceFileResult = {
+    filePath: string;
+    status: 'created' | 'updated' | 'unchanged';
+};
+
 function parseArgs(argv: string[]): SetupOptions {
     const options: SetupOptions = {
         name: 'iranti',
@@ -79,11 +84,11 @@ function printHelp(): void {
         'Notes:',
         '  - Registers a global Codex MCP entry using `codex mcp add`.',
         '  - Prefers the installed CLI path: `iranti mcp`.',
-        '  - When a project binding is available, also writes or merges a project-local `.mcp.json` entry pinned to that binding.',
+        '  - When a project binding is available, also writes or merges project-local `.mcp.json` and `.vscode/mcp.json` entries pinned to that binding.',
         '  - By default does not pin IRANTI_PROJECT_ENV, so Codex can resolve .env.iranti from the active project/workspace at runtime.',
         '  - Use --project-env only when you deliberately want to pin Codex globally to one project binding.',
         '  - Use --local-script only if you need to point Codex at this repo build directly.',
-        '  - Use --no-workspace-file only if you explicitly want global registration without a project-local `.mcp.json` update.',
+        '  - Use --no-workspace-file only if you explicitly want global registration without project-local MCP file updates.',
         '  - Does not store DATABASE_URL in Codex config; iranti-mcp loads project/instance env at runtime.',
         '  - Replaces any existing MCP entry with the same name.',
     ].join('\n'));
@@ -186,7 +191,31 @@ function makeWorkspaceMcpServer(options: SetupOptions, projectEnv: string): Reco
     };
 }
 
-function writeWorkspaceMcpFile(projectEnv: string, options: SetupOptions): { filePath: string; status: 'created' | 'updated' | 'unchanged' } {
+function makeVsCodeWorkspaceMcpServer(options: SetupOptions, projectEnv: string): Record<string, unknown> {
+    const projectPath = path.dirname(projectEnv);
+    const env: Record<string, string> = {
+        IRANTI_MCP_DEFAULT_AGENT: options.agent,
+        IRANTI_MCP_DEFAULT_SOURCE: options.source,
+    };
+    if (options.provider) {
+        env.LLM_PROVIDER = options.provider;
+    }
+    const localBinding = path.join(projectPath, '.env.iranti');
+    if (path.resolve(projectEnv) !== path.resolve(localBinding)) {
+        env.IRANTI_PROJECT_ENV = projectEnv;
+    }
+    return {
+        type: 'stdio',
+        command: 'iranti',
+        args: ['mcp'],
+        ...(path.resolve(projectEnv) === path.resolve(localBinding)
+            ? { envFile: '${workspaceFolder}/.env.iranti' }
+            : {}),
+        env,
+    };
+}
+
+function writeWorkspaceMcpFile(projectEnv: string, options: SetupOptions): WorkspaceFileResult {
     const projectPath = path.dirname(projectEnv);
     const mcpFile = path.join(projectPath, '.mcp.json');
     const nextServer = makeWorkspaceMcpServer(options, projectEnv);
@@ -223,6 +252,53 @@ function writeWorkspaceMcpFile(projectEnv: string, options: SetupOptions): { fil
     fs.writeFileSync(mcpFile, `${JSON.stringify({
         ...existing,
         mcpServers: {
+            ...existingServers,
+            iranti: nextServer,
+        },
+    }, null, 2)}\n`, 'utf8');
+    return { filePath: mcpFile, status: 'updated' };
+}
+
+function writeWorkspaceVsCodeMcpFile(projectEnv: string, options: SetupOptions): WorkspaceFileResult {
+    const projectPath = path.dirname(projectEnv);
+    const vscodeDir = path.join(projectPath, '.vscode');
+    const mcpFile = path.join(vscodeDir, 'mcp.json');
+    const nextServer = makeVsCodeWorkspaceMcpServer(options, projectEnv);
+
+    fs.mkdirSync(vscodeDir, { recursive: true });
+
+    if (!fs.existsSync(mcpFile)) {
+        fs.writeFileSync(mcpFile, `${JSON.stringify({
+            servers: {
+                iranti: nextServer,
+            },
+        }, null, 2)}\n`, 'utf8');
+        return { filePath: mcpFile, status: 'created' };
+    }
+
+    let existing: Record<string, unknown>;
+    try {
+        existing = JSON.parse(fs.readFileSync(mcpFile, 'utf8')) as Record<string, unknown>;
+    } catch {
+        throw new Error(`Existing .vscode/mcp.json is not valid JSON: ${mcpFile}`);
+    }
+
+    if (!existing || typeof existing !== 'object' || Array.isArray(existing)) {
+        throw new Error(`Existing .vscode/mcp.json must contain a JSON object: ${mcpFile}`);
+    }
+
+    const existingServers =
+        existing.servers && typeof existing.servers === 'object' && !Array.isArray(existing.servers)
+            ? existing.servers as Record<string, unknown>
+            : {};
+    const currentIranti = existingServers.iranti;
+    if (JSON.stringify(currentIranti) === JSON.stringify(nextServer)) {
+        return { filePath: mcpFile, status: 'unchanged' };
+    }
+
+    fs.writeFileSync(mcpFile, `${JSON.stringify({
+        ...existing,
+        servers: {
             ...existingServers,
             iranti: nextServer,
         },
@@ -293,8 +369,11 @@ function main(): void {
     const workspaceProjectEnv = options.writeWorkspaceFile
         ? resolveWorkspaceProjectEnv(options)
         : undefined;
-    const workspaceMcpResult = workspaceProjectEnv
-        ? writeWorkspaceMcpFile(workspaceProjectEnv, options)
+    const workspaceFilesResult = workspaceProjectEnv
+        ? {
+            mcp: writeWorkspaceMcpFile(workspaceProjectEnv, options),
+            vscode: writeWorkspaceVsCodeMcpFile(workspaceProjectEnv, options),
+        }
         : null;
 
     const registered = run('codex', ['mcp', 'get', options.name], repoRoot);
@@ -320,10 +399,11 @@ function main(): void {
         console.log(`Launch with: codex -C "${repoRoot}"`);
     }
     if (options.writeWorkspaceFile) {
-        if (workspaceMcpResult) {
-            console.log(`Workspace .mcp.json: ${workspaceMcpResult.status} (${workspaceMcpResult.filePath})`);
+        if (workspaceFilesResult) {
+            console.log(`Workspace .mcp.json: ${workspaceFilesResult.mcp.status} (${workspaceFilesResult.mcp.filePath})`);
+            console.log(`Workspace .vscode/mcp.json: ${workspaceFilesResult.vscode.status} (${workspaceFilesResult.vscode.filePath})`);
         } else {
-            console.log('Workspace .mcp.json: unchanged (no project binding found from the current working directory)');
+            console.log('Workspace MCP files: unchanged (no project binding found from the current working directory)');
         }
     }
 }

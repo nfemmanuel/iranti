@@ -59,7 +59,7 @@ What it does:
 - on Windows, resolves Codex through a concrete CLI target such as a bundled `codex.exe` or the npm-installed Codex package entrypoint instead of relying on PowerShell-only shim resolution
 - replaces any existing MCP entry named `iranti`
 - registers the global installed CLI path `iranti mcp`
-- when run from a bound project, writes or merges a project-local `.mcp.json` pinned to that project's `.env.iranti`
+- when run from a bound project, writes or merges a project-local `.mcp.json` and `.vscode/mcp.json` pinned to that project's `.env.iranti`
 - stores only safe defaults like default agent/source in Codex config
 - does not pin `IRANTI_PROJECT_ENV` unless you explicitly pass `--project-env`
 
@@ -73,7 +73,7 @@ Use `--project-env` only when you deliberately want the global Codex MCP registr
 
 Use `--local-script` only if you deliberately want Codex bound to a repo checkout build instead of the installed package.
 
-Use `--no-workspace-file` only if you explicitly want the global Codex registration without touching the current project's `.mcp.json`.
+Use `--no-workspace-file` only if you explicitly want the global Codex registration without touching the current project's MCP files.
 
 ## 3. Verify the MCP registration
 
@@ -88,10 +88,11 @@ You want the registration to show:
 - env: includes safe defaults such as agent/source
 - `IRANTI_PROJECT_ENV` only when you explicitly pinned a project with `--project-env`
 
-If setup ran from a bound project, you also want the workspace file to exist:
+If setup ran from a bound project, you also want the workspace files to exist:
 
 ```bash
 type .mcp.json
+type .vscode\mcp.json
 ```
 
 The project-local `.mcp.json` should contain:
@@ -101,6 +102,18 @@ The project-local `.mcp.json` should contain:
   - `IRANTI_PROJECT_ENV=<absolute path to .env.iranti>`
   - `IRANTI_MCP_DEFAULT_AGENT=<agent>`
   - `IRANTI_MCP_DEFAULT_SOURCE=<source>`
+
+The VS Code-native `.vscode/mcp.json` should contain:
+- `servers.iranti.type = stdio`
+- command: `iranti`
+- args: `mcp`
+- `envFile = ${workspaceFolder}/.env.iranti` when the binding lives in the workspace root
+- the default agent/source env values
+
+Why both files exist:
+- Codex CLI reads its own global MCP registration from `~/.codex/config.toml`
+- VS Code MCP clients, including Codex VS Code sessions, look for workspace MCP configuration in `.vscode/mcp.json`
+- `.mcp.json` remains useful for repo-local MCP conventions and other clients, but it is not sufficient by itself for VS Code Codex sessions
 
 Optional opt-in memory capture:
 - add `IRANTI_AUTO_REMEMBER=true` to the bound project's `.env.iranti`, or run `iranti configure project . --auto-remember true`
@@ -211,6 +224,14 @@ iranti doctor --instance local
 ```
 
 5. Restart the Codex app or CLI session after changing MCP registrations.
+
+6. If Codex CLI works but Codex VS Code still says `iranti_query` or `iranti_attend` is not available:
+
+```bash
+iranti doctor
+```
+
+Doctor now warns when the project binding is present but `.vscode/mcp.json` is missing or does not expose `iranti`.
 
 ## Related
 

@@ -77,7 +77,7 @@ export const SETUP_AND_RUNTIME_HELP: HelpEntry[] = [
     },
     {
         command: 'iranti run --instance <name> [--scope user|system]',
-        description: 'Start an instance and write runtime metadata.',
+        description: 'Start an instance, ensure any recorded Docker dependencies are running, and write runtime metadata.',
         useWhen: 'the instance exists on disk but the API process is not running yet.',
         scenario: 'Bringing `local` online after setup, reboot, or a stop/restart cycle.',
     },
@@ -85,8 +85,8 @@ export const SETUP_AND_RUNTIME_HELP: HelpEntry[] = [
 
 export const CONFIGURATION_HELP: HelpEntry[] = [
     {
-        command: 'iranti configure instance <name> [--interactive] [--db-url <url>] [--port <n>] [--api-key <token>] [--provider <name>] [--provider-key <token>] [--clear-provider-key] [--json]',
-        description: 'Update an instance without editing env files manually.',
+        command: 'iranti configure instance <name> [--interactive] [--db-url <url>] [--port <n>] [--api-key <token>] [--provider <name>] [--provider-key <token>] [--clear-provider-key] [--docker-container <name>] [--docker-health-port <n>] [--clear-docker-container] [--json]',
+        description: 'Update an instance without editing env files manually, including optional Docker dependency metadata.',
         useWhen: 'you need to change one existing instance after creation rather than recreate it from scratch.',
         scenario: 'Switching from `mock` to `openai`, rotating provider keys, or moving the instance to a new port.',
     },
@@ -222,7 +222,7 @@ export const INTEGRATIONS_HELP: HelpEntry[] = [
     {
         command: 'iranti claude-setup [path] [--project-env <path>] [--force]',
         description: 'Scaffold Claude Code files for one project.',
-        useWhen: 'one bound repo should get `.mcp.json` and Claude hook files without hand-editing them.',
+        useWhen: 'one bound repo should get `.mcp.json`, `.vscode/mcp.json`, and Claude hook files without hand-editing them.',
         scenario: 'Setting up `iranti-control-plane` so Claude Code can use the same Iranti instance.',
     },
     {
@@ -239,8 +239,8 @@ export const INTEGRATIONS_HELP: HelpEntry[] = [
     },
     {
         command: 'iranti codex-setup [--name iranti] [--agent codex_code] [--source Codex] [--provider openai] [--project-env <path>] [--local-script] [--no-workspace-file]',
-        description: 'Register Iranti with the Codex CLI and, by default, write a project-local `.mcp.json` when a binding is available.',
-        useWhen: 'Codex should see Iranti through its global MCP configuration and the current bound workspace should get a deterministic `.mcp.json` entry.',
+        description: 'Register Iranti with the Codex CLI and, by default, write project-local `.mcp.json` and `.vscode/mcp.json` files when a binding is available.',
+        useWhen: 'Codex should see Iranti through its global MCP configuration and the current bound workspace should get deterministic MCP files for both Codex CLI and VS Code.',
         scenario: 'Making the `codex` CLI able to call Iranti tools from bound repos.',
     },
     {
@@ -336,8 +336,8 @@ export const INSTANCE_HELP: HelpEntry[] = [
 
 export const CONFIGURE_HELP: HelpEntry[] = [
     {
-        command: 'iranti configure instance <name> [--interactive] [--db-url <url>] [--port <n>] [--api-key <token>] [--provider <name>] [--provider-key <token>] [--clear-provider-key] [--scope user|system] [--root <path>] [--json]',
-        description: 'Update one existing instance in place.',
+        command: 'iranti configure instance <name> [--interactive] [--db-url <url>] [--port <n>] [--api-key <token>] [--provider <name>] [--provider-key <token>] [--clear-provider-key] [--docker-container <name>] [--docker-health-port <n>] [--clear-docker-container] [--scope user|system] [--root <path>] [--json]',
+        description: 'Update one existing instance in place, including optional Docker dependency metadata.',
         useWhen: 'you are changing a running or configured instance rather than creating a new one.',
         scenario: 'Updating the database URL, port, provider, or provider key for `local`.',
     },
