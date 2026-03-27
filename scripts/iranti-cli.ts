@@ -3170,12 +3170,41 @@ async function spawnDetachedCli(args: string[], cwd?: string): Promise<number> {
     return pid;
 }
 
-async function waitForRestartedRuntime(runtimeFile: string, previousPid: number | null, timeoutMs: number): Promise<RuntimeInspection> {
+function isFreshRestartState(
+    inspection: RuntimeInspection,
+    previousPid: number | null,
+    previousStartedAt?: string | null,
+): boolean {
+    if (!inspection.running || !inspection.state) return false;
+
+    if (inspection.state.pid && inspection.state.pid !== previousPid) {
+        return true;
+    }
+
+    if (!previousStartedAt) {
+        return false;
+    }
+
+    const previousStartedMs = Date.parse(previousStartedAt);
+    const currentStartedMs = Date.parse(inspection.state.startedAt);
+    if (!Number.isFinite(previousStartedMs) || !Number.isFinite(currentStartedMs)) {
+        return false;
+    }
+
+    return currentStartedMs > previousStartedMs;
+}
+
+async function waitForRestartedRuntime(
+    runtimeFile: string,
+    previousPid: number | null,
+    previousStartedAt: string | null,
+    timeoutMs: number,
+): Promise<RuntimeInspection> {
     const startedAt = Date.now();
     let lastInspection = await inspectRuntimeState(runtimeFile);
     while (Date.now() - startedAt < timeoutMs) {
         lastInspection = await inspectRuntimeState(runtimeFile);
-        if (lastInspection.running && lastInspection.state?.pid && lastInspection.state.pid !== previousPid) {
+        if (isFreshRestartState(lastInspection, previousPid, previousStartedAt)) {
             return lastInspection;
         }
         if (lastInspection.classification === 'invalid') {
@@ -3218,6 +3247,7 @@ async function restartInstanceRuntime(args: ParsedArgs, instanceName: string, sc
     }
 
     const runtimeFile = instancePaths(root, instanceName).runtimeFile;
+    const startupTimeoutMs = Math.max(timeoutMs, 30_000);
     const newPid = await spawnDetachedCli([
         'run',
         '--instance',
@@ -3227,7 +3257,7 @@ async function restartInstanceRuntime(args: ParsedArgs, instanceName: string, sc
         '--root',
         root,
     ], root);
-    await waitForRestartedRuntime(runtimeFile, previousPid, 15_000);
+    await waitForRestartedRuntime(runtimeFile, previousPid, runtimeBefore.state?.startedAt ?? null, startupTimeoutMs);
 
     return {
         previousPid,

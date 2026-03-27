@@ -39,6 +39,21 @@ const MEMORY_NEED_NEGATIVE_PATTERNS: RegExp[] = [
     /^\s*(thanks|thank you|cool|great|nice)\b[!.?\s]*$/i,
 ];
 
+const EXPLICIT_TASK_PREFIX_PATTERNS: RegExp[] = [
+    /^\s*general session\s*[:\-]\s*/i,
+    /^\s*general session assistance\s*(?:for)?\s*/i,
+    /^\s*session assistance\s*(?:for)?\s*/i,
+    /^\s*general assistance\s*(?:for)?\s*/i,
+];
+
+const WEAK_EXPLICIT_TASK_PATTERNS: RegExp[] = [
+    /^general session$/i,
+    /^general assistance$/i,
+    /^session assistance$/i,
+    /^assistance$/i,
+    /^help$/i,
+];
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface AgentContext {
@@ -225,6 +240,37 @@ export interface AttendResult extends ObserveResult {
         | 'memory_needed_but_in_context'
         | 'memory_needed_injected';
     decision: AttendDecision;
+}
+
+export function normalizeExplicitTask(task: string | null | undefined): string | null {
+    if (typeof task !== 'string') return null;
+
+    let cleaned = task
+        .replace(/\s+/g, ' ')
+        .replace(/^[`"'“”]+|[`"'“”]+$/g, '')
+        .trim();
+
+    if (!cleaned) return null;
+
+    for (const pattern of EXPLICIT_TASK_PREFIX_PATTERNS) {
+        cleaned = cleaned.replace(pattern, '').trim();
+    }
+
+    cleaned = cleaned.replace(/^[,;:.!?-]+/, '').trim();
+    cleaned = cleaned.replace(/[.]+$/, '').trim();
+
+    if (!cleaned) return null;
+    if (WEAK_EXPLICIT_TASK_PATTERNS.some((pattern) => pattern.test(cleaned))) return null;
+
+    if (
+        /\bproject\b/i.test(cleaned)
+        && !/^(review|reviewing|audit|auditing|debug|debugging|fix|fixing|build|building|ship|shipping|release|releasing|investigate|investigating|document|documenting|work|working|implement|implementing|test|testing|verify|verifying|research|researching|prepare|preparing|maintain|maintaining|improve|improving)\b/i.test(cleaned)
+        && !/\b(review|audit|debug|fix|build|ship|release|investigate|investigating|investigation|document|work|working|implement|implementation|implementing|test|testing|verify|verification|verifying|research|researching|prepare|maintain|improve|improving|improvement)\b/i.test(cleaned)
+    ) {
+        return `working on ${cleaned}`;
+    }
+
+    return cleaned;
 }
 
 async function readPersistedBriefForAgent(agentId: string): Promise<WorkingMemoryBrief | null> {
@@ -1599,6 +1645,11 @@ Rules:
     }
 
     private async inferTask(context: AgentContext): Promise<string> {
+        const explicitTask = normalizeExplicitTask(context.task);
+        if (explicitTask) {
+            return explicitTask;
+        }
+
         this.contextCallCount++;
         if (this.contextCallCount >= CONTEXT_RECOVERY_THRESHOLD) {
             await this.onContextLow();
@@ -1619,7 +1670,8 @@ Be specific and concrete.`,
             },
         ], 256);
 
-        return response.text;
+        const inferred = response.text.trim();
+        return inferred || 'general assistance';
     }
 
     private async loadOperatingRules(): Promise<string> {
