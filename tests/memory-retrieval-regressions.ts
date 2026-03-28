@@ -159,6 +159,36 @@ async function main(): Promise<void> {
       'Expected personal recall prompts to suppress project favorite_book contamination.'
     );
 
+    process.env.IRANTI_PERSONAL_MEMORY_ENTITY = 'user/main';
+
+    await iranti.write({
+      entity: 'person/user',
+      key: 'height',
+      value: `6'0"`,
+      summary: `User is 6'0" tall`,
+      confidence: 100,
+      source: 'memory_regression_height',
+      agent: agentId,
+    });
+
+    const heightQuery = await iranti.query('user/main', 'height');
+    assert.equal(heightQuery.found, true, 'Expected personal height recall to fall back across legacy person/user storage.');
+    assert.equal(heightQuery.resolvedEntity, 'person/user');
+
+    const heightAttend = await iranti.attend({
+      agentId,
+      currentContext: '',
+      latestMessage: 'How tall am I?',
+      maxFacts: 5,
+    });
+
+    assert.equal(heightAttend.shouldInject, true, 'Expected “How tall am I?” to force personal memory recall.');
+    assert.equal(heightAttend.decision.explanation, 'personal_height_recall_prompt');
+    assert.ok(
+      heightAttend.facts.some((fact: { entityKey: string }) => fact.entityKey === 'person/user/height'),
+      'Expected personal height recall to surface legacy person/user height facts.'
+    );
+
     console.log('memory retrieval regressions passed');
   } finally {
     if (priorMemoryEntity === undefined) {

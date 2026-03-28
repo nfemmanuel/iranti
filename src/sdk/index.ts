@@ -23,6 +23,7 @@ import { findArchiveAsOf, findArchiveHistory, findEntriesByEntity, findEntry, li
 import { createRelationship, getRelated, getRelatedDeep, RelatedEntity } from '../library/relationships';
 import { registerAgent, getAgent, whoKnows, listAgents, assignToTeam, AgentProfile, AgentRecord } from '../library/agent-registry';
 import { resolveEntity } from '../library/entity-resolution';
+import { getPersonalRecallEntities, isPersonalMemoryKey } from '../lib/autoRemember';
 import { configureMock, MockConfig } from '../lib/providers/mock';
 import { EntityType } from '../types';
 import { ArchivedReason, ResolutionOutcome, ResolutionState } from '../generated/prisma/client';
@@ -372,6 +373,12 @@ async function resolveQueryEntity(entity: string): Promise<{
     };
 }
 
+function isPersonalEntityString(entity: string): boolean {
+    const [entityType] = entity.split('/', 1);
+    const normalized = entityType?.trim().toLowerCase();
+    return normalized === 'user' || normalized === 'person';
+}
+
 function mapArchiveResult(result: {
     valueRaw: unknown;
     valueSummary: string;
@@ -599,6 +606,12 @@ export class Iranti {
 
     async query(entity: string, key: string, options: TemporalQueryOptions = {}): Promise<QueryResult> {
         const resolved = await resolveQueryEntity(entity);
+        const personalRecallCandidates = (
+            isPersonalEntityString(entity) && isPersonalMemoryKey(key)
+                ? getPersonalRecallEntities(entity)
+                : []
+        )
+            .filter((candidate) => candidate !== resolved.canonicalEntity);
 
         if (options.asOf) {
             const current = await findEntry({ entityType: resolved.entityType, entityId: resolved.entityId, key });
@@ -645,9 +658,24 @@ export class Iranti {
             return { found: false, resolvedEntity: resolved.canonicalEntity, inputEntity: entity };
         }
 
-        const entry = await findEntry({ entityType: resolved.entityType, entityId: resolved.entityId, key });
+        const primaryEntry = await findEntry({ entityType: resolved.entityType, entityId: resolved.entityId, key });
+        let entry = primaryEntry;
+        let resolvedEntity = resolved.canonicalEntity;
+
+        if ((!entry || entry.isProtected) && personalRecallCandidates.length > 0) {
+            for (const candidate of personalRecallCandidates) {
+                const fallback = await resolveQueryEntity(candidate);
+                const fallbackEntry = await findEntry({ entityType: fallback.entityType, entityId: fallback.entityId, key });
+                if (fallbackEntry && !fallbackEntry.isProtected) {
+                    entry = fallbackEntry;
+                    resolvedEntity = fallback.canonicalEntity;
+                    break;
+                }
+            }
+        }
+
         if (!entry || entry.isProtected) {
-            return { found: false, resolvedEntity: resolved.canonicalEntity, inputEntity: entity };
+            return { found: false, resolvedEntity, inputEntity: entity };
         }
 
         await recordKnowledgeEntryAccess([entry.id]);
@@ -664,7 +692,7 @@ export class Iranti {
             archivedReason: null,
             resolutionState: null,
             resolutionOutcome: null,
-            resolvedEntity: resolved.canonicalEntity,
+            resolvedEntity,
             inputEntity: entity,
         };
     }

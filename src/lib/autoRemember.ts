@@ -52,6 +52,7 @@ const PERSONAL_MEMORY_KEYS = new Set([
     'home_city',
     'hometown',
     'likes',
+    'height',
 ]);
 
 export function canonicalizeMemoryKey(text: string): string {
@@ -132,6 +133,25 @@ export function getPersonalMemoryEntity(explicit?: string | null): string {
     return normalizeEntity(explicit)
         ?? normalizeEntity(process.env.IRANTI_PERSONAL_MEMORY_ENTITY)
         ?? 'user/main';
+}
+
+export function getPersonalRecallEntities(explicit?: string | null): string[] {
+    const canonical = getPersonalMemoryEntity(explicit);
+    const entities = new Set<string>([canonical]);
+
+    const [entityType, entityId] = canonical.split('/', 2);
+    if (!entityType || !entityId || !isPersonalEntityType(entityType)) {
+        return Array.from(entities);
+    }
+
+    if ((entityType === 'user' && entityId === 'main') || (entityType === 'person' && entityId === 'user')) {
+        entities.add('user/main');
+        entities.add('person/user');
+        return Array.from(entities);
+    }
+
+    entities.add(`${entityType === 'user' ? 'person' : 'user'}/${entityId}`);
+    return Array.from(entities);
 }
 
 export function getProjectMemoryEntity(explicit?: string | null): string | undefined {
@@ -217,6 +237,15 @@ export function detectMandatoryRecall(message: string): MandatoryRecallDecision 
             scope: 'personal',
             key: canonicalizeMemoryKey(myFieldMatch[1]),
             reason: 'personal_recall_prompt',
+        };
+    }
+
+    if (/\bhow tall am i\b/i.test(normalized) || /\bwhat(?:'s| is)? my height\b/i.test(normalized)) {
+        return {
+            required: true,
+            scope: 'personal',
+            key: 'height',
+            reason: 'personal_height_recall_prompt',
         };
     }
 

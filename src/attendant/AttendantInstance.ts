@@ -13,7 +13,7 @@ import {
     detectMandatoryRecall,
     extractExplicitAssistantMemory,
     extractExplicitPromptMemory,
-    getPersonalMemoryEntity,
+    getPersonalRecallEntities,
     getProjectMemoryEntity,
 } from '../lib/autoRemember';
 
@@ -1790,7 +1790,7 @@ Rules:
         }
 
         if (scope === 'personal') {
-            return [getPersonalMemoryEntity()];
+            return getPersonalRecallEntities();
         }
 
         if (scope === 'project') {

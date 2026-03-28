@@ -28,6 +28,8 @@ This feature defines how Iranti should participate across an agent turn without 
 3. Mandatory recall prompts currently include:
    - `what is my favorite ...`
    - `what is my ...`
+   - `how tall am I`
+   - `what is my height`
    - `what is the next step`
    - `what is the blocker`
    - `what did we decide`
@@ -51,7 +53,7 @@ This feature defines how Iranti should participate across an agent turn without 
 - Direct user correction of a personal-memory fact should override an older non-human hook-written value for the same key.
 - This rule is intentionally narrow:
   - personal entity only (`user/*` or `person/*`)
-  - personal-memory keys only such as `favorite_*`, `home_city`, `hometown`, and `likes`
+- personal-memory keys only such as `favorite_*`, `height`, `home_city`, `hometown`, and `likes`
   - incoming source must be a direct-user source such as `user_stated` or `UserPromptAutoRemember`
   - existing `HumanReview` truth is not auto-overwritten by this rule
 
@@ -66,6 +68,7 @@ This feature defines how Iranti should participate across an agent turn without 
 
 ## Test Results
 - `tests/memory-retrieval-regressions.ts` verifies personal recall prefers `IRANTI_PERSONAL_MEMORY_ENTITY` over project contamination.
+- `tests/memory-retrieval-regressions.ts` also verifies `how tall am I?` recalls canonical personal memory even when the stored fact still lives under legacy `person/user`.
 - `tests/memory-lifecycle/run_memory_lifecycle_tests.ts` verifies:
   - mandatory project recall for `what is the next step?`
   - prompt-side personal correction through `UserPromptAutoRemember`
