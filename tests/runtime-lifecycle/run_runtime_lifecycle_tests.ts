@@ -917,6 +917,20 @@ async function main(): Promise<void> {
         );
         assert.ok(!fs.existsSync(path.join(root, 'instances', 'busy', '.env')), 'failed create should not leave an instance env behind');
 
+        const siblingDir = path.join(instancesDir, 'mini_app_olis');
+        fs.mkdirSync(siblingDir, { recursive: true });
+        const siblingCollisionRun = runCli(['instance', 'create', 'mini-app-olis', '--root', root], ambientFreeCwd);
+        assert.notStrictEqual(siblingCollisionRun.status, 0, 'instance create unexpectedly accepted a sibling name collision');
+        assert.match(
+            `${siblingCollisionRun.stdout}\n${siblingCollisionRun.stderr}`,
+            /too close to existing instance 'mini_app_olis'/i,
+            'instance create should explain normalized sibling collisions'
+        );
+        assert.ok(
+            !fs.existsSync(path.join(root, 'instances', 'mini-app-olis', '.env')),
+            'sibling collision should not leave an instance env behind'
+        );
+
         const configDir = path.join(instancesDir, 'config-check');
         const configEnvFile = path.join(configDir, '.env');
         writeJson(path.join(configDir, 'instance.json'), {

@@ -1736,6 +1736,28 @@ function sanitizeIdentifier(input: string, fallback: string): string {
     return value || fallback;
 }
 
+function normalizedInstanceCollisionKey(input: string): string {
+    return sanitizeIdentifier(input, 'instance').replace(/[-_]+/g, '_');
+}
+
+function findSiblingInstanceCollision(root: string, desiredName: string): { name: string; dir: string } | null {
+    const instancesDir = path.join(root, 'instances');
+    if (!fs.existsSync(instancesDir)) return null;
+
+    const desiredKey = normalizedInstanceCollisionKey(desiredName);
+    for (const entry of fs.readdirSync(instancesDir, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        if (entry.name === desiredName) continue;
+        if (normalizedInstanceCollisionKey(entry.name) !== desiredKey) continue;
+        return {
+            name: entry.name,
+            dir: path.join(instancesDir, entry.name),
+        };
+    }
+
+    return null;
+}
+
 function normalizeDockerContainerName(input: string | undefined, fallback: string): string {
     const trimmed = input?.trim() ?? '';
     return trimmed || fallback;
@@ -6192,6 +6214,14 @@ async function createInstanceCommand(args: ParsedArgs): Promise<void> {
     const instanceAlreadyExisted = fs.existsSync(instanceDir);
     if (instanceAlreadyExisted && !hasFlag(args, 'force')) {
         throw new Error(`Instance '${name}' already exists at ${instanceDir}. Use --force to overwrite.`);
+    }
+    const siblingCollision = findSiblingInstanceCollision(root, name);
+    if (siblingCollision && !hasFlag(args, 'force')) {
+        throw new Error(
+            `Instance '${name}' is too close to existing instance '${siblingCollision.name}' at ${siblingCollision.dir}. ` +
+            'For safety, Iranti treats hyphens and underscores as the same identity when creating instances. ' +
+            'Choose a more distinct name.'
+        );
     }
     await assertPortAssignable(root, port, instanceAlreadyExisted ? name : undefined);
 

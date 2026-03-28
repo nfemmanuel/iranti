@@ -68,6 +68,7 @@ Provisioning remains:
 ## Edge Cases
 
 - Existing instances without `databaseIntent` remain valid. `instance show` infers a best-effort strategy without mutating files.
+- `iranti instance create` now refuses sibling names that normalize to the same identity after hyphen/underscore folding (for example `mini_app_olis` vs `mini-app-olis`). This prevents two instances from silently targeting the same default database slug or looking interchangeable in Control Plane.
 - `--db-intent external` may still point at localhost if the operator explicitly wants Iranti to treat that DB as externally managed.
 - Docker-backed local DBs can still be marked `shared-local` when one container/DB is intentionally shared.
 - Metadata does not yet fingerprint a specific PostgreSQL server identity; this slice is about intent and target shape, not cryptographic origin validation.
