@@ -6927,225 +6927,236 @@ async function resolveCommand(args: ParsedArgs): Promise<void> {
 }
 
 async function handshakeCommand(args: ParsedArgs): Promise<void> {
-    const json = hasFlag(args, 'json');
-    const target = await resolveAttendantCliTarget(args);
-    const task = getFlag(args, 'task')?.trim() || 'CLI handshake';
-    let recentMessages = resolveRecentMessages(args);
-    const backfillFile = resolveBackfillFile(args);
-    let backfillResult: Awaited<ReturnType<typeof backfillChatHistory>> | null = null;
+    try {
+        const json = hasFlag(args, 'json');
+        const target = await resolveAttendantCliTarget(args);
+        const task = getFlag(args, 'task')?.trim() || 'CLI handshake';
+        let recentMessages = resolveRecentMessages(args);
+        const backfillFile = resolveBackfillFile(args);
+        let backfillResult: Awaited<ReturnType<typeof backfillChatHistory>> | null = null;
 
-    if (backfillFile) {
-        const content = fs.readFileSync(backfillFile, 'utf-8');
-        backfillResult = await backfillChatHistory({
-            iranti: target.iranti,
-            content,
-            agent: target.agentId,
-            source: 'CLIBackfill',
-        });
-        if (recentMessages.length === 0) {
-            recentMessages = parseBackfillChatTranscript(content)
-                .map((message) => message.text.trim())
-                .filter(Boolean)
-                .slice(-12);
+        if (backfillFile) {
+            const content = fs.readFileSync(backfillFile, 'utf-8');
+            backfillResult = await backfillChatHistory({
+                iranti: target.iranti,
+                content,
+                agent: target.agentId,
+                source: 'CLIBackfill',
+            });
+            if (recentMessages.length === 0) {
+                recentMessages = parseBackfillChatTranscript(content)
+                    .map((message) => message.text.trim())
+                    .filter(Boolean)
+                    .slice(-12);
+            }
         }
-    }
 
-    const result = await target.iranti.handshake({
-        agent: target.agentId,
-        task,
-        recentMessages,
-    });
-
-    if (json) {
-        console.log(JSON.stringify({
+        const result = await target.iranti.handshake({
             agent: target.agentId,
-            envSource: target.envSource,
-            envFile: target.envFile,
             task,
-            backfillFile,
-            backfillResult,
             recentMessages,
-            result,
-        }, null, 2));
-        return;
-    }
+        });
 
-    printHandshakeResult(target, task, result);
-    if (backfillResult) {
-        console.log('');
-        console.log('Backfill:');
-        console.log(`  file          ${backfillFile}`);
-        console.log(`  messages      ${backfillResult.messagesParsed}`);
-        console.log(`  extracted     ${backfillResult.extracted}`);
-        console.log(`  written       ${backfillResult.written}`);
-        if (backfillResult.skipped.length > 0) {
-            console.log(`  skipped       ${backfillResult.skipped.length}`);
+        if (json) {
+            console.log(JSON.stringify({
+                agent: target.agentId,
+                envSource: target.envSource,
+                envFile: target.envFile,
+                task,
+                backfillFile,
+                backfillResult,
+                recentMessages,
+                result,
+            }, null, 2));
+            return;
         }
-    }
-    if (result.backfillSuggestion?.suggested && !backfillFile) {
+
+        printHandshakeResult(target, task, result);
+        if (backfillResult) {
+            console.log('');
+            console.log('Backfill:');
+            console.log(`  file          ${backfillFile}`);
+            console.log(`  messages      ${backfillResult.messagesParsed}`);
+            console.log(`  extracted     ${backfillResult.extracted}`);
+            console.log(`  written       ${backfillResult.written}`);
+            if (backfillResult.skipped.length > 0) {
+                console.log(`  skipped       ${backfillResult.skipped.length}`);
+            }
+        }
+        if (result.backfillSuggestion?.suggested && !backfillFile) {
+            console.log('');
+            console.log('Backfill suggestion:');
+            console.log(`  reason        ${result.backfillSuggestion.reason}`);
+            console.log(`  candidateFacts ${result.backfillSuggestion.candidateFacts}`);
+            console.log(`  sample keys   ${result.backfillSuggestion.sampleKeys.join(', ')}`);
+            console.log(`  command       ${result.backfillSuggestion.suggestedCommand}`);
+        }
         console.log('');
-        console.log('Backfill suggestion:');
-        console.log(`  reason        ${result.backfillSuggestion.reason}`);
-        console.log(`  candidateFacts ${result.backfillSuggestion.candidateFacts}`);
-        console.log(`  sample keys   ${result.backfillSuggestion.sampleKeys.join(', ')}`);
-        console.log(`  command       ${result.backfillSuggestion.suggestedCommand}`);
+        console.log(`${infoLabel()} This is a manual Attendant inspection tool. Claude Code should still use hooks + MCP in normal operation.`);
+    } finally {
+        await disconnectDb().catch(() => undefined);
     }
-    console.log('');
-    console.log(`${infoLabel()} This is a manual Attendant inspection tool. Claude Code should still use hooks + MCP in normal operation.`);
 }
 
 async function attendCommand(args: ParsedArgs): Promise<void> {
-    const json = hasFlag(args, 'json');
-    const target = await resolveAttendantCliTarget(args);
-    const latestMessage = resolveAttendMessage(args);
-    const currentContext = resolveContextText(args);
-    const maxFacts = parsePositiveInteger(getFlag(args, 'max-facts'), 'max-facts');
-    const entityHint = getFlag(args, 'entity-hint')?.trim();
-    if (entityHint && !entityHint.includes('/')) {
-        throw new Error('entity-hint must use entityType/entityId format.');
-    }
+    try {
+        const json = hasFlag(args, 'json');
+        const target = await resolveAttendantCliTarget(args);
+        const latestMessage = resolveAttendMessage(args);
+        const currentContext = resolveContextText(args);
+        const maxFacts = parsePositiveInteger(getFlag(args, 'max-facts'), 'max-facts');
+        const entityHint = getFlag(args, 'entity-hint')?.trim();
+        if (entityHint && !entityHint.includes('/')) {
+            throw new Error('entity-hint must use entityType/entityId format.');
+        }
 
-    const result = await target.iranti.attend({
-        agent: target.agentId,
-        currentContext,
-        latestMessage,
-        forceInject: hasFlag(args, 'force'),
-        maxFacts,
-        entityHints: entityHint ? [entityHint] : undefined,
-    });
-
-    if (json) {
-        console.log(JSON.stringify({
+        const result = await target.iranti.attend({
             agent: target.agentId,
-            envSource: target.envSource,
-            envFile: target.envFile,
-            latestMessage,
             currentContext,
-            maxFacts: maxFacts ?? null,
-            entityHints: entityHint ? [entityHint] : [],
+            latestMessage,
             forceInject: hasFlag(args, 'force'),
-            result,
-        }, null, 2));
-        return;
-    }
+            maxFacts,
+            entityHints: entityHint ? [entityHint] : undefined,
+        });
 
-    printAttendResult(target, latestMessage, result);
-    console.log('');
-    console.log(`${infoLabel()} This is a manual Attendant inspection tool. Claude Code should still use hooks + MCP in normal operation.`);
+        if (json) {
+            console.log(JSON.stringify({
+                agent: target.agentId,
+                envSource: target.envSource,
+                envFile: target.envFile,
+                latestMessage,
+                currentContext,
+                maxFacts: maxFacts ?? null,
+                entityHints: entityHint ? [entityHint] : [],
+                forceInject: hasFlag(args, 'force'),
+                result,
+            }, null, 2));
+            return;
+        }
+
+        printAttendResult(target, latestMessage, result);
+        console.log('');
+        console.log(`${infoLabel()} This is a manual Attendant inspection tool. Claude Code should still use hooks + MCP in normal operation.`);
+    } finally {
+        await disconnectDb().catch(() => undefined);
+    }
 }
 
 async function handoffCommand(args: ParsedArgs): Promise<void> {
-    const json = hasFlag(args, 'json');
-    const target = await resolveAttendantCliTarget(args);
-    const taskEntity = resolveTaskEntity(args);
-    const projectEntity = getFlag(args, 'project-entity')?.trim();
-    if (projectEntity && !projectEntity.includes('/')) {
-        throw new Error('project-entity must use entityType/entityId format.');
-    }
+    try {
+        const json = hasFlag(args, 'json');
+        const target = await resolveAttendantCliTarget(args);
+        const taskEntity = resolveTaskEntity(args);
+        const projectEntity = getFlag(args, 'project-entity')?.trim();
+        if (projectEntity && !projectEntity.includes('/')) {
+            throw new Error('project-entity must use entityType/entityId format.');
+        }
 
-    const nextStep = getFlag(args, 'next-step')?.trim();
-    if (!nextStep) {
-        throw new Error('Missing --next-step. A standardized handoff must record the receiver action.');
-    }
+        const nextStep = getFlag(args, 'next-step')?.trim();
+        if (!nextStep) {
+            throw new Error('Missing --next-step. A standardized handoff must record the receiver action.');
+        }
 
-    const status = getFlag(args, 'status')?.trim() || 'ready_for_handoff';
-    const owner = getFlag(args, 'owner')?.trim();
-    const blockers = parseDelimitedList(getFlag(args, 'blockers'));
-    const artifacts = parseDelimitedList(getFlag(args, 'artifacts'));
-    const notes = getFlag(args, 'notes')?.trim();
-    const source = getFlag(args, 'source')?.trim() || 'CLIHandoff';
-    const confidence = parsePositiveInteger(getFlag(args, 'confidence'), 'confidence') ?? 95;
-    if (confidence > 100) {
-        throw new Error('confidence must be <= 100.');
-    }
+        const status = getFlag(args, 'status')?.trim() || 'ready_for_handoff';
+        const owner = getFlag(args, 'owner')?.trim();
+        const blockers = parseDelimitedList(getFlag(args, 'blockers'));
+        const artifacts = parseDelimitedList(getFlag(args, 'artifacts'));
+        const notes = getFlag(args, 'notes')?.trim();
+        const source = getFlag(args, 'source')?.trim() || 'CLIHandoff';
+        const confidence = parsePositiveInteger(getFlag(args, 'confidence'), 'confidence') ?? 95;
+        if (confidence > 100) {
+            throw new Error('confidence must be <= 100.');
+        }
 
-    const writes: Array<{ entity: string; key: string; value: unknown; summary: string }> = [];
-    writes.push({
-        entity: taskEntity,
-        key: 'status',
-        value: { state: status },
-        summary: buildHandoffSummary('status', { state: status }),
-    });
-    writes.push({
-        entity: taskEntity,
-        key: 'next_step',
-        value: { instruction: nextStep },
-        summary: buildHandoffSummary('next_step', { instruction: nextStep }),
-    });
-    if (owner) {
+        const writes: Array<{ entity: string; key: string; value: unknown; summary: string }> = [];
         writes.push({
             entity: taskEntity,
-            key: 'current_owner',
-            value: { agentId: owner },
-            summary: buildHandoffSummary('current_owner', { agentId: owner }),
+            key: 'status',
+            value: { state: status },
+            summary: buildHandoffSummary('status', { state: status }),
         });
-    }
-    if (blockers.length > 0) {
         writes.push({
             entity: taskEntity,
-            key: 'blockers',
-            value: { items: blockers },
-            summary: buildHandoffSummary('blockers', { items: blockers }),
+            key: 'next_step',
+            value: { instruction: nextStep },
+            summary: buildHandoffSummary('next_step', { instruction: nextStep }),
         });
-    }
-    if (artifacts.length > 0) {
-        writes.push({
-            entity: taskEntity,
-            key: 'artifacts',
-            value: { files: artifacts },
-            summary: buildHandoffSummary('artifacts', { files: artifacts }),
-        });
-    }
-    if (notes) {
-        writes.push({
-            entity: taskEntity,
-            key: 'notes',
-            value: { text: notes },
-            summary: buildHandoffSummary('notes', { text: notes }),
-        });
-    }
-    if (projectEntity) {
-        writes.push({
-            entity: projectEntity,
-            key: 'active_handoff_task',
-            value: {
-                taskEntity,
-                owner: owner ?? null,
-                status,
-                updatedBy: target.agentId,
-            },
-            summary: buildHandoffSummary('active_handoff_task', { taskEntity }),
-        });
-    }
+        if (owner) {
+            writes.push({
+                entity: taskEntity,
+                key: 'current_owner',
+                value: { agentId: owner },
+                summary: buildHandoffSummary('current_owner', { agentId: owner }),
+            });
+        }
+        if (blockers.length > 0) {
+            writes.push({
+                entity: taskEntity,
+                key: 'blockers',
+                value: { items: blockers },
+                summary: buildHandoffSummary('blockers', { items: blockers }),
+            });
+        }
+        if (artifacts.length > 0) {
+            writes.push({
+                entity: taskEntity,
+                key: 'artifacts',
+                value: { files: artifacts },
+                summary: buildHandoffSummary('artifacts', { files: artifacts }),
+            });
+        }
+        if (notes) {
+            writes.push({
+                entity: taskEntity,
+                key: 'notes',
+                value: { text: notes },
+                summary: buildHandoffSummary('notes', { text: notes }),
+            });
+        }
+        if (projectEntity) {
+            writes.push({
+                entity: projectEntity,
+                key: 'active_handoff_task',
+                value: {
+                    taskEntity,
+                    owner: owner ?? null,
+                    status,
+                    updatedBy: target.agentId,
+                },
+                summary: buildHandoffSummary('active_handoff_task', { taskEntity }),
+            });
+        }
 
-    for (const write of writes) {
-        await target.iranti.write({
-            entity: write.entity,
-            key: write.key,
-            value: write.value,
-            summary: write.summary,
-            confidence,
-            source,
-            agent: target.agentId,
-        });
-    }
+        for (const write of writes) {
+            await target.iranti.write({
+                entity: write.entity,
+                key: write.key,
+                value: write.value,
+                summary: write.summary,
+                confidence,
+                source,
+                agent: target.agentId,
+            });
+        }
 
-    if (json) {
-        console.log(JSON.stringify({
-            agent: target.agentId,
-            envSource: target.envSource,
-            envFile: target.envFile,
-            source,
-            confidence,
-            writes,
-        }, null, 2));
-        process.exit(0);
-    }
+        if (json) {
+            console.log(JSON.stringify({
+                agent: target.agentId,
+                envSource: target.envSource,
+                envFile: target.envFile,
+                source,
+                confidence,
+                writes,
+            }, null, 2));
+            return;
+        }
 
-    printHandoffResult(target, taskEntity, writes);
-    console.log('');
-    console.log(`${infoLabel()} Handoffs are shared-memory facts. Pair this with checkpoint() if the sender also needs agent-local recovery.`);
-    process.exit(0);
+        printHandoffResult(target, taskEntity, writes);
+        console.log('');
+        console.log(`${infoLabel()} Handoffs are shared-memory facts. Pair this with checkpoint() if the sender also needs agent-local recovery.`);
+    } finally {
+        await disconnectDb().catch(() => undefined);
+    }
 }
 
 function printClaudeSetupHelp(): void {

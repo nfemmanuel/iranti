@@ -50,6 +50,42 @@ async function main(): Promise<void> {
     assert.strictEqual(parsed[0]?.role, 'user');
     assert.strictEqual(parsed[1]?.role, 'assistant');
 
+    const jsonlTranscript = [
+        JSON.stringify({
+            type: 'user',
+            message: {
+                role: 'user',
+                content: 'my favorite tech company is Samsung',
+            },
+        }),
+        JSON.stringify({
+            type: 'assistant',
+            message: {
+                role: 'assistant',
+                content: [
+                    { type: 'thinking', thinking: 'hidden' },
+                    { type: 'text', text: 'Good to know! Let me save that.' },
+                ],
+            },
+        }),
+        JSON.stringify({
+            type: 'user',
+            message: {
+                role: 'user',
+                content: [
+                    { type: 'tool_result', content: '{"ok":true}' },
+                ],
+            },
+        }),
+    ].join('\n');
+
+    const parsedJsonl = parseBackfillChatTranscript(jsonlTranscript);
+    assert.strictEqual(parsedJsonl.length, 2, 'Expected JSONL parser to ignore tool-result-only user records.');
+    assert.strictEqual(parsedJsonl[0]?.role, 'user');
+    assert.strictEqual(parsedJsonl[0]?.text, 'my favorite tech company is Samsung');
+    assert.strictEqual(parsedJsonl[1]?.role, 'assistant');
+    assert.strictEqual(parsedJsonl[1]?.text, 'Good to know! Let me save that.');
+
     const stub = new StubIrantiClient();
     const result = await backfillChatHistory({
         iranti: stub,

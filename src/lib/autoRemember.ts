@@ -566,6 +566,10 @@ export async function rememberAssistantResponseFacts(params: {
 
 export function parseBackfillChatTranscript(content: string): BackfillChatMessage[] {
     const normalized = content.replace(/\r\n/g, '\n');
+    const jsonlMessages = parseJsonlBackfillMessages(normalized);
+    if (jsonlMessages.length > 0) {
+        return jsonlMessages;
+    }
     const lines = normalized.split('\n');
     const messages: BackfillChatMessage[] = [];
     let current: BackfillChatMessage | null = null;
@@ -624,6 +628,76 @@ export function parseBackfillChatTranscript(content: string): BackfillChatMessag
 
     flush();
     return messages;
+}
+
+function parseJsonlBackfillMessages(content: string): BackfillChatMessage[] {
+    const messages: BackfillChatMessage[] = [];
+    for (const rawLine of content.split('\n')) {
+        const line = rawLine.trim();
+        if (!line.startsWith('{')) continue;
+        try {
+            const parsed = JSON.parse(line) as Record<string, unknown>;
+            const message = parseJsonlBackfillMessage(parsed);
+            if (message) {
+                messages.push(message);
+            }
+        } catch {
+            return [];
+        }
+    }
+    return messages;
+}
+
+function parseJsonlBackfillMessage(record: Record<string, unknown>): BackfillChatMessage | null {
+    const directCodexText = typeof record.text === 'string' ? record.text.trim() : '';
+    if (directCodexText) {
+        return {
+            role: 'user',
+            text: directCodexText,
+        };
+    }
+
+    if (record.type !== 'user' && record.type !== 'assistant') {
+        return null;
+    }
+
+    const message = isRecord(record.message) ? record.message : null;
+    const role = record.type === 'assistant' ? 'assistant' : 'user';
+    const text = extractJsonlMessageText(message, role);
+    if (!text) {
+        return null;
+    }
+
+    return {
+        role,
+        text,
+    };
+}
+
+function extractJsonlMessageText(message: Record<string, unknown> | null, fallbackRole: 'user' | 'assistant'): string {
+    if (!message) return '';
+    const role = typeof message.role === 'string' ? message.role : fallbackRole;
+    const content = message.content;
+    if (typeof content === 'string') {
+        return content.trim();
+    }
+    if (!Array.isArray(content)) {
+        return '';
+    }
+
+    const parts: string[] = [];
+    for (const item of content) {
+        if (!isRecord(item)) continue;
+        const type = typeof item.type === 'string' ? item.type : '';
+        if (type === 'text' && typeof item.text === 'string') {
+            parts.push(item.text.trim());
+        }
+    }
+    return parts.filter(Boolean).join('\n').trim();
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null;
 }
 
 export async function backfillChatHistory(params: {
