@@ -29,6 +29,7 @@ import {
     printIntegrateHelp as renderIntegrateHelp,
     printMainHelp as renderMainHelp,
     printProjectInitHelp as renderProjectInitHelp,
+    printProjectUnbindHelp as renderProjectUnbindHelp,
     printProviderKeyHelp as renderProviderKeyHelp,
     printResolveHelp as renderResolveHelp,
     printRunHelp as renderRunHelp,
@@ -1365,6 +1366,32 @@ async function writeProjectBinding(projectPath: string, updates: Record<string, 
     await upsertEnvFile(outFile, updates);
     await ensureProjectGitignore(projectPath);
     return outFile;
+}
+
+async function removeProjectPathFromRegistry(runtimeRoot: string, instanceName: string, projectPath: string): Promise<boolean> {
+    const registryPath = path.join(runtimeRoot, 'instances', instanceName, 'projects.json');
+    if (!fs.existsSync(registryPath)) return false;
+    const parsed = readJsonFile<{ projects?: Array<Record<string, unknown>> }>(registryPath);
+    if (!parsed || !Array.isArray(parsed.projects)) return false;
+    const nextProjects = parsed.projects.filter((entry) => {
+        if (!entry || typeof entry !== 'object') return false;
+        return String((entry as Record<string, unknown>).projectPath ?? '') !== projectPath;
+    });
+    if (nextProjects.length === parsed.projects.length) return false;
+    await writeText(registryPath, `${JSON.stringify({ projects: nextProjects }, null, 2)}\n`);
+    return true;
+}
+
+async function cleanupProjectBindingRegistry(projectPath: string, binding: Record<string, string>): Promise<string[]> {
+    const removedFrom: string[] = [];
+    const runtimeRoot = runtimeRootFromInstanceEnv(binding.IRANTI_INSTANCE_ENV ?? '');
+    const instanceName = binding.IRANTI_INSTANCE?.trim() || null;
+    if (runtimeRoot && instanceName) {
+        if (await removeProjectPathFromRegistry(runtimeRoot, instanceName, projectPath)) {
+            removedFrom.push(instanceName);
+        }
+    }
+    return removedFrom;
 }
 
 type PromptSession = {
@@ -4468,19 +4495,28 @@ function detectCodexRegistration(name: string = 'iranti'): boolean {
 }
 
 function removeIrantiMcpServerFromValue(value: Record<string, unknown>): Record<string, unknown> | null {
-    const mcpServers = value.mcpServers;
-    if (!mcpServers || typeof mcpServers !== 'object' || Array.isArray(mcpServers)) return value;
-    const nextServers = { ...(mcpServers as Record<string, unknown>) };
-    delete nextServers.iranti;
-    if (Object.keys(nextServers).length === 0) {
-        const next = { ...value };
-        delete next.mcpServers;
-        return Object.keys(next).length === 0 ? null : next;
-    }
-    return {
-        ...value,
-        mcpServers: nextServers,
+    let next: Record<string, unknown> = { ...value };
+    let changed = false;
+
+    const stripServerMap = (field: 'mcpServers' | 'servers'): void => {
+        const current = next[field];
+        if (!current || typeof current !== 'object' || Array.isArray(current)) return;
+        const nextServers = { ...(current as Record<string, unknown>) };
+        if (!Object.prototype.hasOwnProperty.call(nextServers, 'iranti')) return;
+        delete nextServers.iranti;
+        changed = true;
+        if (Object.keys(nextServers).length === 0) {
+            delete next[field];
+        } else {
+            next[field] = nextServers;
+        }
     };
+
+    stripServerMap('mcpServers');
+    stripServerMap('servers');
+
+    if (!changed) return value;
+    return Object.keys(next).length === 0 ? null : next;
 }
 
 function removeIrantiClaudeHooksFromValue(value: Record<string, unknown>): Record<string, unknown> | null {
@@ -4525,6 +4561,59 @@ function removeIrantiClaudeHooksFromValue(value: Record<string, unknown>): Recor
         next.hooks = nextHooks;
     }
     return Object.keys(next).length === 0 ? null : next;
+}
+
+type ProjectUnbindCleanupResult = {
+    removed: string[];
+    updated: string[];
+    warnings: string[];
+};
+
+async function cleanupProjectBindingIntegrations(projectPath: string): Promise<ProjectUnbindCleanupResult> {
+    const result: ProjectUnbindCleanupResult = { removed: [], updated: [], warnings: [] };
+    const candidates = [
+        path.join(projectPath, '.mcp.json'),
+        path.join(projectPath, '.vscode', 'mcp.json'),
+    ];
+
+    for (const candidate of candidates) {
+        if (!fs.existsSync(candidate)) continue;
+        const parsed = readJsonFile<Record<string, unknown>>(candidate);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            result.warnings.push(`Skipped unreadable MCP file ${candidate}`);
+            continue;
+        }
+        const next = removeIrantiMcpServerFromValue(parsed);
+        if (next === parsed) continue;
+        if (!next) {
+            await fsp.rm(candidate, { force: true });
+            result.removed.push(candidate);
+        } else {
+            await writeText(candidate, `${JSON.stringify(next, null, 2)}\n`);
+            result.updated.push(candidate);
+        }
+    }
+
+    const claudeSettingsFile = path.join(projectPath, '.claude', 'settings.local.json');
+    if (fs.existsSync(claudeSettingsFile)) {
+        const parsed = readJsonFile<Record<string, unknown>>(claudeSettingsFile);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            result.warnings.push(`Skipped unreadable Claude settings file ${claudeSettingsFile}`);
+        } else {
+            const next = removeIrantiClaudeHooksFromValue(parsed);
+            if (next !== parsed) {
+                if (!next) {
+                    await fsp.rm(claudeSettingsFile, { force: true });
+                    result.removed.push(claudeSettingsFile);
+                } else {
+                    await writeText(claudeSettingsFile, `${JSON.stringify(next, null, 2)}\n`);
+                    result.updated.push(claudeSettingsFile);
+                }
+            }
+        }
+    }
+
+    return result;
 }
 
 async function cleanupProjectArtifacts(artifacts: UninstallProjectArtifact[]): Promise<UninstallExecutionResult[]> {
@@ -6503,6 +6592,62 @@ async function projectInitCommand(args: ParsedArgs): Promise<void> {
     ]);
 }
 
+async function projectUnbindCommand(args: ParsedArgs): Promise<void> {
+    const projectPath = path.resolve(args.positionals[0] ?? process.cwd());
+    const bindingFile = path.join(projectPath, '.env.iranti');
+    if (!fs.existsSync(bindingFile)) {
+        throw cliError(
+            'IRANTI_PROJECT_BINDING_NOT_FOUND',
+            `Project binding not found at ${bindingFile}.`,
+            ['Run `iranti project init . --instance <name>` first, or point `iranti project unbind` at a bound repo root.'],
+            { projectPath, bindingFile }
+        );
+    }
+
+    const binding = await readEnvFile(bindingFile);
+    const keepIntegrations = hasFlag(args, 'keep-integrations');
+    const registryInstances = await cleanupProjectBindingRegistry(projectPath, binding);
+    await fsp.rm(bindingFile, { force: true });
+
+    const integrationCleanup = keepIntegrations
+        ? { removed: [] as string[], updated: [] as string[], warnings: [] as string[] }
+        : await cleanupProjectBindingIntegrations(projectPath);
+
+    const json = hasFlag(args, 'json');
+    const result = {
+        projectPath,
+        bindingFile,
+        removedBinding: true,
+        cleanedRegistryInstances: registryInstances,
+        keepIntegrations,
+        integrationCleanup,
+    };
+
+    if (json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+    }
+
+    console.log(sectionTitle('Project Unbound'));
+    console.log(`  status     ${okLabel()}`);
+    console.log(`  project    ${projectPath}`);
+    console.log(`  binding    removed`);
+    console.log(`  registry   ${registryInstances.length > 0 ? registryInstances.join(', ') : 'no registry entry found'}`);
+    console.log(`  cleanup    ${keepIntegrations ? 'kept local integration files' : 'cleaned local integration files'}`);
+    for (const filePath of integrationCleanup.removed) {
+        console.log(`  removed    ${filePath}`);
+    }
+    for (const filePath of integrationCleanup.updated) {
+        console.log(`  updated    ${filePath}`);
+    }
+    for (const warning of integrationCleanup.warnings) {
+        console.log(`  warning    ${warning}`);
+    }
+    printNextSteps([
+        'Rebind later with `iranti project init . --instance <name>` if this repo should reconnect to Iranti.',
+    ]);
+}
+
 async function configureInstanceCommand(args: ParsedArgs): Promise<void> {
     const name = args.positionals[0];
     if (!name) {
@@ -7537,6 +7682,10 @@ function printProjectInitHelp(): void {
     renderProjectInitHelp({ sectionTitle, commandText });
 }
 
+function printProjectUnbindHelp(): void {
+    renderProjectUnbindHelp({ sectionTitle, commandText });
+}
+
 function printDoctorHelp(): void {
     renderDoctorHelp({ sectionTitle, commandText });
 }
@@ -7756,6 +7905,15 @@ async function main(): Promise<void> {
             return;
         }
         await projectInitCommand(args);
+        return;
+    }
+
+    if (args.command === 'project' && args.subcommand === 'unbind') {
+        if (hasFlag(args, 'help')) {
+            printProjectUnbindHelp();
+            return;
+        }
+        await projectUnbindCommand(args);
         return;
     }
 

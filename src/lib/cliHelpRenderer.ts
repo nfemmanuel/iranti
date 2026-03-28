@@ -209,6 +209,14 @@ export function printProjectInitHelp(style: CliHelpStyle): void {
     );
 }
 
+export function printProjectUnbindHelp(style: CliHelpStyle): void {
+    printSingleHelpEntry(
+        style,
+        'Project Unbind Command',
+        requireHelpEntry(CONFIGURATION_HELP, 'iranti project unbind ')
+    );
+}
+
 export function printDoctorHelp(style: CliHelpStyle): void {
     printSingleHelpEntry(
         style,

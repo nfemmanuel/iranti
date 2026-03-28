@@ -471,6 +471,7 @@ Later changes use the same surface:
 ```bash
 iranti configure project . --instance local --agent-id chatbot_worker
 iranti configure project . --interactive
+iranti project unbind .
 iranti auth create-key --instance local --key-id chatbot_worker --owner "Chatbot Worker" --scopes "kb:read,memory:read,memory:write" --project .
 ```
 

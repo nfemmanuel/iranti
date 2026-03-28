@@ -232,6 +232,7 @@ iranti configure project . --instance local --agent-id chatbot_worker
 iranti configure project . --auto-remember true
 iranti configure project . --mode shared
 iranti configure project . --interactive
+iranti project unbind .
 ```
 
 ---

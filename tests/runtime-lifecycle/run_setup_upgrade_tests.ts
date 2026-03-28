@@ -363,6 +363,93 @@ async function main(): Promise<void> {
         assert.strictEqual(configuredProjectBinding.IRANTI_PERSONAL_MEMORY_ENTITY, 'user/main');
         assert.strictEqual(configuredProjectBinding.IRANTI_AUTO_REMEMBER, 'true');
 
+        const projectsRegistryPath = path.join(runtimeRoot, 'instances', 'local', 'projects.json');
+        writeJson(projectsRegistryPath, {
+            projects: [
+                {
+                    projectPath: projectInitDir,
+                    agentId: configuredProjectBinding.IRANTI_AGENT_ID,
+                    memoryEntity: configuredProjectBinding.IRANTI_MEMORY_ENTITY,
+                    mode: configuredProjectBinding.IRANTI_PROJECT_MODE,
+                    boundAt: new Date().toISOString(),
+                },
+            ],
+        });
+
+        writeJson(path.join(projectInitDir, '.mcp.json'), {
+            mcpServers: {
+                iranti: {
+                    command: 'iranti',
+                    args: ['mcp'],
+                },
+            },
+        });
+        writeJson(path.join(projectInitDir, '.vscode', 'mcp.json'), {
+            servers: {
+                iranti: {
+                    command: 'iranti',
+                    envFile: '${workspaceFolder}/.env.iranti',
+                },
+                other: {
+                    command: 'other-mcp',
+                },
+            },
+        });
+        writeJson(path.join(projectInitDir, '.claude', 'settings.local.json'), {
+            hooks: {
+                SessionStart: [
+                    {
+                        matcher: '*',
+                        hooks: [
+                            { type: 'command', command: 'iranti claude-hook session-start' },
+                            { type: 'command', command: 'echo keep-me' },
+                        ],
+                    },
+                ],
+                Stop: [
+                    {
+                        hooks: [
+                            { type: 'command', command: 'iranti claude-hook stop' },
+                        ],
+                    },
+                ],
+            },
+        });
+
+        const projectUnbindRun = runCli([
+            'project',
+            'unbind',
+            projectInitDir,
+            '--root',
+            runtimeRoot,
+            '--scope',
+            'user',
+            '--json',
+        ], repoRoot);
+        assert.strictEqual(projectUnbindRun.status, 0, `project unbind failed:\n${projectUnbindRun.stdout}\n${projectUnbindRun.stderr}`);
+        const projectUnbindPayload = parseJsonFromStdout(projectUnbindRun.stdout) as {
+            removedBinding: boolean;
+            cleanedRegistryInstances: string[];
+            keepIntegrations: boolean;
+            integrationCleanup: {
+                removed: string[];
+                updated: string[];
+            };
+        };
+        assert.strictEqual(projectUnbindPayload.removedBinding, true, 'Expected project unbind to remove the project binding.');
+        assert.deepStrictEqual(projectUnbindPayload.cleanedRegistryInstances, ['local']);
+        assert.strictEqual(projectUnbindPayload.keepIntegrations, false, 'Expected project unbind to clean local integrations by default.');
+        assert.strictEqual(fs.existsSync(path.join(projectInitDir, '.env.iranti')), false, 'Expected project unbind to remove .env.iranti.');
+        assert.strictEqual(fs.existsSync(path.join(projectInitDir, '.mcp.json')), false, 'Expected project unbind to remove a workspace MCP file that only referenced Iranti.');
+        const vscodeMcpAfterUnbind = readJson<{ servers?: Record<string, { command?: string }> }>(path.join(projectInitDir, '.vscode', 'mcp.json'));
+        assert.ok(!vscodeMcpAfterUnbind.servers?.iranti, 'Expected project unbind to remove the Iranti VS Code MCP server entry.');
+        assert.strictEqual(vscodeMcpAfterUnbind.servers?.other?.command, 'other-mcp', 'Expected unrelated VS Code MCP servers to remain.');
+        const claudeSettingsAfterUnbind = readJson<{ hooks?: Record<string, Array<{ hooks?: Array<{ command?: string }> }>> }>(path.join(projectInitDir, '.claude', 'settings.local.json'));
+        const remainingSessionStart = claudeSettingsAfterUnbind.hooks?.SessionStart?.[0]?.hooks?.map((entry) => entry.command) ?? [];
+        assert.deepStrictEqual(remainingSessionStart, ['echo keep-me'], 'Expected project unbind to remove only Iranti Claude hooks.');
+        const registryAfterUnbind = readJson<{ projects: Array<{ projectPath: string }> }>(projectsRegistryPath);
+        assert.deepStrictEqual(registryAfterUnbind.projects, [], 'Expected project unbind to remove the project from projects.json.');
+
         const statusRun = runCli(['status', '--root', runtimeRoot, '--json'], repoRoot);
         assert.strictEqual(statusRun.status, 0, `status failed after setup:\n${statusRun.stdout}\n${statusRun.stderr}`);
         const statusPayload = parseJsonFromStdout(statusRun.stdout) as {

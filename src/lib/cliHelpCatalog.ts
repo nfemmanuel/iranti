@@ -102,6 +102,12 @@ export const CONFIGURATION_HELP: HelpEntry[] = [
         useWhen: 'the project is already bound and you want to change its instance, URL, key, agent identity, or memory entity.',
         scenario: 'Moving a repo from `local` to `shared_team` or fixing a wrong `IRANTI_PROJECT_MODE`.',
     },
+    {
+        command: 'iranti project unbind [path] [--keep-integrations] [--json]',
+        description: 'Remove a project binding and, by default, clean local Iranti MCP and Claude integration files.',
+        useWhen: 'a repo should stop pointing at Iranti without leaving broken local integration files behind.',
+        scenario: 'Retiring a repo binding before rebinding it elsewhere or removing Iranti from one project while keeping the instance.',
+    },
 ];
 
 export const KEY_HELP: HelpEntry[] = [

@@ -63,6 +63,7 @@ function testHelpMatrix(): void {
         { args: ['update', 'api-key', '--help'], token: 'Provider Key Commands' },
         { args: ['remove', 'api-key', '--help'], token: 'Provider Key Commands' },
         { args: ['project', 'init', '--help'], token: 'Project Init Command' },
+        { args: ['project', 'unbind', '--help'], token: 'Project Unbind Command' },
         { args: ['doctor', '--help'], token: 'Doctor Command' },
         { args: ['status', '--help'], token: 'Status Command' },
         { args: ['upgrade', '--help'], token: 'Upgrade Command' },
@@ -98,6 +99,10 @@ function testHelpDoesNotMutate(): void {
         const projectInitHelp = runCli(['project', 'init', projectDir, '--instance', 'local', '--help']);
         assertSuccess(projectInitHelp, 'project init --help');
         assert.ok(!fs.existsSync(path.join(projectDir, '.env.iranti')), 'project init --help should not create a project binding');
+
+        const projectUnbindHelp = runCli(['project', 'unbind', projectDir, '--help']);
+        assertSuccess(projectUnbindHelp, 'project unbind --help');
+        assert.ok(!fs.existsSync(path.join(projectDir, '.env.iranti')), 'project unbind --help should not create or remove a project binding');
     } finally {
         fs.rmSync(root, { recursive: true, force: true });
         fs.rmSync(projectDir, { recursive: true, force: true });

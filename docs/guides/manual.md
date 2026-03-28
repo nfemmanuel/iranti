@@ -240,6 +240,14 @@ iranti configure project . --auto-remember true
 iranti configure project . --interactive
 ```
 
+Remove a binding cleanly:
+
+```bash
+iranti project unbind .
+```
+
+Add `--keep-integrations` when you want to remove only `.env.iranti` and leave local MCP / Claude scaffolding in place.
+
 Project binding file:
 - `.env.iranti`
 
@@ -544,6 +552,7 @@ If upgrade behaves strangely on Windows:
 | Manage provider keys | `iranti add|update|remove api-key ...` |
 | Bind project | `iranti project init ...` |
 | Reconfigure project | `iranti configure project ...` |
+| Unbind project | `iranti project unbind ...` |
 | Scaffold Claude Code | `iranti claude-setup ...` |
 | Register Codex | `iranti codex-setup` |
 | Write shared Codex/Claude handoff state | `iranti handoff task/<task_id> ...` |
