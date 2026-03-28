@@ -78,7 +78,8 @@ Use this when you learned something concrete that future turns,
 agents, or sessions should retain. Requires: entity ("type/id"),
 key, value JSON, and summary. Confidence is optional and defaults
 to 85. Conflicts on the same entity+key are detected automatically
-and may be resolved or escalated.`,
+and may be resolved or escalated. Personal-memory keys honor the
+configured canonical personal entity for this project/session.`,
             iranti_remember_response: `Persist a strict durable summary from your own response.
 Use this after you decide to say something like "the next step is ...",
 "the blocker is ...", "we decided ...", or "the current owner is ...".
@@ -102,13 +103,17 @@ visible context window. If the user is asking you to recall a remembered
 fact (for example a preference, decision, blocker, next step, or prior
 project detail), use this before answering instead of guessing or saying
 you do not know. Returns an injection decision plus any facts that should
-be added to context if relevant memory is missing.
+be added to context if relevant memory is missing. If no handshake has been
+performed yet for this agent in the current process, attend will auto-bootstrap
+the session first and report that in the result metadata.
 Omitting currentContext falls back to latestMessage only; pass the
 full visible context when available.`,
             iranti_handshake: `Initialize or refresh an agent's working-memory brief for the current task.
 Call this at session start or when a new task begins, passing the task and
 recent messages. Returns operating rules plus prioritized relevant memory
-for that task. Do not use this as a per-turn retrieval tool; use iranti_attend.`,
+for that task. If the recent messages appear to contain durable facts that
+are not yet in shared memory, the result may include a backfill suggestion.
+Do not use this as a per-turn retrieval tool; use iranti_attend.`,
             iranti_related: 'Read directly related entities (1 hop) for a given entity.',
             iranti_related_deep: 'Read related entities up to N hops deep for a given entity.',
         };
@@ -145,6 +150,37 @@ for that task. Do not use this as a per-turn retrieval tool; use iranti_attend.`
             },
         });
         expect(!write.isError, 'Expected iranti_write to succeed.');
+
+        const personalKey = `favorite_mcp_smoke_${Date.now()}`;
+
+        const personalWrite = await client.callTool({
+            name: 'iranti_write',
+            arguments: {
+                entity: 'user/nf',
+                key: personalKey,
+                valueJson: JSON.stringify({ text: 'The Bible' }),
+                summary: `${personalKey.replace(/_/g, ' ')} is The Bible`,
+                confidence: 95,
+            },
+        });
+        expect(!personalWrite.isError, 'Expected personal iranti_write to succeed.');
+        expect(
+            JSON.stringify(personalWrite.structuredContent).includes('"resolvedEntity":"user/main"'),
+            'Expected personal iranti_write to resolve to the configured canonical personal entity.',
+        );
+
+        const personalQuery = await client.callTool({
+            name: 'iranti_query',
+            arguments: {
+                entity: 'user/main',
+                key: personalKey,
+            },
+        });
+        expect(!personalQuery.isError, 'Expected iranti_query for personal canonical entity to succeed.');
+        expect(
+            JSON.stringify(personalQuery.structuredContent).toLowerCase().includes('the bible'),
+            'Expected personal fact to be stored under user/main.',
+        );
 
         const relate = await client.callTool({
             name: 'iranti_relate',

@@ -5,7 +5,7 @@ import * as z from 'zod/v4';
 import { Iranti } from '../src/sdk';
 import { rewriteCommandError } from '../src/lib/commandErrors';
 import { loadRuntimeEnv } from '../src/lib/runtimeEnv';
-import { autoRememberPromptFacts, isAutoRememberEnabled, rememberAssistantResponseFacts } from '../src/lib/autoRemember';
+import { autoRememberPromptFacts, isAutoRememberEnabled, rememberAssistantResponseFacts, resolvePersonalWriteTarget } from '../src/lib/autoRemember';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -266,7 +266,8 @@ Use this when you learned something concrete that future turns,
 agents, or sessions should retain. Requires: entity ("type/id"),
 key, value JSON, and summary. Confidence is optional and defaults
 to 85. Conflicts on the same entity+key are detected automatically
-and may be resolved or escalated.`,
+and may be resolved or escalated. Personal-memory keys honor the
+configured canonical personal entity for this project/session.`,
         inputSchema: {
             entity: z.string().min(1).describe('Entity in entityType/entityId format.'),
             key: z.string().min(1).describe('Fact key.'),
@@ -279,8 +280,9 @@ and may be resolved or escalated.`,
             agent: z.string().optional().describe('Override the default agent id.'),
         },
     }, async ({ entity, key, valueJson, summary, confidence, source, validFrom, requestId, agent }) => {
+        const target = resolvePersonalWriteTarget({ entity, key });
         const result = await iranti.write({
-            entity,
+            entity: target.entity,
             key,
             value: safeJsonParse(valueJson),
             summary,
@@ -290,7 +292,11 @@ and may be resolved or escalated.`,
             validFrom: parseIsoDate(validFrom),
             requestId,
         });
-        return textResult(result);
+        return textResult({
+            ...toStructuredContent(result),
+            resolvedEntity: target.entity,
+            ...(target.rerouted ? { originalEntity: target.originalEntity, canonicalizedPersonalEntity: true } : {}),
+        });
     });
 
     server.registerTool('iranti_remember_response', {

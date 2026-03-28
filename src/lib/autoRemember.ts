@@ -77,6 +77,11 @@ function normalizeEntity(entity: string | null | undefined): string | undefined 
     return trimmed && trimmed.includes('/') ? trimmed : undefined;
 }
 
+function isPersonalEntityType(entityType: string): boolean {
+    const normalized = entityType.trim().toLowerCase();
+    return normalized === 'user' || normalized === 'person';
+}
+
 function isQuestionLike(prompt: string): boolean {
     const trimmed = prompt.trim();
     if (!trimmed) return false;
@@ -132,6 +137,40 @@ export function getPersonalMemoryEntity(explicit?: string | null): string {
 export function getProjectMemoryEntity(explicit?: string | null): string | undefined {
     return normalizeEntity(explicit)
         ?? normalizeEntity(process.env.IRANTI_MEMORY_ENTITY);
+}
+
+export function resolvePersonalWriteTarget(params: {
+    entity: string;
+    key: string;
+    personalEntity?: string | null;
+}): {
+    entity: string;
+    rerouted: boolean;
+    originalEntity?: string;
+} {
+    const requested = normalizeEntity(params.entity) ?? params.entity.trim();
+    const canonicalPersonalEntity = getPersonalMemoryEntity(params.personalEntity);
+    const normalizedKey = canonicalizeMemoryKey(params.key);
+
+    if (!requested.includes('/') || !canonicalPersonalEntity.includes('/')) {
+        return { entity: requested, rerouted: false };
+    }
+
+    const [requestedType] = requested.split('/', 1);
+    const [canonicalType] = canonicalPersonalEntity.split('/', 1);
+    if (!isPersonalMemoryKey(normalizedKey) || !isPersonalEntityType(requestedType) || !isPersonalEntityType(canonicalType)) {
+        return { entity: requested, rerouted: false };
+    }
+
+    if (requested === canonicalPersonalEntity) {
+        return { entity: requested, rerouted: false };
+    }
+
+    return {
+        entity: canonicalPersonalEntity,
+        rerouted: true,
+        originalEntity: requested,
+    };
 }
 
 export function classifyMemoryScope(message: string): 'personal' | 'project' | null {

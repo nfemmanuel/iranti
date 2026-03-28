@@ -52,10 +52,11 @@ This feature connects Codex to Iranti through Codex's MCP client using the insta
 18. If `IRANTI_AUTO_REMEMBER=true`, `iranti_attend` first persists only narrow explicit prompt facts, routing personal facts to `IRANTI_PERSONAL_MEMORY_ENTITY`/`user/main` and project facts to `IRANTI_MEMORY_ENTITY`.
 19. Prompt-captured personal facts are stored as direct user memory so later explicit user corrections can replace older hook-written values.
 20. If no handshake has been performed yet for that agent in the current process, `iranti_attend` auto-runs a bootstrap handshake before making the injection decision.
-21. Recall questions about remembered preferences, decisions, blockers, next steps, or prior project facts are treated as mandatory memory prompts and bypass the LLM memory-needed classifier.
-22. Handshake may also return a backfill suggestion when recent messages appear to contain durable facts that have not yet been persisted.
-23. If Codex's own final answer contains a strict durable summary such as `The next step is ...` or `We decided ...`, call `iranti_remember_response` explicitly because there is no Codex-side `Stop` hook.
-24. Launch Codex with `codex -C <project>` for the intended workspace context.
+21. If Codex explicitly calls `iranti_write` for a personal-memory key such as `favorite_book`, the MCP server reroutes that write to the configured canonical personal entity instead of allowing project-local identity forks like `user/nf` vs `user/main`.
+22. Recall questions about remembered preferences, decisions, blockers, next steps, or prior project facts are treated as mandatory memory prompts and bypass the LLM memory-needed classifier.
+23. Handshake may also return a backfill suggestion when recent messages appear to contain durable facts that have not yet been persisted.
+24. If Codex's own final answer contains a strict durable summary such as `The next step is ...` or `We decided ...`, call `iranti_remember_response` explicitly because there is no Codex-side `Stop` hook.
+25. Launch Codex with `codex -C <project>` for the intended workspace context.
 
 ## Edge Cases
 

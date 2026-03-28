@@ -37,14 +37,15 @@ This feature defines how Iranti should participate across an agent turn without 
 6. Personal prompt facts route to `IRANTI_PERSONAL_MEMORY_ENTITY` and default to `user/main`.
 7. Project prompt facts route to `IRANTI_MEMORY_ENTITY`.
 8. Personal prompt facts are stored as direct user memory rather than generic hook/tool memory so later user corrections can replace older hook-written values.
-9. Before a memory-dependent action, the host integration should retrieve memory if no turn retrieval has happened yet.
-10. Do not poll during arbitrary tool execution or during generation unless the action itself is a memory operation.
-11. After an assistant response, persist only strict durable summaries such as:
+9. Explicit MCP writes for personal-memory keys also route to the configured canonical personal entity, so a client cannot accidentally fork durable personal memory into `user/nf` vs `user/main` for the same project/session.
+10. Before a memory-dependent action, the host integration should retrieve memory if no turn retrieval has happened yet.
+11. Do not poll during arbitrary tool execution or during generation unless the action itself is a memory operation.
+12. After an assistant response, persist only strict durable summaries such as:
     - `The next step is ...`
     - `The blocker is ...`
     - `We decided ...`
     - `The current owner is ...`
-12. Codex and other MCP clients without a `Stop` hook use `iranti_remember_response` explicitly for the post-response step.
+13. Codex and other MCP clients without a `Stop` hook use `iranti_remember_response` explicitly for the post-response step.
 
 ## Conflict / Correction Rules
 - Direct user correction of a personal-memory fact should override an older non-human hook-written value for the same key.
