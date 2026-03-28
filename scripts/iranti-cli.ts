@@ -2889,7 +2889,12 @@ function defaultsSetupPlan(args: ParsedArgs): SetupExecutionPlan {
         if (explicit === 'managed' || explicit === 'docker') return explicit;
         throw new Error(`Invalid --db-mode '${explicit}'. Use local, managed, or docker.`);
     })();
-    const databaseUrl = deriveDatabaseUrlForMode(databaseMode, instanceName, (getFlag(args, 'db-url') ?? process.env.DATABASE_URL ?? '').trim());
+    const explicitDatabaseUrl = (
+        getFlag(args, 'db-url')
+        ?? (databaseMode === 'managed' ? process.env.DATABASE_URL : '')
+        ?? ''
+    ).trim();
+    const databaseUrl = deriveDatabaseUrlForMode(databaseMode, instanceName, explicitDatabaseUrl);
     const databaseIntentStrategy = parseDatabaseIntentStrategyFlag(getFlag(args, 'db-intent'), '--db-intent');
 
     const provider = normalizeProvider(getFlag(args, 'provider') ?? process.env.LLM_PROVIDER ?? 'mock') ?? 'mock';
@@ -3544,10 +3549,15 @@ function deriveDatabaseUrlForMode(
     }
     const user = encodeURIComponent((process.env.POSTGRES_USER ?? 'postgres').trim() || 'postgres');
     const password = encodeURIComponent((process.env.POSTGRES_PASSWORD ?? 'postgres').trim() || 'postgres');
+    const localDatabaseHost = preferredLocalDatabaseHost();
     if (mode === 'local') {
-        return `postgresql://${user}:${password}@localhost:5432/iranti_${instanceName}`;
+        return `postgresql://${user}:${password}@${localDatabaseHost}:5432/iranti_${instanceName}`;
     }
-    return `postgresql://${user}:${password}@localhost:5432/iranti_${instanceName}`;
+    return `postgresql://${user}:${password}@${localDatabaseHost}:5432/iranti_${instanceName}`;
+}
+
+function preferredLocalDatabaseHost(): string {
+    return process.platform === 'win32' ? '127.0.0.1' : 'localhost';
 }
 
 function inferSetupDependencies(plan: {
@@ -5259,7 +5269,7 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
                     `iranti_${instanceName}_db`
                 );
                 dockerContainerName = containerName;
-                dbUrl = `postgresql://postgres:${dbPassword}@localhost:${dbHostPort}/${dbName}`;
+                dbUrl = `postgresql://postgres:${dbPassword}@${preferredLocalDatabaseHost()}:${dbHostPort}/${dbName}`;
                 databaseIntentStrategy = parseDatabaseIntentStrategyFlag(
                     await prompt.line(
                         'Database intent (dedicated, shared, external)',
@@ -6169,7 +6179,7 @@ async function createInstanceCommand(args: ParsedArgs): Promise<void> {
 
     const dbUrl =
         getFlag(args, 'db-url') ??
-        `postgresql://postgres:yourpassword@localhost:5432/iranti_${name}`;
+        `postgresql://postgres:yourpassword@${preferredLocalDatabaseHost()}:5432/iranti_${name}`;
     const apiKey = getFlag(args, 'api-key');
     const provider = normalizeProvider(getFlag(args, 'provider')) ?? 'mock';
     const providerKey = getFlag(args, 'provider-key');

@@ -238,6 +238,42 @@ async function main(): Promise<void> {
         assert.ok(claudeSettings.hooks?.UserPromptSubmit, 'Expected scaffolded Claude settings to include UserPromptSubmit hook.');
         assert.ok(claudeSettings.hooks?.Stop, 'Expected scaffolded Claude settings to include Stop hook.');
 
+        const localGuardRoot = path.join(tempRoot, 'local-guard-runtime');
+        const localGuardPort = await reservePort();
+        const localGuardRun = runCli([
+            'setup',
+            '--defaults',
+            '--mode',
+            'isolated',
+            '--root',
+            localGuardRoot,
+            '--instance',
+            'local_guard',
+            '--port',
+            String(localGuardPort),
+            '--db-mode',
+            'local',
+            '--provider',
+            'mock',
+            '--api-key',
+            `test_${randomBytes(16).toString('hex')}`,
+        ], repoRoot, {
+            DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/inherited_should_not_win',
+        });
+        assert.strictEqual(localGuardRun.status, 0, `local guard setup failed:\n${localGuardRun.stdout}\n${localGuardRun.stderr}`);
+        const localGuardEnv = readEnv(path.join(localGuardRoot, 'instances', 'local_guard', '.env'));
+        const expectedLocalGuardHost = process.platform === 'win32' ? '127.0.0.1' : 'localhost';
+        assert.notStrictEqual(
+            localGuardEnv.DATABASE_URL,
+            'postgresql://postgres:postgres@localhost:5432/inherited_should_not_win',
+            'Expected local setup to ignore the inherited DATABASE_URL from the parent shell.',
+        );
+        assert.match(
+            localGuardEnv.DATABASE_URL,
+            new RegExp(`^postgresql://postgres:[^@]+@${expectedLocalGuardHost.replace(/\./g, '\\.')}:5432/iranti_local_guard$`),
+            'Expected local setup to generate an instance-specific DATABASE_URL with the platform-appropriate local host.',
+        );
+
         const sharedSetupRun = runCli([
             'setup',
             '--defaults',
