@@ -106,6 +106,7 @@ you do not know. Returns an injection decision plus any facts that should
 be added to context if relevant memory is missing. If no handshake has been
 performed yet for this agent in the current process, attend will auto-bootstrap
 the session first and report that in the result metadata.
+This is the minimum safe pre-reply call even when the host skipped handshake.
 Omitting currentContext falls back to latestMessage only; pass the
 full visible context when available.`,
             iranti_handshake: `Initialize or refresh an agent's working-memory brief for the current task.
@@ -113,6 +114,8 @@ Call this at session start or when a new task begins, passing the task and
 recent messages. Returns operating rules plus prioritized relevant memory
 for that task. If the recent messages appear to contain durable facts that
 are not yet in shared memory, the result may include a backfill suggestion.
+If your host does not support a true session-start hook, call this on the
+first user turn before you start answering recall-style questions.
 Do not use this as a per-turn retrieval tool; use iranti_attend.`,
             iranti_related: 'Read directly related entities (1 hop) for a given entity.',
             iranti_related_deep: 'Read related entities up to N hops deep for a given entity.',

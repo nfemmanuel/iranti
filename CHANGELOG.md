@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.49 - Unreleased
+
+### Changed
+
+- MCP tool guidance is now more explicit about the intended host pattern: run `handshake()` at session start when possible, and treat `attend()` as the mandatory pre-reply retrieval call even when the host skipped startup hooks.
+- Codex setup output and docs now spell out the same host-side memory contract instead of relying on inferred operator discipline.
+
+### Fixed
+
+- Routine control-plane health and diagnostics probes can now call `attend()` without flooding Staff Logs with `control_plane_operator / attend_completed / memory_not_needed` debug noise.
+- Personal height recall is now treated as mandatory memory retrieval and can resolve across the legacy `person/user` versus canonical `user/main` identity split.
+- MCP personal-memory retrieval is more tolerant of legacy personal-entity variants, so stored facts like height no longer disappear just because older sessions used a different personal entity.
+
+### Documentation
+
+- Added an internal host audit documenting which first-party paths guarantee `handshake()` + `attend()` and which generic MCP paths still depend on the external host honoring that contract.
+
 ## 0.2.44 - Unreleased
 
 ### Added

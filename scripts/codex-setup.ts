@@ -91,6 +91,7 @@ function printHelp(): void {
         '  - Use --no-workspace-file only if you explicitly want global registration without project-local MCP file updates.',
         '  - Does not store DATABASE_URL in Codex config; iranti-mcp loads project/instance env at runtime.',
         '  - Replaces any existing MCP entry with the same name.',
+        '  - Expected host pattern: call iranti_handshake at session start (or on the first user turn if startup hooks are unavailable), then call iranti_attend before each reply.',
     ].join('\n'));
 }
 
@@ -380,6 +381,7 @@ function main(): void {
     console.log(registered);
     console.log('');
     console.log('Codex is now configured to use Iranti through MCP.');
+    console.log('Recommended MCP host pattern: run iranti_handshake at session start (or on the first user turn if no startup hook exists), then run iranti_attend before each reply.');
     if (useInstalled) {
         console.log('Registration target: installed CLI (`iranti mcp`)');
         if (projectEnv) {
