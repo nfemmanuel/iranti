@@ -51,6 +51,7 @@ import { createVectorBackend, resolveVectorBackendName } from '../src/library/ba
 import { InstanceRuntimeState, RuntimeInspection, inspectRuntimeState, isPidRunning, resolveRuntimeAuthorityFromEnv, waitForPidExit } from '../src/lib/runtimeLifecycle';
 import { Iranti } from '../src/sdk';
 import { auditVectorIndexConsistency } from '../src/library/queries';
+import { backfillChatHistory, parseBackfillChatTranscript } from '../src/lib/autoRemember';
 
 type Scope = 'user' | 'system';
 
@@ -1849,6 +1850,11 @@ function resolveRecentMessages(args: ParsedArgs): string[] {
     return [];
 }
 
+function resolveBackfillFile(args: ParsedArgs): string | null {
+    const backfill = getFlag(args, 'backfill')?.trim();
+    return backfill ? path.resolve(backfill) : null;
+}
+
 function parsePositiveInteger(raw: string | undefined, label: string): number | undefined {
     if (!raw) return undefined;
     const parsed = Number.parseInt(raw, 10);
@@ -1989,6 +1995,9 @@ function printAttendResult(
     console.log(`  message       ${truncateText(latestMessage, 120)}`);
     console.log(`  inject        ${result.shouldInject ? 'yes' : 'no'}`);
     console.log(`  reason        ${result.reason}`);
+    if (result.bootstrap?.handshakePerformed) {
+        console.log(`  bootstrap     handshake auto-ran (${result.bootstrap.task})`);
+    }
     console.log(`  method        ${result.decision.method}`);
     console.log(`  confidence    ${result.decision.confidence}`);
     console.log(`  explanation   ${result.decision.explanation}`);
@@ -6611,7 +6620,26 @@ async function handshakeCommand(args: ParsedArgs): Promise<void> {
     const json = hasFlag(args, 'json');
     const target = await resolveAttendantCliTarget(args);
     const task = getFlag(args, 'task')?.trim() || 'CLI handshake';
-    const recentMessages = resolveRecentMessages(args);
+    let recentMessages = resolveRecentMessages(args);
+    const backfillFile = resolveBackfillFile(args);
+    let backfillResult: Awaited<ReturnType<typeof backfillChatHistory>> | null = null;
+
+    if (backfillFile) {
+        const content = fs.readFileSync(backfillFile, 'utf-8');
+        backfillResult = await backfillChatHistory({
+            iranti: target.iranti,
+            content,
+            agent: target.agentId,
+            source: 'CLIBackfill',
+        });
+        if (recentMessages.length === 0) {
+            recentMessages = parseBackfillChatTranscript(content)
+                .map((message) => message.text.trim())
+                .filter(Boolean)
+                .slice(-12);
+        }
+    }
+
     const result = await target.iranti.handshake({
         agent: target.agentId,
         task,
@@ -6624,6 +6652,8 @@ async function handshakeCommand(args: ParsedArgs): Promise<void> {
             envSource: target.envSource,
             envFile: target.envFile,
             task,
+            backfillFile,
+            backfillResult,
             recentMessages,
             result,
         }, null, 2));
@@ -6631,6 +6661,25 @@ async function handshakeCommand(args: ParsedArgs): Promise<void> {
     }
 
     printHandshakeResult(target, task, result);
+    if (backfillResult) {
+        console.log('');
+        console.log('Backfill:');
+        console.log(`  file          ${backfillFile}`);
+        console.log(`  messages      ${backfillResult.messagesParsed}`);
+        console.log(`  extracted     ${backfillResult.extracted}`);
+        console.log(`  written       ${backfillResult.written}`);
+        if (backfillResult.skipped.length > 0) {
+            console.log(`  skipped       ${backfillResult.skipped.length}`);
+        }
+    }
+    if (result.backfillSuggestion?.suggested && !backfillFile) {
+        console.log('');
+        console.log('Backfill suggestion:');
+        console.log(`  reason        ${result.backfillSuggestion.reason}`);
+        console.log(`  candidateFacts ${result.backfillSuggestion.candidateFacts}`);
+        console.log(`  sample keys   ${result.backfillSuggestion.sampleKeys.join(', ')}`);
+        console.log(`  command       ${result.backfillSuggestion.suggestedCommand}`);
+    }
     console.log('');
     console.log(`${infoLabel()} This is a manual Attendant inspection tool. Claude Code should still use hooks + MCP in normal operation.`);
 }

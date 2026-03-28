@@ -33,6 +33,13 @@ export type MandatoryRecallDecision = {
     reason?: string;
 };
 
+export type BackfillChatRole = 'user' | 'assistant' | 'unknown';
+
+export type BackfillChatMessage = {
+    role: BackfillChatRole;
+    text: string;
+};
+
 export const USER_PROMPT_AUTO_REMEMBER_SOURCE = 'UserPromptAutoRemember';
 
 const PERSONAL_MEMORY_KEYS = new Set([
@@ -372,7 +379,7 @@ async function persistExtractedFacts(params: {
     facts: ExtractedMemoryFact[];
     agent: string;
     source: string;
-    phase: 'user_prompt' | 'assistant_response';
+    phase: 'user_prompt' | 'assistant_response' | 'backfill';
     confidence: number;
     entity?: string | null;
     projectEntity?: string | null;
@@ -555,4 +562,120 @@ export async function rememberAssistantResponseFacts(params: {
         projectEntity,
         personalEntity,
     });
+}
+
+export function parseBackfillChatTranscript(content: string): BackfillChatMessage[] {
+    const normalized = content.replace(/\r\n/g, '\n');
+    const lines = normalized.split('\n');
+    const messages: BackfillChatMessage[] = [];
+    let current: BackfillChatMessage | null = null;
+
+    const flush = (): void => {
+        if (!current) return;
+        const text = current.text.trim();
+        if (text) {
+            messages.push({
+                role: current.role,
+                text,
+            });
+        }
+        current = null;
+    };
+
+    const detectRole = (line: string): BackfillChatMessage | null => {
+        const match = line.match(/^\s*(user|human|assistant|claude|codex|system)\s*:\s*(.*)$/i);
+        if (!match) return null;
+        const label = (match[1] ?? '').toLowerCase();
+        const text = (match[2] ?? '').trim();
+        if (label === 'user' || label === 'human') {
+            return { role: 'user', text };
+        }
+        if (label === 'assistant' || label === 'claude' || label === 'codex') {
+            return { role: 'assistant', text };
+        }
+        return { role: 'unknown', text };
+    };
+
+    for (const rawLine of lines) {
+        const line = rawLine.trimEnd();
+        const detected = detectRole(line);
+        if (detected) {
+            flush();
+            current = detected;
+            continue;
+        }
+
+        if (!current) {
+            if (!line.trim()) continue;
+            current = {
+                role: 'unknown',
+                text: line,
+            };
+            continue;
+        }
+
+        if (!line.trim()) {
+            flush();
+            continue;
+        }
+
+        current.text = `${current.text}\n${line}`;
+    }
+
+    flush();
+    return messages;
+}
+
+export async function backfillChatHistory(params: {
+    iranti: IrantiQueryClient;
+    content: string;
+    agent: string;
+    source: string;
+    entity?: string | null;
+    projectEntity?: string | null;
+    personalEntity?: string | null;
+    confidence?: number;
+}): Promise<AutoRememberResult & { messagesParsed: number }> {
+    const {
+        iranti,
+        content,
+        agent,
+        source,
+        entity,
+        projectEntity,
+        personalEntity,
+        confidence = 94,
+    } = params;
+
+    const messages = parseBackfillChatTranscript(content);
+    const facts: ExtractedMemoryFact[] = [];
+    for (const message of messages) {
+        if (message.role === 'user') {
+            facts.push(...extractExplicitPromptMemory(message.text));
+            continue;
+        }
+        if (message.role === 'assistant') {
+            facts.push(...extractExplicitAssistantMemory(message.text));
+            continue;
+        }
+        facts.push(...extractExplicitPromptMemory(message.text));
+        facts.push(...extractExplicitAssistantMemory(message.text));
+    }
+
+    const result = await persistExtractedFacts({
+        iranti,
+        facts,
+        agent,
+        source,
+        phase: 'backfill',
+        confidence,
+        entity,
+        projectEntity,
+        personalEntity,
+    });
+
+    return {
+        ...result,
+        messagesParsed: messages.length,
+    };
 }

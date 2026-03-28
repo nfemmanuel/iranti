@@ -13,9 +13,11 @@ export type {
     SessionOperatorState,
     ObserveInput,
     ObserveResult,
+    BackfillSuggestion,
     AttendInput,
     AttendResult,
     AttendDecision,
+    AttendBootstrapInfo,
 } from './AttendantInstance';
 
 // Legacy functional API — kept for backward compatibility during transition

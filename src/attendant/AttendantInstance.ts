@@ -8,7 +8,14 @@ import { Prisma } from '../generated/prisma/client';
 import { EntryQuery, QueryResult } from '../types';
 import { timeStart, timeEnd } from '../lib/metrics';
 import { getConflictPolicy } from '../librarian/getPolicy';
-import { classifyMemoryScope, detectMandatoryRecall, getPersonalMemoryEntity, getProjectMemoryEntity } from '../lib/autoRemember';
+import {
+    classifyMemoryScope,
+    detectMandatoryRecall,
+    extractExplicitAssistantMemory,
+    extractExplicitPromptMemory,
+    getPersonalMemoryEntity,
+    getProjectMemoryEntity,
+} from '../lib/autoRemember';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -91,8 +98,17 @@ export interface WorkingMemoryBrief {
     sessionStarted: string;
     briefGeneratedAt: string;
     contextCallCount: number;
+    backfillSuggestion?: BackfillSuggestion | null;
     sessionCheckpoint?: SessionCheckpointRecord | null;
     sessionRecovery?: SessionRecoveryInfo | null;
+}
+
+export interface BackfillSuggestion {
+    suggested: boolean;
+    reason: string;
+    candidateFacts: number;
+    sampleKeys: string[];
+    suggestedCommand: string;
 }
 
 export type SessionStatus = 'active' | 'interrupted' | 'completed' | 'abandoned';
@@ -254,6 +270,13 @@ export interface AttendResult extends ObserveResult {
         | 'memory_needed_but_in_context'
         | 'memory_needed_injected';
     decision: AttendDecision;
+    bootstrap?: AttendBootstrapInfo | null;
+}
+
+export interface AttendBootstrapInfo {
+    handshakePerformed: boolean;
+    reason: 'no_existing_brief';
+    task: string;
 }
 
 export function normalizeExplicitTask(task: string | null | undefined): string | null {
@@ -318,6 +341,101 @@ export function formatOperatingRulesText(
         '',
         ...mergedRules.map((rule) => `- ${rule}`),
     ].join('\n');
+}
+
+type BackfillCandidate = {
+    key: string;
+    summary: string;
+};
+
+function collectBackfillCandidates(messages: string[]): BackfillCandidate[] {
+    const deduped = new Map<string, BackfillCandidate>();
+
+    for (const message of messages) {
+        const trimmed = message.trim();
+        if (!trimmed) continue;
+        const facts = [
+            ...extractExplicitPromptMemory(trimmed),
+            ...extractExplicitAssistantMemory(trimmed),
+        ];
+        for (const fact of facts) {
+            if (!deduped.has(fact.key)) {
+                deduped.set(fact.key, {
+                    key: fact.key,
+                    summary: fact.summary,
+                });
+            }
+        }
+    }
+
+    return Array.from(deduped.values());
+}
+
+function buildBackfillSuggestion(
+    context: AgentContext,
+    workingMemory: WorkingMemoryEntry[],
+): BackfillSuggestion | null {
+    const recentMessages = context.recentMessages
+        .map((message) => message.trim())
+        .filter(Boolean);
+    if (recentMessages.length === 0) return null;
+
+    const candidates = collectBackfillCandidates(recentMessages);
+    if (candidates.length === 0) return null;
+
+    const knownKeys = new Set(
+        workingMemory.map((entry) => entry.entityKey.split('/').slice(2).join('/'))
+    );
+    const missingCandidates = candidates.filter((candidate) => !knownKeys.has(candidate.key));
+    if (missingCandidates.length === 0) return null;
+
+    return {
+        suggested: true,
+        reason: 'recent_messages_contain_durable_facts_not_yet_persisted',
+        candidateFacts: missingCandidates.length,
+        sampleKeys: missingCandidates.slice(0, 5).map((candidate) => candidate.key),
+        suggestedCommand: 'iranti handshake --backfill <chat-file>',
+    };
+}
+
+function buildAttendBootstrapTask(latestMessage: string, currentContext: string): string {
+    const latest = normalizeMessage(latestMessage);
+    if (latest) {
+        const explicitLatestTask = normalizeExplicitTask(latest);
+        if (explicitLatestTask) {
+            return explicitLatestTask;
+        }
+    }
+
+    const trimmedContext = currentContext.trim();
+    if (trimmedContext) {
+        const explicitContextTask = normalizeExplicitTask(trimmedContext);
+        if (explicitContextTask) {
+            return explicitContextTask;
+        }
+    }
+
+    const basis = latest || trimmedContext;
+    if (!basis) {
+        return 'bootstrap initial turn memory context';
+    }
+
+    const normalized = basis.replace(/\s+/g, ' ').trim();
+    const truncated = normalized.length > 120 ? `${normalized.slice(0, 117)}...` : normalized;
+    return `responding to ${truncated}`;
+}
+
+function buildAttendBootstrapMessages(latestMessage: string, currentContext: string): string[] {
+    const out: string[] = [];
+    const trimmedContext = currentContext.trim();
+    if (trimmedContext) {
+        out.push(trimmedContext);
+    }
+    const normalizedLatest = normalizeMessage(latestMessage);
+    if (normalizedLatest && !out.includes(normalizedLatest)) {
+        out.push(normalizedLatest);
+    }
+    return out.slice(-6);
 }
 
 async function readPersistedBriefForAgent(agentId: string): Promise<WorkingMemoryBrief | null> {
@@ -767,6 +885,7 @@ export class AttendantInstance {
             sessionStarted: persisted?.sessionStarted ?? this.sessionStarted,
             briefGeneratedAt: new Date().toISOString(),
             contextCallCount: this.contextCallCount,
+            backfillSuggestion: buildBackfillSuggestion(context, workingMemory),
             sessionCheckpoint: this.sessionCheckpoint,
             sessionRecovery: recoveryResult.recovery,
         };
@@ -890,8 +1009,8 @@ export class AttendantInstance {
     async onContextLow(): Promise<void> {
         const rulesResult: QueryResult = await queryEntry(ATTENDANT_RULES_QUERY);
         const operatingRules = rulesResult.found && rulesResult.entry
-            ? rulesResult.entry.valueSummary
-            : 'No operating rules found.';
+            ? formatOperatingRulesText(rulesResult.entry.valueRaw, rulesResult.entry.valueSummary)
+            : formatOperatingRulesText(null, 'Attendant operating rules:');
 
         if (this.brief) {
             this.brief.operatingRules = operatingRules;
@@ -1081,6 +1200,21 @@ export class AttendantInstance {
         const currentContext = input.currentContext ?? '';
         const latestMessage = normalizeMessage(input.latestMessage);
         const forceInject = input.forceInject === true;
+        let bootstrap: AttendBootstrapInfo | null = null;
+
+        if (!this.brief) {
+            const bootstrapTask = buildAttendBootstrapTask(latestMessage, currentContext);
+            await this.handshake({
+                task: bootstrapTask,
+                recentMessages: buildAttendBootstrapMessages(latestMessage, currentContext),
+            });
+            bootstrap = {
+                handshakePerformed: true,
+                reason: 'no_existing_brief',
+                task: bootstrapTask,
+            };
+        }
+
         const effectiveEntityHints = this.resolveAttendEntityHints(input.entityHints, latestMessage);
         const observationContext = currentContext.trim().length > 0 ? currentContext : latestMessage;
         const mandatoryRecall = detectMandatoryRecall(latestMessage);
@@ -1111,6 +1245,7 @@ export class AttendantInstance {
                 shouldInject: false,
                 reason: 'memory_not_needed',
                 decision,
+                bootstrap,
                 facts: [],
                 entitiesDetected: [],
                 alreadyPresent: 0,
@@ -1151,6 +1286,7 @@ export class AttendantInstance {
             shouldInject,
             reason,
             decision,
+            bootstrap,
         };
         getStaffEventEmitter().emit({
             staffComponent: 'Attendant',

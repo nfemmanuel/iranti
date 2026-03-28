@@ -12,6 +12,7 @@ This feature adds two operator-facing CLI commands, `iranti handshake` and `iran
 | `--task` | `string` | Optional task string for `iranti handshake`. |
 | `--recent` | `string` | Optional `||`-delimited recent messages for `iranti handshake`. |
 | `--recent-file` | `string` | Optional newline-delimited recent-messages file for `iranti handshake`. |
+| `--backfill` | `string` | Optional chat-transcript file to import for durable fact backfill before running `iranti handshake`. |
 | `message` / `--message` | `string` | Latest user message for `iranti attend`. |
 | `--context` | `string` | Inline current-context string for `iranti attend`. |
 | `--context-file` | `string` | File containing current context for `iranti attend`. |
@@ -23,7 +24,7 @@ This feature adds two operator-facing CLI commands, `iranti handshake` and `iran
 ## Outputs
 | Output | Type | Description |
 |---|---|---|
-| Handshake summary | text | Agent, env source, inferred task, the full operating-rules block, working-memory count, and loaded facts. |
+| Handshake summary | text | Agent, env source, inferred task, the full operating-rules block, working-memory count, loaded facts, and optional backfill suggestion/import summary. |
 | Attend summary | text | Agent, env source, injection decision, reasoning, and selected facts. |
 | JSON payload | object | Full handshake brief or attend decision/result plus command metadata. |
 
@@ -33,13 +34,17 @@ This feature adds two operator-facing CLI commands, `iranti handshake` and `iran
 3. Resolve the agent id from `--agent`, bound project env, or the fallback `iranti_cli`.
 4. Construct a local `Iranti` SDK instance against the resolved database.
 5. For `iranti handshake`, call `iranti.handshake()` with the requested task and recent messages.
-6. Print the full multi-line operating-rules block so operators can inspect the active Attendant discipline instead of a truncated summary.
-7. For `iranti attend`, call `iranti.attend()` with the latest message, current context, optional entity hint, and optional force/max-facts settings.
-8. Render either a concise text summary or JSON.
-9. Remind the operator that these commands are inspection tools, not the primary Claude Code integration path.
+6. If `--backfill <chat-file>` is supplied, parse the transcript, import only narrow durable-fact patterns, and then run handshake using the transcript messages as recent context when no explicit `--recent*` input was provided.
+7. Print the full multi-line operating-rules block so operators can inspect the active Attendant discipline instead of a truncated summary.
+8. Surface a backfill suggestion when recent messages appear to contain durable facts that are not yet persisted.
+9. For `iranti attend`, call `iranti.attend()` with the latest message, current context, optional entity hint, and optional force/max-facts settings.
+10. If no brief exists yet for the agent in the current process, `iranti attend` auto-runs a bootstrap handshake first and reports that in the result.
+11. Render either a concise text summary or JSON.
+12. Remind the operator that these commands are inspection tools, not the primary Claude Code integration path.
 
 ## Edge Cases
 - Missing `DATABASE_URL`: command fails with guidance to use a bound project or `--instance`.
+- `--backfill` transcript with no durable fact patterns: handshake still runs normally after importing nothing.
 - Missing attend message: command fails with usage guidance.
 - Invalid `--entity-hint`: command fails unless it uses `entityType/entityId` format.
 - Invalid `--max-facts`: command fails unless it is a positive integer.
@@ -48,6 +53,7 @@ This feature adds two operator-facing CLI commands, `iranti handshake` and `iran
 
 ## Test Results
 - `npx tsc --noEmit` passes with the new CLI commands wired into dispatch and help output.
+- `npx ts-node tests/attendant/run_backfill_tests.ts` verifies transcript parsing and durable-fact import for `--backfill`.
 - `iranti attend --instance local --agent claude_code_main --message "What did we decide earlier?" --context "USER: We talked about snack_plan for game_night_app. ASSISTANT: Noted." --json` returns a structured attend decision successfully.
 - `iranti handshake` is wired into the same runtime-env resolution path and compiles cleanly; on the current local instance its full handshake path exceeded the local validation timeout and should be treated as a follow-up runtime check rather than a claimed benchmark pass.
 

@@ -181,10 +181,10 @@ export const DIAGNOSTICS_HELP: HelpEntry[] = [
         scenario: 'Removing the CLI from a machine while keeping project bindings, or doing a full wipe before reinstalling.',
     },
     {
-        command: 'iranti handshake [--instance <name> | --project-env <file>] [--agent <id>] [--task <text>] [--recent <msg1||msg2>] [--recent-file <path>] [--json]',
+        command: 'iranti handshake [--instance <name> | --project-env <file>] [--agent <id>] [--task <text>] [--recent <msg1||msg2>] [--recent-file <path>] [--backfill <chat-file>] [--json]',
         description: 'Manually inspect Attendant handshake output.',
         useWhen: 'you need to see what working-memory brief an agent would receive before a session starts.',
-        scenario: 'Verifying that a project binding and agent identity resolve to the right memory context.',
+        scenario: 'Verifying that a project binding and agent identity resolve to the right memory context, optionally backfilling durable facts from an older chat transcript first.',
     },
     {
         command: 'iranti attend [message] [--instance <name> | --project-env <file>] [--agent <id>] [--context <text> | --context-file <path>] [--entity-hint <entity>] [--force] [--max-facts <n>] [--json]',

@@ -140,7 +140,9 @@ async function main(): Promise<void> {
         description: `Initialize or refresh an agent's working-memory brief for the current task.
 Call this at session start or when a new task begins, passing the task and
 recent messages. Returns operating rules plus prioritized relevant memory
-for that task. Do not use this as a per-turn retrieval tool; use iranti_attend.`,
+for that task. If the recent messages appear to contain durable facts that
+are not yet in shared memory, the result may include a backfill suggestion.
+Do not use this as a per-turn retrieval tool; use iranti_attend.`,
         inputSchema: {
             task: z.string().min(1).describe('The current task or objective.'),
             recentMessages: z.array(z.string()).optional().describe('Recent conversation messages.'),
@@ -162,7 +164,9 @@ visible context window. If the user is asking you to recall a remembered
 fact (for example a preference, decision, blocker, next step, or prior
 project detail), use this before answering instead of guessing or saying
 you do not know. Returns an injection decision plus any facts that should
-be added to context if relevant memory is missing.
+be added to context if relevant memory is missing. If no handshake has been
+performed yet for this agent in the current process, attend will auto-bootstrap
+the session first and report that in the result metadata.
 Omitting currentContext falls back to latestMessage only; pass the
 full visible context when available.`,
         inputSchema: {
