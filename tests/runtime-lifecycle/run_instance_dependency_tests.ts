@@ -245,13 +245,21 @@ async function main(): Promise<void> {
         ].join('\n'));
 
         const configure = runCli(
-            ['configure', 'instance', 'local', '--root', root, '--docker-container', 'iranti_dev_db', '--docker-health-port', '5434', '--json'],
+            ['configure', 'instance', 'local', '--root', root, '--docker-container', 'iranti_dev_db', '--docker-health-port', '5434', '--db-intent', 'shared', '--json'],
             repoRoot,
         );
         assert.equal(configure.status, 0, `configure instance failed:\n${configure.stdout}\n${configure.stderr}`);
 
         const meta = JSON.parse(fs.readFileSync(metaFile, 'utf8')) as {
             dependencies?: Array<{ kind: string; name: string; healthTcpPort?: number }>;
+            databaseIntent?: {
+                strategy: string;
+                provisioning: string;
+                host: string;
+                port?: number;
+                database: string;
+                dockerContainerName?: string;
+            };
         };
         assert.deepEqual(meta.dependencies, [
             {
@@ -260,12 +268,67 @@ async function main(): Promise<void> {
                 healthTcpPort: 5434,
             },
         ]);
+        assert.deepEqual(meta.databaseIntent, {
+            strategy: 'shared-local',
+            provisioning: 'docker',
+            host: 'localhost',
+            port: 5432,
+            database: 'iranti_local',
+            dockerContainerName: 'iranti_dev_db',
+        });
 
         const show = runCli(['instance', 'show', 'local', '--root', root], repoRoot);
         assert.equal(show.status, 0, `instance show failed:\n${show.stdout}\n${show.stderr}`);
         assert.match(show.stdout, /docker-container:iranti_dev_db -> tcp:5434/i);
+        assert.match(show.stdout, /db strategy:\s+shared local database via docker -> localhost:5432\/iranti_local, container iranti_dev_db/i);
     } finally {
         fs.rmSync(root, { recursive: true, force: true });
+    }
+
+    const setupRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'iranti-setup-intent-'));
+    try {
+        const setup = runCli(
+            [
+                'setup',
+                '--defaults',
+                '--root',
+                setupRoot,
+                '--scope',
+                'user',
+                '--instance',
+                'external_case',
+                '--db-mode',
+                'managed',
+                '--db-url',
+                'postgresql://postgres:postgres@db.example.com:5432/iranti_external_case',
+                '--db-intent',
+                'external',
+                '--provider',
+                'mock',
+            ],
+            repoRoot,
+        );
+        assert.equal(setup.status, 0, `setup --defaults failed:\n${setup.stdout}\n${setup.stderr}`);
+
+        const setupMetaFile = path.join(setupRoot, 'instances', 'external_case', 'instance.json');
+        const setupMeta = JSON.parse(fs.readFileSync(setupMetaFile, 'utf8')) as {
+            databaseIntent?: {
+                strategy: string;
+                provisioning: string;
+                host: string;
+                port?: number;
+                database: string;
+            };
+        };
+        assert.deepEqual(setupMeta.databaseIntent, {
+            strategy: 'external-existing',
+            provisioning: 'managed',
+            host: 'db.example.com',
+            port: 5432,
+            database: 'iranti_external_case',
+        });
+    } finally {
+        fs.rmSync(setupRoot, { recursive: true, force: true });
     }
 
     console.log('instance dependency tests passed');

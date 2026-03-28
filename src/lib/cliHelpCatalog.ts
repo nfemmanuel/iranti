@@ -46,7 +46,7 @@ export const SETUP_AND_RUNTIME_HELP: HelpEntry[] = [
         scenario: 'Preparing a machine-level root ahead of scripted `instance create` calls.',
     },
     {
-        command: 'iranti setup [--scope user|system] [--root <path>] [--mode isolated|shared] [--instance <name>] [--port <n>] [--config <file> | --defaults] [--db-mode local|managed|docker] [--db-url <url>] [--provider <name>] [--api-key <token>] [--projects <path1,path2>] [--auto-remember [true|false]] [--claude-code] [--bootstrap-db]',
+        command: 'iranti setup [--scope user|system] [--root <path>] [--mode isolated|shared] [--instance <name>] [--port <n>] [--config <file> | --defaults] [--db-mode local|managed|docker] [--db-url <url>] [--db-intent dedicated|shared|external] [--provider <name>] [--api-key <token>] [--projects <path1,path2>] [--auto-remember [true|false]] [--claude-code] [--bootstrap-db]',
         description: 'Guided setup for runtime, database, instance, keys, and project binding.',
         useWhen: 'you want the CLI to explain the decisions and create a runnable starting point with minimal manual editing.',
         scenario: 'The normal first-run path for a developer machine, test box, or new local project.',
@@ -85,8 +85,8 @@ export const SETUP_AND_RUNTIME_HELP: HelpEntry[] = [
 
 export const CONFIGURATION_HELP: HelpEntry[] = [
     {
-        command: 'iranti configure instance <name> [--interactive] [--db-url <url>] [--port <n>] [--api-key <token>] [--provider <name>] [--provider-key <token>] [--clear-provider-key] [--docker-container <name>] [--docker-health-port <n>] [--clear-docker-container] [--json]',
-        description: 'Update an instance without editing env files manually, including optional Docker dependency metadata.',
+        command: 'iranti configure instance <name> [--interactive] [--db-url <url>] [--db-intent dedicated|shared|external] [--port <n>] [--api-key <token>] [--provider <name>] [--provider-key <token>] [--clear-provider-key] [--docker-container <name>] [--docker-health-port <n>] [--clear-docker-container] [--json]',
+        description: 'Update an instance without editing env files manually, including optional Docker dependency metadata and explicit database intent.',
         useWhen: 'you need to change one existing instance after creation rather than recreate it from scratch.',
         scenario: 'Switching from `mock` to `openai`, rotating provider keys, or moving the instance to a new port.',
     },
@@ -265,7 +265,7 @@ export const INTEGRATIONS_HELP: HelpEntry[] = [
 
 export const SETUP_COMMAND_HELP: HelpEntry[] = [
     {
-        command: 'iranti setup [--scope user|system] [--root <path>] [--mode isolated|shared] [--instance <name>] [--port <n>] [--config <file> | --defaults] [--db-mode local|managed|docker] [--db-url <url>] [--provider <name>] [--api-key <token>] [--projects <path1,path2>] [--auto-remember [true|false]] [--claude-code] [--bootstrap-db]',
+        command: 'iranti setup [--scope user|system] [--root <path>] [--mode isolated|shared] [--instance <name>] [--port <n>] [--config <file> | --defaults] [--db-mode local|managed|docker] [--db-url <url>] [--db-intent dedicated|shared|external] [--provider <name>] [--api-key <token>] [--projects <path1,path2>] [--auto-remember [true|false]] [--claude-code] [--bootstrap-db]',
         description: 'Interactive or automation-friendly first-run setup for runtime, database, instance, provider keys, Iranti client key, and optional project bindings.',
         useWhen: 'you want one command to either explain setup choices interactively or execute a known setup plan non-interactively.',
         scenario: 'Bootstrapping a new project in isolated mode, or provisioning a shared runtime with multiple bound repos from a config file.',
@@ -282,6 +282,7 @@ export const SETUP_OPTION_GUIDE: OptionGuideEntry[] = [
     { option: '--defaults', meaning: 'Runs setup non-interactively from flags plus environment/default values.', useWhen: 'you want quick automation but do not need the full explicitness of a saved config file.' },
     { option: '--db-mode local|managed|docker', meaning: 'Selects how PostgreSQL is sourced during automated setup.', useWhen: 'use `local` for your own postgres on the machine, `docker` for containerized local pgvector, or `managed` for a remote connection string you already own.' },
     { option: '--db-url <url>', meaning: 'Supplies the PostgreSQL connection string directly.', useWhen: 'you already know the target database and do not want the CLI to derive it.' },
+    { option: '--db-intent dedicated|shared|external', meaning: 'Declares whether this instance expects its own local database, a shared local database, or a fully external existing database.', useWhen: 'you want future repair flows to know whether they may safely recreate/start a dedicated local database or should treat the target as shared/external.' },
     { option: '--provider <name>', meaning: 'Sets the default LLM provider for the instance.', useWhen: 'you want setup to land on `openai`, `claude`, `gemini`, `mock`, or another supported provider immediately.' },
     { option: '--api-key <token>', meaning: 'Supplies the instance `IRANTI_API_KEY` instead of generating or rotating one during setup.', useWhen: 'you need a predetermined client key because another system already expects it.' },
     { option: '--projects <path1,path2>', meaning: 'Binds one or more project roots during non-interactive setup.', useWhen: 'the setup flow should finish by writing `.env.iranti` into known repo folders.' },
@@ -336,8 +337,8 @@ export const INSTANCE_HELP: HelpEntry[] = [
 
 export const CONFIGURE_HELP: HelpEntry[] = [
     {
-        command: 'iranti configure instance <name> [--interactive] [--db-url <url>] [--port <n>] [--api-key <token>] [--provider <name>] [--provider-key <token>] [--clear-provider-key] [--docker-container <name>] [--docker-health-port <n>] [--clear-docker-container] [--scope user|system] [--root <path>] [--json]',
-        description: 'Update one existing instance in place, including optional Docker dependency metadata.',
+        command: 'iranti configure instance <name> [--interactive] [--db-url <url>] [--db-intent dedicated|shared|external] [--port <n>] [--api-key <token>] [--provider <name>] [--provider-key <token>] [--clear-provider-key] [--docker-container <name>] [--docker-health-port <n>] [--clear-docker-container] [--scope user|system] [--root <path>] [--json]',
+        description: 'Update one existing instance in place, including optional Docker dependency metadata and explicit database intent.',
         useWhen: 'you are changing a running or configured instance rather than creating a new one.',
         scenario: 'Updating the database URL, port, provider, or provider key for `local`.',
     },

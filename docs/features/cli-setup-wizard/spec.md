@@ -14,6 +14,7 @@ The interactive wizard also explains high-friction choices inline before prompti
 | `--defaults` | `boolean` | Runs setup non-interactively using defaults plus environment/flag input. |
 | `--config` | `string` | Path to a JSON setup plan used for repeatable non-interactive bootstrap. |
 | `--db-mode` | `local \| managed \| docker` | Selects how PostgreSQL should be sourced during automated setup. |
+| `--db-intent` | `dedicated \| shared \| external` | Declares whether the instance expects a dedicated local DB, a shared local DB, or a fully external existing DB. |
 | `--auto-remember` | `boolean \| string` | Writes `IRANTI_AUTO_REMEMBER` into each generated project binding. Bare flag means `true`. |
 | `--bootstrap-db` | `boolean` | Runs migrations and seeding after non-interactive setup when the database is reachable. |
 | terminal answers | interactive text | User-provided answers for runtime mode, instance name, database URL, providers, secrets, and project paths. |
@@ -42,26 +43,28 @@ The interactive wizard also explains high-friction choices inline before prompti
 7. Recommend a PostgreSQL source in this order: local, Docker, then managed.
 8. Ask how PostgreSQL should be provided: local, managed, or Docker-local. Legacy `existing` remains accepted as an alias for `local`.
    - Before prompting, explain what each database mode means and when to choose it.
-9. When Docker-local is selected, optionally start or reuse a Docker PostgreSQL container and derive the connection string automatically.
-10. When local PostgreSQL is selected and `psql` is available, create the target localhost database automatically if it does not already exist.
-11. Ask for the default LLM provider.
+9. Ask for database intent so later repair flows know whether the DB target should be treated as dedicated-local, shared-local, or external-existing.
+10. When Docker-local is selected, optionally start or reuse a Docker PostgreSQL container and derive the connection string automatically.
+11. When local PostgreSQL is selected and `psql` is available, create the target localhost database automatically if it does not already exist.
+12. Ask for the default LLM provider.
    - Before prompting, explain the difference between local/dev providers (`mock`, `ollama`) and remote providers that require API keys.
-12. If the provider is remote, require its API key.
-13. Offer to collect additional provider keys for other supported providers.
-14. Generate or rotate a usable instance `IRANTI_API_KEY` so the instance can run even without DB-backed registry setup.
-15. Create or update the target instance env.
-16. Optionally bootstrap the database schema and seed data.
-17. Offer to bind project folders by writing `.env.iranti`, tagging each binding with `IRANTI_PROJECT_MODE`.
+13. If the provider is remote, require its API key.
+14. Offer to collect additional provider keys for other supported providers.
+15. Generate or rotate a usable instance `IRANTI_API_KEY` so the instance can run even without DB-backed registry setup.
+16. Create or update the target instance env.
+17. Optionally bootstrap the database schema and seed data.
+18. Offer to bind project folders by writing `.env.iranti`, tagging each binding with `IRANTI_PROJECT_MODE`.
    - Before prompting, explain that binding targets one specific repo/app root rather than a broad parent directory.
    - Ask whether strict auto-remember should be enabled for each project binding and write `IRANTI_AUTO_REMEMBER=true|false`.
-18. In isolated mode, allow one bound project. Shared mode may bind multiple projects.
-19. For each bound project, optionally scaffold Claude Code MCP and hook files.
-20. If Codex is installed and at least one project was bound, optionally register Codex globally against the first bound project.
+19. In isolated mode, allow one bound project. Shared mode may bind multiple projects.
+20. For each bound project, optionally scaffold Claude Code MCP and hook files.
+21. If Codex is installed and at least one project was bound, optionally register Codex globally against the first bound project.
    - Before prompting, explain that Codex registration touches the machine-global Codex MCP config.
-21. Print a runnable summary with next-step commands.
+22. Print a runnable summary with next-step commands.
 
 Non-interactive variants:
 - `--defaults` derives values from flags and environment variables. It synthesizes a localhost or Docker `DATABASE_URL` automatically for `local` and `docker` modes, but still requires a real `DATABASE_URL` for `managed`.
+- `--db-intent` lets automation record whether that target should be treated as a dedicated local DB, shared local DB, or external existing DB for future repair flows.
 - `--defaults --auto-remember` writes `IRANTI_AUTO_REMEMBER=true` into each generated project binding. Omitting the flag writes `false`.
 - generated project bindings also include `IRANTI_PERSONAL_MEMORY_ENTITY=user/main` unless a setup config overrides it per project.
 - `--config <file>` reads a JSON plan and executes the same runtime/instance/project binding flow without prompts.

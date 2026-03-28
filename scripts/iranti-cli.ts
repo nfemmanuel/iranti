@@ -71,12 +71,24 @@ type InstallMeta = {
     installedAt: string;
 };
 
+type DatabaseIntentStrategy = 'dedicated-local' | 'shared-local' | 'external-existing';
+
+type InstanceDatabaseIntent = {
+    strategy: DatabaseIntentStrategy;
+    provisioning: DatabaseSetupMode;
+    host: string;
+    port?: number;
+    database: string;
+    dockerContainerName?: string;
+};
+
 type InstanceMeta = {
     name: string;
     createdAt: string;
     port: number;
     envFile: string;
     instanceDir: string;
+    databaseIntent?: InstanceDatabaseIntent;
     dependencies?: InstanceDependency[];
 };
 
@@ -1073,6 +1085,10 @@ async function inspectInstanceConfig(root: string, name: string): Promise<Instan
                 if (typeof parsed.envFile === 'string' && path.resolve(parsed.envFile) !== path.resolve(envFile)) {
                     ownershipIssues.push(`instance.json envFile points to ${parsed.envFile}`);
                 }
+                const databaseIntentValidation = parseInstanceDatabaseIntent(parsed.databaseIntent);
+                if (databaseIntentValidation.errors.length > 0) {
+                    ownershipIssues.push(`instance.json databaseIntent invalid: ${databaseIntentValidation.errors.join(', ')}`);
+                }
                 const dependencyValidation = parseInstanceDependencies(parsed.dependencies);
                 if (dependencyValidation.errors.length > 0) {
                     ownershipIssues.push(`instance.json dependencies invalid: ${dependencyValidation.errors.join(', ')}`);
@@ -1387,6 +1403,7 @@ type SetupExecutionPlan = {
     port: number;
     databaseUrl: string;
     databaseMode: DatabaseSetupMode;
+    databaseIntent: InstanceDatabaseIntent;
     provider: string;
     providerKeys: Record<string, string>;
     apiKey: string;
@@ -1407,6 +1424,7 @@ type SetupExecutionResult = {
     port: number;
     mode: 'shared' | 'isolated';
     databaseMode: DatabaseSetupMode;
+    databaseIntent: InstanceDatabaseIntent;
     bindings: SetupProjectBinding[];
 };
 
@@ -1527,6 +1545,187 @@ function postgresDatabaseName(databaseUrl: string): string {
 function isLocalPostgresHost(hostname: string): boolean {
     const normalized = hostname.trim().toLowerCase();
     return normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1';
+}
+
+function parseDatabaseIntentStrategy(raw: string | undefined | null): DatabaseIntentStrategy | null {
+    const normalized = raw?.trim().toLowerCase() ?? '';
+    if (!normalized) return null;
+    if (normalized === 'dedicated' || normalized === 'dedicated-local') return 'dedicated-local';
+    if (normalized === 'shared' || normalized === 'shared-local') return 'shared-local';
+    if (normalized === 'external' || normalized === 'managed' || normalized === 'external-existing') return 'external-existing';
+    return null;
+}
+
+function parseDatabaseIntentStrategyFlag(raw: string | undefined | null, label: string): DatabaseIntentStrategy | null {
+    const trimmed = raw?.trim() ?? '';
+    if (!trimmed) return null;
+    const parsed = parseDatabaseIntentStrategy(trimmed);
+    if (!parsed) {
+        throw new Error(`Invalid ${label} '${raw}'. Use dedicated, shared, or external.`);
+    }
+    return parsed;
+}
+
+function databaseIntentPromptValue(strategy: DatabaseIntentStrategy | undefined): string {
+    if (strategy === 'dedicated-local') return 'dedicated';
+    if (strategy === 'shared-local') return 'shared';
+    return 'external';
+}
+
+function describeDatabaseIntentStrategy(strategy: DatabaseIntentStrategy): string {
+    switch (strategy) {
+        case 'dedicated-local':
+            return 'dedicated local database';
+        case 'shared-local':
+            return 'shared local database';
+        case 'external-existing':
+        default:
+            return 'external existing database';
+    }
+}
+
+function inferDatabaseProvisioning(
+    databaseUrl: string,
+    dependencies: InstanceDependency[] = [],
+): DatabaseSetupMode {
+    if (dependencies.some((dependency) => dependency.kind === 'docker-container')) {
+        return 'docker';
+    }
+    const parsed = parsePostgresConnectionString(databaseUrl);
+    return isLocalPostgresHost(parsed.hostname) ? 'local' : 'managed';
+}
+
+function inferDatabaseIntentStrategy(options: {
+    instanceName: string;
+    databaseMode: DatabaseSetupMode;
+    databaseUrl: string;
+}): DatabaseIntentStrategy {
+    const databaseName = postgresDatabaseName(options.databaseUrl);
+    if (options.databaseMode === 'managed') {
+        return 'external-existing';
+    }
+    return databaseName === `iranti_${options.instanceName}`
+        ? 'dedicated-local'
+        : 'shared-local';
+}
+
+function buildInstanceDatabaseIntent(options: {
+    instanceName: string;
+    databaseMode: DatabaseSetupMode;
+    databaseUrl: string;
+    strategy?: DatabaseIntentStrategy | null;
+    dockerContainerName?: string;
+}): InstanceDatabaseIntent {
+    const parsed = parsePostgresConnectionString(options.databaseUrl);
+    const strategy = options.strategy ?? inferDatabaseIntentStrategy({
+        instanceName: options.instanceName,
+        databaseMode: options.databaseMode,
+        databaseUrl: options.databaseUrl,
+    });
+    const port = Number.parseInt(parsed.port || '5432', 10);
+    return {
+        strategy,
+        provisioning: options.databaseMode,
+        host: parsed.hostname,
+        ...(Number.isFinite(port) && port > 0 ? { port } : {}),
+        database: postgresDatabaseName(options.databaseUrl),
+        ...(options.dockerContainerName ? { dockerContainerName: options.dockerContainerName } : {}),
+    };
+}
+
+function parseInstanceDatabaseIntent(raw: unknown): { intent: InstanceDatabaseIntent | null; errors: string[] } {
+    if (raw === undefined || raw === null) {
+        return { intent: null, errors: [] };
+    }
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+        return { intent: null, errors: ['databaseIntent must be an object'] };
+    }
+
+    const record = raw as Record<string, unknown>;
+    const strategy = parseDatabaseIntentStrategy(typeof record.strategy === 'string' ? record.strategy : undefined);
+    const provisioningRaw = typeof record.provisioning === 'string' ? record.provisioning.trim().toLowerCase() : '';
+    const provisioning = provisioningRaw === 'local' || provisioningRaw === 'managed' || provisioningRaw === 'docker'
+        ? provisioningRaw
+        : null;
+    const host = typeof record.host === 'string' ? record.host.trim() : '';
+    const database = typeof record.database === 'string' ? record.database.trim() : '';
+    const portRaw = typeof record.port === 'number'
+        ? record.port
+        : typeof record.port === 'string'
+            ? Number.parseInt(record.port, 10)
+            : undefined;
+    const dockerContainerName = typeof record.dockerContainerName === 'string'
+        ? record.dockerContainerName.trim()
+        : undefined;
+
+    const errors: string[] = [];
+    if (!strategy) {
+        errors.push('databaseIntent.strategy must be dedicated-local, shared-local, or external-existing');
+    }
+    if (!provisioning) {
+        errors.push('databaseIntent.provisioning must be local, managed, or docker');
+    }
+    if (!host) {
+        errors.push('databaseIntent.host is required');
+    }
+    if (!database) {
+        errors.push('databaseIntent.database is required');
+    }
+    if (portRaw !== undefined && (!Number.isFinite(portRaw) || portRaw <= 0)) {
+        errors.push('databaseIntent.port must be a positive integer');
+    }
+
+    if (errors.length > 0 || !strategy || !provisioning || !host || !database) {
+        return { intent: null, errors };
+    }
+
+    return {
+        intent: {
+            strategy,
+            provisioning,
+            host,
+            ...(portRaw !== undefined ? { port: portRaw } : {}),
+            database,
+            ...(dockerContainerName ? { dockerContainerName } : {}),
+        },
+        errors: [],
+    };
+}
+
+function resolveInstanceDatabaseIntent(options: {
+    instanceName: string;
+    env: Record<string, string>;
+    meta: Partial<InstanceMeta> | null;
+    dependencies: InstanceDependency[];
+}): { intent: InstanceDatabaseIntent | null; source: 'meta' | 'inferred' | 'none'; errors: string[] } {
+    const parsedMeta = parseInstanceDatabaseIntent(options.meta?.databaseIntent);
+    if (parsedMeta.intent) {
+        return { intent: parsedMeta.intent, source: 'meta', errors: parsedMeta.errors };
+    }
+
+    const dbUrl = options.env.DATABASE_URL?.trim();
+    if (!dbUrl || detectPlaceholder(dbUrl)) {
+        return { intent: null, source: 'none', errors: parsedMeta.errors };
+    }
+
+    const dockerDependency = options.dependencies.find((dependency) => dependency.kind === 'docker-container');
+    return {
+        intent: buildInstanceDatabaseIntent({
+            instanceName: options.instanceName,
+            databaseMode: inferDatabaseProvisioning(dbUrl, options.dependencies),
+            databaseUrl: dbUrl,
+            dockerContainerName: dockerDependency?.name,
+        }),
+        source: 'inferred',
+        errors: parsedMeta.errors,
+    };
+}
+
+function describeInstanceDatabaseIntent(intent: InstanceDatabaseIntent, source: 'meta' | 'inferred' | 'none' = 'meta'): string {
+    const target = `${intent.host}${intent.port ? `:${intent.port}` : ''}/${intent.database}`;
+    const sourceSuffix = source === 'inferred' ? ' (inferred)' : '';
+    const dockerSuffix = intent.dockerContainerName ? `, container ${intent.dockerContainerName}` : '';
+    return `${describeDatabaseIntentStrategy(intent.strategy)} via ${intent.provisioning} -> ${target}${dockerSuffix}${sourceSuffix}`;
 }
 
 function sanitizeIdentifier(input: string, fallback: string): string {
@@ -1672,6 +1871,7 @@ async function ensureInstanceConfigured(
     config: {
         port: number;
         dbUrl: string;
+        databaseIntent: InstanceDatabaseIntent;
         provider: string;
         providerKeys: Record<string, string>;
         apiKey: string;
@@ -1694,6 +1894,7 @@ async function ensureInstanceConfigured(
             port: config.port,
             envFile,
             instanceDir,
+            databaseIntent: config.databaseIntent,
             ...(config.dependencies && config.dependencies.length > 0 ? { dependencies: config.dependencies } : {}),
         };
         await writeJson(metaFile, meta);
@@ -1708,6 +1909,7 @@ async function ensureInstanceConfigured(
     });
 
     await syncInstanceMeta(root, name, config.port, {
+        databaseIntent: config.databaseIntent,
         ...(config.dependencies !== undefined ? { dependencies: config.dependencies } : {}),
     });
 
@@ -2346,12 +2548,23 @@ async function syncInstanceMeta(
     root: string,
     name: string,
     port: number,
-    options: { dependencies?: InstanceDependency[] } = {},
+    options: { dependencies?: InstanceDependency[]; databaseIntent?: InstanceDatabaseIntent } = {},
 ): Promise<void> {
     const { instanceDir, envFile, metaFile } = instancePaths(root, name);
     const existing = await readInstanceMetaFile(metaFile);
     const existingCreatedAt = typeof existing?.createdAt === 'string' ? existing.createdAt : undefined;
     const existingDependencies = parseInstanceDependencies(existing?.dependencies).dependencies;
+    const currentDependencies = options.dependencies ?? existingDependencies;
+    const env = fs.existsSync(envFile)
+        ? await readEnvFile(envFile).catch(() => ({} as Record<string, string>))
+        : {};
+    const resolvedDatabaseIntent = options.databaseIntent
+        ?? resolveInstanceDatabaseIntent({
+            instanceName: name,
+            env,
+            meta: existing,
+            dependencies: currentDependencies,
+        }).intent;
 
     const meta: InstanceMeta = {
         name,
@@ -2359,6 +2572,7 @@ async function syncInstanceMeta(
         port,
         envFile,
         instanceDir,
+        ...(resolvedDatabaseIntent ? { databaseIntent: resolvedDatabaseIntent } : {}),
         ...(options.dependencies !== undefined
             ? { dependencies: options.dependencies }
             : existingDependencies.length > 0
@@ -2480,6 +2694,7 @@ async function executeSetupPlan(plan: SetupExecutionPlan): Promise<SetupExecutio
     const configured = await ensureInstanceConfigured(plan.root, plan.instanceName, {
         port: plan.port,
         dbUrl: plan.databaseUrl,
+        databaseIntent: plan.databaseIntent,
         provider: plan.provider,
         providerKeys: plan.providerKeys,
         apiKey: plan.apiKey,
@@ -2561,6 +2776,7 @@ async function executeSetupPlan(plan: SetupExecutionPlan): Promise<SetupExecutio
         port: plan.port,
         mode: plan.mode,
         databaseMode: plan.databaseMode,
+        databaseIntent: plan.databaseIntent,
         bindings,
     };
 }
@@ -2588,6 +2804,7 @@ function parseSetupConfig(filePath: string): SetupExecutionPlan {
                 ? 'local'
                 : (() => { throw new Error(`Unsupported databaseMode in setup config: ${databaseModeRaw}`); })();
     const databaseUrl = deriveDatabaseUrlForMode(databaseMode, instanceName, String(raw?.databaseUrl ?? raw?.dbUrl ?? '').trim());
+    const databaseIntentStrategy = parseDatabaseIntentStrategyFlag(String(raw?.databaseIntent ?? raw?.dbIntent ?? '').trim(), 'databaseIntent');
     const provider = normalizeProvider(String(raw?.provider ?? 'mock')) ?? 'mock';
     if (!isSupportedProvider(provider)) {
         throw new Error(`Unsupported provider in setup config: ${provider}`);
@@ -2628,6 +2845,13 @@ function parseSetupConfig(filePath: string): SetupExecutionPlan {
         port,
         databaseUrl,
         databaseMode,
+        databaseIntent: buildInstanceDatabaseIntent({
+            instanceName,
+            databaseMode,
+            databaseUrl,
+            strategy: databaseIntentStrategy,
+            dockerContainerName: typeof raw?.dockerContainerName === 'string' ? raw.dockerContainerName : undefined,
+        }),
         provider,
         providerKeys,
         apiKey,
@@ -2666,6 +2890,7 @@ function defaultsSetupPlan(args: ParsedArgs): SetupExecutionPlan {
         throw new Error(`Invalid --db-mode '${explicit}'. Use local, managed, or docker.`);
     })();
     const databaseUrl = deriveDatabaseUrlForMode(databaseMode, instanceName, (getFlag(args, 'db-url') ?? process.env.DATABASE_URL ?? '').trim());
+    const databaseIntentStrategy = parseDatabaseIntentStrategyFlag(getFlag(args, 'db-intent'), '--db-intent');
 
     const provider = normalizeProvider(getFlag(args, 'provider') ?? process.env.LLM_PROVIDER ?? 'mock') ?? 'mock';
     if (!isSupportedProvider(provider)) {
@@ -2712,6 +2937,13 @@ function defaultsSetupPlan(args: ParsedArgs): SetupExecutionPlan {
         port,
         databaseUrl,
         databaseMode,
+        databaseIntent: buildInstanceDatabaseIntent({
+            instanceName,
+            databaseMode,
+            databaseUrl,
+            strategy: databaseIntentStrategy,
+            dockerContainerName: getFlag(args, 'docker-container-name'),
+        }),
         provider,
         providerKeys,
         apiKey,
@@ -4822,6 +5054,7 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
         console.log(`  instance url   http://localhost:${result.port}`);
         console.log(`  memory mode    ${result.mode}`);
         console.log(`  database mode  ${result.databaseMode}`);
+        console.log(`  db strategy    ${describeInstanceDatabaseIntent(result.databaseIntent)}`);
         if (result.bindings.length === 0) {
             console.log(`  projects       ${paint('none bound yet', 'yellow')}`);
         } else {
@@ -4923,6 +5156,9 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
         const existingInstance = fs.existsSync(instancePaths(finalRoot, instanceName).envFile)
             ? await loadInstanceEnv(finalRoot, instanceName)
             : null;
+        const existingInstanceMeta = fs.existsSync(instancePaths(finalRoot, instanceName).metaFile)
+            ? await readInstanceMetaFile(instancePaths(finalRoot, instanceName).metaFile)
+            : null;
 
         if (existingInstance) {
             console.log(`${infoLabel()} Found existing instance '${instanceName}'. Updating it.`);
@@ -4944,6 +5180,7 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
         let databaseProvisioned = false;
         let dockerContainerName: string | undefined;
         let databaseMode: DatabaseSetupMode = recommendedDatabaseMode;
+        let databaseIntentStrategy: DatabaseIntentStrategy | null = null;
         printChoiceGuide('Database Mode Choices', [
             {
                 choice: 'local',
@@ -4989,6 +5226,21 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
                         console.log(`${infoLabel()} Iranti will create the local database automatically if it does not already exist.`);
                     }
                 }
+                databaseIntentStrategy = parseDatabaseIntentStrategyFlag(
+                    await prompt.line(
+                        'Database intent (dedicated, shared, external)',
+                        databaseIntentPromptValue(
+                            resolveInstanceDatabaseIntent({
+                                instanceName,
+                                env: existingInstance?.env ?? { DATABASE_URL: dbUrl },
+                                meta: existingInstanceMeta,
+                                dependencies: parseInstanceDependencies(existingInstanceMeta?.dependencies).dependencies,
+                            }).intent?.strategy
+                            ?? inferDatabaseIntentStrategy({ instanceName, databaseMode, databaseUrl: dbUrl })
+                        )
+                    ),
+                    'database intent'
+                );
                 bootstrapDatabase = await promptYesNo(prompt, 'Run migrations and seed the database now?', true);
                 break;
             }
@@ -5008,6 +5260,23 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
                 );
                 dockerContainerName = containerName;
                 dbUrl = `postgresql://postgres:${dbPassword}@localhost:${dbHostPort}/${dbName}`;
+                databaseIntentStrategy = parseDatabaseIntentStrategyFlag(
+                    await prompt.line(
+                        'Database intent (dedicated, shared, external)',
+                        databaseIntentPromptValue(
+                            resolveInstanceDatabaseIntent({
+                                instanceName,
+                                env: existingInstance?.env ?? { DATABASE_URL: dbUrl },
+                                meta: existingInstanceMeta,
+                                dependencies: dockerContainerName
+                                    ? [{ kind: 'docker-container', name: dockerContainerName, ...(dbHostPort > 0 ? { healthTcpPort: dbHostPort } : {}) }]
+                                    : parseInstanceDependencies(existingInstanceMeta?.dependencies).dependencies,
+                            }).intent?.strategy
+                            ?? inferDatabaseIntentStrategy({ instanceName, databaseMode, databaseUrl: dbUrl })
+                        )
+                    ),
+                    'database intent'
+                );
 
                 console.log(`${infoLabel()} Docker will be used only for PostgreSQL. Iranti itself does not require Docker once a PostgreSQL database is available.`);
                 if (await promptYesNo(prompt, `Start or reuse Docker container '${containerName}' now?`, true)) {
@@ -5164,6 +5433,13 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
             port,
             databaseUrl: dbUrl,
             databaseMode,
+            databaseIntent: buildInstanceDatabaseIntent({
+                instanceName,
+                databaseMode,
+                databaseUrl: dbUrl,
+                strategy: databaseIntentStrategy,
+                dockerContainerName,
+            }),
             provider,
             providerKeys,
             apiKey: defaultApiKey,
@@ -5196,6 +5472,7 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
     console.log(`  instance url   http://localhost:${finalResult.port}`);
     console.log(`  memory mode    ${finalResult.mode}`);
     console.log(`  database mode  ${finalResult.databaseMode}`);
+    console.log(`  db strategy    ${describeInstanceDatabaseIntent(finalResult.databaseIntent)}`);
     if (finalResult.bindings.length === 0) {
             console.log(`  projects       ${paint('none bound yet', 'yellow')}`);
     } else {
@@ -6001,6 +6278,12 @@ async function showInstanceCommand(args: ParsedArgs): Promise<void> {
         : {};
     const meta = await readInstanceMetaFile(instancePaths(root, name).metaFile);
     const dependencies = parseInstanceDependencies(meta?.dependencies).dependencies;
+    const databaseIntent = resolveInstanceDatabaseIntent({
+        instanceName: name,
+        env,
+        meta,
+        dependencies,
+    });
     const runtime = await readInstanceRuntimeSummary(root, name);
     console.log(bold(`Instance: ${name}`));
     console.log(`  dir : ${instanceDir}`);
@@ -6008,6 +6291,9 @@ async function showInstanceCommand(args: ParsedArgs): Promise<void> {
     console.log(`  config: ${describeInstanceConfig(config)}`);
     console.log(`  port: ${env.IRANTI_PORT ?? '3001'}`);
     console.log(`  db  : ${env.DATABASE_URL ?? '(missing)'}`);
+    if (databaseIntent.intent) {
+        console.log(`  db strategy: ${describeInstanceDatabaseIntent(databaseIntent.intent, databaseIntent.source)}`);
+    }
     console.log(`  esc : ${env.IRANTI_ESCALATION_DIR ?? '(missing)'}`);
     if (dependencies.length > 0) {
         console.log(`  deps: ${dependencies.map((dependency) => describeInstanceDependency(dependency)).join(', ')}`);
@@ -6188,6 +6474,12 @@ async function configureInstanceCommand(args: ParsedArgs): Promise<void> {
     const { instanceDir, envFile, env, config } = await loadInstanceEnv(root, name, { allowRepair: true });
     const currentMeta = await readInstanceMetaFile(instancePaths(root, name).metaFile);
     const currentDependencies = parseInstanceDependencies(currentMeta?.dependencies).dependencies;
+    const currentDatabaseIntent = resolveInstanceDatabaseIntent({
+        instanceName: name,
+        env,
+        meta: currentMeta,
+        dependencies: currentDependencies,
+    });
     const updates: Record<string, string | undefined> = {};
 
     let portRaw = getFlag(args, 'port');
@@ -6198,6 +6490,7 @@ async function configureInstanceCommand(args: ParsedArgs): Promise<void> {
     let clearProviderKey = hasFlag(args, 'clear-provider-key');
     let dockerContainerName = getFlag(args, 'docker-container');
     let dockerHealthPortRaw = getFlag(args, 'docker-health-port');
+    let dbIntentRaw = getFlag(args, 'db-intent');
     const clearDockerContainer = hasFlag(args, 'clear-docker-container');
 
     if (hasFlag(args, 'interactive')) {
@@ -6206,12 +6499,14 @@ async function configureInstanceCommand(args: ParsedArgs): Promise<void> {
                 'This updates one existing instance in place.',
                 'API port controls where the Iranti API listens.',
                 'DATABASE_URL points at the PostgreSQL database for this instance.',
+                'Database intent tells Iranti whether this should be treated as a dedicated local DB, a shared local DB, or an external existing DB.',
                 'LLM provider and provider key control which model backend Iranti uses.',
                 'Iranti API key is the client credential other tools and project bindings use to authenticate.',
                 'Optional Docker dependency settings let `iranti run --instance` start a recorded backing container before the API boots.',
             ]);
             portRaw = await prompt.line('API port', portRaw ?? env.IRANTI_PORT);
             dbUrl = await prompt.line('DATABASE_URL', dbUrl ?? env.DATABASE_URL);
+            dbIntentRaw = await prompt.line('Database intent (dedicated, shared, external)', dbIntentRaw ?? databaseIntentPromptValue(currentDatabaseIntent.intent?.strategy));
             providerInput = await prompt.line('LLM provider', providerInput ?? env.LLM_PROVIDER ?? 'mock');
             const interactiveProvider = normalizeProvider(providerInput ?? env.LLM_PROVIDER ?? 'mock');
             const interactiveProviderEnvKey = providerKeyEnv(interactiveProvider);
@@ -6234,6 +6529,7 @@ async function configureInstanceCommand(args: ParsedArgs): Promise<void> {
     }
 
     if (dbUrl) updates.DATABASE_URL = dbUrl;
+    const requestedDatabaseIntent = parseDatabaseIntentStrategyFlag(dbIntentRaw, '--db-intent');
 
     if (apiKey) updates.IRANTI_API_KEY = apiKey;
 
@@ -6296,8 +6592,9 @@ async function configureInstanceCommand(args: ParsedArgs): Promise<void> {
 
     if (Object.keys(updates).length === 0) {
         const dependenciesUnchanged = JSON.stringify(nextDependencies) === JSON.stringify(currentDependencies);
-        if (dependenciesUnchanged) {
-            throw new Error('No changes provided. Use flags like --provider, --provider-key, --api-key, --db-url, --port, or the Docker dependency flags.');
+        const databaseIntentUnchanged = requestedDatabaseIntent === null;
+        if (dependenciesUnchanged && databaseIntentUnchanged) {
+            throw new Error('No changes provided. Use flags like --provider, --provider-key, --api-key, --db-url, --db-intent, --port, or the Docker dependency flags.');
         }
     }
 
@@ -6329,9 +6626,20 @@ async function configureInstanceCommand(args: ParsedArgs): Promise<void> {
         );
     }
 
+    const nextDatabaseIntent = buildInstanceDatabaseIntent({
+        instanceName: name,
+        databaseMode: inferDatabaseProvisioning(nextEnv.DATABASE_URL, nextDependencies),
+        databaseUrl: nextEnv.DATABASE_URL,
+        strategy: requestedDatabaseIntent ?? currentDatabaseIntent.intent?.strategy,
+        dockerContainerName: nextDependencies.find((dependency) => dependency.kind === 'docker-container')?.name,
+    });
+
     await ensureDir(instanceDir);
     await upsertEnvFile(envFile, updates);
-    await syncInstanceMeta(root, name, nextPort, { dependencies: nextDependencies });
+    await syncInstanceMeta(root, name, nextPort, {
+        dependencies: nextDependencies,
+        databaseIntent: nextDatabaseIntent,
+    });
 
     const json = hasFlag(args, 'json');
     const result = {
@@ -6341,6 +6649,7 @@ async function configureInstanceCommand(args: ParsedArgs): Promise<void> {
         provider: updates.LLM_PROVIDER ?? env.LLM_PROVIDER ?? 'mock',
         apiKeyChanged: Boolean(apiKey),
         providerKeyChanged: Boolean(providerKey) || hasFlag(args, 'clear-provider-key'),
+        databaseIntent: nextDatabaseIntent.strategy,
         dependencies: nextDependencies.map((dependency) => describeInstanceDependency(dependency)),
     };
 
@@ -6353,6 +6662,7 @@ async function configureInstanceCommand(args: ParsedArgs): Promise<void> {
     console.log(`  status   ${okLabel()}`);
     console.log(`  env      ${envFile}`);
     console.log(`  keys     ${result.updatedKeys.join(', ')}`);
+    console.log(`  db       ${describeInstanceDatabaseIntent(nextDatabaseIntent)}`);
     if (result.dependencies.length > 0) {
         console.log(`  deps     ${result.dependencies.join(', ')}`);
     }

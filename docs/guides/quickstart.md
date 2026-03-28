@@ -127,6 +127,7 @@ It now also prints a dependency preflight up front so you can see whether Docker
 
 Automation notes:
 - `--defaults` skips prompts and uses defaults plus environment/flag input. It now derives a localhost or Docker `DATABASE_URL` automatically when `--db-mode local` or `--db-mode docker` is selected. A real `--db-url` is still required for `--db-mode managed`.
+- `--db-intent dedicated|shared|external` records whether the instance should treat that target as its own local DB, a shared local DB, or a fully external existing DB for future repair flows.
 - `--config` accepts a JSON setup plan for repeatable bootstrap in CI or managed installs.
 - `--bootstrap-db` runs migrations and seeding during automated setup when the target database is reachable and suitable for Prisma bootstrap.
 - Example config: [`iranti.setup.example.json`](./iranti.setup.example.json)

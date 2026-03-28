@@ -10,6 +10,7 @@
 |---|---|---|
 | `configure instance <name>` | command | Targets a named machine-level instance. |
 | `--db-url` | string | Replaces `DATABASE_URL` in the instance env. |
+| `--db-intent` | `dedicated \| shared \| external` | Replaces or records explicit database intent in instance metadata. |
 | `--port` | integer | Replaces `IRANTI_PORT` in the instance env. |
 | `--api-key` | string | Replaces `IRANTI_API_KEY` in the instance env or project binding. |
 | `--provider` | string | Replaces `LLM_PROVIDER` in the instance env. |
@@ -43,6 +44,7 @@
    - `configure project` loads or creates `.env.iranti` under the selected project path.
 2. Validate user-supplied flags:
    - parse and validate `--port`
+   - parse and validate `--db-intent`
    - normalize provider names
    - map provider names to the correct provider API key env variable
    - if `--interactive` is enabled, explain the meaning of each field, then prompt for missing/current values before applying updates
@@ -57,7 +59,7 @@
    - preserve existing values when the user does not override them
    - preserve or update `IRANTI_PERSONAL_MEMORY_ENTITY`, defaulting new bindings to `user/main`
    - preserve or update `IRANTI_AUTO_REMEMBER`, defaulting new bindings to `false`
-6. When an instance port changes, dependency metadata changes, or a broken `instance.json` is being repaired, rewrite `instance.json` so metadata stays in sync with the repaired env.
+6. When an instance port changes, database intent changes, dependency metadata changes, or a broken `instance.json` is being repaired, rewrite `instance.json` so metadata stays in sync with the repaired env.
 7. Write the resulting env file and ensure `.env.iranti` is listed in `.gitignore` for project bindings.
 8. Emit text or JSON output.
 
@@ -65,6 +67,7 @@
 
 - `configure instance` fails if the named instance does not exist.
 - `configure instance` can repair an instance directory with a missing or unreadable `.env`, but it refuses to finish until the repaired result has a valid `IRANTI_PORT` and `DATABASE_URL`.
+- Existing instances without explicit database intent remain repairable; configure backfills explicit intent metadata from the repaired env when possible.
 - `--docker-health-port` fails without `--docker-container`.
 - `--provider-key` fails for providers that do not use remote API keys (`mock`, `ollama`).
 - `--interactive` requires a real terminal session and is not intended for piped/non-TTY automation.

@@ -303,7 +303,7 @@ iranti/
 â”œâ”€â”€ docs/
 â”‚   â”œâ”€â”€ engineering/            â€” CODE_STANDARDS.md, COMMENTING_GUIDELINES.md
 â”‚   â”œâ”€â”€ decisions/              â€” One file per architectural decision
-â”‚   â”œâ”€â”€ features/               â€” One subfolder per feature, including cli-uninstall, ontology-evolution, cross-tool-handoffs, and compatibility-contracts
+â”‚   â”œâ”€â”€ features/               â€” One subfolder per feature, including cli-uninstall, ontology-evolution, cross-tool-handoffs, compatibility-contracts, instance runtime dependencies, and instance database intent
 â”‚   â””â”€â”€ internal/               â€” Internal design notes, validation artifacts, and compatibility backlog
 +-- clients/
 ¦   +-- python/
@@ -556,7 +556,8 @@ Entity format: `"entityType/entityId"` e.g. `"researcher/jane_smith"`
 - **docs/features/** â€” One subfolder per feature. Each contains `spec.md`
   covering inputs, outputs, decision tree, edge cases, and test results.
   Current feature folders include Claude/Codex MCP integration, compatibility
-  contracts, memory lifecycle policy, and instance runtime dependencies.
+  contracts, memory lifecycle policy, instance runtime dependencies, and
+  instance database intent.
 - **docs/engineering/** â€” Internal standards for contributors.
   `CODE_STANDARDS.md`, `COMMENTING_GUIDELINES.md`.
 - **docs/internal/** â€” Internal design notes, validation artifacts, and release/backward-compatibility backlogs. `docs/internal/README.md` is the index for trust levels and categories inside this folder. Internal docs are supporting material, not canonical product contract, unless a guide/spec/decision explicitly points to them.
