@@ -1037,6 +1037,7 @@ async function inspectInstanceConfig(root: string, name: string): Promise<Instan
     let metaReadable = false;
     let envReadable = false;
     const ownershipIssues: string[] = [];
+    let rewrittenMeta = false;
 
     if (metaPresent) {
         try {
@@ -1044,6 +1045,24 @@ async function inspectInstanceConfig(root: string, name: string): Promise<Instan
             const parsed = JSON.parse(raw) as Partial<InstanceMeta>;
             metaReadable = typeof parsed.name === 'string' && parsed.name.trim().length > 0;
             if (metaReadable) {
+                const shouldRewriteOwnership =
+                    parsed.name?.trim() === name
+                    && (
+                        (typeof parsed.instanceDir === 'string' && path.resolve(parsed.instanceDir) !== path.resolve(instanceDir))
+                        || (typeof parsed.envFile === 'string' && path.resolve(parsed.envFile) !== path.resolve(envFile))
+                    );
+                if (shouldRewriteOwnership) {
+                    const nextMeta = {
+                        ...parsed,
+                        name,
+                        instanceDir,
+                        envFile,
+                    };
+                    await writeText(metaFile, `${JSON.stringify(nextMeta, null, 2)}\n`);
+                    rewrittenMeta = true;
+                    parsed.instanceDir = instanceDir;
+                    parsed.envFile = envFile;
+                }
                 if (parsed.name?.trim() !== name) {
                     ownershipIssues.push(`instance.json name is ${parsed.name}`);
                 }
@@ -1079,7 +1098,9 @@ async function inspectInstanceConfig(root: string, name: string): Promise<Instan
         detail = ownershipIssues.join('; ');
     } else if (metaPresent && envPresent && metaReadable && envReadable) {
         classification = 'complete';
-        detail = 'instance metadata and env are present';
+        detail = rewrittenMeta
+            ? 'instance metadata was repaired and env is present'
+            : 'instance metadata and env are present';
     } else if ((metaPresent && !metaReadable) || (envPresent && !envReadable)) {
         classification = 'invalid';
         detail = [

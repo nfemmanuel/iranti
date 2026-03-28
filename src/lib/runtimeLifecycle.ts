@@ -295,6 +295,14 @@ function parseInstanceRuntime(raw: string, runtimeFile: string): InstanceRuntime
     }
 }
 
+function removeRuntimeMetadataFile(runtimeFile: string): void {
+    try {
+        fs.rmSync(runtimeFile, { force: true });
+    } catch {
+        // Best-effort self-heal. If removal fails, callers still receive the invalid classification.
+    }
+}
+
 export function readInstanceRuntime(runtimeFile: string): InstanceRuntimeMetadata | null {
     if (!fs.existsSync(runtimeFile)) return null;
     const raw = fs.readFileSync(runtimeFile, 'utf8');
@@ -357,13 +365,14 @@ export async function inspectRuntimeState(runtimeFile: string): Promise<RuntimeI
 
     const state = await readRuntimeState(runtimeFile);
     if (!state) {
+        removeRuntimeMetadataFile(runtimeFile);
         return {
             state: null,
             processAlive: false,
             running: false,
             stale: false,
-            classification: 'invalid',
-            detail: 'runtime metadata is unreadable or incomplete',
+            classification: 'missing',
+            detail: 'invalid runtime metadata was discarded',
             health: { checked: false, ok: false, source: 'none', detail: 'runtime metadata unavailable' },
         };
     }
@@ -378,10 +387,23 @@ export async function inspectRuntimeState(runtimeFile: string): Promise<RuntimeI
         path.resolve(state.envFile) !== expectedEnvFile ? `envFile points to ${state.envFile}` : null,
         state.instanceName !== expectedInstanceName ? `instanceName is ${state.instanceName}` : null,
     ].filter((value): value is string => Boolean(value));
+    const processAlive = isPidAlive(state.pid);
     if (ownershipIssues.length > 0) {
+        if (!processAlive) {
+            removeRuntimeMetadataFile(runtimeFile);
+            return {
+                state: null,
+                processAlive: false,
+                running: false,
+                stale: false,
+                classification: 'missing',
+                detail: 'stale runtime metadata was discarded after an ownership mismatch',
+                health: { checked: false, ok: false, source: 'none', detail: 'runtime metadata ownership mismatch' },
+            };
+        }
         return {
             state,
-            processAlive: false,
+            processAlive,
             running: false,
             stale: false,
             classification: 'invalid',
@@ -390,7 +412,6 @@ export async function inspectRuntimeState(runtimeFile: string): Promise<RuntimeI
         };
     }
 
-    const processAlive = isPidAlive(state.pid);
     const stale = !processAlive && state.status !== 'stopped';
     const healthUrl = state.healthUrl?.trim() || `http://127.0.0.1:${state.port}/health`;
     const healthResult = processAlive

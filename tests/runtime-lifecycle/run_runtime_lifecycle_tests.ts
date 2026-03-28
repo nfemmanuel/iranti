@@ -508,6 +508,39 @@ async function main(): Promise<void> {
             healthUrl: `http://127.0.0.1:${healthyRuntime.port}/health`,
         });
 
+        const repairedConfigDir = path.join(instancesDir, 'repaired-config');
+        const repairedConfigEnvFile = path.join(repairedConfigDir, '.env');
+        writeJson(path.join(repairedConfigDir, 'instance.json'), {
+            name: 'repaired-config',
+            createdAt: now,
+            port: 3093,
+            envFile: path.join(root, 'old-root', 'instances', 'repaired-config', '.env'),
+            instanceDir: path.join(root, 'old-root', 'instances', 'repaired-config'),
+        });
+        writeText(repairedConfigEnvFile, [
+            'IRANTI_INSTANCE_NAME=repaired-config',
+            'IRANTI_PORT=3093',
+            'DATABASE_URL=postgresql://postgres:postgres@localhost:5432/iranti_repaired_config',
+            '',
+        ].join('\n'));
+
+        const invalidRuntimeFileDir = path.join(instancesDir, 'invalid-runtime-file');
+        const invalidRuntimeEnvFile = path.join(invalidRuntimeFileDir, '.env');
+        writeJson(path.join(invalidRuntimeFileDir, 'instance.json'), {
+            name: 'invalid-runtime-file',
+            createdAt: now,
+            port: 3094,
+            envFile: invalidRuntimeEnvFile,
+            instanceDir: invalidRuntimeFileDir,
+        });
+        writeText(invalidRuntimeEnvFile, [
+            'IRANTI_INSTANCE_NAME=invalid-runtime-file',
+            'IRANTI_PORT=3094',
+            'DATABASE_URL=postgresql://postgres:postgres@localhost:5432/iranti_invalid_runtime_file',
+            '',
+        ].join('\n'));
+        fs.writeFileSync(path.join(invalidRuntimeFileDir, 'runtime.json'), Buffer.alloc(64));
+
         const statusWithVariantsRun = runCli(['status', '--root', root, '--json'], ambientFreeCwd);
         assert.strictEqual(statusWithVariantsRun.status, 0, `status with variant instances failed:\n${statusWithVariantsRun.stdout}\n${statusWithVariantsRun.stderr}`);
         const statusWithVariants = JSON.parse(statusWithVariantsRun.stdout.trim()) as typeof statusPayload;
@@ -518,6 +551,8 @@ async function main(): Promise<void> {
         const misownedConfigStatus = statusWithVariants.instances.find((instance) => instance.name === 'misowned-config');
         const misownedRuntimeStatus = statusWithVariants.instances.find((instance) => instance.name === 'misowned-runtime');
         const stoppedButAliveStatus = statusWithVariants.instances.find((instance) => instance.name === 'stopped-but-alive');
+        const repairedConfigStatus = statusWithVariants.instances.find((instance) => instance.name === 'repaired-config');
+        const invalidRuntimeFileStatus = statusWithVariants.instances.find((instance) => instance.name === 'invalid-runtime-file');
         assert.ok(healthyStatus, 'Expected healthy instance in status payload.');
         assert.ok(unhealthyStatus, 'Expected unhealthy instance in status payload.');
         assert.ok(partialStatus, 'Expected partial instance in status payload.');
@@ -525,6 +560,8 @@ async function main(): Promise<void> {
         assert.ok(misownedConfigStatus, 'Expected misowned-config instance in status payload.');
         assert.ok(misownedRuntimeStatus, 'Expected misowned-runtime instance in status payload.');
         assert.ok(stoppedButAliveStatus, 'Expected stopped-but-alive instance in status payload.');
+        assert.ok(repairedConfigStatus, 'Expected repaired-config instance in status payload.');
+        assert.ok(invalidRuntimeFileStatus, 'Expected invalid-runtime-file instance in status payload.');
         assert.strictEqual(healthyStatus?.runtime.classification, 'running');
         assert.strictEqual(healthyStatus?.runtime.health.ok, true);
         assert.strictEqual(unhealthyStatus?.runtime.classification, 'unhealthy');
@@ -537,10 +574,18 @@ async function main(): Promise<void> {
         assert.strictEqual(invalidStatus?.config.classification, 'invalid');
         assert.strictEqual(misownedConfigStatus?.config.classification, 'invalid');
         assert.strictEqual(misownedRuntimeStatus?.runtime.classification, 'invalid');
+        const repairedConfigSummary = repairedConfigStatus?.config as { classification?: string; detail?: string } | undefined;
+        assert.strictEqual(repairedConfigSummary?.classification, 'complete');
+        assert.match(repairedConfigSummary?.detail ?? '', /repaired/i);
+        assert.strictEqual(invalidRuntimeFileStatus?.runtime.classification, 'missing');
         assert.ok((partialStatus?.repairHints ?? []).some((hint) => hint.includes('configure instance partial')), 'Expected partial instance repair hint.');
         assert.ok((unhealthyStatus?.repairHints ?? []).some((hint) => hint.includes('doctor --instance unhealthy')), 'Expected unhealthy instance repair hint.');
         assert.ok((misownedRuntimeStatus?.repairHints ?? []).some((hint) => hint.includes('runtime.json')), 'Expected invalid runtime repair hint.');
         assert.ok(statusWithVariants.recommendedActions.length >= 3, 'Expected aggregated recommended actions in status JSON.');
+
+        const repairedConfigMeta = JSON.parse(fs.readFileSync(path.join(repairedConfigDir, 'instance.json'), 'utf8')) as { instanceDir: string; envFile: string };
+        assert.strictEqual(repairedConfigMeta.instanceDir, repairedConfigDir);
+        assert.strictEqual(repairedConfigMeta.envFile, repairedConfigEnvFile);
 
         const healthyInspection = await inspectRuntimeState(path.join(healthyDir, 'runtime.json'));
         assert.strictEqual(healthyInspection.classification, 'running');
@@ -555,6 +600,10 @@ async function main(): Promise<void> {
         const misownedInspection = await inspectRuntimeState(path.join(misownedRuntimeDir, 'runtime.json'));
         assert.strictEqual(misownedInspection.classification, 'invalid');
         assert.strictEqual(misownedInspection.health.checked, false);
+
+        const invalidRuntimeInspection = await inspectRuntimeState(path.join(invalidRuntimeFileDir, 'runtime.json'));
+        assert.strictEqual(invalidRuntimeInspection.classification, 'missing');
+        assert.strictEqual(fs.existsSync(path.join(invalidRuntimeFileDir, 'runtime.json')), false);
 
         const runPartialRun = runCli(['run', '--instance', 'partial', '--root', root], ambientFreeCwd);
         assert.notStrictEqual(runPartialRun.status, 0, 'run unexpectedly accepted a partial instance');
