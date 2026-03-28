@@ -65,7 +65,8 @@ const schemas = {
     latestMessage: { type: 'string', required: false, maxLength: 10000 },
     maxFacts: { type: 'number', required: false, min: 1, max: 100, default: 10 },
     entityHints: { type: 'array', required: false, maxLength: 100 },
-    forceInject: { type: 'boolean', required: false }
+    forceInject: { type: 'boolean', required: false },
+    suppressEvents: { type: 'boolean', required: false }
   },
   relate: {
     fromEntity: { type: 'string', required: true, pattern: /^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_/-]+$/, maxLength: 200 },

@@ -245,6 +245,7 @@ export interface ObserveResult {
 export interface AttendInput extends ObserveInput {
     latestMessage?: string;
     forceInject?: boolean;
+    suppressEvents?: boolean;
 }
 
 export interface SessionCheckpointInput extends AgentContext {
@@ -1229,20 +1230,22 @@ export class AttendantInstance {
         });
 
         if (!decision.needed) {
-            getStaffEventEmitter().emit({
-                staffComponent: 'Attendant',
-                actionType: 'attend_completed',
-                agentId: this.agentId,
-                source: 'internal',
-                reason: null,
-                level: 'debug',
-                metadata: {
-                    contextCallCount: this.contextCallCount,
-                    sessionId: this.sessionStarted,
-                    shouldInject: false,
-                    attendReason: 'memory_not_needed',
-                },
-            });
+            if (input.suppressEvents !== true) {
+                getStaffEventEmitter().emit({
+                    staffComponent: 'Attendant',
+                    actionType: 'attend_completed',
+                    agentId: this.agentId,
+                    source: 'internal',
+                    reason: null,
+                    level: 'debug',
+                    metadata: {
+                        contextCallCount: this.contextCallCount,
+                        sessionId: this.sessionStarted,
+                        shouldInject: false,
+                        attendReason: 'memory_not_needed',
+                    },
+                });
+            }
             timeEnd('attendant.attend_ms', t0);
             return {
                 shouldInject: false,
@@ -1291,20 +1294,22 @@ export class AttendantInstance {
             decision,
             bootstrap,
         };
-        getStaffEventEmitter().emit({
-            staffComponent: 'Attendant',
-            actionType: 'attend_completed',
-            agentId: this.agentId,
-            source: 'internal',
-            reason: null,
-            level: 'debug',
-            metadata: {
-                contextCallCount: this.contextCallCount,
-                sessionId: this.sessionStarted,
-                shouldInject,
-                attendReason: reason,
-            },
-        });
+        if (input.suppressEvents !== true) {
+            getStaffEventEmitter().emit({
+                staffComponent: 'Attendant',
+                actionType: 'attend_completed',
+                agentId: this.agentId,
+                source: 'internal',
+                reason: null,
+                level: 'debug',
+                metadata: {
+                    contextCallCount: this.contextCallCount,
+                    sessionId: this.sessionStarted,
+                    shouldInject,
+                    attendReason: reason,
+                },
+            });
+        }
         timeEnd('attendant.attend_ms', t0);
         return attendResult;
     }

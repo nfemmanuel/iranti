@@ -253,6 +253,7 @@ export interface ObserveInput {
 export interface AttendInput extends ObserveInput {
     latestMessage?: string;
     forceInject?: boolean;
+    suppressEvents?: boolean;
 }
 
 // ─── Entity Parsing ──────────────────────────────────────────────────────────
