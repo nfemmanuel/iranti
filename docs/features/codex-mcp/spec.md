@@ -45,15 +45,18 @@ This feature connects Codex to Iranti through Codex's MCP client using the insta
 11. The project-local `.vscode/mcp.json` exposes the same `iranti` server through VS Code's native workspace MCP surface so Codex VS Code sessions do not depend on cross-app discovery.
 12. Store only safe defaults and any explicitly requested pinned `IRANTI_PROJECT_ENV` in the global MCP entry.
 13. At runtime, `iranti mcp` loads `IRANTI_PROJECT_ENV` first when explicitly pinned and otherwise falls back to the active project/workspace.
-14. If `IRANTI_AUTO_REMEMBER=true`, `iranti_attend` first persists only narrow explicit prompt facts, routing personal facts to `IRANTI_PERSONAL_MEMORY_ENTITY`/`user/main` and project facts to `IRANTI_MEMORY_ENTITY`.
-15. Prompt-captured personal facts are stored as direct user memory so later explicit user corrections can replace older hook-written values.
-16. Recall questions about remembered preferences, decisions, blockers, next steps, or prior project facts are treated as mandatory memory prompts and bypass the LLM memory-needed classifier.
-17. If Codex's own final answer contains a strict durable summary such as `The next step is ...` or `We decided ...`, call `iranti_remember_response` explicitly because there is no Codex-side `Stop` hook.
-18. Launch Codex with `codex -C <project>` for the intended workspace context.
+14. If an operator launches `iranti mcp` directly in a terminal, the process intentionally stays running because it is waiting for an MCP client over stdio.
+15. Handshake returns the Attendant operating-rules summary plus a concrete read/write discipline for Iranti usage, including when to query, search, write, remember durable summaries, and avoid saving ephemeral chatter.
+16. If `IRANTI_AUTO_REMEMBER=true`, `iranti_attend` first persists only narrow explicit prompt facts, routing personal facts to `IRANTI_PERSONAL_MEMORY_ENTITY`/`user/main` and project facts to `IRANTI_MEMORY_ENTITY`.
+17. Prompt-captured personal facts are stored as direct user memory so later explicit user corrections can replace older hook-written values.
+18. Recall questions about remembered preferences, decisions, blockers, next steps, or prior project facts are treated as mandatory memory prompts and bypass the LLM memory-needed classifier.
+19. If Codex's own final answer contains a strict durable summary such as `The next step is ...` or `We decided ...`, call `iranti_remember_response` explicitly because there is no Codex-side `Stop` hook.
+20. Launch Codex with `codex -C <project>` for the intended workspace context.
 
 ## Edge Cases
 
 - If `codex` is not installed, setup fails fast with a direct error that tells the user to confirm `codex --version` before retrying.
+- Direct terminal launch of `iranti mcp`: the process intentionally stays running because it is waiting for a stdio MCP client; this is not a crash or deadlock.
 - If `codex --version` works in PowerShell on Windows but PATH resolution still differs for child-process execution, `CODEX_CLI_PATH` may be used to pin Iranti to a concrete `codex.exe` or npm shim target.
 - Setup succeeds without `--project-env`; the MCP server then relies on runtime cwd-based resolution.
 - If `--project-env` points to a missing file, setup fails fast.

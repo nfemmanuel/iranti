@@ -17,6 +17,20 @@ const ATTENDANT_RULES_QUERY: EntryQuery = {
     entityId: 'attendant',
     key: 'operating_rules',
 };
+export const DEFAULT_ATTENDANT_OPERATING_RULES: string[] = [
+    'Serve one external agent only; optimize for that agent keeping task context coherent across turns and sessions.',
+    'At session start or when the task changes, run handshake to load operating rules, task context, and the most relevant shared memory.',
+    'Before answering recall-style questions about remembered preferences, decisions, blockers, next steps, prior project state, or earlier findings, consult Iranti instead of guessing.',
+    'Use exact query when the entity and key are known. Use search or attend when the fact must be discovered from shared memory.',
+    'Persist durable knowledge when it is learned or confirmed: decisions, blockers, next steps, owners, stable preferences, project constraints, important file purposes, and validated environment details.',
+    'When a file is created or substantially repurposed, capture what it is for only if that context is likely to matter to another agent or a later session.',
+    'When an approach fails and the failure or workaround is likely to matter later, store the failed path and the chosen alternative route as durable memory.',
+    'Use iranti_write for durable facts, iranti_ingest for stable source material worth chunking, and iranti_remember_response for strict assistant summaries such as next steps or blockers.',
+    'Do not save every turn. Skip ephemeral chatter, speculative thoughts, or transient execution noise that will degrade retrieval quality later.',
+    'Deliver a compressed working-memory brief, not the full knowledge base. Load only what is relevant to the current task.',
+    'Reconvene or attend again when context shifts, when the visible window is missing needed facts, or when a different entity becomes relevant.',
+    'If context gets stale or the task has gone long enough that reasoning may drift, re-read the operating rules from the Staff Namespace before proceeding.',
+];
 const CONTEXT_RECOVERY_THRESHOLD = 20;  // LLM calls before context recovery
 const SESSION_INTERRUPTION_TTL_MS = 5 * 60 * 1000;
 const ENTITY_DETECTION_WINDOW_CHARS = 1500;
@@ -247,7 +261,7 @@ export function normalizeExplicitTask(task: string | null | undefined): string |
 
     let cleaned = task
         .replace(/\s+/g, ' ')
-        .replace(/^[`"'“”]+|[`"'“”]+$/g, '')
+        .replace(/^[`"']+|[`"']+$/g, '')
         .trim();
 
     if (!cleaned) return null;
@@ -271,6 +285,39 @@ export function normalizeExplicitTask(task: string | null | undefined): string |
     }
 
     return cleaned;
+}
+
+export function formatOperatingRulesText(
+    rawValue: unknown,
+    summary?: string | null,
+    fallbackRules: string[] = DEFAULT_ATTENDANT_OPERATING_RULES
+): string {
+    const candidateRules = rawValue
+        && typeof rawValue === 'object'
+        && Array.isArray((rawValue as { rules?: unknown }).rules)
+        ? (rawValue as { rules: unknown[] }).rules
+        : [];
+
+    const normalizedRules = candidateRules
+        .map((rule) => (typeof rule === 'string' ? rule.trim() : ''))
+        .filter(Boolean);
+
+    const mergedRules = [...normalizedRules];
+    for (const fallbackRule of fallbackRules) {
+        if (!mergedRules.includes(fallbackRule)) {
+            mergedRules.push(fallbackRule);
+        }
+    }
+
+    if (mergedRules.length === 0) {
+        return summary?.trim() || 'No operating rules found.';
+    }
+
+    return [
+        summary?.trim() || 'Attendant operating rules:',
+        '',
+        ...mergedRules.map((rule) => `- ${rule}`),
+    ].join('\n');
 }
 
 async function readPersistedBriefForAgent(agentId: string): Promise<WorkingMemoryBrief | null> {
@@ -1677,8 +1724,8 @@ Be specific and concrete.`,
     private async loadOperatingRules(): Promise<string> {
         const rulesResult: QueryResult = await queryEntry(ATTENDANT_RULES_QUERY);
         return rulesResult.found && rulesResult.entry
-            ? rulesResult.entry.valueSummary
-            : 'No operating rules found.';
+            ? formatOperatingRulesText(rulesResult.entry.valueRaw, rulesResult.entry.valueSummary)
+            : formatOperatingRulesText(null, 'Attendant operating rules:');
     }
 
     private async buildWorkingMemory(taskType: string): Promise<WorkingMemoryEntry[]> {

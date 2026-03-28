@@ -137,6 +137,8 @@ This exposes these tools to Claude Code:
 - `iranti_relate`
 - `iranti_who_knows`
 
+If you launch `iranti mcp` directly in a terminal, it will stay running and wait for a stdio MCP client. That is expected behavior, not a normal shell command completion.
+
 ## 4. Add Claude Code hooks
 
 Create `.claude/settings.local.json` in the same project:

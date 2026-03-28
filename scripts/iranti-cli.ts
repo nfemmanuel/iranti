@@ -1962,7 +1962,10 @@ function printHandshakeResult(target: AttendantCliTarget, task: string, result: 
     console.log(`  memory facts  ${result.workingMemory.length}`);
     console.log(`  generated     ${result.briefGeneratedAt}`);
     console.log('');
-    console.log(`Rules: ${truncateText(result.operatingRules, 160)}`);
+    console.log('Rules:');
+    for (const line of result.operatingRules.split(/\r?\n/)) {
+        console.log(line.trim().length > 0 ? `  ${line}` : '');
+    }
     if (result.workingMemory.length === 0) {
         console.log('');
         console.log('No working memory entries loaded.');

@@ -23,7 +23,7 @@ This feature adds two operator-facing CLI commands, `iranti handshake` and `iran
 ## Outputs
 | Output | Type | Description |
 |---|---|---|
-| Handshake summary | text | Agent, env source, inferred task, working-memory count, and loaded facts. |
+| Handshake summary | text | Agent, env source, inferred task, the full operating-rules block, working-memory count, and loaded facts. |
 | Attend summary | text | Agent, env source, injection decision, reasoning, and selected facts. |
 | JSON payload | object | Full handshake brief or attend decision/result plus command metadata. |
 
@@ -33,9 +33,10 @@ This feature adds two operator-facing CLI commands, `iranti handshake` and `iran
 3. Resolve the agent id from `--agent`, bound project env, or the fallback `iranti_cli`.
 4. Construct a local `Iranti` SDK instance against the resolved database.
 5. For `iranti handshake`, call `iranti.handshake()` with the requested task and recent messages.
-6. For `iranti attend`, call `iranti.attend()` with the latest message, current context, optional entity hint, and optional force/max-facts settings.
-7. Render either a concise text summary or JSON.
-8. Remind the operator that these commands are inspection tools, not the primary Claude Code integration path.
+6. Print the full multi-line operating-rules block so operators can inspect the active Attendant discipline instead of a truncated summary.
+7. For `iranti attend`, call `iranti.attend()` with the latest message, current context, optional entity hint, and optional force/max-facts settings.
+8. Render either a concise text summary or JSON.
+9. Remind the operator that these commands are inspection tools, not the primary Claude Code integration path.
 
 ## Edge Cases
 - Missing `DATABASE_URL`: command fails with guidance to use a bound project or `--instance`.

@@ -110,6 +110,8 @@ The VS Code-native `.vscode/mcp.json` should contain:
 - `envFile = ${workspaceFolder}/.env.iranti` when the binding lives in the workspace root
 - the default agent/source env values
 
+If you launch `iranti mcp` directly in a terminal, it will stay running and wait for a stdio MCP client. That is expected behavior, not a normal shell command completion.
+
 Why both files exist:
 - Codex CLI reads its own global MCP registration from `~/.codex/config.toml`
 - VS Code MCP clients, including Codex VS Code sessions, look for workspace MCP configuration in `.vscode/mcp.json`

@@ -32,6 +32,7 @@ function printHelp(): void {
         '  IRANTI_AUTO_REMEMBER         Opt-in explicit prompt auto-save before attend()',
         '',
         'This server is intended for Claude Code and other MCP clients over stdio.',
+        'If you run `iranti mcp` directly in a terminal, it will stay running and wait for an MCP client.',
     ].join('\n'));
 }
 
@@ -111,6 +112,10 @@ function normalizeRecentMessages(messages?: string[]): string[] {
         .map((value) => String(value ?? '').trim())
         .filter(Boolean)
         .slice(-12);
+}
+
+function isInteractiveTerminalLaunch(): boolean {
+    return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
 
 async function main(): Promise<void> {
@@ -380,6 +385,10 @@ this for arbitrary prose or every turn.`,
         const result = await iranti.whoKnows(entity);
         return textResult(result);
     });
+
+    if (isInteractiveTerminalLaunch()) {
+        console.error('[iranti-mcp] stdio server running; waiting for an MCP client. Press Ctrl+C to exit.');
+    }
 
     const transport = new StdioServerTransport();
     await server.connect(transport);
