@@ -36,11 +36,13 @@ This feature adds two operator-facing CLI commands, `iranti handshake` and `iran
 5. For `iranti handshake`, call `iranti.handshake()` with the requested task and recent messages.
 6. If `--backfill <chat-file>` is supplied, parse the transcript, import only narrow durable-fact patterns, and then run handshake using the transcript messages as recent context when no explicit `--recent*` input was provided.
 7. Print the full multi-line operating-rules block so operators can inspect the active Attendant discipline instead of a truncated summary.
-8. Surface a backfill suggestion when recent messages appear to contain durable facts that are not yet persisted.
-9. For `iranti attend`, call `iranti.attend()` with the latest message, current context, optional entity hint, and optional force/max-facts settings.
-10. If no brief exists yet for the agent in the current process, `iranti attend` auto-runs a bootstrap handshake first and reports that in the result.
-11. Render either a concise text summary or JSON.
-12. Remind the operator that these commands are inspection tools, not the primary Claude Code integration path.
+8. The printed rules explicitly position Iranti as the default shared working-memory layer for durable task state, handoffs, decisions, file-state changes, and validated environment details.
+9. The printed rules explicitly tell agents to record durable file-state changes that will matter later, including file creation, moves, renames, deletions, repurposing, and notable artifacts or paths.
+10. Surface a backfill suggestion when recent messages appear to contain durable facts that are not yet persisted.
+11. For `iranti attend`, call `iranti.attend()` with the latest message, current context, optional entity hint, and optional force/max-facts settings.
+12. If no brief exists yet for the agent in the current process, `iranti attend` auto-runs a bootstrap handshake first and reports that in the result.
+13. Render either a concise text summary or JSON.
+14. Remind the operator that these commands are inspection tools, not the primary Claude Code integration path.
 
 ## Edge Cases
 - Missing `DATABASE_URL`: command fails with guidance to use a bound project or `--instance`.

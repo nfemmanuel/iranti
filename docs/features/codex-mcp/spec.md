@@ -46,14 +46,16 @@ This feature connects Codex to Iranti through Codex's MCP client using the insta
 12. Store only safe defaults and any explicitly requested pinned `IRANTI_PROJECT_ENV` in the global MCP entry.
 13. At runtime, `iranti mcp` loads `IRANTI_PROJECT_ENV` first when explicitly pinned and otherwise falls back to the active project/workspace.
 14. If an operator launches `iranti mcp` directly in a terminal, the process intentionally stays running because it is waiting for an MCP client over stdio.
-15. Handshake returns the Attendant operating-rules summary plus a concrete read/write discipline for Iranti usage, including when to query, search, write, remember durable summaries, and avoid saving ephemeral chatter.
-16. If `IRANTI_AUTO_REMEMBER=true`, `iranti_attend` first persists only narrow explicit prompt facts, routing personal facts to `IRANTI_PERSONAL_MEMORY_ENTITY`/`user/main` and project facts to `IRANTI_MEMORY_ENTITY`.
-17. Prompt-captured personal facts are stored as direct user memory so later explicit user corrections can replace older hook-written values.
-18. If no handshake has been performed yet for that agent in the current process, `iranti_attend` auto-runs a bootstrap handshake before making the injection decision.
-19. Recall questions about remembered preferences, decisions, blockers, next steps, or prior project facts are treated as mandatory memory prompts and bypass the LLM memory-needed classifier.
-20. Handshake may also return a backfill suggestion when recent messages appear to contain durable facts that have not yet been persisted.
-21. If Codex's own final answer contains a strict durable summary such as `The next step is ...` or `We decided ...`, call `iranti_remember_response` explicitly because there is no Codex-side `Stop` hook.
-22. Launch Codex with `codex -C <project>` for the intended workspace context.
+15. Handshake returns the Attendant operating-rules summary plus a stricter read/write discipline for Iranti usage, including when to query, search, write, remember durable summaries, and avoid saving ephemeral chatter.
+16. The operating rules explicitly position Iranti as the default shared working-memory layer for anything another session, another agent, or a later handoff may need, even if Codex also keeps private notes elsewhere.
+17. The operating rules explicitly tell agents to persist durable file-state changes that matter later, including file creation, moves, renames, deletions, repurposing, and notable artifacts or paths produced during the task.
+18. If `IRANTI_AUTO_REMEMBER=true`, `iranti_attend` first persists only narrow explicit prompt facts, routing personal facts to `IRANTI_PERSONAL_MEMORY_ENTITY`/`user/main` and project facts to `IRANTI_MEMORY_ENTITY`.
+19. Prompt-captured personal facts are stored as direct user memory so later explicit user corrections can replace older hook-written values.
+20. If no handshake has been performed yet for that agent in the current process, `iranti_attend` auto-runs a bootstrap handshake before making the injection decision.
+21. Recall questions about remembered preferences, decisions, blockers, next steps, or prior project facts are treated as mandatory memory prompts and bypass the LLM memory-needed classifier.
+22. Handshake may also return a backfill suggestion when recent messages appear to contain durable facts that have not yet been persisted.
+23. If Codex's own final answer contains a strict durable summary such as `The next step is ...` or `We decided ...`, call `iranti_remember_response` explicitly because there is no Codex-side `Stop` hook.
+24. Launch Codex with `codex -C <project>` for the intended workspace context.
 
 ## Edge Cases
 
