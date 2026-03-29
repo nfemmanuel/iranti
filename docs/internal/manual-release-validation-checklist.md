@@ -1,6 +1,8 @@
 # Manual Release Validation Checklist
 
 This checklist complements [docs/guides/releasing.md](../guides/releasing.md).
+For the current hardening phase, use it **after** the broader matrix in
+[rigorous-validation-plan-2026-03-29.md](./rigorous-validation-plan-2026-03-29.md).
 
 Use it when we want a human-readable release gate for `iranti` itself, not just the automated workflow output.
 
