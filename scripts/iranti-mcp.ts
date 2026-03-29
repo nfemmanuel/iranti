@@ -133,7 +133,7 @@ async function main(): Promise<void> {
 
     const server = new McpServer({
         name: 'iranti-mcp',
-        version: '0.2.49',
+        version: '0.2.50',
     });
 
     server.registerTool('iranti_handshake', {

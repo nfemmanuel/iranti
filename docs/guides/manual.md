@@ -95,6 +95,10 @@ Use `status` when you want to see what this machine and current directory are bo
 `status` and `instance show` now also surface runtime metadata for live or stale instance-backed API processes.
 Instances can also record explicit Docker container dependencies so `iranti run --instance <name>` starts the backing container before the API boots.
 
+Windows `cmd.exe` note:
+- use `--root C:\path\to\runtime` or `--root "C:\path\to\runtime"`
+- do not use single quotes around `--root` in `cmd.exe`, because they are treated as literal characters there
+
 When a command fails and you need more detail:
 
 ```bash

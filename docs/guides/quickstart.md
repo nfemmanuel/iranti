@@ -196,6 +196,10 @@ iranti upgrade --yes --restart --instance local
 
 Use `iranti configure instance ...` when you want to edit several instance fields together. Use `iranti add|update|remove api-key` when you only want to manage upstream provider credentials without opening the env file manually. Supported remote providers are OpenAI, Claude, Gemini, Groq, and Mistral. `mock` and `ollama` do not require remote API keys, and Perplexity is not yet supported.
 
+Windows `cmd.exe` note:
+- use `--root C:\path\to\runtime` or `--root "C:\path\to\runtime"`
+- do not use single quotes around `--root` in `cmd.exe`
+
 If a remote provider runs out of credits or hits a billing quota, Iranti surfaces a direct provider warning instead of a generic failure. Example: `Claude quota or billing limit reached. Add credits, update the API key, or switch providers.`
 
 ### Bind a project

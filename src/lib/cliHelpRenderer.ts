@@ -89,6 +89,7 @@ export function printMainHelp(style: CliHelpStyle): void {
     console.log(style.sectionTitle('Iranti CLI'));
     console.log('Memory infrastructure for multi-agent systems.');
     console.log('Most instance-aware commands also accept --root <path> in addition to --scope.');
+    console.log('On Windows cmd.exe, use no quotes or double quotes around --root paths. Single quotes are treated literally there.');
     console.log('Global debugging flags: --debug for extra diagnostics, --verbose for subprocess trace output.');
     console.log('');
 
@@ -223,6 +224,7 @@ export function printDoctorHelp(style: CliHelpStyle): void {
         'Doctor Command',
         requireHelpEntry(DIAGNOSTICS_HELP, 'iranti doctor ')
     );
+    console.log('  Windows cmd.exe note: write `--root C:\\path\\to\\runtime` or `--root "C:\\path\\to\\runtime"`. Do not wrap --root in single quotes there.');
 }
 
 export function printStatusHelp(style: CliHelpStyle): void {
@@ -231,6 +233,7 @@ export function printStatusHelp(style: CliHelpStyle): void {
         'Status Command',
         requireHelpEntry(DIAGNOSTICS_HELP, 'iranti status ')
     );
+    console.log('  Windows cmd.exe note: write `--root C:\\path\\to\\runtime` or `--root "C:\\path\\to\\runtime"`. Do not wrap --root in single quotes there.');
 }
 
 export function printUpgradeHelp(style: CliHelpStyle): void {

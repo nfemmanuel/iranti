@@ -9,10 +9,10 @@
 
 Iranti gives agents persistent, identity-based memory. Facts written by one agent are retrievable by any other agent through exact entity+key lookup. Iranti also supports hybrid search (lexical + vector) when exact keys are unknown. Memory persists across sessions and survives context window limits.
 
-**Latest release:** [`v0.2.21`](https://github.com/nfemmanuel/iranti/releases/tag/v0.2.21)  
+**Latest release:** [`v0.2.49`](https://github.com/nfemmanuel/iranti/releases/tag/v0.2.49)  
 Published packages:
-- `iranti@0.2.21`
-- `@iranti/sdk@0.2.21`
+- `iranti@0.2.49`
+- `@iranti/sdk@0.2.49`
 
 ---
 
@@ -496,6 +496,7 @@ This validates the active env file, database URL, API key presence, provider sel
 On Windows, if the currently running CLI is itself the global npm install being upgraded, Iranti now hands that npm-global step off to a detached updater process instead of trying to replace the live binary in place.
 `iranti configure ...` updates instance/project credentials without manual env editing.
 `iranti auth ...` manages registry-backed API keys and can sync them into instance or project bindings.
+When you pass `--root` in Windows `cmd.exe`, use no quotes or double quotes. Single quotes are treated literally there.
 
 ---
 

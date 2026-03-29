@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.50 - Unreleased
+
+### Fixed
+
+- `--root` path handling now strips accidental wrapping quotes before resolving the runtime root, so Windows `cmd.exe` usage is more forgiving when operators copy Unix-style examples.
+
+### Documentation
+
+- CLI help, quickstart, manual, and README now explicitly warn Windows `cmd.exe` users to avoid single quotes around `--root` paths.
+
 ## 0.2.49 - Unreleased
 
 ### Changed
