@@ -668,57 +668,82 @@ export class Iranti {
                 : []
         )
             .filter((candidate) => candidate !== resolved.canonicalEntity);
+        try {
 
-        if (options.asOf) {
-            const current = await findEntry({ entityType: resolved.entityType, entityId: resolved.entityId, key });
-            const currentMatches = current && !current.isProtected && current.validFrom <= options.asOf;
+            if (options.asOf) {
+                const current = await findEntry({ entityType: resolved.entityType, entityId: resolved.entityId, key });
+                const currentMatches = current && !current.isProtected && current.validFrom <= options.asOf;
 
-            if (currentMatches) {
-                await recordKnowledgeEntryAccess([current.id]);
-                this.emitLedgerEvent({
-                    staffComponent: 'Attendant',
-                    actionType: 'query_executed',
-                    agentId: 'sdk',
-                    source: 'sdk',
-                    entityType: resolved.entityType,
-                    entityId: resolved.entityId,
-                    key,
-                    reason: 'query_exact_current',
-                    level: 'audit',
-                    metadata: {
+                if (currentMatches) {
+                    await recordKnowledgeEntryAccess([current.id]);
+                    this.emitLedgerEvent({
+                        staffComponent: 'Attendant',
+                        actionType: 'query_executed',
+                        agentId: 'sdk',
+                        source: 'sdk',
+                        entityType: resolved.entityType,
+                        entityId: resolved.entityId,
+                        key,
+                        reason: 'query_exact_current',
+                        level: 'audit',
+                        metadata: {
+                            found: true,
+                            fromArchive: false,
+                            asOf: options.asOf.toISOString(),
+                        },
+                    });
+                    return {
                         found: true,
+                        value: current.valueRaw,
+                        summary: current.valueSummary,
+                        confidence: current.confidence,
+                        source: current.source,
+                        validFrom: current.validFrom,
+                        validUntil: current.validUntil,
+                        contested: false,
                         fromArchive: false,
-                        asOf: options.asOf.toISOString(),
-                    },
-                });
-                return {
-                    found: true,
-                    value: current.valueRaw,
-                    summary: current.valueSummary,
-                    confidence: current.confidence,
-                    source: current.source,
-                    validFrom: current.validFrom,
-                    validUntil: current.validUntil,
-                    contested: false,
-                    fromArchive: false,
-                    archivedReason: null,
-                    resolutionState: null,
-                    resolutionOutcome: null,
-                    resolvedEntity: resolved.canonicalEntity,
-                    inputEntity: entity,
-                };
-            }
-
-            const historical = await findArchiveAsOf(
-                { entityType: resolved.entityType, entityId: resolved.entityId, key },
-                options.asOf,
-                {
-                    includeExpired: options.includeExpired,
-                    includeContested: options.includeContested,
+                        archivedReason: null,
+                        resolutionState: null,
+                        resolutionOutcome: null,
+                        resolvedEntity: resolved.canonicalEntity,
+                        inputEntity: entity,
+                    };
                 }
-            );
 
-            if (historical) {
+                const historical = await findArchiveAsOf(
+                    { entityType: resolved.entityType, entityId: resolved.entityId, key },
+                    options.asOf,
+                    {
+                        includeExpired: options.includeExpired,
+                        includeContested: options.includeContested,
+                    }
+                );
+
+                if (historical) {
+                    this.emitLedgerEvent({
+                        staffComponent: 'Attendant',
+                        actionType: 'query_executed',
+                        agentId: 'sdk',
+                        source: 'sdk',
+                        entityType: resolved.entityType,
+                        entityId: resolved.entityId,
+                        key,
+                        reason: 'query_historical_match',
+                        level: 'audit',
+                        metadata: {
+                            found: true,
+                            fromArchive: true,
+                            asOf: options.asOf.toISOString(),
+                        },
+                    });
+                    return {
+                        found: true,
+                        ...mapArchiveResult(historical),
+                        resolvedEntity: resolved.canonicalEntity,
+                        inputEntity: entity,
+                    };
+                }
+
                 this.emitLedgerEvent({
                     staffComponent: 'Attendant',
                     actionType: 'query_executed',
@@ -727,110 +752,105 @@ export class Iranti {
                     entityType: resolved.entityType,
                     entityId: resolved.entityId,
                     key,
-                    reason: 'query_historical_match',
+                    reason: 'query_historical_miss',
                     level: 'audit',
                     metadata: {
-                        found: true,
+                        found: false,
                         fromArchive: true,
                         asOf: options.asOf.toISOString(),
                     },
                 });
-                return {
-                    found: true,
-                    ...mapArchiveResult(historical),
-                    resolvedEntity: resolved.canonicalEntity,
-                    inputEntity: entity,
-                };
+                return { found: false, resolvedEntity: resolved.canonicalEntity, inputEntity: entity };
             }
 
-            this.emitLedgerEvent({
-                staffComponent: 'Attendant',
-                actionType: 'query_executed',
-                agentId: 'sdk',
-                source: 'sdk',
-                entityType: resolved.entityType,
-                entityId: resolved.entityId,
-                key,
-                reason: 'query_historical_miss',
-                level: 'audit',
-                metadata: {
-                    found: false,
-                    fromArchive: true,
-                    asOf: options.asOf.toISOString(),
-                },
-            });
-            return { found: false, resolvedEntity: resolved.canonicalEntity, inputEntity: entity };
-        }
+            const primaryEntry = await findEntry({ entityType: resolved.entityType, entityId: resolved.entityId, key });
+            let entry = primaryEntry;
+            let resolvedEntity = resolved.canonicalEntity;
 
-        const primaryEntry = await findEntry({ entityType: resolved.entityType, entityId: resolved.entityId, key });
-        let entry = primaryEntry;
-        let resolvedEntity = resolved.canonicalEntity;
-
-        if ((!entry || entry.isProtected) && personalRecallCandidates.length > 0) {
-            for (const candidate of personalRecallCandidates) {
-                const fallback = await resolveQueryEntity(candidate);
-                const fallbackEntry = await findEntry({ entityType: fallback.entityType, entityId: fallback.entityId, key });
-                if (fallbackEntry && !fallbackEntry.isProtected) {
-                    entry = fallbackEntry;
-                    resolvedEntity = fallback.canonicalEntity;
-                    break;
+            if ((!entry || entry.isProtected) && personalRecallCandidates.length > 0) {
+                for (const candidate of personalRecallCandidates) {
+                    const fallback = await resolveQueryEntity(candidate);
+                    const fallbackEntry = await findEntry({ entityType: fallback.entityType, entityId: fallback.entityId, key });
+                    if (fallbackEntry && !fallbackEntry.isProtected) {
+                        entry = fallbackEntry;
+                        resolvedEntity = fallback.canonicalEntity;
+                        break;
+                    }
                 }
             }
-        }
 
-        if (!entry || entry.isProtected) {
+            if (!entry || entry.isProtected) {
+                this.emitLedgerEvent({
+                    staffComponent: 'Attendant',
+                    actionType: 'query_executed',
+                    agentId: 'sdk',
+                    source: 'sdk',
+                    entityType: resolved.entityType,
+                    entityId: resolved.entityId,
+                    key,
+                    reason: personalRecallCandidates.length > 0 ? 'query_personal_fallback_miss' : 'query_exact_miss',
+                    level: 'audit',
+                    metadata: {
+                        found: false,
+                        resolvedEntity,
+                        inputEntity: entity,
+                    },
+                });
+                return { found: false, resolvedEntity, inputEntity: entity };
+            }
+
+            await recordKnowledgeEntryAccess([entry.id]);
             this.emitLedgerEvent({
                 staffComponent: 'Attendant',
                 actionType: 'query_executed',
                 agentId: 'sdk',
                 source: 'sdk',
-                entityType: resolved.entityType,
-                entityId: resolved.entityId,
+                entityType: entry.entityType,
+                entityId: entry.entityId,
                 key,
-                reason: personalRecallCandidates.length > 0 ? 'query_personal_fallback_miss' : 'query_exact_miss',
+                reason: resolvedEntity === resolved.canonicalEntity ? 'query_exact_match' : 'query_personal_fallback_match',
                 level: 'audit',
                 metadata: {
-                    found: false,
+                    found: true,
                     resolvedEntity,
                     inputEntity: entity,
                 },
             });
-            return { found: false, resolvedEntity, inputEntity: entity };
-        }
-
-        await recordKnowledgeEntryAccess([entry.id]);
-        this.emitLedgerEvent({
-            staffComponent: 'Attendant',
-            actionType: 'query_executed',
-            agentId: 'sdk',
-            source: 'sdk',
-            entityType: entry.entityType,
-            entityId: entry.entityId,
-            key,
-            reason: resolvedEntity === resolved.canonicalEntity ? 'query_exact_match' : 'query_personal_fallback_match',
-            level: 'audit',
-            metadata: {
+            return {
                 found: true,
+                value: entry.valueRaw,
+                summary: entry.valueSummary,
+                confidence: entry.confidence,
+                source: entry.source,
+                validFrom: entry.validFrom,
+                validUntil: entry.validUntil,
+                contested: false,
+                fromArchive: false,
+                archivedReason: null,
+                resolutionState: null,
+                resolutionOutcome: null,
                 resolvedEntity,
                 inputEntity: entity,
-            },
-        });
-        return {
-            found: true,
-            value: entry.valueRaw,
-            summary: entry.valueSummary,
-            confidence: entry.confidence,
-            source: entry.source,
-            validFrom: entry.validFrom,
-            validUntil: entry.validUntil,
-            contested: false,
-            fromArchive: false,
-            archivedReason: null,
-            resolutionState: null,
-            resolutionOutcome: null,
-            resolvedEntity,
-            inputEntity: entity,
-        };
+            };
+        } catch (error) {
+            this.emitLedgerEvent({
+                staffComponent: 'Attendant',
+                actionType: 'host_failure',
+                agentId: 'sdk',
+                source: 'sdk',
+                entityType: resolved.entityType,
+                entityId: resolved.entityId,
+                key,
+                reason: 'query_failed',
+                level: 'audit',
+                metadata: {
+                    operation: 'query',
+                    inputEntity: entity,
+                    error: error instanceof Error ? error.message : String(error),
+                },
+            });
+            throw error;
+        }
     }
 
     async history(entity: string, key: string, options: Omit<TemporalQueryOptions, 'asOf'> = {}): Promise<HistoryEntry[]> {
@@ -920,46 +940,64 @@ export class Iranti {
         if (!input.query || typeof input.query !== 'string' || input.query.trim().length === 0) {
             throw new Error('query is required for search().');
         }
+        try {
+            const rows = await searchEntriesHybrid({
+                query: input.query.trim(),
+                limit: input.limit,
+                entityType: input.entityType as EntityType | undefined,
+                entityId: input.entityId,
+                lexicalWeight: input.lexicalWeight,
+                vectorWeight: input.vectorWeight,
+                minScore: input.minScore,
+            });
 
-        const rows = await searchEntriesHybrid({
-            query: input.query.trim(),
-            limit: input.limit,
-            entityType: input.entityType as EntityType | undefined,
-            entityId: input.entityId,
-            lexicalWeight: input.lexicalWeight,
-            vectorWeight: input.vectorWeight,
-            minScore: input.minScore,
-        });
+            this.emitLedgerEvent({
+                staffComponent: 'Attendant',
+                actionType: 'search_executed',
+                agentId: 'sdk',
+                source: 'sdk',
+                entityType: input.entityType,
+                entityId: input.entityId,
+                reason: 'hybrid_search',
+                level: 'audit',
+                metadata: {
+                    queryPreview: input.query.trim().slice(0, 120),
+                    resultCount: rows.length,
+                    minScore: input.minScore ?? null,
+                },
+            });
 
-        this.emitLedgerEvent({
-            staffComponent: 'Attendant',
-            actionType: 'search_executed',
-            agentId: 'sdk',
-            source: 'sdk',
-            entityType: input.entityType,
-            entityId: input.entityId,
-            reason: 'hybrid_search',
-            level: 'audit',
-            metadata: {
-                queryPreview: input.query.trim().slice(0, 120),
-                resultCount: rows.length,
-                minScore: input.minScore ?? null,
-            },
-        });
-
-        return rows.map((row) => ({
-            id: row.id,
-            entity: `${row.entityType}/${row.entityId}`,
-            key: row.key,
-            value: row.valueRaw,
-            summary: row.valueSummary,
-            confidence: row.confidence,
-            source: row.source,
-            validUntil: row.validUntil,
-            lexicalScore: row.lexicalScore,
-            vectorScore: row.vectorScore,
-            score: row.score,
-        }));
+            return rows.map((row) => ({
+                id: row.id,
+                entity: `${row.entityType}/${row.entityId}`,
+                key: row.key,
+                value: row.valueRaw,
+                summary: row.valueSummary,
+                confidence: row.confidence,
+                source: row.source,
+                validUntil: row.validUntil,
+                lexicalScore: row.lexicalScore,
+                vectorScore: row.vectorScore,
+                score: row.score,
+            }));
+        } catch (error) {
+            this.emitLedgerEvent({
+                staffComponent: 'Attendant',
+                actionType: 'host_failure',
+                agentId: 'sdk',
+                source: 'sdk',
+                entityType: input.entityType,
+                entityId: input.entityId,
+                reason: 'search_failed',
+                level: 'audit',
+                metadata: {
+                    operation: 'search',
+                    queryPreview: input.query.trim().slice(0, 120),
+                    error: error instanceof Error ? error.message : String(error),
+                },
+            });
+            throw error;
+        }
     }
     async runMaintenance(): Promise<{
         expiredArchived: number;
@@ -994,41 +1032,78 @@ export class Iranti {
 
     async getRelated(entity: string): Promise<RelatedEntity[]> {
         const { entityType, entityId } = parseEntity(entity);
-        const result = await getRelated(entityType, entityId);
-        this.emitLedgerEvent({
-            staffComponent: 'Attendant',
-            actionType: 'related_executed',
-            agentId: 'sdk',
-            source: 'sdk',
-            entityType,
-            entityId,
-            reason: 'relationship_lookup',
-            level: 'audit',
-            metadata: {
-                resultCount: result.length,
-            },
-        });
-        return result;
+        try {
+            const result = await getRelated(entityType, entityId);
+            this.emitLedgerEvent({
+                staffComponent: 'Attendant',
+                actionType: 'related_executed',
+                agentId: 'sdk',
+                source: 'sdk',
+                entityType,
+                entityId,
+                reason: 'relationship_lookup',
+                level: 'audit',
+                metadata: {
+                    resultCount: result.length,
+                },
+            });
+            return result;
+        } catch (error) {
+            this.emitLedgerEvent({
+                staffComponent: 'Attendant',
+                actionType: 'host_failure',
+                agentId: 'sdk',
+                source: 'sdk',
+                entityType,
+                entityId,
+                reason: 'related_failed',
+                level: 'audit',
+                metadata: {
+                    operation: 'related',
+                    error: error instanceof Error ? error.message : String(error),
+                },
+            });
+            throw error;
+        }
     }
 
     async getRelatedDeep(entity: string, depth: number = 2): Promise<RelatedEntity[]> {
         const { entityType, entityId } = parseEntity(entity);
-        const result = await getRelatedDeep(entityType, entityId, depth);
-        this.emitLedgerEvent({
-            staffComponent: 'Attendant',
-            actionType: 'related_deep_executed',
-            agentId: 'sdk',
-            source: 'sdk',
-            entityType,
-            entityId,
-            reason: 'relationship_lookup_deep',
-            level: 'audit',
-            metadata: {
-                resultCount: result.length,
-                depth,
-            },
-        });
-        return result;
+        try {
+            const result = await getRelatedDeep(entityType, entityId, depth);
+            this.emitLedgerEvent({
+                staffComponent: 'Attendant',
+                actionType: 'related_deep_executed',
+                agentId: 'sdk',
+                source: 'sdk',
+                entityType,
+                entityId,
+                reason: 'relationship_lookup_deep',
+                level: 'audit',
+                metadata: {
+                    resultCount: result.length,
+                    depth,
+                },
+            });
+            return result;
+        } catch (error) {
+            this.emitLedgerEvent({
+                staffComponent: 'Attendant',
+                actionType: 'host_failure',
+                agentId: 'sdk',
+                source: 'sdk',
+                entityType,
+                entityId,
+                reason: 'related_deep_failed',
+                level: 'audit',
+                metadata: {
+                    operation: 'related_deep',
+                    depth,
+                    error: error instanceof Error ? error.message : String(error),
+                },
+            });
+            throw error;
+        }
     }
 
     // ── Agent Registry ──────────────────────────────────────────────────────
@@ -1047,21 +1122,39 @@ export class Iranti {
         totalContributions: number;
     }>> {
         const { entityType, entityId } = parseEntity(entity);
-        const result = await whoKnows(entityType, entityId);
-        this.emitLedgerEvent({
-            staffComponent: 'Attendant',
-            actionType: 'whoknows_executed',
-            agentId: 'sdk',
-            source: 'sdk',
-            entityType,
-            entityId,
-            reason: 'agent_contribution_lookup',
-            level: 'audit',
-            metadata: {
-                resultCount: result.length,
-            },
-        });
-        return result;
+        try {
+            const result = await whoKnows(entityType, entityId);
+            this.emitLedgerEvent({
+                staffComponent: 'Attendant',
+                actionType: 'whoknows_executed',
+                agentId: 'sdk',
+                source: 'sdk',
+                entityType,
+                entityId,
+                reason: 'agent_contribution_lookup',
+                level: 'audit',
+                metadata: {
+                    resultCount: result.length,
+                },
+            });
+            return result;
+        } catch (error) {
+            this.emitLedgerEvent({
+                staffComponent: 'Attendant',
+                actionType: 'host_failure',
+                agentId: 'sdk',
+                source: 'sdk',
+                entityType,
+                entityId,
+                reason: 'whoknows_failed',
+                level: 'audit',
+                metadata: {
+                    operation: 'whoknows',
+                    error: error instanceof Error ? error.message : String(error),
+                },
+            });
+            throw error;
+        }
     }
 
     async listAgents(): Promise<AgentProfile[]> {

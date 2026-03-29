@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import express from 'express';
 import { createServer } from 'node:http';
 import { memoryRoutes } from '../../src/api/routes/memory';
-import { querySessionLedger } from '../../src/lib/sessionLedger';
+import { querySessionLedger, summarizeSessionLedgerLearnings } from '../../src/lib/sessionLedger';
 
 const clientModule = require('../../src/library/client');
 
@@ -116,6 +116,23 @@ async function main(): Promise<void> {
         assert.ok(
             ledger.some((event) => event.metadata?.host === 'plain_cli'),
             'Expected the ledger to carry host metadata for first-party events.'
+        );
+
+        const learnings = await summarizeSessionLedgerLearnings({
+            agentId,
+            sessionId,
+            source: 'cli',
+            host: 'plain_cli',
+            maxLearnings: 3,
+        });
+        assert.ok(learnings.length >= 1, 'Expected bounded session-ledger learnings.');
+        assert.ok(
+            learnings.some((entry) => entry.actionType === 'memory_injected'),
+            'Expected memory_injected to survive the learning summary filter.'
+        );
+        assert.ok(
+            learnings.every((entry) => entry.host === 'plain_cli'),
+            'Expected learning summaries to preserve host metadata.'
         );
 
         const app = express();

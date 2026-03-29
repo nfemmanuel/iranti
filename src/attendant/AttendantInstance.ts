@@ -17,6 +17,11 @@ import {
     getPersonalRecallEntities,
     getProjectMemoryEntity,
 } from '../lib/autoRemember';
+import {
+    summarizeSessionLedgerLearnings,
+    type SessionLedgerLearning,
+    SessionLedgerUnavailableError,
+} from '../lib/sessionLedger';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -107,6 +112,7 @@ export interface WorkingMemoryBrief {
     briefGeneratedAt: string;
     contextCallCount: number;
     backfillSuggestion?: BackfillSuggestion | null;
+    sessionLedgerLearnings?: SessionLedgerLearning[];
     sessionCheckpoint?: SessionCheckpointRecord | null;
     sessionRecovery?: SessionRecoveryInfo | null;
 }
@@ -358,6 +364,20 @@ type BackfillCandidate = {
     key: string;
     summary: string;
 };
+
+function summarizeLedgerLearning(entry: SessionLedgerLearning): string {
+    return `Recent ledger learning: ${entry.summary}`;
+}
+
+function toLedgerWorkingMemoryEntries(entries: SessionLedgerLearning[]): WorkingMemoryEntry[] {
+    return entries.map((entry, index) => ({
+        entityKey: `system/session_ledger/recent_learning_${index + 1}`,
+        summary: summarizeLedgerLearning(entry),
+        confidence: 100,
+        source: 'session_ledger',
+        lastUpdated: entry.timestamp,
+    }));
+}
 
 function collectBackfillCandidates(messages: string[]): BackfillCandidate[] {
     const deduped = new Map<string, BackfillCandidate>();
@@ -966,6 +986,23 @@ export class AttendantInstance {
         };
     }
 
+    private async loadSessionLedgerLearnings(): Promise<SessionLedgerLearning[]> {
+        try {
+            return await summarizeSessionLedgerLearnings({
+                agentId: this.agentId,
+                source: this.eventSource === 'internal' ? undefined : this.eventSource,
+                host: this.eventHost ?? undefined,
+                limit: 40,
+                maxLearnings: 4,
+            });
+        } catch (error) {
+            if (error instanceof SessionLedgerUnavailableError) {
+                return [];
+            }
+            return [];
+        }
+    }
+
     // ── Handshake ────────────────────────────────────────────────────────────
 
     async handshake(context: AgentContext): Promise<WorkingMemoryBrief> {
@@ -982,6 +1019,10 @@ export class AttendantInstance {
 
         // Load knowledge — agent entries + related entities
         const workingMemory = await this.buildWorkingMemory(inferredTaskType);
+        const sessionLedgerLearnings = await this.loadSessionLedgerLearnings();
+        const workingMemoryWithLedger = sessionLedgerLearnings.length > 0
+            ? [...workingMemory, ...toLedgerWorkingMemoryEntries(sessionLedgerLearnings)]
+            : workingMemory;
         const recoveryResult = persisted?.sessionCheckpoint
             ? this.buildRecovery(context, persisted.sessionCheckpoint)
             : { interrupted: false, recovery: null as SessionRecoveryInfo | null };
@@ -1001,11 +1042,12 @@ export class AttendantInstance {
             agentId: this.agentId,
             operatingRules,
             inferredTaskType,
-            workingMemory,
+            workingMemory: workingMemoryWithLedger,
             sessionStarted: persisted?.sessionStarted ?? this.sessionStarted,
             briefGeneratedAt: new Date().toISOString(),
             contextCallCount: this.contextCallCount,
-            backfillSuggestion: buildBackfillSuggestion(context, workingMemory),
+            backfillSuggestion: buildBackfillSuggestion(context, workingMemoryWithLedger),
+            sessionLedgerLearnings,
             sessionCheckpoint: this.sessionCheckpoint,
             sessionRecovery: recoveryResult.recovery,
         };
@@ -1020,6 +1062,7 @@ export class AttendantInstance {
             level: 'audit',
             metadata: this.buildEventMetadata({
                 briefSize: this.brief?.workingMemory.length ?? 0,
+                ledgerLearningCount: sessionLedgerLearnings.length,
                 taskSummary: context.task.slice(0, 120),
             }),
         });
@@ -1217,6 +1260,22 @@ export class AttendantInstance {
                 }),
             });
         }
+        getStaffEventEmitter().emit({
+            staffComponent: 'Attendant',
+            actionType: 'checkpoint_written',
+            agentId: this.agentId,
+            source: this.eventSource,
+            reason: 'shared_checkpoint_written',
+            level: 'audit',
+            metadata: this.buildEventMetadata({
+                sessionId,
+                currentStep: normalizedCheckpoint.currentStep ?? null,
+                nextStep: normalizedCheckpoint.nextStep ?? null,
+                openRiskCount: normalizedCheckpoint.openRisks?.length ?? 0,
+                recentOutputCount: normalizedCheckpoint.recentOutputs?.length ?? 0,
+                entityTargetCount: normalizedCheckpoint.entityTargets?.length ?? 0,
+            }),
+        });
         await this.persistState();
         return this.brief;
     }

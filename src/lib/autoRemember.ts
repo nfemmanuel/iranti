@@ -12,6 +12,8 @@ type IrantiQueryClient = {
     }): Promise<unknown>;
 };
 
+import { getStaffEventEmitter } from './staffEventRegistry';
+
 type DurableMemoryClass =
     | 'preference'
     | 'profile'
@@ -713,6 +715,10 @@ async function persistExtractedFacts(params: {
     entity?: string | null;
     projectEntity?: string | null;
     personalEntity?: string | null;
+    ledgerContext?: {
+        source?: string;
+        host?: string | null;
+    };
 }): Promise<AutoRememberResult> {
     const {
         iranti,
@@ -724,6 +730,7 @@ async function persistExtractedFacts(params: {
         entity,
         projectEntity,
         personalEntity,
+        ledgerContext,
     } = params;
 
     const skipped: Array<{ key: string; reason: string }> = [];
@@ -762,6 +769,25 @@ async function persistExtractedFacts(params: {
             agent,
             properties: buildFactProperties(fact, phase),
         });
+        if (phase === 'assistant_response') {
+            getStaffEventEmitter().emit({
+                staffComponent: 'Attendant',
+                actionType: 'summary_written',
+                agentId: agent,
+                source: ledgerContext?.source?.trim() || source,
+                entityType: targetEntity.split('/', 2)[0],
+                entityId: targetEntity.split('/', 2)[1],
+                key: fact.key,
+                reason: 'strict_assistant_summary_persisted',
+                level: 'audit',
+                metadata: {
+                    memoryScope: fact.scope,
+                    durableClass: fact.durableClass,
+                    capturePhase: phase,
+                    ...(ledgerContext?.host ? { host: ledgerContext.host } : {}),
+                },
+            });
+        }
         written += 1;
         writtenEntities.add(targetEntity);
     }
@@ -784,6 +810,10 @@ export async function autoRememberPromptFacts(params: {
     projectEntity?: string | null;
     personalEntity?: string | null;
     confidence?: number;
+    ledgerContext?: {
+        source?: string;
+        host?: string | null;
+    };
 }): Promise<AutoRememberResult> {
     const {
         iranti,
@@ -794,6 +824,7 @@ export async function autoRememberPromptFacts(params: {
         projectEntity,
         personalEntity,
         confidence = 96,
+        ledgerContext,
     } = params;
 
     if (!isAutoRememberEnabled()) {
@@ -816,6 +847,7 @@ export async function autoRememberPromptFacts(params: {
         entity,
         projectEntity,
         personalEntity,
+        ledgerContext,
     });
 }
 
@@ -828,6 +860,10 @@ export async function autoRememberAssistantFacts(params: {
     projectEntity?: string | null;
     personalEntity?: string | null;
     confidence?: number;
+    ledgerContext?: {
+        source?: string;
+        host?: string | null;
+    };
 }): Promise<AutoRememberResult> {
     const {
         iranti,
@@ -838,6 +874,7 @@ export async function autoRememberAssistantFacts(params: {
         projectEntity,
         personalEntity,
         confidence = 90,
+        ledgerContext,
     } = params;
 
     if (!isAutoRememberEnabled()) {
@@ -860,6 +897,7 @@ export async function autoRememberAssistantFacts(params: {
         entity,
         projectEntity,
         personalEntity,
+        ledgerContext,
     });
 }
 
@@ -872,6 +910,10 @@ export async function rememberAssistantResponseFacts(params: {
     projectEntity?: string | null;
     personalEntity?: string | null;
     confidence?: number;
+    ledgerContext?: {
+        source?: string;
+        host?: string | null;
+    };
 }): Promise<AutoRememberResult> {
     const {
         iranti,
@@ -882,6 +924,7 @@ export async function rememberAssistantResponseFacts(params: {
         projectEntity,
         personalEntity,
         confidence = 90,
+        ledgerContext,
     } = params;
 
     return persistExtractedFacts({
@@ -894,6 +937,7 @@ export async function rememberAssistantResponseFacts(params: {
         entity,
         projectEntity,
         personalEntity,
+        ledgerContext,
     });
 }
 

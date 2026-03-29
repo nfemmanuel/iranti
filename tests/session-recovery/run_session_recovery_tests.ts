@@ -51,6 +51,18 @@ async function main(): Promise<void> {
     attendant.loadOperatingRules = async () => 'Persist checkpoints before expensive work.';
     attendant.inferTask = async () => task;
     attendant.buildWorkingMemory = async () => [];
+    attendant.loadSessionLedgerLearnings = async () => ([
+        {
+            actionType: 'host_failure',
+            summary: 'codex_vscode failure: initialize timed out',
+            timestamp: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
+            source: 'mcp',
+            host: 'codex_vscode',
+            sessionId,
+            entityKey: null,
+            reason: 'initialize_timeout',
+        },
+    ]);
     attendant.persistState = async () => {};
 
     const recoveredBrief = await attendant.handshake({
@@ -63,6 +75,11 @@ async function main(): Promise<void> {
     expect(recoveredBrief.sessionRecovery?.matchedCurrentTask === true, 'Expected the returning task to match.');
     expect(recoveredBrief.sessionCheckpoint?.status === 'interrupted', 'Expected the stale checkpoint to be marked interrupted.');
     expect(recoveredBrief.sessionCheckpoint?.checkpoint.currentStep === 'drafting launch checklist', 'Expected checkpoint step to round-trip.');
+    expect((recoveredBrief.sessionLedgerLearnings?.length ?? 0) === 1, 'Expected handshake to surface bounded session-ledger learnings.');
+    expect(
+        recoveredBrief.workingMemory.some((entry: { entityKey: string }) => entry.entityKey === 'system/session_ledger/recent_learning_1'),
+        'Expected handshake to append a synthetic working-memory entry for recent ledger learnings.'
+    );
 
     const inspected = await attendant.inspectSession({
         task,

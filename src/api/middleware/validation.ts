@@ -261,6 +261,7 @@ export function validateSessionLedgerQuery(query: Request['query']): {
   sessionId?: string;
   actionType?: string;
   source?: string;
+  host?: string;
   level?: EventLevel;
   since?: Date;
   until?: Date;
@@ -270,6 +271,7 @@ export function validateSessionLedgerQuery(query: Request['query']): {
   const sessionId = readQueryValue(query.sessionId)?.trim();
   const actionType = readQueryValue(query.actionType)?.trim();
   const source = readQueryValue(query.source)?.trim();
+  const host = readQueryValue(query.host)?.trim();
   const levelRaw = readQueryValue(query.level)?.trim();
   const sinceRaw = readQueryValue(query.since)?.trim();
   const untilRaw = readQueryValue(query.until)?.trim();
@@ -280,6 +282,7 @@ export function validateSessionLedgerQuery(query: Request['query']): {
     sessionId?: string;
     actionType?: string;
     source?: string;
+    host?: string;
     level?: EventLevel;
     since?: Date;
     until?: Date;
@@ -304,6 +307,11 @@ export function validateSessionLedgerQuery(query: Request['query']): {
   if (source) {
     if (source.length > 80) throw new Error('source exceeds maximum length of 80.');
     result.source = source;
+  }
+
+  if (host) {
+    if (host.length > 120) throw new Error('host exceeds maximum length of 120.');
+    result.host = host;
   }
 
   if (levelRaw) {

@@ -6,7 +6,9 @@ export interface SessionLedgerQuery {
     agentId?: string;
     sessionId?: string;
     actionType?: string;
+    actionTypes?: string[];
     source?: string;
+    host?: string;
     level?: EventLevel;
     since?: Date;
     until?: Date;
@@ -26,6 +28,28 @@ export interface SessionLedgerEvent {
     reason: string | null;
     level: EventLevel;
     metadata: Record<string, unknown> | null;
+}
+
+export interface SessionLedgerLearning {
+    actionType: string;
+    summary: string;
+    timestamp: string;
+    source: string;
+    host: string | null;
+    sessionId: string | null;
+    entityKey: string | null;
+    reason: string | null;
+}
+
+export interface SessionLedgerLearningQuery {
+    agentId?: string;
+    sessionId?: string;
+    source?: string;
+    host?: string;
+    since?: Date;
+    until?: Date;
+    limit?: number;
+    maxLearnings?: number;
 }
 
 export class SessionLedgerUnavailableError extends Error {
@@ -62,6 +86,11 @@ function normalizeLimit(limit: number | undefined): number {
     return Math.max(1, Math.min(500, Math.floor(limit!)));
 }
 
+function normalizeLearningLimit(limit: number | undefined): number {
+    if (!Number.isFinite(limit)) return 4;
+    return Math.max(1, Math.min(10, Math.floor(limit!)));
+}
+
 function rowToEvent(row: SessionLedgerRow): SessionLedgerEvent {
     return {
         eventId: row.event_id,
@@ -91,8 +120,19 @@ export async function querySessionLedger(input: SessionLedgerQuery = {}): Promis
     if (input.actionType?.trim()) {
         clauses.push(Prisma.sql`action_type = ${input.actionType.trim()}`);
     }
+    if (Array.isArray(input.actionTypes)) {
+        const actionTypes = input.actionTypes
+            .map((value) => value.trim())
+            .filter(Boolean);
+        if (actionTypes.length > 0) {
+            clauses.push(Prisma.sql`action_type IN (${Prisma.join(actionTypes)})`);
+        }
+    }
     if (input.source?.trim()) {
         clauses.push(Prisma.sql`source = ${input.source.trim()}`);
+    }
+    if (input.host?.trim()) {
+        clauses.push(Prisma.sql`metadata->>'host' = ${input.host.trim()}`);
     }
     if (input.level) {
         clauses.push(Prisma.sql`level = ${input.level}`);
@@ -136,4 +176,132 @@ export async function querySessionLedger(input: SessionLedgerQuery = {}): Promis
         }
         throw error;
     }
+}
+
+const LEDGER_LEARNING_ACTIONS = new Set([
+    'host_failure',
+    'provider_fallback_used',
+    'integration_probe_failed',
+    'mandatory_recall_forced',
+    'memory_injected',
+    'checkpoint_written',
+    'summary_written',
+    'write_rejected',
+    'write_escalated',
+    'write_updated',
+    'write_replaced',
+    'write_created',
+    'checkpoint_shared_breadcrumb_failed',
+]);
+
+function describeEvent(event: SessionLedgerEvent): string | null {
+    const host = typeof event.metadata?.host === 'string' ? event.metadata.host : null;
+    const entityKey = event.entityType && event.entityId && event.key
+        ? `${event.entityType}/${event.entityId}/${event.key}`
+        : event.entityType && event.entityId
+            ? `${event.entityType}/${event.entityId}`
+            : null;
+    const error = typeof event.metadata?.error === 'string' ? event.metadata.error : null;
+    const injectedKeys = Array.isArray(event.metadata?.injectedKeys)
+        ? event.metadata!.injectedKeys.map((value) => String(value)).filter(Boolean)
+        : [];
+
+    switch (event.actionType) {
+        case 'host_failure':
+        case 'integration_probe_failed':
+        case 'provider_fallback_used':
+            return `${host ?? event.source} failure: ${event.reason ?? error ?? 'host error'}`;
+        case 'mandatory_recall_forced':
+            return event.key
+                ? `recall policy forced a lookup for ${event.key}`
+                : 'recall policy forced a memory lookup';
+        case 'memory_injected':
+            return injectedKeys.length > 0
+                ? `memory injected from ${host ?? event.source}: ${injectedKeys.slice(0, 3).join(', ')}`
+                : `memory injected from ${host ?? event.source}`;
+        case 'checkpoint_written':
+            return entityKey
+                ? `shared checkpoint written for ${entityKey}`
+                : 'shared checkpoint written';
+        case 'summary_written':
+            return entityKey
+                ? `strict summary written for ${entityKey}`
+                : 'strict summary written';
+        case 'checkpoint_shared_breadcrumb_failed':
+            return entityKey
+                ? `shared checkpoint breadcrumb failed for ${entityKey}`
+                : `shared checkpoint breadcrumb failed${error ? `: ${error}` : ''}`;
+        case 'write_created':
+            return entityKey ? `created ${entityKey}` : 'created durable fact';
+        case 'write_updated':
+            return entityKey ? `updated ${entityKey}` : 'updated durable fact';
+        case 'write_replaced':
+            return entityKey ? `replaced ${entityKey}` : 'replaced durable fact';
+        case 'write_rejected':
+            return entityKey
+                ? `rejected write for ${entityKey}${event.reason ? `: ${event.reason}` : ''}`
+                : 'rejected write';
+        case 'write_escalated':
+            return entityKey
+                ? `escalated conflict for ${entityKey}`
+                : 'escalated write conflict';
+        default:
+            return null;
+    }
+}
+
+function eventToLearning(event: SessionLedgerEvent): SessionLedgerLearning | null {
+    if (!LEDGER_LEARNING_ACTIONS.has(event.actionType)) {
+        return null;
+    }
+
+    const summary = describeEvent(event);
+    if (!summary) return null;
+
+    return {
+        actionType: event.actionType,
+        summary,
+        timestamp: event.timestamp,
+        source: event.source,
+        host: typeof event.metadata?.host === 'string' ? event.metadata.host : null,
+        sessionId: typeof event.metadata?.sessionId === 'string' ? event.metadata.sessionId : null,
+        entityKey: event.entityType && event.entityId && event.key ? `${event.entityType}/${event.entityId}/${event.key}` : null,
+        reason: event.reason ?? null,
+    };
+}
+
+export async function summarizeSessionLedgerLearnings(
+    input: SessionLedgerLearningQuery = {},
+): Promise<SessionLedgerLearning[]> {
+    const events = await querySessionLedger({
+        agentId: input.agentId,
+        sessionId: input.sessionId,
+        source: input.source,
+        host: input.host,
+        since: input.since,
+        until: input.until,
+        limit: normalizeLimit(input.limit ?? 40),
+    });
+
+    const out: SessionLedgerLearning[] = [];
+    const seen = new Set<string>();
+
+    for (const event of events) {
+        const learning = eventToLearning(event);
+        if (!learning) continue;
+        const identity = [
+            learning.actionType,
+            learning.entityKey ?? '',
+            learning.reason ?? '',
+            learning.summary,
+        ].join('|');
+        if (seen.has(identity)) continue;
+        seen.add(identity);
+        out.push(learning);
+        if (out.length >= normalizeLearningLimit(input.maxLearnings)) {
+            break;
+        }
+    }
+
+    return out;
 }

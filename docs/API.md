@@ -357,6 +357,7 @@ Optional query parameters:
 - `sessionId`
 - `actionType`
 - `source`
+- `host`
 - `level`
 - `since` (ISO timestamp)
 - `until` (ISO timestamp)
@@ -426,6 +427,18 @@ Checkpoint response:
   "sessionStarted": "2026-03-21T07:10:00.000Z",
   "briefGeneratedAt": "2026-03-21T07:13:30.000Z",
   "contextCallCount": 0,
+  "sessionLedgerLearnings": [
+    {
+      "actionType": "memory_injected",
+      "summary": "memory injected from plain_cli: user/main/height",
+      "timestamp": "2026-03-28T18:22:31.000Z",
+      "source": "cli",
+      "host": "plain_cli",
+      "sessionId": "2026-03-28T18:20:00.000Z",
+      "entityKey": "user/main/height",
+      "reason": "personal_height_recall_prompt"
+    }
+  ],
   "sessionCheckpoint": {
     "sessionId": "sess_9f21b6f7",
     "task": "Audit launch blockers for local setup",
@@ -464,6 +477,7 @@ Resume / complete / abandon response:
   "sessionStarted": "2026-03-21T07:10:00.000Z",
   "briefGeneratedAt": "2026-03-21T07:14:00.000Z",
   "contextCallCount": 0,
+  "sessionLedgerLearnings": [],
   "sessionCheckpoint": {
     "sessionId": "sess_9f21b6f7",
     "task": "Audit launch blockers for local setup",

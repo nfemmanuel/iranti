@@ -502,6 +502,10 @@ export async function buildHookAdditionalContext(options: {
                 response,
                 agent,
                 source: 'ClaudeCodeHookStop',
+                ledgerContext: {
+                    source: 'claude_hook',
+                    host: 'claude_code',
+                },
             });
             const checkpoint = extractHookCheckpointPayload(response);
             const projectEntity = getProjectMemoryEntity();
@@ -538,6 +542,10 @@ export async function buildHookAdditionalContext(options: {
             prompt,
             agent,
             source: 'ClaudeCodeHook',
+            ledgerContext: {
+                source: 'claude_hook',
+                host: 'claude_code',
+            },
         });
     }
 

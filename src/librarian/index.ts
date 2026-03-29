@@ -474,7 +474,7 @@ async function resolveConflict(
             inc('librarian.updated');
             getStaffEventEmitter().emit({
                 staffComponent: 'Librarian',
-                actionType: 'write_replaced',
+                actionType: 'write_updated',
                 agentId: candidate.createdBy,
                 source: candidate.source,
                 entityType: candidate.entityType,
@@ -508,7 +508,7 @@ async function resolveConflict(
             inc('librarian.updated');
             getStaffEventEmitter().emit({
                 staffComponent: 'Librarian',
-                actionType: 'write_replaced',
+                actionType: 'write_updated',
                 agentId: candidate.createdBy,
                 source: candidate.source,
                 entityType: candidate.entityType,

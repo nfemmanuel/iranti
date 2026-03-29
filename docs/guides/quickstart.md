@@ -389,6 +389,7 @@ const brief = await iranti.handshake({
 
 console.log('Task inferred:', brief.inferredTaskType);
 console.log('Working memory entries:', brief.workingMemory.length);
+console.log('Recent ledger learnings:', brief.sessionLedgerLearnings?.length ?? 0);
 console.log('Operating rules loaded:', brief.operatingRules.length > 0);
 ```
 

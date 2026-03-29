@@ -368,6 +368,10 @@ this for arbitrary prose or every turn.`,
             projectEntity,
             personalEntity,
             confidence: confidence ?? 90,
+            ledgerContext: {
+                source: 'mcp',
+                host: process.env.IRANTI_MCP_HOST?.trim() || 'generic_mcp',
+            },
         });
         return textResult(result);
     });
