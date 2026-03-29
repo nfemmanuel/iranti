@@ -278,6 +278,19 @@ async function main(): Promise<void> {
         const statusRun = runCli(['status', '--root', root, '--json'], ambientFreeCwd);
         assert.strictEqual(statusRun.status, 0, `status failed:\n${statusRun.stdout}\n${statusRun.stderr}`);
 
+        const quotedRootStatusRun = runCli(['status', '--root', `'${root}'`, '--json'], ambientFreeCwd);
+        assert.strictEqual(
+            quotedRootStatusRun.status,
+            0,
+            `status with single-quoted root failed:\n${quotedRootStatusRun.stdout}\n${quotedRootStatusRun.stderr}`
+        );
+        const quotedRootStatusPayload = JSON.parse(quotedRootStatusRun.stdout.trim()) as {
+            runtimeRoot: string;
+            runtimeRootSource: string;
+        };
+        assert.strictEqual(quotedRootStatusPayload.runtimeRoot, root);
+        assert.strictEqual(quotedRootStatusPayload.runtimeRootSource, 'flag');
+
         const statusPayload = JSON.parse(statusRun.stdout.trim()) as {
             runtimeRootSource: string;
             boundRuntimeRoot: string | null;

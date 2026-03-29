@@ -396,6 +396,18 @@ function getFlag(args: ParsedArgs, key: string): string | undefined {
     return typeof value === 'string' ? value : undefined;
 }
 
+function stripWrappingQuotes(value: string): string {
+    const trimmed = value.trim();
+    if (trimmed.length >= 2) {
+        const first = trimmed[0];
+        const last = trimmed[trimmed.length - 1];
+        if ((first === '"' || first === "'") && last === first) {
+            return trimmed.slice(1, -1);
+        }
+    }
+    return trimmed;
+}
+
 function hasFlag(args: ParsedArgs, key: string): boolean {
     return Boolean(args.flags.get(key));
 }
@@ -492,11 +504,12 @@ function findClosestAncestorRuntimeRoot(startDir: string): string | null {
 }
 
 function resolveInstallRootDetails(args: ParsedArgs, scope: Scope): RuntimeRootResolution {
-    const explicit = getFlag(args, 'root') ?? process.env.IRANTI_HOME;
+    const explicitFlag = getFlag(args, 'root');
+    const explicit = explicitFlag ? stripWrappingQuotes(explicitFlag) : (process.env.IRANTI_HOME ? stripWrappingQuotes(process.env.IRANTI_HOME) : undefined);
     if (explicit) {
         return {
             root: path.resolve(explicit),
-            source: getFlag(args, 'root') ? 'flag' : 'env',
+            source: explicitFlag ? 'flag' : 'env',
             userRoot: defaultInstallRoot('user'),
             systemRoot: defaultInstallRoot('system'),
             installMetaPath: path.join(path.resolve(explicit), 'install.json'),
