@@ -1981,16 +1981,16 @@ async function ensureInstanceConfigured(
 }
 
 function makeIrantiMcpServerConfig(projectEnvPath?: string): { command: string; args: string[]; env?: Record<string, string> } {
+    const env: Record<string, string> = {
+        IRANTI_MCP_HOST: 'codex_cli',
+    };
+    if (projectEnvPath) {
+        env.IRANTI_PROJECT_ENV = projectEnvPath;
+    }
     return {
         command: 'iranti',
         args: ['mcp'],
-        ...(projectEnvPath
-            ? {
-                env: {
-                    IRANTI_PROJECT_ENV: projectEnvPath,
-                },
-            }
-            : {}),
+        env,
     };
 }
 
@@ -2003,7 +2003,9 @@ function makeVsCodeIrantiMcpServerConfig(projectPath: string, projectEnvPath?: s
 } {
     const resolvedProjectEnvPath = projectEnvPath ? path.resolve(projectEnvPath) : undefined;
     const localProjectEnvPath = path.join(projectPath, '.env.iranti');
-    const env: Record<string, string> = {};
+    const env: Record<string, string> = {
+        IRANTI_MCP_HOST: 'codex_vscode',
+    };
     if (resolvedProjectEnvPath && path.resolve(localProjectEnvPath) !== resolvedProjectEnvPath) {
         env.IRANTI_PROJECT_ENV = resolvedProjectEnvPath;
     }
@@ -2089,7 +2091,11 @@ async function resolveAttendantCliTarget(args: ParsedArgs): Promise<AttendantCli
         projectEnvFile,
         instanceEnvFile,
         agentId,
-        iranti: createFirstPartyIranti({ connectionString }),
+        iranti: createFirstPartyIranti({
+            connectionString,
+            sessionLedgerSource: 'cli',
+            sessionLedgerHost: 'plain_cli',
+        }),
     };
 }
 

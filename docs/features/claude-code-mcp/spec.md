@@ -12,6 +12,7 @@ This feature exposes Iranti to Claude Code through the installed CLI surface: `i
 | `IRANTI_PROJECT_ENV` | string? | Optional explicit `.env.iranti` path. |
 | `IRANTI_MCP_DEFAULT_AGENT` | string? | Default agent id for MCP tool calls. |
 | `IRANTI_MCP_DEFAULT_SOURCE` | string? | Default source label for MCP writes and ingests. |
+| `IRANTI_MCP_HOST` | string? | Optional host label for first-party session-ledger metadata. Defaults to `generic_mcp` for direct MCP launches. |
 | `IRANTI_CLAUDE_AGENT_ID` | string? | Default agent id used by the Claude Code hook helper. |
 | `IRANTI_AUTO_REMEMBER` | boolean? | Opt-in explicit prompt auto-save into `IRANTI_MEMORY_ENTITY` before retrieval. |
 | `IRANTI_PERSONAL_MEMORY_ENTITY` | string? | Optional personal-memory target for auto-remembered user facts. Defaults to `user/main`. |

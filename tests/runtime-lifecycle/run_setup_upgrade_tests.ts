@@ -218,6 +218,7 @@ async function main(): Promise<void> {
         assert.strictEqual(mcpConfig.mcpServers.iranti.command, 'iranti');
         assert.deepStrictEqual(mcpConfig.mcpServers.iranti.args, ['mcp']);
         assert.strictEqual(mcpConfig.mcpServers.iranti.env?.IRANTI_PROJECT_ENV, bindingFile, 'Expected scaffolded .mcp.json to pin the project binding');
+        assert.strictEqual(mcpConfig.mcpServers.iranti.env?.IRANTI_MCP_HOST, 'codex_cli', 'Expected scaffolded .mcp.json to label Codex CLI host context.');
         const vscodeMcpConfig = readJson<{
             servers: {
                 iranti: {
@@ -233,6 +234,7 @@ async function main(): Promise<void> {
         assert.strictEqual(vscodeMcpConfig.servers.iranti.command, 'iranti');
         assert.deepStrictEqual(vscodeMcpConfig.servers.iranti.args, ['mcp']);
         assert.strictEqual(vscodeMcpConfig.servers.iranti.envFile, '${workspaceFolder}/.env.iranti', 'Expected scaffolded .vscode/mcp.json to load the local binding via envFile');
+        assert.strictEqual(vscodeMcpConfig.servers.iranti.env?.IRANTI_MCP_HOST, 'codex_vscode', 'Expected scaffolded .vscode/mcp.json to label Codex VS Code host context.');
         const claudeSettings = readJson<{ hooks?: Record<string, unknown>; permissions?: { allow?: string[] } }>(claudeSettingsFile);
         assert.ok(claudeSettings.hooks?.SessionStart, 'Expected scaffolded Claude settings to include SessionStart hook.');
         assert.ok(claudeSettings.hooks?.UserPromptSubmit, 'Expected scaffolded Claude settings to include UserPromptSubmit hook.');
@@ -327,14 +329,17 @@ async function main(): Promise<void> {
                 };
             }>(path.join(projectPath, '.mcp.json'));
             assert.strictEqual(sharedMcp.mcpServers.iranti.env?.IRANTI_PROJECT_ENV, path.join(projectPath, '.env.iranti'), 'Expected shared scaffolding to pin each project binding in .mcp.json');
+            assert.strictEqual(sharedMcp.mcpServers.iranti.env?.IRANTI_MCP_HOST, 'codex_cli', 'Expected shared .mcp.json scaffolding to label Codex CLI host context.');
             const sharedVsCodeMcp = readJson<{
                 servers: {
                     iranti: {
                         envFile?: string;
+                        env?: Record<string, string>;
                     };
                 };
             }>(path.join(projectPath, '.vscode', 'mcp.json'));
             assert.strictEqual(sharedVsCodeMcp.servers.iranti.envFile, '${workspaceFolder}/.env.iranti', 'Expected shared scaffolding to pin each project binding in .vscode/mcp.json');
+            assert.strictEqual(sharedVsCodeMcp.servers.iranti.env?.IRANTI_MCP_HOST, 'codex_vscode', 'Expected shared .vscode/mcp.json scaffolding to label Codex VS Code host context.');
             const sharedClaudeSettings = readJson<{ hooks?: Record<string, unknown>; permissions?: { allow?: string[] } }>(path.join(projectPath, '.claude', 'settings.local.json'));
             assert.ok(sharedClaudeSettings.hooks?.Stop, 'Expected shared Claude scaffolding to include Stop hook.');
             assert.ok(

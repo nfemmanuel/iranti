@@ -43,7 +43,7 @@ async function main(): Promise<void> {
                 key: 'height',
                 reason: 'personal_height_recall_prompt',
                 level: 'audit',
-                metadata: { sessionId, shouldInject: true },
+                metadata: { sessionId, shouldInject: true, host: 'plain_cli' },
             },
             {
                 event_id: 'evt-checkpoint',
@@ -57,7 +57,7 @@ async function main(): Promise<void> {
                 key: 'checkpoint_summary',
                 reason: 'shared_checkpoint_breadcrumb_failed',
                 level: 'debug',
-                metadata: { sessionId, error: 'synthetic checkpoint failure for ledger testing' },
+                metadata: { sessionId, error: 'synthetic checkpoint failure for ledger testing', host: 'plain_cli' },
             },
             {
                 event_id: 'evt-handshake',
@@ -71,7 +71,7 @@ async function main(): Promise<void> {
                 key: 'attendant_state',
                 reason: 'session_started',
                 level: 'audit',
-                metadata: { sessionId, task: 'Validate session ledger retrieval.' },
+                metadata: { sessionId, task: 'Validate session ledger retrieval.', host: 'plain_cli' },
             },
         ]),
     });
@@ -95,6 +95,10 @@ async function main(): Promise<void> {
                 .filter((value): value is string => Boolean(value))
         );
         assert.ok(ledgerSessionIds.has(sessionId), 'Expected the ledger to carry the requested sessionId metadata.');
+        assert.ok(
+            ledger.some((event) => event.metadata?.host === 'plain_cli'),
+            'Expected the ledger to carry host metadata for first-party events.'
+        );
 
         const app = express();
         app.use('/memory', memoryRoutes({

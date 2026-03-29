@@ -109,6 +109,7 @@ The project-local `.mcp.json` should contain:
   - `IRANTI_PROJECT_ENV=<absolute path to .env.iranti>`
   - `IRANTI_MCP_DEFAULT_AGENT=<agent>`
   - `IRANTI_MCP_DEFAULT_SOURCE=<source>`
+  - `IRANTI_MCP_HOST=codex_cli`
 
 The VS Code-native `.vscode/mcp.json` should contain:
 - `servers.iranti.type = stdio`
@@ -116,6 +117,7 @@ The VS Code-native `.vscode/mcp.json` should contain:
 - args: `mcp`
 - `envFile = ${workspaceFolder}/.env.iranti` when the binding lives in the workspace root
 - the default agent/source env values
+- `IRANTI_MCP_HOST=codex_vscode`
 
 If you launch `iranti mcp` directly in a terminal, it will stay running and wait for a stdio MCP client. That is expected behavior, not a normal shell command completion.
 

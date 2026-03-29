@@ -584,6 +584,8 @@ async function main(): Promise<void> {
     const iranti = createFirstPartyIranti({
         connectionString: requireConnectionString(),
         llmProvider: process.env.LLM_PROVIDER,
+        sessionLedgerSource: 'claude_hook',
+        sessionLedgerHost: 'claude_code',
     });
     const context = await buildHookAdditionalContext({
         iranti,

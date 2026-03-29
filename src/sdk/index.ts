@@ -34,6 +34,8 @@ import { querySessionLedger, SessionLedgerEvent, SessionLedgerQuery } from '../l
 export interface IrantiConfig {
     connectionString?: string;
     llmProvider?: string;
+    sessionLedgerSource?: string;
+    sessionLedgerHost?: string | null;
     /**
      * Optional event emitter for observability integrations (e.g., the Iranti
      * Control Plane). Defaults to a no-op emitter if not provided.
@@ -260,6 +262,11 @@ export interface AttendInput extends ObserveInput {
     suppressEvents?: boolean;
 }
 
+type SessionLedgerContext = {
+    source?: string;
+    host?: string | null;
+};
+
 // ─── Entity Parsing ──────────────────────────────────────────────────────────
 
 function parseEntity(entity: string): { entityType: EntityType; entityId: string } {
@@ -414,9 +421,16 @@ function mapArchiveResult(result: {
 
 export class Iranti {
     private config: IrantiConfig;
+    private sessionLedgerContext: SessionLedgerContext;
 
     constructor(config: IrantiConfig = {}) {
         this.config = config;
+        this.sessionLedgerContext = {
+            source: config.sessionLedgerSource?.trim() || undefined,
+            host: typeof config.sessionLedgerHost === 'string'
+                ? (config.sessionLedgerHost.trim() || null)
+                : (config.sessionLedgerHost ?? null),
+        };
 
         const connectionString = config.connectionString ?? process.env.DATABASE_URL;
         if (!connectionString) {
@@ -436,6 +450,16 @@ export class Iranti {
         if (config.staffEventEmitter) {
             setStaffEventEmitter(config.staffEventEmitter);
         }
+    }
+
+    private buildSessionLedgerContext(): SessionLedgerContext | undefined {
+        if (!this.sessionLedgerContext.source && !this.sessionLedgerContext.host) {
+            return undefined;
+        }
+        return {
+            source: this.sessionLedgerContext.source,
+            host: this.sessionLedgerContext.host ?? null,
+        };
     }
 
     // ── Write ───────────────────────────────────────────────────────────────
@@ -515,6 +539,7 @@ export class Iranti {
         return attendant.handshake({
             task: input.task,
             recentMessages: input.recentMessages,
+            ledgerContext: this.buildSessionLedgerContext(),
         });
     }
 
@@ -528,6 +553,7 @@ export class Iranti {
         return attendant.reconvene({
             task: input.task,
             recentMessages: input.recentMessages,
+            ledgerContext: this.buildSessionLedgerContext(),
         });
     }
 
@@ -539,6 +565,7 @@ export class Iranti {
             checkpoint: input.checkpoint,
             sessionId: input.sessionId,
             heartbeatAt: input.heartbeatAt,
+            ledgerContext: this.buildSessionLedgerContext(),
         });
     }
 
@@ -546,6 +573,7 @@ export class Iranti {
         const attendant = getAttendant(resolveAgentId(input, 'resumeSession'));
         return attendant.resumeSession({
             sessionId: input.sessionId,
+            ledgerContext: this.buildSessionLedgerContext(),
         });
     }
 
@@ -553,6 +581,7 @@ export class Iranti {
         const attendant = getAttendant(resolveAgentId(input, 'completeSession'));
         return attendant.completeSession({
             sessionId: input.sessionId,
+            ledgerContext: this.buildSessionLedgerContext(),
         });
     }
 
@@ -560,6 +589,7 @@ export class Iranti {
         const attendant = getAttendant(resolveAgentId(input, 'abandonSession'));
         return attendant.abandonSession({
             sessionId: input.sessionId,
+            ledgerContext: this.buildSessionLedgerContext(),
         });
     }
 
@@ -568,6 +598,7 @@ export class Iranti {
         return attendant.inspectSession({
             task: input.task,
             recentMessages: input.recentMessages,
+            ledgerContext: this.buildSessionLedgerContext(),
         });
     }
 
@@ -909,6 +940,7 @@ export class Iranti {
             currentContext: input.currentContext,
             maxFacts: input.maxFacts,
             entityHints: input.entityHints,
+            ledgerContext: this.buildSessionLedgerContext(),
         });
     }
 
@@ -934,6 +966,8 @@ export class Iranti {
             entityHints: input.entityHints,
             latestMessage: input.latestMessage,
             forceInject: input.forceInject,
+            suppressEvents: input.suppressEvents,
+            ledgerContext: this.buildSessionLedgerContext(),
         });
     }
 

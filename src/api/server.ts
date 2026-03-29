@@ -252,6 +252,8 @@ app.get(ROUTES.health, (_req, res) => {
 const iranti = createFirstPartyIranti({
     connectionString: process.env.DATABASE_URL!,
     llmProvider: (process.env.LLM_PROVIDER as 'gemini' | 'openai' | 'mock') ?? 'mock',
+    sessionLedgerSource: 'api',
+    sessionLedgerHost: 'api_server',
 });
 
 let stopArchivistScheduler: (() => void) | null = null;

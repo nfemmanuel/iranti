@@ -30,6 +30,7 @@ function printHelp(): void {
         '  IRANTI_MCP_AGENT_DESCRIPTION  Default agent description',
         '  IRANTI_MCP_AGENT_MODEL        Default agent model label',
         '  IRANTI_MCP_DEFAULT_SOURCE     Default write source (default: ClaudeCode)',
+        '  IRANTI_MCP_HOST               Host label for session ledger events (default: generic_mcp)',
         '  IRANTI_AUTO_REMEMBER         Opt-in explicit prompt auto-save before attend()',
         '',
         'This server is intended for Claude Code and other MCP clients over stdio.',
@@ -128,6 +129,8 @@ async function main(): Promise<void> {
     const iranti = createFirstPartyIranti({
         connectionString: requireConnectionString(),
         llmProvider: process.env.LLM_PROVIDER,
+        sessionLedgerSource: 'mcp',
+        sessionLedgerHost: process.env.IRANTI_MCP_HOST?.trim() || 'generic_mcp',
     });
 
     await ensureDefaultAgent(iranti);

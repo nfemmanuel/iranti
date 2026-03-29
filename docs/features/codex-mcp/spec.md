@@ -17,6 +17,7 @@ This feature connects Codex to Iranti through Codex's MCP client using the insta
 | `.env.iranti` | file | Project binding file containing `IRANTI_URL`, `IRANTI_API_KEY`, `IRANTI_AGENT_ID`, and `IRANTI_INSTANCE_ENV`. |
 | `IRANTI_AUTO_REMEMBER` | boolean? | Opt-in explicit prompt auto-save into `IRANTI_MEMORY_ENTITY` before `iranti_attend` retrieval. |
 | `IRANTI_PERSONAL_MEMORY_ENTITY` | string? | Optional personal-memory target for auto-remembered user facts. Defaults to `user/main`. |
+| `IRANTI_MCP_HOST` | string? | Host label written into first-party session-ledger metadata. Workspace scaffolds use `codex_cli` for `.mcp.json` and `codex_vscode` for `.vscode/mcp.json`. |
 | `iranti_checkpoint` | MCP tool | Explicit shared progress checkpointing for Codex and other MCP clients so in-flight work survives across turns, sessions, and agents. |
 | `iranti_remember_response` | MCP tool | Explicit strict assistant-summary persistence for Codex and other MCP clients without a `Stop` hook; may optionally pin `projectEntity` or `personalEntity`. |
 | linked instance env | file | Instance environment file referenced by `IRANTI_INSTANCE_ENV`, containing `DATABASE_URL`, `LLM_PROVIDER`, and provider keys. |
@@ -42,8 +43,8 @@ This feature connects Codex to Iranti through Codex's MCP client using the insta
 7. If `--project-env` is provided, validate and store it as `IRANTI_PROJECT_ENV`. Otherwise leave the registration unpinned.
 8. By default register `iranti mcp`; only use `--local-script` for repo-bound development.
 9. Unless `--no-workspace-file` is supplied, locate the active project binding from `--project-env` or the nearest ancestor `.env.iranti` and write or merge project-local `.mcp.json` and `.vscode/mcp.json` files.
-10. The project-local `.mcp.json` pins `IRANTI_PROJECT_ENV` and carries the default Codex agent/source for repo-local MCP consumers.
-11. The project-local `.vscode/mcp.json` exposes the same `iranti` server through VS Code's native workspace MCP surface so Codex VS Code sessions do not depend on cross-app discovery.
+10. The project-local `.mcp.json` pins `IRANTI_PROJECT_ENV`, carries the default Codex agent/source, and labels the host as `codex_cli` for repo-local MCP consumers.
+11. The project-local `.vscode/mcp.json` exposes the same `iranti` server through VS Code's native workspace MCP surface, using host label `codex_vscode` so Codex VS Code sessions do not collapse into generic MCP telemetry.
 12. Store only safe defaults and any explicitly requested pinned `IRANTI_PROJECT_ENV` in the global MCP entry.
 13. At runtime, `iranti mcp` loads `IRANTI_PROJECT_ENV` first when explicitly pinned and otherwise falls back to the active project/workspace.
 14. If an operator launches `iranti mcp` directly in a terminal, the process intentionally stays running because it is waiting for an MCP client over stdio.

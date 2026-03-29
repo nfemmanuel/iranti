@@ -84,6 +84,10 @@ const WEAK_EXPLICIT_TASK_PATTERNS: RegExp[] = [
 export interface AgentContext {
     task: string;
     recentMessages: string[];
+    ledgerContext?: {
+        source?: string;
+        host?: string | null;
+    };
 }
 
 export interface WorkingMemoryEntry {
@@ -204,9 +208,10 @@ export interface SessionSummary {
 
 export interface ObserveInput {
     currentContext: string;
-    maxFacts?: number;          // default 5 — don't overwhelm context
+    maxFacts?: number;          // default 5 - don't overwhelm context
     entityHints?: string[];     // deterministic canonical entities from caller
     priorityKeys?: string[];    // exact keys to prioritize within resolved entities
+    ledgerContext?: AgentContext['ledgerContext'];
 }
 
 export interface FactInjection {
@@ -257,6 +262,7 @@ export interface SessionCheckpointInput extends AgentContext {
 
 export interface SessionActionInput {
     sessionId?: string;
+    ledgerContext?: AgentContext['ledgerContext'];
 }
 
 export interface AttendDecision {
@@ -930,15 +936,41 @@ export class AttendantInstance {
     private contextCallCount: number = 0;
     private sessionStarted: string = new Date().toISOString();
     private sessionCheckpoint: SessionCheckpointRecord | null = null;
+    private eventSource: string = 'internal';
+    private eventHost: string | null = null;
 
     constructor(agentId: string) {
         this.agentId = agentId;
+    }
+
+    setLedgerContext(context?: AgentContext['ledgerContext']): void {
+        if (context?.source?.trim()) {
+            this.eventSource = context.source.trim();
+        }
+        if (typeof context?.host === 'string') {
+            const trimmed = context.host.trim();
+            this.eventHost = trimmed || null;
+        } else if (context?.host === null) {
+            this.eventHost = null;
+        }
+    }
+
+    private buildEventMetadata(metadata: Record<string, unknown> = {}): Record<string, unknown> {
+        const withSession =
+            Object.prototype.hasOwnProperty.call(metadata, 'sessionId')
+                ? metadata
+                : { ...metadata, sessionId: this.sessionStarted };
+        return {
+            ...withSession,
+            ...(this.eventHost ? { host: this.eventHost } : {}),
+        };
     }
 
     // ── Handshake ────────────────────────────────────────────────────────────
 
     async handshake(context: AgentContext): Promise<WorkingMemoryBrief> {
         const t0 = timeStart();
+        this.setLedgerContext(context.ledgerContext);
         // Try to resume from persisted state first
         const persisted = await this.loadPersistedState();
 
@@ -983,14 +1015,13 @@ export class AttendantInstance {
             staffComponent: 'Attendant',
             actionType: 'handshake_completed',
             agentId: this.agentId,
-            source: 'internal', // Source not threaded to AttendantInstance in this PR; follow-up required
-            reason: null,
-            level: 'debug',
-            metadata: {
+            source: this.eventSource,
+            reason: 'session_started',
+            level: 'audit',
+            metadata: this.buildEventMetadata({
                 briefSize: this.brief?.workingMemory.length ?? 0,
                 taskSummary: context.task.slice(0, 120),
-                sessionId: this.sessionStarted,
-            },
+            }),
         });
         timeEnd('attendant.handshake_ms', t0);
         return this.brief;
@@ -1000,6 +1031,7 @@ export class AttendantInstance {
 
     async reconvene(context: AgentContext): Promise<WorkingMemoryBrief> {
         const t0 = timeStart();
+        this.setLedgerContext(context.ledgerContext);
         if (!this.brief) {
             const result = await this.handshake(context);
             timeEnd('attendant.reconvene_ms', t0);
@@ -1030,14 +1062,13 @@ export class AttendantInstance {
                 staffComponent: 'Attendant',
                 actionType: 'reconvene_completed',
                 agentId: this.agentId,
-                source: 'internal',
-                reason: 'Task unchanged — brief timestamp refreshed.',
+                source: this.eventSource,
+                reason: 'Task unchanged - brief timestamp refreshed.',
                 level: 'audit',
-                metadata: {
+                metadata: this.buildEventMetadata({
                     briefSize: this.brief?.workingMemory.length ?? 0,
-                    sessionId: this.sessionStarted,
                     contextCallCount: this.contextCallCount,
-                },
+                }),
             });
             timeEnd('attendant.reconvene_ms', t0);
             return this.brief;
@@ -1060,14 +1091,13 @@ export class AttendantInstance {
             staffComponent: 'Attendant',
             actionType: 'reconvene_completed',
             agentId: this.agentId,
-            source: 'internal',
-            reason: 'Task shifted — working memory rebuilt.',
+            source: this.eventSource,
+            reason: 'Task shifted - working memory rebuilt.',
             level: 'audit',
-            metadata: {
+            metadata: this.buildEventMetadata({
                 briefSize: this.brief?.workingMemory.length ?? 0,
-                sessionId: this.sessionStarted,
                 contextCallCount: this.contextCallCount,
-            },
+            }),
         });
         timeEnd('attendant.reconvene_ms', t0);
         return this.brief;
@@ -1112,14 +1142,13 @@ export class AttendantInstance {
             staffComponent: 'Attendant',
             actionType: 'session_expired',
             agentId: this.agentId,
-            source: 'internal',
+            source: this.eventSource,
             reason: 'Context window threshold reached. Session archived.',
             level: 'audit',
-            metadata: {
-                sessionId: this.sessionStarted,
+            metadata: this.buildEventMetadata({
                 contextCallCount: 0,
                 expiryReason: 'context_low',
-            },
+            }),
         });
     }
 
@@ -1130,11 +1159,13 @@ export class AttendantInstance {
     }
 
     async checkpoint(input: SessionCheckpointInput): Promise<WorkingMemoryBrief> {
+        this.setLedgerContext(input.ledgerContext);
         const now = new Date().toISOString();
         if (!this.brief) {
             await this.handshake({
                 task: input.task,
                 recentMessages: input.recentMessages,
+                ledgerContext: input.ledgerContext,
             });
         }
 
@@ -1177,13 +1208,13 @@ export class AttendantInstance {
                 staffComponent: 'Attendant',
                 actionType: 'checkpoint_shared_breadcrumb_failed',
                 agentId: this.agentId,
-                source: 'internal',
+                source: this.eventSource,
                 reason: 'shared_checkpoint_breadcrumb_failed',
                 level: 'audit',
-                metadata: {
+                metadata: this.buildEventMetadata({
                     sessionId,
                     error: error instanceof Error ? error.message : String(error),
-                },
+                }),
             });
         }
         await this.persistState();
@@ -1191,9 +1222,14 @@ export class AttendantInstance {
     }
 
     async resumeSession(input: SessionActionInput = {}): Promise<WorkingMemoryBrief> {
+        this.setLedgerContext(input.ledgerContext);
         await this.ensureSessionLoaded();
         if (!this.brief || !this.sessionCheckpoint) {
-            return this.brief ?? (await this.handshake({ task: 'resume session', recentMessages: [] }));
+            return this.brief ?? (await this.handshake({
+                task: 'resume session',
+                recentMessages: [],
+                ledgerContext: input.ledgerContext,
+            }));
         }
 
         if (input.sessionId && input.sessionId.trim() !== this.sessionCheckpoint.sessionId) {
@@ -1221,9 +1257,14 @@ export class AttendantInstance {
     }
 
     async completeSession(input: SessionActionInput = {}): Promise<WorkingMemoryBrief> {
+        this.setLedgerContext(input.ledgerContext);
         await this.ensureSessionLoaded();
         if (!this.brief || !this.sessionCheckpoint) {
-            return this.brief ?? (await this.handshake({ task: 'complete session', recentMessages: [] }));
+            return this.brief ?? (await this.handshake({
+                task: 'complete session',
+                recentMessages: [],
+                ledgerContext: input.ledgerContext,
+            }));
         }
 
         if (input.sessionId && input.sessionId.trim() !== this.sessionCheckpoint.sessionId) {
@@ -1251,9 +1292,14 @@ export class AttendantInstance {
     }
 
     async abandonSession(input: SessionActionInput = {}): Promise<WorkingMemoryBrief> {
+        this.setLedgerContext(input.ledgerContext);
         await this.ensureSessionLoaded();
         if (!this.brief || !this.sessionCheckpoint) {
-            return this.brief ?? (await this.handshake({ task: 'abandon session', recentMessages: [] }));
+            return this.brief ?? (await this.handshake({
+                task: 'abandon session',
+                recentMessages: [],
+                ledgerContext: input.ledgerContext,
+            }));
         }
 
         if (input.sessionId && input.sessionId.trim() !== this.sessionCheckpoint.sessionId) {
@@ -1281,6 +1327,7 @@ export class AttendantInstance {
     }
 
     async inspectSession(context?: Partial<AgentContext>): Promise<SessionInspection> {
+        this.setLedgerContext(context?.ledgerContext);
         const persisted = await this.loadPersistedState();
         const checkpoint = persisted?.sessionCheckpoint ?? this.sessionCheckpoint ?? null;
         const normalizedTask = typeof context?.task === 'string' ? context.task.trim() : '';
@@ -1305,6 +1352,7 @@ export class AttendantInstance {
 
     async attend(input: AttendInput): Promise<AttendResult> {
         const t0 = timeStart();
+        this.setLedgerContext(input.ledgerContext);
         const currentContext = input.currentContext ?? '';
         const latestMessage = normalizeMessage(input.latestMessage);
         const forceInject = input.forceInject === true;
@@ -1315,6 +1363,7 @@ export class AttendantInstance {
             await this.handshake({
                 task: bootstrapTask,
                 recentMessages: buildAttendBootstrapMessages(latestMessage, currentContext),
+                ledgerContext: input.ledgerContext,
             });
             bootstrap = {
                 handshakePerformed: true,
@@ -1339,15 +1388,14 @@ export class AttendantInstance {
                     staffComponent: 'Attendant',
                     actionType: 'attend_completed',
                     agentId: this.agentId,
-                    source: 'internal',
-                    reason: null,
-                    level: 'debug',
-                    metadata: {
+                    source: this.eventSource,
+                    reason: 'memory_not_injected',
+                    level: 'audit',
+                    metadata: this.buildEventMetadata({
                         contextCallCount: this.contextCallCount,
-                        sessionId: this.sessionStarted,
                         shouldInject: false,
                         attendReason: 'memory_not_needed',
-                    },
+                    }),
                 });
             }
             timeEnd('attendant.attend_ms', t0);
@@ -1379,6 +1427,7 @@ export class AttendantInstance {
             maxFacts: input.maxFacts,
             entityHints: effectiveEntityHints,
             priorityKeys: mandatoryRecall.key ? [mandatoryRecall.key] : [],
+            ledgerContext: input.ledgerContext,
         });
 
         let reason: AttendResult['reason'] = 'memory_needed_injected';
@@ -1403,15 +1452,14 @@ export class AttendantInstance {
                 staffComponent: 'Attendant',
                 actionType: 'attend_completed',
                 agentId: this.agentId,
-                source: 'internal',
-                reason: null,
-                level: 'debug',
-                metadata: {
+                source: this.eventSource,
+                reason: shouldInject ? 'memory_injected' : 'memory_not_injected',
+                level: 'audit',
+                metadata: this.buildEventMetadata({
                     contextCallCount: this.contextCallCount,
-                    sessionId: this.sessionStarted,
                     shouldInject,
                     attendReason: reason,
-                },
+                }),
             });
         }
         timeEnd('attendant.attend_ms', t0);
@@ -1422,6 +1470,7 @@ export class AttendantInstance {
 
     async observe(input: ObserveInput): Promise<ObserveResult> {
         const t0 = timeStart();
+        this.setLedgerContext(input.ledgerContext);
         const maxFacts = input.maxFacts ?? 5;
         const currentContext = input.currentContext ?? '';
         const entityHints = Array.isArray(input.entityHints)
@@ -1438,13 +1487,12 @@ export class AttendantInstance {
                 staffComponent: 'Attendant',
                 actionType: 'observe_completed',
                 agentId: this.agentId,
-                source: 'internal',
-                reason: null,
-                level: 'debug',
-                metadata: {
+                source: this.eventSource,
+                reason: 'no_observation_context',
+                level: 'audit',
+                metadata: this.buildEventMetadata({
                     observeType: 'empty_context',
-                    sessionId: this.sessionStarted,
-                },
+                }),
             });
             timeEnd('attendant.observe_ms', t0);
             return {
@@ -1591,13 +1639,12 @@ ${detectionWindow}`,
                 staffComponent: 'Attendant',
                 actionType: 'observe_completed',
                 agentId: this.agentId,
-                source: 'internal',
-                reason: null,
-                level: 'debug',
-                metadata: {
+                source: this.eventSource,
+                reason: 'no_entity_candidates',
+                level: 'audit',
+                metadata: this.buildEventMetadata({
                     observeType: 'no_candidates',
-                    sessionId: this.sessionStarted,
-                },
+                }),
             });
             timeEnd('attendant.observe_ms', t0);
             return {
@@ -1770,14 +1817,13 @@ ${detectionWindow}`,
             staffComponent: 'Attendant',
             actionType: 'observe_completed',
             agentId: this.agentId,
-            source: 'internal',
-            reason: null,
-            level: 'debug',
-            metadata: {
+            source: this.eventSource,
+            reason: topFacts.length > 0 ? 'facts_retrieved' : 'no_new_facts',
+            level: 'audit',
+            metadata: this.buildEventMetadata({
                 observeType: 'facts_retrieved',
                 factsCount: topFacts.length,
-                sessionId: this.sessionStarted,
-            },
+            }),
         });
         timeEnd('attendant.observe_ms', t0);
         return {

@@ -181,6 +181,7 @@ function makeWorkspaceMcpServer(options: SetupOptions, projectEnv: string): Reco
         IRANTI_PROJECT_ENV: projectEnv,
         IRANTI_MCP_DEFAULT_AGENT: options.agent,
         IRANTI_MCP_DEFAULT_SOURCE: options.source,
+        IRANTI_MCP_HOST: 'codex_cli',
     };
     if (options.provider) {
         env.LLM_PROVIDER = options.provider;
@@ -197,6 +198,7 @@ function makeVsCodeWorkspaceMcpServer(options: SetupOptions, projectEnv: string)
     const env: Record<string, string> = {
         IRANTI_MCP_DEFAULT_AGENT: options.agent,
         IRANTI_MCP_DEFAULT_SOURCE: options.source,
+        IRANTI_MCP_HOST: 'codex_vscode',
     };
     if (options.provider) {
         env.LLM_PROVIDER = options.provider;
@@ -349,6 +351,8 @@ function main(): void {
         `IRANTI_MCP_DEFAULT_AGENT=${options.agent}`,
         '--env',
         `IRANTI_MCP_DEFAULT_SOURCE=${options.source}`,
+        '--env',
+        'IRANTI_MCP_HOST=codex_cli',
     ];
 
     const projectEnv = resolveProjectEnv(options);

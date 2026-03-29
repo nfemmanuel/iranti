@@ -212,6 +212,7 @@ process.exit(1);
     assert.ok(args.includes(specialName), 'codex mcp add should receive the MCP name literally');
     assert.ok(args.includes(`IRANTI_MCP_DEFAULT_AGENT=${specialAgent}`), 'agent env should arrive literally');
     assert.ok(args.includes(`IRANTI_MCP_DEFAULT_SOURCE=${specialSource}`), 'source env should arrive literally');
+    assert.ok(args.includes('IRANTI_MCP_HOST=codex_cli'), 'global codex setup should label the Codex CLI host');
     assert.ok(args.includes(`LLM_PROVIDER=${specialProvider}`), 'provider env should arrive literally');
 }
 
@@ -298,6 +299,7 @@ process.exit(1);
     assert.strictEqual(mcpConfig.mcpServers?.iranti?.env?.IRANTI_PROJECT_ENV, projectEnv, 'workspace .mcp.json should pin the local project binding');
     assert.strictEqual(mcpConfig.mcpServers?.iranti?.env?.IRANTI_MCP_DEFAULT_AGENT, 'codex_code', 'workspace .mcp.json should carry the default Codex agent');
     assert.strictEqual(mcpConfig.mcpServers?.iranti?.env?.IRANTI_MCP_DEFAULT_SOURCE, 'Codex', 'workspace .mcp.json should carry the default Codex source label');
+    assert.strictEqual(mcpConfig.mcpServers?.iranti?.env?.IRANTI_MCP_HOST, 'codex_cli', 'workspace .mcp.json should label the Codex CLI host');
     const vscodeMcpConfig = JSON.parse(fs.readFileSync(vscodeMcpFile, 'utf8')) as {
         servers?: Record<string, {
             type?: string;
@@ -313,6 +315,7 @@ process.exit(1);
     assert.strictEqual(vscodeMcpConfig.servers?.iranti?.envFile, '${workspaceFolder}/.env.iranti', 'workspace .vscode/mcp.json should load the project binding through envFile');
     assert.strictEqual(vscodeMcpConfig.servers?.iranti?.env?.IRANTI_MCP_DEFAULT_AGENT, 'codex_code', 'workspace .vscode/mcp.json should carry the default Codex agent');
     assert.strictEqual(vscodeMcpConfig.servers?.iranti?.env?.IRANTI_MCP_DEFAULT_SOURCE, 'Codex', 'workspace .vscode/mcp.json should carry the default Codex source label');
+    assert.strictEqual(vscodeMcpConfig.servers?.iranti?.env?.IRANTI_MCP_HOST, 'codex_vscode', 'workspace .vscode/mcp.json should label the Codex VS Code host');
 }
 
 async function testWindowsCodexResolutionPrefersExe(root: string): Promise<void> {
