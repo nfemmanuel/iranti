@@ -178,6 +178,7 @@ On the next handshake or checkpoint cycle, the Attendant can surface interrupted
 Operator inspection surfaces:
 - `GET /memory/session/:agentId` returns one agent's persisted checkpoint plus a derived summary
 - `GET /memory/sessions` returns operator-oriented checkpoint inventory across agents, with filters such as `agentId`, `operatorState`, and `staleOnly`
+- `GET /memory/ledger` returns structured staff-event rows for one session, one agent, or a bounded time window when you need an audit-style view of what happened during handshake, attend, observe, or maintenance
 
 Important distinction:
 - `sessionCheckpoint.status` is the raw persisted checkpoint status
@@ -564,6 +565,7 @@ If upgrade behaves strangely on Windows:
 | Resolve conflicts | `iranti resolve` |
 | Inspect Attendant state | `iranti handshake`, `iranti attend` |
 | Inspect persisted session state | `GET /memory/session/:agentId`, `GET /memory/sessions` |
+| Inspect structured session ledger events | `GET /memory/ledger?agentId=...&sessionId=...` |
 | Upgrade CLI/runtime | `iranti upgrade` |
 
 ---

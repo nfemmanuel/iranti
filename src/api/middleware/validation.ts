@@ -5,6 +5,7 @@
 
 import { Request, Response, NextFunction } from 'express';
 import type { SessionListInput, SessionListSort, SessionOperatorState } from '../../sdk';
+import type { EventLevel } from '../../lib/staffEventEmitter';
 
 // Validation schemas
 const schemas = {
@@ -250,6 +251,86 @@ export function validateSessionListQuery(query: Request['query']): SessionListIn
       throw new Error(`sort must be one of: ${allowedSorts.join(', ')}`);
     }
     result.sort = sortRaw as SessionListSort;
+  }
+
+  return result;
+}
+
+export function validateSessionLedgerQuery(query: Request['query']): {
+  agentId?: string;
+  sessionId?: string;
+  actionType?: string;
+  source?: string;
+  level?: EventLevel;
+  since?: Date;
+  until?: Date;
+  limit?: number;
+} {
+  const agentId = readQueryValue(query.agentId)?.trim();
+  const sessionId = readQueryValue(query.sessionId)?.trim();
+  const actionType = readQueryValue(query.actionType)?.trim();
+  const source = readQueryValue(query.source)?.trim();
+  const levelRaw = readQueryValue(query.level)?.trim();
+  const sinceRaw = readQueryValue(query.since)?.trim();
+  const untilRaw = readQueryValue(query.until)?.trim();
+  const limitRaw = readQueryValue(query.limit)?.trim();
+
+  const result: {
+    agentId?: string;
+    sessionId?: string;
+    actionType?: string;
+    source?: string;
+    level?: EventLevel;
+    since?: Date;
+    until?: Date;
+    limit?: number;
+  } = {};
+
+  if (agentId) {
+    if (agentId.length > 200) throw new Error('agentId exceeds maximum length of 200.');
+    result.agentId = agentId;
+  }
+
+  if (sessionId) {
+    if (sessionId.length > 200) throw new Error('sessionId exceeds maximum length of 200.');
+    result.sessionId = sessionId;
+  }
+
+  if (actionType) {
+    if (actionType.length > 120) throw new Error('actionType exceeds maximum length of 120.');
+    result.actionType = actionType;
+  }
+
+  if (source) {
+    if (source.length > 80) throw new Error('source exceeds maximum length of 80.');
+    result.source = source;
+  }
+
+  if (levelRaw) {
+    if (levelRaw !== 'audit' && levelRaw !== 'debug') {
+      throw new Error('level must be audit or debug.');
+    }
+    result.level = levelRaw;
+  }
+
+  if (sinceRaw) {
+    const since = new Date(sinceRaw);
+    if (Number.isNaN(since.getTime())) throw new Error('since must be a valid ISO 8601 timestamp.');
+    result.since = since;
+  }
+
+  if (untilRaw) {
+    const until = new Date(untilRaw);
+    if (Number.isNaN(until.getTime())) throw new Error('until must be a valid ISO 8601 timestamp.');
+    result.until = until;
+  }
+
+  if (limitRaw) {
+    const parsed = Number.parseInt(limitRaw, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 500) {
+      throw new Error('limit must be an integer between 1 and 500.');
+    }
+    result.limit = parsed;
   }
 
   return result;

@@ -221,6 +221,7 @@ Hybrid search response:
 - `POST /memory/handshake`
 - `POST /memory/reconvene`
 - `GET /memory/sessions`
+- `GET /memory/ledger`
 - `GET /memory/session/:agentId`
 - `POST /memory/checkpoint`
 - `POST /memory/resume`
@@ -346,6 +347,50 @@ Session inspection response (`GET /memory/session/:agentId`):
       "openRisks": ["stale metadata semantics unclear"]
     }
   }
+}
+```
+
+Session ledger response (`GET /memory/ledger`):
+
+Optional query parameters:
+- `agentId`
+- `sessionId`
+- `actionType`
+- `source`
+- `level`
+- `since` (ISO timestamp)
+- `until` (ISO timestamp)
+- `limit` (1-500, default 100)
+
+Response:
+
+```json
+{
+  "items": [
+    {
+      "eventId": "evt_123",
+      "timestamp": "2026-03-28T18:22:31.000Z",
+      "staffComponent": "Attendant",
+      "actionType": "attend_completed",
+      "agentId": "claude_code_main",
+      "source": "mcp",
+      "level": "debug",
+      "reason": "personal_height_recall_prompt",
+      "metadata": {
+        "sessionId": "2026-03-28T18:20:00.000Z"
+      }
+    }
+  ],
+  "total": 1
+}
+```
+
+If the target instance has not run the `staff_events` migration yet, this route returns:
+
+```json
+{
+  "error": "staff_events table is missing. Create it before querying the session ledger.",
+  "code": "SESSION_LEDGER_UNAVAILABLE"
 }
 ```
 

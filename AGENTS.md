@@ -250,6 +250,7 @@ iranti/
 â”‚   â”‚   â”œâ”€â”€ runtimeLifecycle.ts â€” Runtime metadata read/write, pid probes, restart helpers
 â”‚   â”‚   â”œâ”€â”€ autoRemember.ts    â€” Opt-in explicit prompt memory capture for Claude/Codex integrations, routing personal facts separately from project facts
 â”‚   â”‚   â”œâ”€â”€ createFirstPartyIranti.ts â€” Shared first-party Iranti constructor that installs DB-backed staff event logging
+â”‚   â”‚   â”œâ”€â”€ sessionLedger.ts   â€” Structured `staff_events` query helpers for operator/session audit reads
 â”‚   â”‚   â”œâ”€â”€ cliHelpCatalog.ts   â€” Extracted command/help catalog text for CLI guidance surfaces
 â”‚   â”‚   â”œâ”€â”€ cliHelpRenderer.ts  â€” Shared CLI help rendering for command and wizard guidance
 â”‚   â”‚   â”œâ”€â”€ escalationPaths.ts  â€” Escalation runtime path resolution + folder bootstrap
@@ -489,6 +490,7 @@ const attendant = iranti.getAttendant(agentId);
 // Session checkpoints and recovery
 const checkpoint = await iranti.checkpoint({ agentId, task, recentMessages, checkpoint: { currentStep, nextStep, openRisks } });
 const sessions = await iranti.listSessions();
+const ledger = await iranti.listSessionLedger({ agentId, sessionId, limit: 100 });
 const session = await iranti.inspectSession({ agentId });
 const resumed = await iranti.resumeSession({ agentId, sessionId });
 const completed = await iranti.completeSession({ agentId, sessionId });

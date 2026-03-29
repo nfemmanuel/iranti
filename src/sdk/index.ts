@@ -27,6 +27,7 @@ import { getPersonalRecallEntities, isPersonalMemoryKey } from '../lib/autoRemem
 import { configureMock, MockConfig } from '../lib/providers/mock';
 import { EntityType } from '../types';
 import { ArchivedReason, ResolutionOutcome, ResolutionState } from '../generated/prisma/client';
+import { querySessionLedger, SessionLedgerEvent, SessionLedgerQuery } from '../lib/sessionLedger';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -151,6 +152,8 @@ export interface SessionInspection {
     persistedBriefGeneratedAt?: string;
     summary: SessionSummary;
 }
+
+export interface SessionLedgerInput extends SessionLedgerQuery {}
 
 export type SessionOperatorState = AttendantSessionOperatorState;
 
@@ -599,6 +602,10 @@ export class Iranti {
         }
 
         return sessions;
+    }
+
+    async listSessionLedger(input: SessionLedgerInput = {}): Promise<SessionLedgerEvent[]> {
+        return querySessionLedger(input);
     }
 
     getAttendant(agentId: string): AttendantInstance {

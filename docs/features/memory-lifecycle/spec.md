@@ -23,6 +23,7 @@ This feature defines how Iranti should participate across an agent turn without 
 | assistant summary facts | durable writes | Strict summaries persisted through Claude `Stop` or explicit MCP response memory tools. |
 | shared checkpoint breadcrumbs | durable writes | Compact `checkpoint_*` facts written to explicit entity targets so other agents can resume shared work without inheriting private attendant state. |
 | fact properties | JSON | Structured metadata describing `memoryScope`, `capturePhase`, `durableClass`, `canonicalKey`, and merge strategy. |
+| session ledger rows | structured events | Operator-visible `staff_events` rows that can be queried through `GET /memory/ledger` or `listSessionLedger()` for audit-style reconstruction of first-party Iranti host activity. |
 | lifecycle reason | string | Explanation such as `project_next_step_recall` or `favorite_recall_prompt`. |
 
 ## Lifecycle Policy
@@ -86,6 +87,7 @@ This feature defines how Iranti should participate across an agent turn without 
 - Personal correction prompts with changed wording but same fact key still target the canonical key, e.g. `favorite` and `favourite`.
 - Arbitrary assistant prose is ignored by post-response persistence.
 - Shared checkpoint breadcrumbs are demoted below canonical task facts during observe/attend selection so checkpoints help recovery without crowding out the main `next_step`, `blocker`, or artifact facts.
+- Session ledger reads are best-effort operator observability. If an instance is missing the `staff_events` table, `GET /memory/ledger` returns `SESSION_LEDGER_UNAVAILABLE` instead of pretending the ledger is simply empty.
 
 ## Test Results
 - `tests/memory-retrieval-regressions.ts` verifies personal recall prefers `IRANTI_PERSONAL_MEMORY_ENTITY` over project contamination.
@@ -97,6 +99,7 @@ This feature defines how Iranti should participate across an agent turn without 
   - project-side capture of `current_step`, `open_risks`, `important_artifacts`, `recent_file_changes`, `failed_paths`, and `alternative_routes`
   - structured fact metadata and append-dedupe merge semantics for project durability
 - `tests/cross-tool/run_cross_tool_handoff_tests.ts` verifies shared checkpoint breadcrumbs are written to explicit entity targets and remain secondary to canonical shared task facts during observe/attend retrieval.
+- `tests/staff-events/run_session_ledger_tests.ts` verifies `listSessionLedger()` and `GET /memory/ledger` return bounded structured event rows and surface `SESSION_LEDGER_UNAVAILABLE` cleanly when the migration is missing.
 
 ## Related
 - `src/attendant/AttendantInstance.ts`

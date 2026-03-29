@@ -1,7 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { Iranti } from '../../sdk';
 import { parseEntityString } from '../../library/entity-resolution';
-import { validateInput, validateSessionListQuery } from '../middleware/validation';
+import { validateInput, validateSessionLedgerQuery, validateSessionListQuery } from '../middleware/validation';
+import { SessionLedgerUnavailableError } from '../../lib/sessionLedger';
 
 function normalizeAgent(req: Request): string | null {
     const fromAgent = req.body.agent;
@@ -125,6 +126,22 @@ export function memoryRoutes(iranti: Iranti): Router {
             const sessions = await iranti.listSessions(validateSessionListQuery(req.query));
             res.json(sessions);
         } catch (err) {
+            res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+    });
+
+    // GET /ledger
+    router.get('/ledger', async (req: Request, res: Response) => {
+        try {
+            const events = await iranti.listSessionLedger(validateSessionLedgerQuery(req.query));
+            res.json({ items: events, total: events.length });
+        } catch (err) {
+            if (err instanceof SessionLedgerUnavailableError) {
+                return res.status(503).json({
+                    error: err.message,
+                    code: err.code,
+                });
+            }
             res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
         }
     });
