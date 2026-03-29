@@ -38,6 +38,31 @@ async function main(): Promise<void> {
             calls.push(`write:${input.entity}:${input.key}:${input.summary}`);
             queryValues.set(`${input.entity}:${input.key}`, input.value);
         },
+        async checkpoint(input: {
+            agent?: string;
+            task: string;
+            recentMessages: string[];
+            checkpoint: {
+                currentStep?: string;
+                nextStep?: string;
+                openRisks?: string[];
+                recentOutputs?: string[];
+                entityTargets?: string[];
+            };
+        }): Promise<void> {
+            calls.push(`checkpoint:${input.agent}:${input.task}:${(input.checkpoint.entityTargets ?? []).join(',')}:${input.checkpoint.currentStep ?? ''}:${input.checkpoint.nextStep ?? ''}`);
+            for (const entity of input.checkpoint.entityTargets ?? []) {
+                if (input.checkpoint.currentStep) {
+                    queryValues.set(`${entity}:checkpoint_current_step`, { text: input.checkpoint.currentStep });
+                }
+                if (input.checkpoint.nextStep) {
+                    queryValues.set(`${entity}:checkpoint_next_step`, { text: input.checkpoint.nextStep });
+                }
+                if (input.checkpoint.openRisks && input.checkpoint.openRisks.length > 0) {
+                    queryValues.set(`${entity}:checkpoint_open_risks`, { items: input.checkpoint.openRisks });
+                }
+            }
+        },
         async handshake(input: { agent?: string; task: string; recentMessages: string[] }) {
             calls.push(`handshake:${input.agent}:${input.task}`);
             return {
@@ -240,6 +265,10 @@ async function main(): Promise<void> {
         assert.ok(
             calls.some((call) => call.startsWith(`write:${memoryEntity}:next_step:`)),
             'Expected Stop hook auto-remember to persist strict assistant response facts.'
+        );
+        assert.ok(
+            calls.some((call) => call.startsWith(`checkpoint:${agentId}:`) && call.includes(`:${memoryEntity}:`) && call.endsWith(':rerun the db validation.')),
+            'Expected Stop hook to also persist a shared checkpoint for resumable project progress.'
         );
 
         const retrievalAnswerContext = await buildHookAdditionalContext({

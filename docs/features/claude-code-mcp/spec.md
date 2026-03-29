@@ -60,6 +60,7 @@ This feature exposes Iranti to Claude Code through the installed CLI surface: `i
 24. If Claude explicitly calls `iranti_write` for a personal-memory key such as `favorite_book`, the MCP server reroutes that write to the configured canonical personal entity instead of allowing project-local identity forks like `user/nf` vs `user/main`.
 25. Recall-class prompts such as `what is my favorite ...`, `what is the next step`, `what did we decide`, and `what is the blocker` are treated as mandatory memory prompts and bypass the LLM memory-needed classifier.
 26. On `Stop`, if `IRANTI_AUTO_REMEMBER=true`, extract only narrow assistant-response summary patterns from `last_assistant_message` and write project-scoped summaries to `IRANTI_MEMORY_ENTITY`.
+27. If the strict assistant summary contains checkpoint-worthy project progress such as `current_step`, `next_step`, `open_risks`, or important artifacts, the `Stop` hook should also emit a shared checkpoint to `IRANTI_MEMORY_ENTITY` so other sessions can resume work without waiting for an explicit MCP checkpoint call.
 27. Narrow project durability now includes strict patterns for:
    - `current_step`
    - `next_step`

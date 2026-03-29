@@ -9,6 +9,7 @@ import {
     autoRememberPromptFacts,
     canonicalizeMemoryKey,
     classifyMemoryScope,
+    extractExplicitAssistantMemory,
     getPersonalMemoryEntity,
     getProjectMemoryEntity,
     isAutoRememberEnabled,
@@ -29,6 +30,13 @@ type HookWorkingMemoryEntry = {
     summary?: unknown;
     confidence?: unknown;
     source?: unknown;
+};
+
+type HookCheckpointPayload = {
+    currentStep?: string;
+    nextStep?: string;
+    openRisks?: string[];
+    recentOutputs?: string[];
 };
 
 const MEMORY_NEED_POSITIVE_PATTERNS: RegExp[] = [
@@ -63,7 +71,7 @@ function printHelp(): void {
         '',
         'Reads Claude Code hook JSON from stdin and returns hookSpecificOutput.additionalContext on stdout.',
         'This helper retrieves working memory; durable KB writes still require explicit iranti_write/ingest calls.',
-        'Set IRANTI_AUTO_REMEMBER=true to auto-save narrow personal facts to IRANTI_PERSONAL_MEMORY_ENTITY/user/main and project summaries to IRANTI_MEMORY_ENTITY.',
+        'Set IRANTI_AUTO_REMEMBER=true to auto-save narrow personal facts to IRANTI_PERSONAL_MEMORY_ENTITY/user/main, project summaries to IRANTI_MEMORY_ENTITY, and shared checkpoint breadcrumbs for resumable work.',
     ].join('\n'));
 }
 
@@ -318,6 +326,74 @@ function formatPromptContext(facts: HookFact[], prompt?: string): string {
     return lines.join('\n');
 }
 
+function readTextField(value: unknown, preferredKey: string): string | undefined {
+    if (typeof value !== 'object' || value === null) return undefined;
+    const record = value as Record<string, unknown>;
+    const raw = record[preferredKey];
+    return typeof raw === 'string' && raw.trim() ? raw.trim() : undefined;
+}
+
+function readItems(value: unknown): string[] {
+    if (typeof value !== 'object' || value === null) return [];
+    const record = value as Record<string, unknown>;
+    const items = Array.isArray(record.items) ? record.items : [];
+    return items.map((item) => String(item ?? '').trim()).filter(Boolean);
+}
+
+function readFileChangeOutputs(value: unknown): string[] {
+    if (typeof value !== 'object' || value === null) return [];
+    const record = value as Record<string, unknown>;
+    const items = Array.isArray(record.items) ? record.items : [];
+    return items.map((item) => {
+        if (typeof item !== 'object' || item === null) return '';
+        const change = item as Record<string, unknown>;
+        const action = String(change.action ?? 'updated').trim();
+        const targetPath = String(change.path ?? '').trim();
+        const toPath = String(change.toPath ?? '').trim();
+        if (!targetPath) return '';
+        return toPath ? `${action} ${targetPath} -> ${toPath}` : `${action} ${targetPath}`;
+    }).filter(Boolean);
+}
+
+function extractHookCheckpointPayload(response: string): HookCheckpointPayload | null {
+    const facts = extractExplicitAssistantMemory(response).filter((fact) => fact.scope === 'project');
+    if (facts.length === 0) {
+        return null;
+    }
+
+    const checkpoint: HookCheckpointPayload = {};
+    const outputs: string[] = [];
+    for (const fact of facts) {
+        if (fact.key === 'current_step') {
+            checkpoint.currentStep = readTextField(fact.value, 'text');
+            continue;
+        }
+        if (fact.key === 'next_step') {
+            checkpoint.nextStep = readTextField(fact.value, 'instruction') ?? readTextField(fact.value, 'text');
+            continue;
+        }
+        if (fact.key === 'open_risks') {
+            checkpoint.openRisks = readItems(fact.value);
+            continue;
+        }
+        if (fact.key === 'important_artifacts') {
+            outputs.push(...readItems(fact.value));
+            continue;
+        }
+        if (fact.key === 'recent_file_changes') {
+            outputs.push(...readFileChangeOutputs(fact.value));
+        }
+    }
+
+    if (outputs.length > 0) {
+        checkpoint.recentOutputs = outputs;
+    }
+
+    return checkpoint.currentStep || checkpoint.nextStep || (checkpoint.openRisks && checkpoint.openRisks.length > 0) || (checkpoint.recentOutputs && checkpoint.recentOutputs.length > 0)
+        ? checkpoint
+        : null;
+}
+
 function emitHookContext(event: HookEventName, additionalContext: string): void {
     const payload = {
         hookSpecificOutput: {
@@ -427,6 +503,26 @@ export async function buildHookAdditionalContext(options: {
                 agent,
                 source: 'ClaudeCodeHookStop',
             });
+            const checkpoint = extractHookCheckpointPayload(response);
+            const projectEntity = getProjectMemoryEntity();
+            if (checkpoint && projectEntity && typeof (iranti as { checkpoint?: unknown }).checkpoint === 'function') {
+                await (iranti as {
+                    checkpoint(input: {
+                        agent?: string;
+                        task: string;
+                        recentMessages: string[];
+                        checkpoint: HookCheckpointPayload & { entityTargets: string[] };
+                    }): Promise<unknown>;
+                }).checkpoint({
+                    agent,
+                    task: buildSessionTask(payload),
+                    recentMessages: getRecentMessages(payload),
+                    checkpoint: {
+                        ...checkpoint,
+                        entityTargets: [projectEntity],
+                    },
+                });
+            }
         }
         return '';
     }
