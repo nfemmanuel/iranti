@@ -3,7 +3,7 @@ import path from 'path';
 import type { Iranti } from '../src/sdk';
 import { createFirstPartyIranti } from '../src/lib/createFirstPartyIranti';
 import { loadRuntimeEnv } from '../src/lib/runtimeEnv';
-import { flushStaffEventEmitter } from '../src/lib/staffEventRegistry';
+import { flushStaffEventEmitter, getStaffEventEmitter } from '../src/lib/staffEventRegistry';
 import {
     autoRememberAssistantFacts,
     autoRememberPromptFacts,
@@ -612,6 +612,18 @@ async function main(): Promise<void> {
 if (require.main === module) {
     main().catch(async (error) => {
         try {
+            getStaffEventEmitter().emit({
+                staffComponent: 'Attendant',
+                actionType: 'host_failure',
+                agentId: process.env.IRANTI_CLAUDE_AGENT_ID?.trim() || 'claude_code',
+                source: 'claude_hook',
+                level: 'audit',
+                reason: error instanceof Error ? error.message : String(error),
+                metadata: {
+                    host: 'claude_code',
+                    operation: 'hook_execution',
+                },
+            });
             await flushStaffEventEmitter();
         } catch {}
         console.error('[claude-code-memory-hook] fatal:', error instanceof Error ? error.message : String(error));

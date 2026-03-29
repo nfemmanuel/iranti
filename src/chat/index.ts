@@ -3,8 +3,10 @@ import os from 'os';
 import path from 'path';
 import readline from 'readline/promises';
 import { completeWithFallback, getSupportedProviders, LLMMessage } from '../lib/llm';
+import { DbStaffEventEmitter } from '../lib/dbStaffEventEmitter';
 import { getAllProfiles } from '../lib/router';
 import { loadRuntimeEnv } from '../lib/runtimeEnv';
+import { flushStaffEventEmitter, setStaffEventEmitter } from '../lib/staffEventRegistry';
 import { resolveInteractive } from '../resolutionist';
 
 type ChatRole = 'user' | 'assistant';
@@ -349,6 +351,7 @@ export async function startChatSession(options: ChatSessionOptions = {}): Promis
     }
 
     process.env.LLM_PROVIDER = initialProvider;
+    setStaffEventEmitter(new DbStaffEventEmitter());
 
     const agentId = options.agentId?.trim() || 'iranti_chat';
     const sessionEntity = `session/${agentId}`;
@@ -697,6 +700,12 @@ export async function startChatSession(options: ChatSessionOptions = {}): Promis
             const response = await completeWithFallback(messages, {
                 preferredProvider: provider,
                 model,
+                ledgerContext: {
+                    source: 'chat',
+                    host: 'plain_chat',
+                    agentId,
+                    operation: 'chat_reply_generation',
+                },
             });
 
             console.log(response.text.trim());
@@ -710,5 +719,6 @@ export async function startChatSession(options: ChatSessionOptions = {}): Promis
     } finally {
         process.off('SIGINT', closeHandler);
         rl.close();
+        await flushStaffEventEmitter();
     }
 }

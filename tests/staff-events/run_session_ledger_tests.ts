@@ -32,6 +32,20 @@ async function main(): Promise<void> {
     clientModule.getDb = () => ({
         $queryRaw: async () => ([
             {
+                event_id: 'evt-query',
+                timestamp: new Date('2026-03-28T10:00:03.500Z'),
+                staff_component: 'Attendant',
+                action_type: 'query_executed',
+                agent_id: agentId,
+                source: 'cli',
+                entity_type: 'user',
+                entity_id: 'main',
+                key: 'height',
+                reason: null,
+                level: 'audit',
+                metadata: { sessionId, host: 'plain_cli' },
+            },
+            {
                 event_id: 'evt-attend',
                 timestamp: new Date('2026-03-28T10:00:03.000Z'),
                 staff_component: 'Attendant',
@@ -44,6 +58,20 @@ async function main(): Promise<void> {
                 reason: 'personal_height_recall_prompt',
                 level: 'audit',
                 metadata: { sessionId, shouldInject: true, host: 'plain_cli' },
+            },
+            {
+                event_id: 'evt-recall',
+                timestamp: new Date('2026-03-28T10:00:02.900Z'),
+                staff_component: 'Attendant',
+                action_type: 'mandatory_recall_forced',
+                agent_id: agentId,
+                source: 'cli',
+                entity_type: 'user',
+                entity_id: 'main',
+                key: 'height',
+                reason: 'personal_height_recall_prompt',
+                level: 'audit',
+                metadata: { sessionId, host: 'plain_cli' },
             },
             {
                 event_id: 'evt-injected',
@@ -74,6 +102,48 @@ async function main(): Promise<void> {
                 metadata: { sessionId, error: 'synthetic checkpoint failure for ledger testing', host: 'plain_cli' },
             },
             {
+                event_id: 'evt-checkpoint-written',
+                timestamp: new Date('2026-03-28T10:00:01.800Z'),
+                staff_component: 'Attendant',
+                action_type: 'checkpoint_written',
+                agent_id: agentId,
+                source: 'cli',
+                entity_type: 'project',
+                entity_id: 'ledger_project',
+                key: 'checkpoint_summary',
+                reason: 'checkpoint_saved',
+                level: 'audit',
+                metadata: { sessionId, host: 'plain_cli' },
+            },
+            {
+                event_id: 'evt-summary',
+                timestamp: new Date('2026-03-28T10:00:01.700Z'),
+                staff_component: 'Librarian',
+                action_type: 'summary_written',
+                agent_id: agentId,
+                source: 'cli',
+                entity_type: 'project',
+                entity_id: 'ledger_project',
+                key: 'checkpoint_summary',
+                reason: 'assistant_summary_persisted',
+                level: 'audit',
+                metadata: { sessionId, host: 'plain_cli' },
+            },
+            {
+                event_id: 'evt-fallback',
+                timestamp: new Date('2026-03-28T10:00:01.600Z'),
+                staff_component: 'Attendant',
+                action_type: 'provider_fallback_used',
+                agent_id: agentId,
+                source: 'cli',
+                entity_type: null,
+                entity_id: null,
+                key: null,
+                reason: 'gemini -> mock',
+                level: 'audit',
+                metadata: { sessionId, host: 'plain_cli', preferredProvider: 'gemini', providerUsed: 'mock' },
+            },
+            {
                 event_id: 'evt-handshake',
                 timestamp: new Date('2026-03-28T10:00:01.000Z'),
                 staff_component: 'Attendant',
@@ -92,7 +162,7 @@ async function main(): Promise<void> {
 
     try {
         const ledger = await querySessionLedger({ agentId, sessionId, limit: 10 });
-        assert.equal(ledger.length, 4, 'Expected multiple ledger events for the agent.');
+        assert.equal(ledger.length, 9, 'Expected multiple ledger events for the agent.');
         assert.equal(ledger.every((event) => event.agentId === agentId), true, 'Expected agent-filtered ledger results.');
         assert.ok(
             ledger.some((event) => event.actionType === 'handshake_completed'),
@@ -127,8 +197,20 @@ async function main(): Promise<void> {
         });
         assert.ok(learnings.length >= 1, 'Expected bounded session-ledger learnings.');
         assert.ok(
-            learnings.some((entry) => entry.actionType === 'memory_injected'),
-            'Expected memory_injected to survive the learning summary filter.'
+            learnings.some((entry) => entry.actionType === 'host_lesson'),
+            'Expected synthesized host lessons to appear in the learning summary.'
+        );
+        assert.ok(
+            learnings.some((entry) => entry.actionType === 'recall_lesson'),
+            'Expected synthesized recall lessons to appear in the learning summary.'
+        );
+        assert.ok(
+            learnings.some((entry) => entry.actionType === 'persistence_lesson'),
+            'Expected synthesized persistence lessons to appear in the learning summary.'
+        );
+        assert.ok(
+            learnings.some((entry) => (entry.evidenceActionTypes ?? []).includes('provider_fallback_used')),
+            'Expected synthesized host lessons to preserve provider fallback evidence.'
         );
         assert.ok(
             learnings.every((entry) => entry.host === 'plain_cli'),

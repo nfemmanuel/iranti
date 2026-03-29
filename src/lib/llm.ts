@@ -2,6 +2,14 @@
 
 import { inc, timeStart, timeEnd } from './metrics';
 import { getContext } from './requestContext';
+import { getStaffEventEmitter } from './staffEventRegistry';
+
+type SessionLedgerEmitContext = {
+    source?: string;
+    host?: string | null;
+    agentId?: string;
+    operation?: string;
+};
 
 const MAX_LLM_CALLS_PER_REQUEST = 10;
 
@@ -191,7 +199,13 @@ async function loadProvider(name: string): Promise<LLMProvider> {
 
 export async function completeWithFallback(
     messages: LLMMessage[],
-    options?: { preferredProvider?: string; model?: string; maxTokens?: number; timeoutMs?: number }
+    options?: {
+        preferredProvider?: string;
+        model?: string;
+        maxTokens?: number;
+        timeoutMs?: number;
+        ledgerContext?: SessionLedgerEmitContext;
+    }
 ): Promise<LLMResponse & { providerUsed: string }> {
     const chain = options?.preferredProvider 
         ? [options.preferredProvider, ...getFallbackChain().filter(p => p !== options.preferredProvider)]
@@ -227,6 +241,22 @@ export async function completeWithFallback(
             
             if (providerName !== chain[0]) {
                 console.warn(`  [router] Primary provider failed. Used fallback: ${providerName}`);
+                if (options?.ledgerContext?.source) {
+                    getStaffEventEmitter().emit({
+                        staffComponent: 'Attendant',
+                        actionType: 'provider_fallback_used',
+                        agentId: options.ledgerContext.agentId ?? 'system',
+                        source: options.ledgerContext.source,
+                        level: 'audit',
+                        reason: `${chain[0]} -> ${providerName}`,
+                        metadata: {
+                            host: options.ledgerContext.host ?? null,
+                            preferredProvider: chain[0],
+                            providerUsed: providerName,
+                            operation: options.ledgerContext.operation ?? 'llm_complete',
+                        },
+                    });
+                }
             }
 
             return { ...response, providerUsed: providerName };
@@ -236,6 +266,23 @@ export async function completeWithFallback(
             errors.push(`${providerName}: ${message}`);
             continue;
         }
+    }
+
+    if (options?.ledgerContext?.source) {
+        getStaffEventEmitter().emit({
+            staffComponent: 'Attendant',
+            actionType: 'host_failure',
+            agentId: options.ledgerContext.agentId ?? 'system',
+            source: options.ledgerContext.source,
+            level: 'audit',
+            reason: 'all_providers_failed',
+            metadata: {
+                host: options.ledgerContext.host ?? null,
+                operation: options.ledgerContext.operation ?? 'llm_complete',
+                attemptedProviders: chain,
+                errors,
+            },
+        });
     }
 
     throw new Error(`All providers failed:\n${errors.join('\n')}`);

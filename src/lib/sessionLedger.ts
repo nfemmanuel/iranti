@@ -39,6 +39,8 @@ export interface SessionLedgerLearning {
     sessionId: string | null;
     entityKey: string | null;
     reason: string | null;
+    category?: 'host' | 'recall' | 'persistence' | 'event';
+    evidenceActionTypes?: string[];
 }
 
 export interface SessionLedgerLearningQuery {
@@ -184,6 +186,11 @@ const LEDGER_LEARNING_ACTIONS = new Set([
     'integration_probe_failed',
     'mandatory_recall_forced',
     'memory_injected',
+    'query_executed',
+    'search_executed',
+    'related_executed',
+    'related_deep_executed',
+    'whoknows_executed',
     'checkpoint_written',
     'summary_written',
     'write_rejected',
@@ -267,7 +274,197 @@ function eventToLearning(event: SessionLedgerEvent): SessionLedgerLearning | nul
         sessionId: typeof event.metadata?.sessionId === 'string' ? event.metadata.sessionId : null,
         entityKey: event.entityType && event.entityId && event.key ? `${event.entityType}/${event.entityId}/${event.key}` : null,
         reason: event.reason ?? null,
+        category: 'event',
+        evidenceActionTypes: [event.actionType],
     };
+}
+
+function latestTimestamp(events: SessionLedgerEvent[]): string {
+    return events
+        .map((event) => event.timestamp)
+        .sort((left, right) => right.localeCompare(left))[0] ?? new Date(0).toISOString();
+}
+
+function distinct<T>(values: T[]): T[] {
+    return Array.from(new Set(values));
+}
+
+function describeHostCapabilities(events: SessionLedgerEvent[]): string | null {
+    const capabilities = distinct(events.flatMap((event) => {
+        switch (event.actionType) {
+            case 'memory_injected':
+                return ['memory injection'];
+            case 'query_executed':
+                return ['exact lookup'];
+            case 'search_executed':
+                return ['search'];
+            case 'related_executed':
+            case 'related_deep_executed':
+                return ['relationship lookup'];
+            case 'whoknows_executed':
+                return ['agent lookup'];
+            case 'checkpoint_written':
+                return ['shared checkpoints'];
+            case 'summary_written':
+                return ['strict summaries'];
+            case 'write_created':
+            case 'write_updated':
+            case 'write_replaced':
+                return ['durable writes'];
+            default:
+                return [];
+        }
+    }));
+
+    if (capabilities.length === 0) return null;
+    if (capabilities.length === 1) return capabilities[0];
+    if (capabilities.length === 2) return `${capabilities[0]} and ${capabilities[1]}`;
+    return `${capabilities.slice(0, -1).join(', ')}, and ${capabilities[capabilities.length - 1]}`;
+}
+
+function summarizeFailureReasons(events: SessionLedgerEvent[]): string {
+    const reasons = distinct(events.map((event) => event.reason ?? 'host error').filter(Boolean));
+    return reasons.slice(0, 2).join('; ');
+}
+
+function buildHostLearnings(events: SessionLedgerEvent[]): SessionLedgerLearning[] {
+    const byHost = new Map<string, SessionLedgerEvent[]>();
+    for (const event of events) {
+        const host = typeof event.metadata?.host === 'string' ? event.metadata.host : event.source;
+        const key = `${event.source}|${host}`;
+        const bucket = byHost.get(key) ?? [];
+        bucket.push(event);
+        byHost.set(key, bucket);
+    }
+
+    const out: SessionLedgerLearning[] = [];
+    for (const [identity, hostEvents] of byHost.entries()) {
+        const [source, hostName] = identity.split('|');
+        const failures = hostEvents.filter((event) => (
+            event.actionType === 'host_failure'
+            || event.actionType === 'integration_probe_failed'
+            || event.actionType === 'provider_fallback_used'
+        ));
+        const successes = hostEvents.filter((event) => !failures.includes(event));
+        if (failures.length === 0 && successes.length === 0) continue;
+
+        const capabilitySummary = describeHostCapabilities(successes);
+        let summary: string | null = null;
+        if (failures.length > 0 && capabilitySummary) {
+            summary = `Recent host lesson: ${hostName} hit ${summarizeFailureReasons(failures)}, but ${source} still completed ${capabilitySummary}.`;
+        } else if (failures.length > 0) {
+            summary = `Recent host lesson: ${hostName} hit ${summarizeFailureReasons(failures)}.`;
+        } else if (capabilitySummary) {
+            summary = `Recent host lesson: ${hostName} successfully completed ${capabilitySummary}.`;
+        }
+        if (!summary) continue;
+
+        out.push({
+            actionType: 'host_lesson',
+            summary,
+            timestamp: latestTimestamp(hostEvents),
+            source,
+            host: hostName || null,
+            sessionId: typeof hostEvents[0]?.metadata?.sessionId === 'string' ? String(hostEvents[0].metadata?.sessionId) : null,
+            entityKey: null,
+            reason: failures[0]?.reason ?? null,
+            category: 'host',
+            evidenceActionTypes: distinct(hostEvents.map((event) => event.actionType)),
+        });
+    }
+
+    return out;
+}
+
+function buildRecallLearnings(events: SessionLedgerEvent[]): SessionLedgerLearning[] {
+    const recalls = events.filter((event) => event.actionType === 'mandatory_recall_forced');
+    const injections = events.filter((event) => event.actionType === 'memory_injected');
+    const out: SessionLedgerLearning[] = [];
+
+    for (const recall of recalls) {
+        const entityKey = recall.entityType && recall.entityId && recall.key
+            ? `${recall.entityType}/${recall.entityId}/${recall.key}`
+            : null;
+        const matchingInjection = injections.find((event) => {
+            const injectedKeys = Array.isArray(event.metadata?.injectedKeys)
+                ? event.metadata!.injectedKeys.map((value) => String(value))
+                : [];
+            return entityKey ? injectedKeys.includes(entityKey) : event.reason === recall.reason;
+        });
+        if (!matchingInjection) continue;
+        out.push({
+            actionType: 'recall_lesson',
+            summary: entityKey
+                ? `Recent recall lesson: policy-forced recall successfully injected ${entityKey}.`
+                : 'Recent recall lesson: policy-forced recall successfully injected needed memory.',
+            timestamp: latestTimestamp([recall, matchingInjection]),
+            source: recall.source,
+            host: typeof recall.metadata?.host === 'string' ? recall.metadata.host : null,
+            sessionId: typeof recall.metadata?.sessionId === 'string' ? recall.metadata.sessionId : null,
+            entityKey,
+            reason: recall.reason ?? null,
+            category: 'recall',
+            evidenceActionTypes: ['mandatory_recall_forced', 'memory_injected'],
+        });
+    }
+
+    return out;
+}
+
+function buildPersistenceLearnings(events: SessionLedgerEvent[]): SessionLedgerLearning[] {
+    const persistenceEvents = events.filter((event) => (
+        event.actionType === 'checkpoint_written'
+        || event.actionType === 'summary_written'
+        || event.actionType === 'write_created'
+        || event.actionType === 'write_updated'
+        || event.actionType === 'write_replaced'
+    ));
+    const byEntity = new Map<string, SessionLedgerEvent[]>();
+    for (const event of persistenceEvents) {
+        const entityKey = event.entityType && event.entityId && event.key
+            ? `${event.entityType}/${event.entityId}/${event.key}`
+            : null;
+        if (!entityKey) continue;
+        const bucket = byEntity.get(entityKey) ?? [];
+        bucket.push(event);
+        byEntity.set(entityKey, bucket);
+    }
+
+    const out: SessionLedgerLearning[] = [];
+    for (const [entityKey, entityEvents] of byEntity.entries()) {
+        const hasCheckpoint = entityEvents.some((event) => event.actionType === 'checkpoint_written');
+        const hasDurable = entityEvents.some((event) => (
+            event.actionType === 'summary_written'
+            || event.actionType === 'write_created'
+            || event.actionType === 'write_updated'
+            || event.actionType === 'write_replaced'
+        ));
+        if (!hasCheckpoint && !hasDurable) continue;
+
+        let summary: string;
+        if (hasCheckpoint && hasDurable) {
+            summary = `Recent persistence lesson: ${entityKey} is being kept current through shared checkpoints and durable writes.`;
+        } else if (hasCheckpoint) {
+            summary = `Recent persistence lesson: ${entityKey} is being handed off through shared checkpoints.`;
+        } else {
+            summary = `Recent persistence lesson: ${entityKey} is being maintained through durable writes.`;
+        }
+
+        out.push({
+            actionType: 'persistence_lesson',
+            summary,
+            timestamp: latestTimestamp(entityEvents),
+            source: entityEvents[0]?.source ?? 'internal',
+            host: typeof entityEvents[0]?.metadata?.host === 'string' ? String(entityEvents[0].metadata?.host) : null,
+            sessionId: typeof entityEvents[0]?.metadata?.sessionId === 'string' ? String(entityEvents[0].metadata?.sessionId) : null,
+            entityKey,
+            reason: null,
+            category: 'persistence',
+            evidenceActionTypes: distinct(entityEvents.map((event) => event.actionType)),
+        });
+    }
+
+    return out;
 }
 
 export async function summarizeSessionLedgerLearnings(
@@ -285,6 +482,27 @@ export async function summarizeSessionLedgerLearnings(
 
     const out: SessionLedgerLearning[] = [];
     const seen = new Set<string>();
+
+    const synthesized = [
+        ...buildHostLearnings(events),
+        ...buildRecallLearnings(events),
+        ...buildPersistenceLearnings(events),
+    ].sort((left, right) => right.timestamp.localeCompare(left.timestamp));
+
+    for (const learning of synthesized) {
+        const identity = [
+            learning.actionType,
+            learning.entityKey ?? '',
+            learning.reason ?? '',
+            learning.summary,
+        ].join('|');
+        if (seen.has(identity)) continue;
+        seen.add(identity);
+        out.push(learning);
+        if (out.length >= normalizeLearningLimit(input.maxLearnings)) {
+            return out;
+        }
+    }
 
     for (const event of events) {
         const learning = eventToLearning(event);

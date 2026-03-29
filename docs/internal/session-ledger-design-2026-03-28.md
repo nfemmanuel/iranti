@@ -165,6 +165,19 @@ The current implementation already has some of these and some nearby variants.
 The next implementation passes should normalize existing names toward this
 contract rather than inventing a parallel vocabulary.
 
+Recent implementation note:
+
+- first-party host paths now emit explicit `host_failure` rows on fatal MCP and
+  Claude hook exits when a DB-backed emitter is installed
+- first-party completion paths can emit `provider_fallback_used`
+- handshake recovery now prefers bounded synthesized lessons such as:
+  - host reliability lessons
+  - recall-policy lessons
+  - persistence lessons
+
+This keeps the ledger more useful after compaction than a pile of isolated raw
+rows would be.
+
 ## Required fields for every ledger row
 
 Every meaningful first-party ledger row should carry:

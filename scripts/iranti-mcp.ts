@@ -7,6 +7,7 @@ import { rewriteCommandError } from '../src/lib/commandErrors';
 import { createFirstPartyIranti } from '../src/lib/createFirstPartyIranti';
 import { loadRuntimeEnv } from '../src/lib/runtimeEnv';
 import { autoRememberPromptFacts, isAutoRememberEnabled, rememberAssistantResponseFacts, resolvePersonalWriteTarget } from '../src/lib/autoRemember';
+import { flushStaffEventEmitter, getStaffEventEmitter } from '../src/lib/staffEventRegistry';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -455,7 +456,21 @@ this for arbitrary prose or every turn.`,
 
 main().catch((error) => {
     const formatted = rewriteCommandError('iranti mcp', error);
+    getStaffEventEmitter().emit({
+        staffComponent: 'Attendant',
+        actionType: 'host_failure',
+        agentId: defaultAgentId(),
+        source: 'mcp',
+        level: 'audit',
+        reason: formatted.message,
+        metadata: {
+            host: process.env.IRANTI_MCP_HOST?.trim() || 'generic_mcp',
+            operation: 'mcp_startup',
+        },
+    });
     console.error('[iranti-mcp] fatal:', formatted.message);
-    process.exit(1);
+    void flushStaffEventEmitter().finally(() => {
+        process.exit(1);
+    });
 });
 

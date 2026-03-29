@@ -327,6 +327,11 @@ app.post(['/v1/chat/completions', '/chat/completions'], authenticate, rateLimitM
             preferredProvider,
             model,
             maxTokens,
+            ledgerContext: {
+                source: 'api',
+                host: 'api_server',
+                operation: 'chat_completions_proxy',
+            },
         });
 
         res.json({

@@ -24,7 +24,7 @@ This feature defines how Iranti should participate across an agent turn without 
 | shared checkpoint breadcrumbs | durable writes | Compact `checkpoint_*` facts written to explicit entity targets so other agents can resume shared work without inheriting private attendant state. |
 | fact properties | JSON | Structured metadata describing `memoryScope`, `capturePhase`, `durableClass`, `canonicalKey`, and merge strategy. |
 | session ledger rows | structured events | Operator-visible `staff_events` rows that can be queried through `GET /memory/ledger` or `listSessionLedger()` for audit-style reconstruction of first-party Iranti host activity. |
-| session ledger learnings | bounded brief appendix | Optional handshake-time summaries of recent high-signal ledger events so Attendant can surface host/debugging learnings after compaction without replaying the full event stream. |
+| session ledger learnings | bounded brief appendix | Optional handshake-time synthesized lessons about recent host, recall, and persistence behavior so Attendant can surface engineering learnings after compaction without replaying the full event stream. |
 | lifecycle reason | string | Explanation such as `project_next_step_recall` or `favorite_recall_prompt`. |
 
 ## Lifecycle Policy
@@ -73,6 +73,11 @@ This feature defines how Iranti should participate across an agent turn without 
 18. Shared checkpoint breadcrumbs should not replace the canonical project facts such as `next_step` or `decision`; they are resumability hints, not the sole source of truth.
 19. Successful shared checkpoints should emit `checkpoint_written` in the ledger, and strict assistant-summary persistence should emit `summary_written`, so the ledger explains not just durable facts but how they were created.
 20. Handshake may append a bounded `sessionLedgerLearnings` appendix plus synthetic `system/session_ledger/recent_learning_*` working-memory entries when recent first-party host learnings are relevant to recovery.
+21. Session-ledger learnings should prefer synthesized engineering lessons over raw event blurbs, for example:
+    - host reliability lessons
+    - recall-policy lessons
+    - shared persistence lessons
+22. First-party host failure paths and LLM provider fallback paths should emit truthful ledger rows when the process has a DB-backed emitter, so recovery can explain what failed and what still worked.
 
 ## Conflict / Correction Rules
 - Direct user correction of a personal-memory fact should override an older non-human hook-written value for the same key.
@@ -93,6 +98,7 @@ This feature defines how Iranti should participate across an agent turn without 
 - Shared checkpoint breadcrumbs are demoted below canonical task facts during observe/attend selection so checkpoints help recovery without crowding out the main `next_step`, `blocker`, or artifact facts.
 - Session ledger reads are best-effort operator observability. If an instance is missing the `staff_events` table, `GET /memory/ledger` returns `SESSION_LEDGER_UNAVAILABLE` instead of pretending the ledger is simply empty.
 - Handshake-time ledger learnings are intentionally bounded and deduped. They should surface recent high-signal host/debugging outcomes, not dump the entire session ledger into working memory.
+- Synthesized ledger learnings should stay engineering-focused for now. Broader collaborative/non-engineering learnings are future scope, not part of the current contract.
 
 ## Test Results
 - `tests/memory-retrieval-regressions.ts` verifies personal recall prefers `IRANTI_PERSONAL_MEMORY_ENTITY` over project contamination.
