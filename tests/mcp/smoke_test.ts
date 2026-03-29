@@ -243,6 +243,50 @@ Do not use this as a per-turn retrieval tool; use iranti_attend.`,
             'Expected iranti_remember_response to persist strict assistant summary facts.'
         );
 
+        const rememberedCurrentStep = await client.callTool({
+            name: 'iranti_remember_response',
+            arguments: {
+                response: 'The current step is audit the retrieval lifecycle.',
+                projectEntity: 'project/mcp_smoke_project_memory',
+            },
+        });
+        expect(!rememberedCurrentStep.isError, 'Expected iranti_remember_response current_step write to succeed.');
+
+        const currentStepQuery = await client.callTool({
+            name: 'iranti_query',
+            arguments: {
+                entity: 'project/mcp_smoke_project_memory',
+                key: 'current_step',
+            },
+        });
+        expect(!currentStepQuery.isError, 'Expected iranti_query for remembered current_step to succeed.');
+        expect(
+            JSON.stringify(currentStepQuery.structuredContent).includes('audit the retrieval lifecycle'),
+            'Expected iranti_remember_response to persist current_step assistant summary facts.'
+        );
+
+        const rememberedOpenRisks = await client.callTool({
+            name: 'iranti_remember_response',
+            arguments: {
+                response: 'Open risks are stale runtime metadata and duplicate instance state.',
+                projectEntity: 'project/mcp_smoke_project_memory',
+            },
+        });
+        expect(!rememberedOpenRisks.isError, 'Expected iranti_remember_response open_risks write to succeed.');
+
+        const openRisksQuery = await client.callTool({
+            name: 'iranti_query',
+            arguments: {
+                entity: 'project/mcp_smoke_project_memory',
+                key: 'open_risks',
+            },
+        });
+        expect(!openRisksQuery.isError, 'Expected iranti_query for remembered open_risks to succeed.');
+        expect(
+            JSON.stringify(openRisksQuery.structuredContent).includes('stale runtime metadata'),
+            'Expected iranti_remember_response to persist open_risks assistant summary facts.'
+        );
+
         const related = await client.callTool({
             name: 'iranti_related',
             arguments: {

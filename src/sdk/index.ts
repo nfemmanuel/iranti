@@ -52,6 +52,7 @@ export interface WriteInput {
     validFrom?: Date;
     validUntil?: Date | null;
     requestId?: string;
+    properties?: Record<string, unknown>;
 }
 
 export interface IngestInput {
@@ -463,6 +464,7 @@ export class Iranti {
             validFrom: input.validFrom,
             validUntil: input.validUntil ?? undefined,
             requestId: input.requestId,
+            properties: input.properties,
         });
 
         return {

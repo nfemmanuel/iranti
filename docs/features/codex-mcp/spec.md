@@ -57,8 +57,9 @@ This feature connects Codex to Iranti through Codex's MCP client using the insta
 23. If Codex explicitly calls `iranti_write` for a personal-memory key such as `favorite_book`, the MCP server reroutes that write to the configured canonical personal entity instead of allowing project-local identity forks like `user/nf` vs `user/main`.
 24. Recall questions about remembered preferences, decisions, blockers, next steps, or prior project facts are treated as mandatory memory prompts and bypass the LLM memory-needed classifier.
 25. Handshake may also return a backfill suggestion when recent messages appear to contain durable facts that have not yet been persisted.
-26. If Codex's own final answer contains a strict durable summary such as `The next step is ...` or `We decided ...`, call `iranti_remember_response` explicitly because there is no Codex-side `Stop` hook.
-27. Launch Codex with `codex -C <project>` for the intended workspace context.
+26. If Codex's own final answer contains a strict durable summary such as `The next step is ...`, `The current step is ...`, `Open risks are ...`, `Important artifacts are ...`, or `We decided ...`, call `iranti_remember_response` explicitly because there is no Codex-side `Stop` hook.
+27. Shared checkpoints now leave `checkpoint_*` breadcrumbs on explicit entity targets so Codex can recover shared work without inheriting another agent's private attendant state.
+28. Launch Codex with `codex -C <project>` for the intended workspace context.
 
 ## Edge Cases
 
@@ -83,7 +84,7 @@ This feature connects Codex to Iranti through Codex's MCP client using the insta
 ## Test Results
 
 - `npm run build` passes with the updated Codex setup script included.
-- `npm run test:mcp-smoke` exercises `iranti_remember_response` and verifies it persists `next_step`.
+- `npm run test:mcp-smoke` exercises `iranti_remember_response` and verifies it persists `next_step`, `current_step`, and `open_risks`.
 - `iranti codex-setup` successfully registers `iranti` in Codex MCP config.
 - `iranti codex-setup` writes or merges project-local `.mcp.json` and `.vscode/mcp.json` files when run from a bound project.
 - `iranti integrate codex` resolves to the same setup path.

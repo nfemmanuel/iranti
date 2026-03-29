@@ -3,6 +3,7 @@ import { getStaffEventEmitter } from '../lib/staffEventRegistry';
 import { queryEntry, findEntriesByEntity, recordKnowledgeEntryAccess } from '../library/queries';
 import { getRelatedDeep } from '../library/relationships';
 import { parseEntityString, resolveEntity } from '../library/entity-resolution';
+import { librarianWrite } from '../librarian';
 import { getDb } from '../library/client';
 import { Prisma } from '../generated/prisma/client';
 import { EntryQuery, QueryResult } from '../types';
@@ -748,6 +749,89 @@ function normalizeCheckpointPayload(
     return normalized;
 }
 
+async function persistSharedCheckpointBreadcrumbs(params: {
+    agentId: string;
+    sessionId: string;
+    checkpoint: SessionCheckpointPayload;
+}): Promise<void> {
+    const { agentId, sessionId, checkpoint } = params;
+    const targets = Array.isArray(checkpoint.entityTargets) ? checkpoint.entityTargets : [];
+    if (targets.length === 0) return;
+
+    const checkpointSummary = {
+        currentStep: checkpoint.currentStep ?? null,
+        nextStep: checkpoint.nextStep ?? null,
+        openRisks: checkpoint.openRisks ?? [],
+        recentOutputs: checkpoint.recentOutputs ?? [],
+        notes: checkpoint.notes ?? null,
+        sessionId,
+    };
+
+    for (const target of targets) {
+        const parsed = parseEntityString(target);
+        const resolved = await resolveEntity({
+            entityType: parsed.entityType,
+            entityId: parsed.entityId,
+            rawName: target,
+            aliases: [target],
+            source: 'AttendantCheckpoint',
+            confidence: 95,
+            createIfMissing: true,
+        });
+
+        const common = {
+            entityType: resolved.entityType,
+            entityId: resolved.entityId,
+            confidence: 95,
+            source: 'AttendantCheckpoint',
+            createdBy: agentId,
+            properties: {
+                memoryScope: 'project',
+                capturePhase: 'checkpoint',
+                durableClass: 'checkpoint',
+                sessionId,
+            } as Record<string, unknown>,
+        };
+
+        await librarianWrite({
+            ...common,
+            key: 'checkpoint_summary',
+            valueRaw: checkpointSummary,
+            valueSummary: truncate(
+                `checkpoint summary: current step ${checkpoint.currentStep ?? 'n/a'}; next step ${checkpoint.nextStep ?? 'n/a'}`,
+                220,
+            ),
+        });
+
+        if (checkpoint.currentStep) {
+            await librarianWrite({
+                ...common,
+                key: 'checkpoint_current_step',
+                valueRaw: { text: checkpoint.currentStep },
+                valueSummary: truncate(`checkpoint current step is ${checkpoint.currentStep}`, 220),
+            });
+        }
+
+        if (checkpoint.nextStep) {
+            await librarianWrite({
+                ...common,
+                key: 'checkpoint_next_step',
+                valueRaw: { instruction: checkpoint.nextStep },
+                valueSummary: truncate(`checkpoint next step is ${checkpoint.nextStep}`, 220),
+            });
+        }
+
+        if (checkpoint.openRisks && checkpoint.openRisks.length > 0) {
+            await librarianWrite({
+                ...common,
+                key: 'checkpoint_open_risks',
+                valueRaw: { items: checkpoint.openRisks },
+                valueSummary: truncate(`checkpoint open risks include ${checkpoint.openRisks.join('; ')}`, 220),
+            });
+        }
+    }
+}
+
 function createSessionId(agentId: string, taskFingerprint: string): string {
     const seed = `${agentId}:${taskFingerprint}:${Date.now()}`;
     let hash = 0;
@@ -1082,6 +1166,26 @@ export class AttendantInstance {
             briefGeneratedAt: now,
         };
 
+        try {
+            await persistSharedCheckpointBreadcrumbs({
+                agentId: this.agentId,
+                sessionId,
+                checkpoint: normalizedCheckpoint,
+            });
+        } catch (error) {
+            getStaffEventEmitter().emit({
+                staffComponent: 'Attendant',
+                actionType: 'checkpoint_shared_breadcrumb_failed',
+                agentId: this.agentId,
+                source: 'internal',
+                reason: 'shared_checkpoint_breadcrumb_failed',
+                level: 'audit',
+                metadata: {
+                    sessionId,
+                    error: error instanceof Error ? error.message : String(error),
+                },
+            });
+        }
         await this.persistState();
         return this.brief;
     }
@@ -1614,7 +1718,14 @@ ${detectionWindow}`,
             const priorityEntries = allEntries.filter((e) => priorityKeys.has(e.key));
             const remainingEntries = allEntries
                 .filter((e) => !priorityKeys.has(e.key))
-                .sort((a, b) => b.confidence - a.confidence);
+                .sort((a, b) => {
+                    const checkpointPenalty = (entryKey: string): number => entryKey.startsWith('checkpoint_') ? 1 : 0;
+                    return (
+                        checkpointPenalty(a.key) - checkpointPenalty(b.key)
+                        || b.confidence - a.confidence
+                        || a.key.localeCompare(b.key)
+                    );
+                });
 
             const selectedEntries = [...priorityEntries, ...remainingEntries].slice(0, maxKeysPerEntity);
 

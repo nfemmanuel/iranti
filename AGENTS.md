@@ -78,6 +78,10 @@ Responsibilities:
   existing brief with updated timestamp if task is unchanged
 - In-memory consolidation: `updateWorkingMemory()` updates the brief without
   a DB round trip â€” the Attendant is a fast cache, the Librarian owns truth
+- Shared checkpoint breadcrumbs: when `checkpoint()` includes explicit
+  `entityTargets`, the Attendant also writes compact `checkpoint_*` facts to
+  those shared entities so other agents can resume work without inheriting the
+  original agent's private attendant state
 - Context recovery: after 20 LLM calls, re-reads operating rules from Staff
   Namespace rather than hallucinating behavior. Resets call counter
 
@@ -471,7 +475,7 @@ Indexed on `(canonicalEntityType, canonicalEntityId)`.
 const iranti = new Iranti({ connectionString, llmProvider });
 
 // Write atomic fact
-await iranti.write({ entity, key, value, summary, confidence, source, agent, validFrom });
+await iranti.write({ entity, key, value, summary, confidence, source, agent, validFrom, properties });
 
 // Ingest raw content blob (auto-chunks into atomic facts)
 await iranti.ingest({ entity, content, source, confidence, agent });

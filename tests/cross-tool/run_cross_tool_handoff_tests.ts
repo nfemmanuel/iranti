@@ -187,6 +187,27 @@ async function main(): Promise<void> {
         'Expected Claude checkpoint to include the shared task entity.'
     );
 
+    const checkpointCurrentStep = await iranti.query(taskEntity, 'checkpoint_current_step');
+    expect(checkpointCurrentStep.found === true, 'Expected checkpoint_current_step breadcrumb to be persisted for shared task targets.');
+    expect(
+        JSON.stringify(checkpointCurrentStep.value).includes('captured shared task status and next step'),
+        'Expected checkpoint_current_step breadcrumb to preserve the current step.'
+    );
+
+    const checkpointNextStep = await iranti.query(taskEntity, 'checkpoint_next_step');
+    expect(checkpointNextStep.found === true, 'Expected checkpoint_next_step breadcrumb to be persisted for shared task targets.');
+    expect(
+        JSON.stringify(checkpointNextStep.value).includes('hand task to Codex'),
+        'Expected checkpoint_next_step breadcrumb to preserve the next step.'
+    );
+
+    const checkpointSummary = await iranti.query(projectEntity, 'checkpoint_summary');
+    expect(checkpointSummary.found === true, 'Expected checkpoint_summary breadcrumb to be persisted for all checkpoint targets.');
+    expect(
+        JSON.stringify(checkpointSummary.value).includes('Cross-tool handoff uses shared task facts'),
+        'Expected checkpoint_summary breadcrumb to preserve checkpoint notes for later handoff recovery.'
+    );
+
     const codexHandshake = await iranti.handshake({
         agentId: codexAgent,
         task: 'Continue the shared runtime verification task handed off from Claude.',
@@ -244,7 +265,7 @@ async function main(): Promise<void> {
         agentId: codexAgent,
         currentContext: '',
         entityHints: [taskEntity, projectEntity],
-        maxFacts: 5,
+        maxFacts: 10,
     });
 
     expect(
@@ -257,7 +278,7 @@ async function main(): Promise<void> {
         latestMessage: `Continue work for ${taskEntity}. What should I do next?`,
         currentContext: 'We are continuing a shared task handoff between Claude Code and Codex.',
         entityHints: [taskEntity, projectEntity],
-        maxFacts: 5,
+        maxFacts: 10,
         forceInject: true,
     });
 

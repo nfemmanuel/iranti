@@ -8,14 +8,30 @@ type IrantiQueryClient = {
         confidence: number;
         source: string;
         agent: string;
+        properties?: Record<string, unknown>;
     }): Promise<unknown>;
 };
+
+type DurableMemoryClass =
+    | 'preference'
+    | 'profile'
+    | 'decision'
+    | 'next_step'
+    | 'blocker'
+    | 'owner'
+    | 'current_step'
+    | 'open_risks'
+    | 'artifact'
+    | 'file_change'
+    | 'failed_path'
+    | 'alternative_route';
 
 type ExtractedMemoryFact = {
     scope: 'personal' | 'project';
     key: string;
     value: unknown;
     summary: string;
+    durableClass: DurableMemoryClass;
 };
 
 type AutoRememberResult = {
@@ -98,7 +114,291 @@ function buildTextFact(key: string, value: string, scope: 'personal' | 'project'
         key: cleanKey,
         value: { text: cleanValue },
         summary: `${cleanKey.replace(/_/g, ' ')} is ${cleanValue}`,
+        durableClass: cleanKey.startsWith('favorite_') ? 'preference' : 'profile',
     };
+}
+
+function dedupeStrings(values: string[]): string[] {
+    const seen = new Set<string>();
+    const deduped: string[] = [];
+    for (const value of values) {
+        const trimmed = value.trim();
+        if (!trimmed) continue;
+        const normalized = trimmed.toLowerCase();
+        if (seen.has(normalized)) continue;
+        seen.add(normalized);
+        deduped.push(trimmed);
+    }
+    return deduped;
+}
+
+function dedupeObjects<T>(values: T[]): T[] {
+    const seen = new Set<string>();
+    const deduped: T[] = [];
+    for (const value of values) {
+        const identity = JSON.stringify(value);
+        if (seen.has(identity)) continue;
+        seen.add(identity);
+        deduped.push(value);
+    }
+    return deduped;
+}
+
+function normalizeListItems(raw: string): string[] {
+    return raw
+        .split(/(?:,|;|\band\b)/i)
+        .map((item) => item.trim())
+        .filter(Boolean);
+}
+
+function trimSummary(text: string, max = 220): string {
+    const normalized = text.trim();
+    if (normalized.length <= max) return normalized;
+    return `${normalized.slice(0, max - 3).trimEnd()}...`;
+}
+
+function readStringArray(value: unknown, preferredKey: string): string[] {
+    if (Array.isArray(value)) {
+        return value.map((item) => String(item ?? '').trim()).filter(Boolean);
+    }
+    if (typeof value !== 'object' || value === null) return [];
+    const record = value as Record<string, unknown>;
+    const direct = record[preferredKey];
+    if (Array.isArray(direct)) {
+        return direct.map((item) => String(item ?? '').trim()).filter(Boolean);
+    }
+    if (Array.isArray(record.items)) {
+        return record.items.map((item) => String(item ?? '').trim()).filter(Boolean);
+    }
+    return [];
+}
+
+function readFileChangeItems(value: unknown): Array<Record<string, unknown>> {
+    if (typeof value !== 'object' || value === null) return [];
+    const record = value as Record<string, unknown>;
+    const items = Array.isArray(record.items) ? record.items : [];
+    return items.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null);
+}
+
+function mergeFactValue(key: string, existing: unknown, incoming: unknown): unknown {
+    if (key === 'open_risks') {
+        return { items: dedupeStrings([...readStringArray(existing, 'items'), ...readStringArray(incoming, 'items')]) };
+    }
+    if (key === 'important_artifacts') {
+        return { items: dedupeStrings([...readStringArray(existing, 'items'), ...readStringArray(incoming, 'items'), ...readStringArray(existing, 'files'), ...readStringArray(incoming, 'files')]) };
+    }
+    if (key === 'failed_paths' || key === 'alternative_routes') {
+        return { items: dedupeStrings([...readStringArray(existing, 'items'), ...readStringArray(incoming, 'items')]) };
+    }
+    if (key === 'recent_file_changes') {
+        return { items: dedupeObjects([...readFileChangeItems(existing), ...readFileChangeItems(incoming)]) };
+    }
+    return incoming;
+}
+
+function summarizeMergedFact(key: string, value: unknown, fallback: string): string {
+    if (key === 'open_risks') {
+        const items = readStringArray(value, 'items');
+        return items.length > 0 ? trimSummary(`open risks include ${items.join('; ')}`) : fallback;
+    }
+    if (key === 'important_artifacts') {
+        const items = readStringArray(value, 'items');
+        return items.length > 0 ? trimSummary(`important artifacts include ${items.join('; ')}`) : fallback;
+    }
+    if (key === 'failed_paths') {
+        const items = readStringArray(value, 'items');
+        return items.length > 0 ? trimSummary(`failed paths include ${items.join('; ')}`) : fallback;
+    }
+    if (key === 'alternative_routes') {
+        const items = readStringArray(value, 'items');
+        return items.length > 0 ? trimSummary(`alternative routes include ${items.join('; ')}`) : fallback;
+    }
+    if (key === 'recent_file_changes') {
+        const items = readFileChangeItems(value).map((item) => {
+            const action = String(item.action ?? 'updated').trim();
+            const path = String(item.path ?? '').trim();
+            const toPath = String(item.toPath ?? '').trim();
+            const purpose = String(item.purpose ?? '').trim();
+            if (!path) return '';
+            if (toPath) return `${action} ${path} -> ${toPath}${purpose ? ` (${purpose})` : ''}`;
+            return `${action} ${path}${purpose ? ` (${purpose})` : ''}`;
+        }).filter(Boolean);
+        return items.length > 0 ? trimSummary(`recent file changes include ${items.join('; ')}`) : fallback;
+    }
+    return fallback;
+}
+
+function buildFactProperties(fact: ExtractedMemoryFact, phase: 'user_prompt' | 'assistant_response' | 'backfill'): Record<string, unknown> {
+    return {
+        memoryScope: fact.scope,
+        capturePhase: phase,
+        durableClass: fact.durableClass,
+        canonicalKey: fact.key,
+        mergeStrategy: ['open_risks', 'important_artifacts', 'recent_file_changes', 'failed_paths', 'alternative_routes'].includes(fact.key)
+            ? 'append_dedupe'
+            : 'replace',
+    };
+}
+
+function extractProjectOperationalFacts(text: string): ExtractedMemoryFact[] {
+    const facts: ExtractedMemoryFact[] = [];
+
+    const decisionMatch = text.match(/^we decided(?: that)? (.+)$/i);
+    if (decisionMatch) {
+        facts.push({
+            scope: 'project',
+            key: 'decision',
+            value: { text: decisionMatch[1].trim() },
+            summary: `decision is ${decisionMatch[1].trim()}`,
+            durableClass: 'decision',
+        });
+    }
+
+    const nextStepMatch = text.match(/^(?:the )?next step is (.+)$/i);
+    if (nextStepMatch) {
+        facts.push({
+            scope: 'project',
+            key: 'next_step',
+            value: { instruction: nextStepMatch[1].trim() },
+            summary: `next step is ${nextStepMatch[1].trim()}`,
+            durableClass: 'next_step',
+        });
+    }
+
+    const currentStepMatch = text.match(/^(?:the )?current step is (.+)$/i);
+    if (currentStepMatch) {
+        facts.push({
+            scope: 'project',
+            key: 'current_step',
+            value: { text: currentStepMatch[1].trim() },
+            summary: `current step is ${currentStepMatch[1].trim()}`,
+            durableClass: 'current_step',
+        });
+    }
+
+    const blockerMatch = text.match(/^(?:the )?blocker is (.+)$/i);
+    if (blockerMatch) {
+        facts.push({
+            scope: 'project',
+            key: 'blocker',
+            value: { text: blockerMatch[1].trim() },
+            summary: `blocker is ${blockerMatch[1].trim()}`,
+            durableClass: 'blocker',
+        });
+    }
+
+    const ownerMatch = text.match(/^(?:the )?current owner is (.+)$/i);
+    if (ownerMatch) {
+        facts.push({
+            scope: 'project',
+            key: 'current_owner',
+            value: { text: ownerMatch[1].trim() },
+            summary: `current owner is ${ownerMatch[1].trim()}`,
+            durableClass: 'owner',
+        });
+    }
+
+    const openRisksMatch = text.match(/^(?:the )?(?:open risks?|risks?) (?:are|include) (.+)$/i);
+    if (openRisksMatch) {
+        const items = dedupeStrings(normalizeListItems(openRisksMatch[1]));
+        if (items.length > 0) {
+            facts.push({
+                scope: 'project',
+                key: 'open_risks',
+                value: { items },
+                summary: trimSummary(`open risks include ${items.join('; ')}`),
+                durableClass: 'open_risks',
+            });
+        }
+    }
+
+    const artifactsMatch = text.match(/^(?:important )?artifacts? (?:are|include) (.+)$/i);
+    if (artifactsMatch) {
+        const items = dedupeStrings(normalizeListItems(artifactsMatch[1]));
+        if (items.length > 0) {
+            facts.push({
+                scope: 'project',
+                key: 'important_artifacts',
+                value: { items },
+                summary: trimSummary(`important artifacts include ${items.join('; ')}`),
+                durableClass: 'artifact',
+            });
+        }
+    }
+
+    const failedPathMatch = text.match(/^(?:the )?failed path (?:is|was) (.+)$/i);
+    if (failedPathMatch) {
+        const items = dedupeStrings(normalizeListItems(failedPathMatch[1]));
+        if (items.length > 0) {
+            facts.push({
+                scope: 'project',
+                key: 'failed_paths',
+                value: { items },
+                summary: trimSummary(`failed paths include ${items.join('; ')}`),
+                durableClass: 'failed_path',
+            });
+        }
+    }
+
+    const alternativeRouteMatch = text.match(/^(?:the )?alternative route (?:is|was) (.+)$/i);
+    if (alternativeRouteMatch) {
+        const items = dedupeStrings(normalizeListItems(alternativeRouteMatch[1]));
+        if (items.length > 0) {
+            facts.push({
+                scope: 'project',
+                key: 'alternative_routes',
+                value: { items },
+                summary: trimSummary(`alternative routes include ${items.join('; ')}`),
+                durableClass: 'alternative_route',
+            });
+        }
+    }
+
+    const createdFileMatch = text.match(/^file created (\S+)(?: for (.+))?$/i);
+    if (createdFileMatch) {
+        facts.push({
+            scope: 'project',
+            key: 'recent_file_changes',
+            value: { items: [{ action: 'created', path: createdFileMatch[1].trim(), purpose: createdFileMatch[2]?.trim() || undefined }] },
+            summary: trimSummary(`recent file changes include created ${createdFileMatch[1].trim()}${createdFileMatch[2]?.trim() ? ` (${createdFileMatch[2].trim()})` : ''}`),
+            durableClass: 'file_change',
+        });
+    }
+
+    const movedFileMatch = text.match(/^file moved (\S+) to (\S+)(?: for (.+))?$/i);
+    if (movedFileMatch) {
+        facts.push({
+            scope: 'project',
+            key: 'recent_file_changes',
+            value: { items: [{ action: 'moved', path: movedFileMatch[1].trim(), toPath: movedFileMatch[2].trim(), purpose: movedFileMatch[3]?.trim() || undefined }] },
+            summary: trimSummary(`recent file changes include moved ${movedFileMatch[1].trim()} to ${movedFileMatch[2].trim()}${movedFileMatch[3]?.trim() ? ` (${movedFileMatch[3].trim()})` : ''}`),
+            durableClass: 'file_change',
+        });
+    }
+
+    const renamedFileMatch = text.match(/^file renamed (\S+) to (\S+)(?: for (.+))?$/i);
+    if (renamedFileMatch) {
+        facts.push({
+            scope: 'project',
+            key: 'recent_file_changes',
+            value: { items: [{ action: 'renamed', path: renamedFileMatch[1].trim(), toPath: renamedFileMatch[2].trim(), purpose: renamedFileMatch[3]?.trim() || undefined }] },
+            summary: trimSummary(`recent file changes include renamed ${renamedFileMatch[1].trim()} to ${renamedFileMatch[2].trim()}${renamedFileMatch[3]?.trim() ? ` (${renamedFileMatch[3].trim()})` : ''}`),
+            durableClass: 'file_change',
+        });
+    }
+
+    const deletedFileMatch = text.match(/^file deleted (\S+)(?: because (.+))?$/i);
+    if (deletedFileMatch) {
+        facts.push({
+            scope: 'project',
+            key: 'recent_file_changes',
+            value: { items: [{ action: 'deleted', path: deletedFileMatch[1].trim(), purpose: deletedFileMatch[2]?.trim() || undefined }] },
+            summary: trimSummary(`recent file changes include deleted ${deletedFileMatch[1].trim()}${deletedFileMatch[2]?.trim() ? ` (${deletedFileMatch[2].trim()})` : ''}`),
+            durableClass: 'file_change',
+        });
+    }
+
+    return facts;
 }
 
 export function isAutoRememberEnabled(): boolean {
@@ -197,7 +497,7 @@ export function classifyMemoryScope(message: string): 'personal' | 'project' | n
     const normalized = normalizePrompt(message).toLowerCase();
     if (!normalized) return null;
 
-    if (/\b(next step|blocker|decision|current owner)\b/.test(normalized)) {
+    if (/\b(next step|current step|blocker|decision|current owner|open risks?|artifacts?|failed path|alternative route|file (?:created|moved|renamed|deleted))\b/.test(normalized)) {
         return 'project';
     }
     if (/\b(my|me|i)\b/.test(normalized)) {
@@ -285,6 +585,33 @@ export function detectMandatoryRecall(message: string): MandatoryRecallDecision 
         };
     }
 
+    if (/\b(?:what|remind me)(?:[^.?!]*)\bcurrent step\b/i.test(normalized)) {
+        return {
+            required: true,
+            scope: 'project',
+            key: 'current_step',
+            reason: 'project_current_step_recall',
+        };
+    }
+
+    if (/\b(?:what|which|remind me)(?:[^.?!]*)\bopen risks?\b/i.test(normalized)) {
+        return {
+            required: true,
+            scope: 'project',
+            key: 'open_risks',
+            reason: 'project_open_risks_recall',
+        };
+    }
+
+    if (/\b(?:what|which|remind me)(?:[^.?!]*)\b(?:important )?artifacts?\b/i.test(normalized)) {
+        return {
+            required: true,
+            scope: 'project',
+            key: 'important_artifacts',
+            reason: 'project_artifacts_recall',
+        };
+    }
+
     return { required: false, scope: null };
 }
 
@@ -326,35 +653,7 @@ export function extractExplicitPromptMemory(prompt: string): ExtractedMemoryFact
         facts.push(buildTextFact('likes', preferenceMatch[1]));
     }
 
-    const decisionMatch = stripped.match(/^we decided(?: that)? (.+)$/i);
-    if (decisionMatch) {
-        facts.push({
-            scope: 'project',
-            key: 'decision',
-            value: { text: decisionMatch[1].trim() },
-            summary: `decision is ${decisionMatch[1].trim()}`,
-        });
-    }
-
-    const nextStepMatch = stripped.match(/^(?:the )?next step is (.+)$/i);
-    if (nextStepMatch) {
-        facts.push({
-            scope: 'project',
-            key: 'next_step',
-            value: { instruction: nextStepMatch[1].trim() },
-            summary: `next step is ${nextStepMatch[1].trim()}`,
-        });
-    }
-
-    const blockerMatch = stripped.match(/^(?:the )?blocker is (.+)$/i);
-    if (blockerMatch) {
-        facts.push({
-            scope: 'project',
-            key: 'blocker',
-            value: { text: blockerMatch[1].trim() },
-            summary: `blocker is ${blockerMatch[1].trim()}`,
-        });
-    }
+    facts.push(...extractProjectOperationalFacts(stripped));
 
     const deduped = new Map<string, ExtractedMemoryFact>();
     for (const fact of facts) {
@@ -385,45 +684,7 @@ export function extractExplicitAssistantMemory(response: string): ExtractedMemor
         facts.push(buildTextFact(yourFieldMatch[1], yourFieldMatch[2]));
     }
 
-    const decisionMatch = lower.match(/^we decided(?: that)? (.+)$/i);
-    if (decisionMatch) {
-        facts.push({
-            scope: 'project',
-            key: 'decision',
-            value: { text: decisionMatch[1].trim() },
-            summary: `decision is ${decisionMatch[1].trim()}`,
-        });
-    }
-
-    const nextStepMatch = lower.match(/^(?:the )?next step is (.+)$/i);
-    if (nextStepMatch) {
-        facts.push({
-            scope: 'project',
-            key: 'next_step',
-            value: { instruction: nextStepMatch[1].trim() },
-            summary: `next step is ${nextStepMatch[1].trim()}`,
-        });
-    }
-
-    const blockerMatch = lower.match(/^(?:the )?blocker is (.+)$/i);
-    if (blockerMatch) {
-        facts.push({
-            scope: 'project',
-            key: 'blocker',
-            value: { text: blockerMatch[1].trim() },
-            summary: `blocker is ${blockerMatch[1].trim()}`,
-        });
-    }
-
-    const ownerMatch = lower.match(/^(?:the )?current owner is (.+)$/i);
-    if (ownerMatch) {
-        facts.push({
-            scope: 'project',
-            key: 'current_owner',
-            value: { text: ownerMatch[1].trim() },
-            summary: `current owner is ${ownerMatch[1].trim()}`,
-        });
-    }
+    facts.push(...extractProjectOperationalFacts(lower));
 
     const deduped = new Map<string, ExtractedMemoryFact>();
     for (const fact of facts) {
@@ -479,7 +740,10 @@ async function persistExtractedFacts(params: {
         }
 
         const existing: { found: boolean; value?: unknown } = await iranti.query(targetEntity, fact.key).catch(() => ({ found: false }));
-        if (existing.found && comparableValue(existing.value) === comparableValue(fact.value)) {
+        const mergedValue = existing.found ? mergeFactValue(fact.key, existing.value, fact.value) : fact.value;
+        const mergedSummary = summarizeMergedFact(fact.key, mergedValue, fact.summary);
+
+        if (existing.found && comparableValue(existing.value) === comparableValue(mergedValue)) {
             skipped.push({ key: fact.key, reason: 'unchanged' });
             continue;
         }
@@ -491,11 +755,12 @@ async function persistExtractedFacts(params: {
         await iranti.write({
             entity: targetEntity,
             key: fact.key,
-            value: fact.value,
-            summary: fact.summary,
+            value: mergedValue,
+            summary: mergedSummary,
             confidence,
             source: writeSource,
             agent,
+            properties: buildFactProperties(fact, phase),
         });
         written += 1;
         writtenEntities.add(targetEntity);

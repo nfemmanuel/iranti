@@ -13,6 +13,7 @@ This feature defines how Iranti should participate across an agent turn without 
 | `IRANTI_PERSONAL_MEMORY_ENTITY` | string? | Personal-memory target, defaulting to `user/main`. |
 | `IRANTI_AUTO_REMEMBER` | boolean? | Enables narrow post-user-turn and post-response capture. |
 | durable assistant summary | string | A strict assistant response such as `The next step is ...` or `We decided ...`. |
+| checkpoint payload | object | Optional checkpoint state including `currentStep`, `nextStep`, `openRisks`, `recentOutputs`, `entityTargets`, and `notes`. |
 
 ## Outputs
 | Output | Type | Description |
@@ -20,6 +21,8 @@ This feature defines how Iranti should participate across an agent turn without 
 | pre-turn retrieval decision | JSON | `attend()` result including `shouldInject`, `reason`, and surfaced facts. |
 | explicit prompt facts | durable writes | Personal or project facts extracted from direct user statements. |
 | assistant summary facts | durable writes | Strict summaries persisted through Claude `Stop` or explicit MCP response memory tools. |
+| shared checkpoint breadcrumbs | durable writes | Compact `checkpoint_*` facts written to explicit entity targets so other agents can resume shared work without inheriting private attendant state. |
+| fact properties | JSON | Structured metadata describing `memoryScope`, `capturePhase`, `durableClass`, `canonicalKey`, and merge strategy. |
 | lifecycle reason | string | Explanation such as `project_next_step_recall` or `favorite_recall_prompt`. |
 
 ## Lifecycle Policy
@@ -44,10 +47,27 @@ This feature defines how Iranti should participate across an agent turn without 
 11. Do not poll during arbitrary tool execution or during generation unless the action itself is a memory operation.
 12. After an assistant response, persist only strict durable summaries such as:
     - `The next step is ...`
+    - `The current step is ...`
     - `The blocker is ...`
     - `We decided ...`
     - `The current owner is ...`
+    - `Open risks are ...`
+    - `Important artifacts are ...`
+    - `File created ...`
+    - `File moved ...`
+    - `File renamed ...`
+    - `File deleted ...`
+    - `The failed path is ...`
+    - `The alternative route is ...`
 13. Codex and other MCP clients without a `Stop` hook use `iranti_remember_response` explicitly for the post-response step.
+14. For list-like project facts such as open risks, artifacts, file changes, failed paths, and alternative routes, append and dedupe rather than blindly replacing the prior value.
+15. Auto-remembered facts should carry structured metadata describing scope, capture phase, durable class, canonical key, and merge behavior so retrieval and audit tools can explain why the fact exists.
+16. `checkpoint()` remains agent-scoped for private session recovery, but when `entityTargets` are supplied it also writes shared checkpoint breadcrumbs:
+   - `checkpoint_summary`
+   - `checkpoint_current_step`
+   - `checkpoint_next_step`
+   - `checkpoint_open_risks`
+17. Shared checkpoint breadcrumbs should not replace the canonical project facts such as `next_step` or `decision`; they are resumability hints, not the sole source of truth.
 
 ## Conflict / Correction Rules
 - Direct user correction of a personal-memory fact should override an older non-human hook-written value for the same key.
@@ -65,6 +85,7 @@ This feature defines how Iranti should participate across an agent turn without 
 - Missing `IRANTI_AUTO_REMEMBER`: no automatic prompt or summary persistence occurs.
 - Personal correction prompts with changed wording but same fact key still target the canonical key, e.g. `favorite` and `favourite`.
 - Arbitrary assistant prose is ignored by post-response persistence.
+- Shared checkpoint breadcrumbs are demoted below canonical task facts during observe/attend selection so checkpoints help recovery without crowding out the main `next_step`, `blocker`, or artifact facts.
 
 ## Test Results
 - `tests/memory-retrieval-regressions.ts` verifies personal recall prefers `IRANTI_PERSONAL_MEMORY_ENTITY` over project contamination.
@@ -73,6 +94,9 @@ This feature defines how Iranti should participate across an agent turn without 
   - mandatory project recall for `what is the next step?`
   - prompt-side personal correction through `UserPromptAutoRemember`
   - explicit `user_stated` correction overriding an older hook-written personal fact
+  - project-side capture of `current_step`, `open_risks`, `important_artifacts`, `recent_file_changes`, `failed_paths`, and `alternative_routes`
+  - structured fact metadata and append-dedupe merge semantics for project durability
+- `tests/cross-tool/run_cross_tool_handoff_tests.ts` verifies shared checkpoint breadcrumbs are written to explicit entity targets and remain secondary to canonical shared task facts during observe/attend retrieval.
 
 ## Related
 - `src/attendant/AttendantInstance.ts`

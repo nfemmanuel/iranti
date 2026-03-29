@@ -198,6 +198,36 @@ async function main(): Promise<void> {
             'Expected favorite prompts not to also emit a duplicate tv_show fact.'
         );
 
+        const projectCheckpointContext = await buildHookAdditionalContext({
+            iranti: fakeIranti as never,
+            event: 'UserPromptSubmit',
+            payload: {
+                cwd: process.cwd(),
+                prompt: 'The current step is audit the retrieval lifecycle.',
+                recentMessages: ['assistant: Capture the current checkpoint for later handoff.'],
+            },
+        });
+        assert.equal(projectCheckpointContext, '', 'Expected project checkpoint prompt to avoid injecting unrelated memory.');
+        assert.ok(
+            calls.some((call) => call.startsWith(`write:${memoryEntity}:current_step:`)),
+            'Expected current_step prompt memory to route to the project memory entity.'
+        );
+
+        const projectRiskContext = await buildHookAdditionalContext({
+            iranti: fakeIranti as never,
+            event: 'UserPromptSubmit',
+            payload: {
+                cwd: process.cwd(),
+                prompt: 'Open risks are stale runtime metadata and duplicate instance state.',
+                recentMessages: ['assistant: Capture the open risks for the shared handoff.'],
+            },
+        });
+        assert.equal(projectRiskContext, '', 'Expected open_risks prompt to avoid injecting unrelated memory.');
+        assert.ok(
+            calls.some((call) => call.startsWith(`write:${memoryEntity}:open_risks:`)),
+            'Expected open_risks prompt memory to route to the project memory entity.'
+        );
+
         const stopContext = await buildHookAdditionalContext({
             iranti: fakeIranti as never,
             event: 'Stop',

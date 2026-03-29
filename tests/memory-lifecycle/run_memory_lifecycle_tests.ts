@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { Iranti } from '../../src/sdk';
 import { autoRememberPromptFacts, USER_PROMPT_AUTO_REMEMBER_SOURCE } from '../../src/lib/autoRemember';
+import { findEntry } from '../../src/library/queries';
 
 function uniqueId(prefix: string): string {
     return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`;
@@ -111,6 +112,113 @@ async function main(): Promise<void> {
         assert.equal(correctedExplicitFact.found, true, 'Expected explicit user correction fact to remain queryable.');
         assert.deepEqual(correctedExplicitFact.value, { text: 'half of a yellow sun' });
         assert.equal(correctedExplicitFact.source, 'user_stated');
+
+        await autoRememberPromptFacts({
+            iranti,
+            prompt: 'The current step is audit the lifecycle and retrieval paths.',
+            agent: agentId,
+            source: 'ClaudeCodeHook',
+        });
+
+        await autoRememberPromptFacts({
+            iranti,
+            prompt: 'Open risks are stale runtime metadata and duplicate instance state.',
+            agent: agentId,
+            source: 'ClaudeCodeHook',
+        });
+
+        await autoRememberPromptFacts({
+            iranti,
+            prompt: 'Open risks are stale runtime metadata and host discipline drift.',
+            agent: agentId,
+            source: 'ClaudeCodeHook',
+        });
+
+        await autoRememberPromptFacts({
+            iranti,
+            prompt: 'Important artifacts are docs/guides/codex.md and docs/guides/claude-code.md.',
+            agent: agentId,
+            source: 'ClaudeCodeHook',
+        });
+
+        await autoRememberPromptFacts({
+            iranti,
+            prompt: 'Failed path is relying on stale control plane status.',
+            agent: agentId,
+            source: 'ClaudeCodeHook',
+        });
+
+        await autoRememberPromptFacts({
+            iranti,
+            prompt: 'Alternative route is force a live status probe.',
+            agent: agentId,
+            source: 'ClaudeCodeHook',
+        });
+
+        await autoRememberPromptFacts({
+            iranti,
+            prompt: 'File created docs/internal/runtime-audit.md for release notes.',
+            agent: agentId,
+            source: 'ClaudeCodeHook',
+        });
+
+        const currentStepFact = await iranti.query(projectEntity, 'current_step');
+        assert.equal(currentStepFact.found, true, 'Expected current_step to be persisted as project memory.');
+        assert.deepEqual(currentStepFact.value, { text: 'audit the lifecycle and retrieval paths.' });
+
+        const openRisksFact = await iranti.query(projectEntity, 'open_risks');
+        assert.equal(openRisksFact.found, true, 'Expected open_risks to be persisted.');
+        assert.deepEqual(openRisksFact.value, {
+            items: [
+                'stale runtime metadata',
+                'duplicate instance state.',
+                'host discipline drift.',
+            ],
+        });
+
+        const artifactsFact = await iranti.query(projectEntity, 'important_artifacts');
+        assert.equal(artifactsFact.found, true, 'Expected important_artifacts to be persisted.');
+        assert.deepEqual(artifactsFact.value, {
+            items: ['docs/guides/codex.md', 'docs/guides/claude-code.md.'],
+        });
+
+        const fileChangeFact = await iranti.query(projectEntity, 'recent_file_changes');
+        assert.equal(fileChangeFact.found, true, 'Expected recent_file_changes to be persisted.');
+        assert.deepEqual(fileChangeFact.value, {
+            items: [
+                {
+                    action: 'created',
+                    path: 'docs/internal/runtime-audit.md',
+                    purpose: 'release notes.',
+                },
+            ],
+        });
+
+        const openRisksEntry = await findEntry({
+            entityType: 'project',
+            entityId: projectEntity.split('/')[1]!,
+            key: 'open_risks',
+        });
+        assert.ok(openRisksEntry, 'Expected open_risks entry to exist in the knowledge base.');
+        const openRisksProperties = openRisksEntry.properties as Record<string, unknown>;
+        assert.equal(openRisksProperties.memoryScope, 'project');
+        assert.equal(openRisksProperties.capturePhase, 'user_prompt');
+        assert.equal(openRisksProperties.durableClass, 'open_risks');
+        assert.equal(openRisksProperties.canonicalKey, 'open_risks');
+        assert.equal(openRisksProperties.mergeStrategy, 'append_dedupe');
+
+        const fileChangeEntry = await findEntry({
+            entityType: 'project',
+            entityId: projectEntity.split('/')[1]!,
+            key: 'recent_file_changes',
+        });
+        assert.ok(fileChangeEntry, 'Expected recent_file_changes entry to exist in the knowledge base.');
+        const fileChangeProperties = fileChangeEntry.properties as Record<string, unknown>;
+        assert.equal(fileChangeProperties.memoryScope, 'project');
+        assert.equal(fileChangeProperties.capturePhase, 'user_prompt');
+        assert.equal(fileChangeProperties.durableClass, 'file_change');
+        assert.equal(fileChangeProperties.canonicalKey, 'recent_file_changes');
+        assert.equal(fileChangeProperties.mergeStrategy, 'append_dedupe');
 
         console.log('memory lifecycle tests passed');
     } finally {

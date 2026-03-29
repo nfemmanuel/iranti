@@ -60,10 +60,21 @@ This feature exposes Iranti to Claude Code through the installed CLI surface: `i
 24. If Claude explicitly calls `iranti_write` for a personal-memory key such as `favorite_book`, the MCP server reroutes that write to the configured canonical personal entity instead of allowing project-local identity forks like `user/nf` vs `user/main`.
 25. Recall-class prompts such as `what is my favorite ...`, `what is the next step`, `what did we decide`, and `what is the blocker` are treated as mandatory memory prompts and bypass the LLM memory-needed classifier.
 26. On `Stop`, if `IRANTI_AUTO_REMEMBER=true`, extract only narrow assistant-response summary patterns from `last_assistant_message` and write project-scoped summaries to `IRANTI_MEMORY_ENTITY`.
-27. MCP clients may call `iranti_remember_response` explicitly to persist a strict assistant summary such as `The next step is ...` without relying on the Claude `Stop` hook path.
-28. MCP tool descriptions explicitly tell Claude-facing clients to consult Iranti for recall questions about remembered preferences, decisions, blockers, next steps, and prior project facts before guessing or saying they do not know.
-29. Handshake may also return a backfill suggestion when recent messages appear to contain durable facts that have not yet been persisted.
-30. Keep durable writes explicit through MCP tool calls rather than auto-saving all turns; the hook never bulk-saves Claude responses.
+27. Narrow project durability now includes strict patterns for:
+   - `current_step`
+   - `next_step`
+   - `blocker`
+   - `decision`
+   - `current_owner`
+   - `open_risks`
+   - `important_artifacts`
+   - `recent_file_changes`
+   - `failed_paths`
+   - `alternative_routes`
+28. MCP clients may call `iranti_remember_response` explicitly to persist a strict assistant summary such as `The next step is ...` without relying on the Claude `Stop` hook path.
+29. MCP tool descriptions explicitly tell Claude-facing clients to consult Iranti for recall questions about remembered preferences, decisions, blockers, next steps, and prior project facts before guessing or saying they do not know.
+30. Handshake may also return a backfill suggestion when recent messages appear to contain durable facts that have not yet been persisted.
+31. Keep durable writes explicit through MCP tool calls rather than auto-saving all turns; the hook never bulk-saves Claude responses.
 
 ## Edge Cases
 - Missing `DATABASE_URL`: process exits with a fatal configuration error.
@@ -73,7 +84,7 @@ This feature exposes Iranti to Claude Code through the installed CLI surface: `i
 - Empty `Stop` message: hook exits without writing.
 - `IRANTI_AUTO_REMEMBER=true` without `IRANTI_MEMORY_ENTITY`: project-scoped auto-write is skipped rather than guessing a target entity; personal facts still default to `user/main`.
 - Auto-remember extracts only strict prompt patterns; arbitrary narrative text is ignored.
-- Assistant-response auto-remember extracts only strict summary patterns such as `the next step is ...`, `the blocker is ...`, `we decided ...`, or `your favorite ... is ...`.
+- Assistant-response auto-remember extracts only strict summary patterns such as `the next step is ...`, `the current step is ...`, `open risks are ...`, `important artifacts are ...`, `file created ...`, `we decided ...`, or `your favorite ... is ...`.
 - `iranti_remember_response` also ignores arbitrary prose and persists only strict assistant-summary patterns.
 - Invalid `valueJson` or `propertiesJson`: MCP write/relate tools reject with a clear JSON parsing error.
 - Unregistered agent ids: auto-registration creates a stable Claude-facing agent profile.
@@ -95,6 +106,7 @@ This feature exposes Iranti to Claude Code through the installed CLI surface: `i
 - `npm run test:mcp-smoke` starts the stdio MCP server, lists tools, and successfully calls `iranti_handshake`, `iranti_write`, `iranti_query`, `iranti_search`, `iranti_attend`, and `iranti_remember_response`.
 - `iranti claude-hook --help` works through the installed CLI handoff path.
 - Installed-package Claude Code integration no longer requires hardcoded `DATABASE_URL` in hook commands when `.env.iranti` points to a valid instance env.
+- `npm run test:claude-hook` verifies project prompt durability for `current_step` and `open_risks` in addition to the existing favorite and `next_step` paths.
 
 ## Related
 - `scripts/iranti-mcp.ts`

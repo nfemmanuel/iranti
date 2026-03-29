@@ -63,6 +63,17 @@ Behavior:
 - MCP tool descriptions explicitly require `iranti_handshake` at session start
 - MCP tool descriptions explicitly require `iranti_attend` before each reply
 - if a host skips `handshake()`, `iranti_attend()` auto-bootstraps a handshake
+- `iranti_remember_response` now persists a broader durable assistant-summary set:
+  - `next_step`
+  - `current_step`
+  - `blocker`
+  - `decision`
+  - `current_owner`
+  - `open_risks`
+  - `important_artifacts`
+  - `recent_file_changes`
+  - `failed_paths`
+  - `alternative_routes`
 
 Limitation:
 
@@ -98,6 +109,32 @@ Limitation:
 - Iranti cannot guarantee that every Codex client session will call `handshake()`
   unless the host product itself implements that lifecycle
 
+### Operational read on Codex CLI vs Codex VS Code
+
+Status: STRONG CONTRACT, STILL HOST-DEPENDENT
+
+Observed in:
+
+- `scripts/codex-setup.ts`
+- `.mcp.json` / `.vscode/mcp.json` scaffolding flow
+- `tests/mcp/smoke_test.ts`
+- `tests/cross-tool/run_cross_tool_handoff_tests.ts`
+
+Behavior:
+
+- both Codex CLI and Codex VS Code get the same `iranti` MCP server registration
+- the MCP tool surface now has a strong minimum-safe pattern:
+  - `iranti_handshake` at session start when the host supports it
+  - `iranti_attend` before reply generation
+  - `iranti_remember_response` for strict assistant durability when there is no stop hook
+- cross-tool tests now verify checkpoint breadcrumbs and shared handoff retrieval
+
+Limitation:
+
+- Codex CLI and Codex VS Code are still external MCP hosts, so Iranti can guide
+  and backstop them strongly, but not force startup-hook behavior from inside
+  the Iranti codebase alone
+
 ## Conclusion
 
 Iranti's own first-party hosts are already aligned:
@@ -111,6 +148,9 @@ For Codex and other MCP clients, the strongest reliable rule is:
 - treat `attend()` as mandatory before reply generation
 - rely on `attend()` auto-bootstrap so a missed handshake does not silently
   degrade retrieval
+- use `iranti_remember_response` or equivalent post-response durability for
+  shared decisions, steps, risks, file changes, and alternatives when there is
+  no native stop hook
 
 ## Release Read
 

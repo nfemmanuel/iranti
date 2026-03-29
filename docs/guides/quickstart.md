@@ -301,6 +301,7 @@ async function main() {
         confidence: 85,
         source: 'OpenAlex',
         agent: 'my_agent',
+        properties: { memoryScope: 'project', durableClass: 'artifact' },
     });
 
     console.log('Write result:', result);
@@ -456,6 +457,7 @@ console.log(inspection.sessionRecovery?.recommendation ?? 'no recovery recommend
 
 `inspectSession()` gives you both the raw persisted checkpoint and the operator-facing summary. A stale checkpoint can still have `sessionCheckpoint.status = 'active'` while `summary.operatorState = 'interrupted'`. `listSessions()` is the inventory view; `inspectSession()` is the one-agent drill-down.
 `checkpoint()` itself stores progress and clears any existing recovery recommendation. Recovery advice appears later on `handshake()` or `inspectSession(...)` when Iranti evaluates a returning task against the persisted checkpoint.
+When `checkpoint.entityTargets` is supplied, Iranti also writes compact shared `checkpoint_*` breadcrumbs to those entities so another agent can resume work without inheriting the original agent's private attendant state.
 
 For Claude Code to hand work over to Codex, write the durable handoff into a shared `task/...` entity and keep any sender-local recovery in a normal checkpoint:
 
