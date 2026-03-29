@@ -46,6 +46,20 @@ async function main(): Promise<void> {
                 metadata: { sessionId, shouldInject: true, host: 'plain_cli' },
             },
             {
+                event_id: 'evt-injected',
+                timestamp: new Date('2026-03-28T10:00:02.500Z'),
+                staff_component: 'Attendant',
+                action_type: 'memory_injected',
+                agent_id: agentId,
+                source: 'cli',
+                entity_type: 'user',
+                entity_id: 'main',
+                key: 'height',
+                reason: 'personal_height_recall_prompt',
+                level: 'audit',
+                metadata: { sessionId, shouldInject: true, factCount: 1, injectedKeys: ['user/main/height'], host: 'plain_cli' },
+            },
+            {
                 event_id: 'evt-checkpoint',
                 timestamp: new Date('2026-03-28T10:00:02.000Z'),
                 staff_component: 'Attendant',
@@ -78,7 +92,7 @@ async function main(): Promise<void> {
 
     try {
         const ledger = await querySessionLedger({ agentId, sessionId, limit: 10 });
-        assert.equal(ledger.length, 3, 'Expected multiple ledger events for the agent.');
+        assert.equal(ledger.length, 4, 'Expected multiple ledger events for the agent.');
         assert.equal(ledger.every((event) => event.agentId === agentId), true, 'Expected agent-filtered ledger results.');
         assert.ok(
             ledger.some((event) => event.actionType === 'handshake_completed'),
@@ -87,6 +101,10 @@ async function main(): Promise<void> {
         assert.ok(
             ledger.some((event) => event.actionType === 'attend_completed'),
             'Expected attend_completed to appear in the ledger.'
+        );
+        assert.ok(
+            ledger.some((event) => event.actionType === 'memory_injected'),
+            'Expected memory_injected to appear in the ledger.'
         );
 
         const ledgerSessionIds = new Set(
@@ -116,6 +134,10 @@ async function main(): Promise<void> {
             assert.ok(
                 body.items.some((event) => event.actionType === 'attend_completed'),
                 'Expected route output to include attend_completed.'
+            );
+            assert.ok(
+                body.items.some((event) => event.actionType === 'memory_injected'),
+                'Expected route output to include memory_injected.'
             );
         } finally {
             await new Promise<void>((resolve) => server.close(() => resolve()));

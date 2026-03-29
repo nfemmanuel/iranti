@@ -462,6 +462,21 @@ export class Iranti {
         };
     }
 
+    private emitLedgerEvent(event: StaffEventInput): void {
+        const context = this.buildSessionLedgerContext();
+        const metadata = event.metadata && typeof event.metadata === 'object'
+            ? { ...event.metadata }
+            : {};
+        if (context?.host) {
+            metadata.host = context.host;
+        }
+        getStaffEventEmitter().emit({
+            ...event,
+            source: context?.source ?? event.source,
+            metadata,
+        });
+    }
+
     // ── Write ───────────────────────────────────────────────────────────────
 
     async write(input: WriteInput): Promise<WriteResult> {
@@ -660,6 +675,22 @@ export class Iranti {
 
             if (currentMatches) {
                 await recordKnowledgeEntryAccess([current.id]);
+                this.emitLedgerEvent({
+                    staffComponent: 'Attendant',
+                    actionType: 'query_executed',
+                    agentId: 'sdk',
+                    source: 'sdk',
+                    entityType: resolved.entityType,
+                    entityId: resolved.entityId,
+                    key,
+                    reason: 'query_exact_current',
+                    level: 'audit',
+                    metadata: {
+                        found: true,
+                        fromArchive: false,
+                        asOf: options.asOf.toISOString(),
+                    },
+                });
                 return {
                     found: true,
                     value: current.valueRaw,
@@ -688,6 +719,22 @@ export class Iranti {
             );
 
             if (historical) {
+                this.emitLedgerEvent({
+                    staffComponent: 'Attendant',
+                    actionType: 'query_executed',
+                    agentId: 'sdk',
+                    source: 'sdk',
+                    entityType: resolved.entityType,
+                    entityId: resolved.entityId,
+                    key,
+                    reason: 'query_historical_match',
+                    level: 'audit',
+                    metadata: {
+                        found: true,
+                        fromArchive: true,
+                        asOf: options.asOf.toISOString(),
+                    },
+                });
                 return {
                     found: true,
                     ...mapArchiveResult(historical),
@@ -696,6 +743,22 @@ export class Iranti {
                 };
             }
 
+            this.emitLedgerEvent({
+                staffComponent: 'Attendant',
+                actionType: 'query_executed',
+                agentId: 'sdk',
+                source: 'sdk',
+                entityType: resolved.entityType,
+                entityId: resolved.entityId,
+                key,
+                reason: 'query_historical_miss',
+                level: 'audit',
+                metadata: {
+                    found: false,
+                    fromArchive: true,
+                    asOf: options.asOf.toISOString(),
+                },
+            });
             return { found: false, resolvedEntity: resolved.canonicalEntity, inputEntity: entity };
         }
 
@@ -716,10 +779,42 @@ export class Iranti {
         }
 
         if (!entry || entry.isProtected) {
+            this.emitLedgerEvent({
+                staffComponent: 'Attendant',
+                actionType: 'query_executed',
+                agentId: 'sdk',
+                source: 'sdk',
+                entityType: resolved.entityType,
+                entityId: resolved.entityId,
+                key,
+                reason: personalRecallCandidates.length > 0 ? 'query_personal_fallback_miss' : 'query_exact_miss',
+                level: 'audit',
+                metadata: {
+                    found: false,
+                    resolvedEntity,
+                    inputEntity: entity,
+                },
+            });
             return { found: false, resolvedEntity, inputEntity: entity };
         }
 
         await recordKnowledgeEntryAccess([entry.id]);
+        this.emitLedgerEvent({
+            staffComponent: 'Attendant',
+            actionType: 'query_executed',
+            agentId: 'sdk',
+            source: 'sdk',
+            entityType: entry.entityType,
+            entityId: entry.entityId,
+            key,
+            reason: resolvedEntity === resolved.canonicalEntity ? 'query_exact_match' : 'query_personal_fallback_match',
+            level: 'audit',
+            metadata: {
+                found: true,
+                resolvedEntity,
+                inputEntity: entity,
+            },
+        });
         return {
             found: true,
             value: entry.valueRaw,
@@ -836,6 +931,22 @@ export class Iranti {
             minScore: input.minScore,
         });
 
+        this.emitLedgerEvent({
+            staffComponent: 'Attendant',
+            actionType: 'search_executed',
+            agentId: 'sdk',
+            source: 'sdk',
+            entityType: input.entityType,
+            entityId: input.entityId,
+            reason: 'hybrid_search',
+            level: 'audit',
+            metadata: {
+                queryPreview: input.query.trim().slice(0, 120),
+                resultCount: rows.length,
+                minScore: input.minScore ?? null,
+            },
+        });
+
         return rows.map((row) => ({
             id: row.id,
             entity: `${row.entityType}/${row.entityId}`,
@@ -883,12 +994,41 @@ export class Iranti {
 
     async getRelated(entity: string): Promise<RelatedEntity[]> {
         const { entityType, entityId } = parseEntity(entity);
-        return getRelated(entityType, entityId);
+        const result = await getRelated(entityType, entityId);
+        this.emitLedgerEvent({
+            staffComponent: 'Attendant',
+            actionType: 'related_executed',
+            agentId: 'sdk',
+            source: 'sdk',
+            entityType,
+            entityId,
+            reason: 'relationship_lookup',
+            level: 'audit',
+            metadata: {
+                resultCount: result.length,
+            },
+        });
+        return result;
     }
 
     async getRelatedDeep(entity: string, depth: number = 2): Promise<RelatedEntity[]> {
         const { entityType, entityId } = parseEntity(entity);
-        return getRelatedDeep(entityType, entityId, depth);
+        const result = await getRelatedDeep(entityType, entityId, depth);
+        this.emitLedgerEvent({
+            staffComponent: 'Attendant',
+            actionType: 'related_deep_executed',
+            agentId: 'sdk',
+            source: 'sdk',
+            entityType,
+            entityId,
+            reason: 'relationship_lookup_deep',
+            level: 'audit',
+            metadata: {
+                resultCount: result.length,
+                depth,
+            },
+        });
+        return result;
     }
 
     // ── Agent Registry ──────────────────────────────────────────────────────
@@ -907,7 +1047,21 @@ export class Iranti {
         totalContributions: number;
     }>> {
         const { entityType, entityId } = parseEntity(entity);
-        return whoKnows(entityType, entityId);
+        const result = await whoKnows(entityType, entityId);
+        this.emitLedgerEvent({
+            staffComponent: 'Attendant',
+            actionType: 'whoknows_executed',
+            agentId: 'sdk',
+            source: 'sdk',
+            entityType,
+            entityId,
+            reason: 'agent_contribution_lookup',
+            level: 'audit',
+            metadata: {
+                resultCount: result.length,
+            },
+        });
+        return result;
     }
 
     async listAgents(): Promise<AgentProfile[]> {

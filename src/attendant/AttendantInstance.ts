@@ -1375,6 +1375,20 @@ export class AttendantInstance {
         const effectiveEntityHints = this.resolveAttendEntityHints(input.entityHints, latestMessage);
         const observationContext = currentContext.trim().length > 0 ? currentContext : latestMessage;
         const mandatoryRecall = detectMandatoryRecall(latestMessage);
+        if (mandatoryRecall.required && input.suppressEvents !== true) {
+            getStaffEventEmitter().emit({
+                staffComponent: 'Attendant',
+                actionType: 'mandatory_recall_forced',
+                agentId: this.agentId,
+                source: this.eventSource,
+                reason: mandatoryRecall.reason ?? 'mandatory_recall_prompt',
+                level: 'audit',
+                metadata: this.buildEventMetadata({
+                    key: mandatoryRecall.key ?? null,
+                    latestMessage: latestMessage.slice(0, 160),
+                }),
+            });
+        }
 
         const decision = await this.decideMemoryNeed({
             currentContext,
@@ -1395,6 +1409,19 @@ export class AttendantInstance {
                         contextCallCount: this.contextCallCount,
                         shouldInject: false,
                         attendReason: 'memory_not_needed',
+                    }),
+                });
+                getStaffEventEmitter().emit({
+                    staffComponent: 'Attendant',
+                    actionType: 'memory_not_injected',
+                    agentId: this.agentId,
+                    source: this.eventSource,
+                    reason: 'memory_not_needed',
+                    level: 'audit',
+                    metadata: this.buildEventMetadata({
+                        shouldInject: false,
+                        factCount: 0,
+                        injectedKeys: [],
                     }),
                 });
             }
@@ -1459,6 +1486,22 @@ export class AttendantInstance {
                     contextCallCount: this.contextCallCount,
                     shouldInject,
                     attendReason: reason,
+                    }),
+                });
+            getStaffEventEmitter().emit({
+                staffComponent: 'Attendant',
+                actionType: shouldInject ? 'memory_injected' : 'memory_not_injected',
+                agentId: this.agentId,
+                source: this.eventSource,
+                reason,
+                level: 'audit',
+                metadata: this.buildEventMetadata({
+                    shouldInject,
+                    factCount: observed.facts.length,
+                    injectedKeys: observed.facts.map((fact) => fact.entityKey),
+                    entitiesResolved: observed.entitiesResolved?.map((entry) => entry.canonicalEntity) ?? [],
+                    alreadyPresent: observed.alreadyPresent,
+                    totalFound: observed.totalFound,
                 }),
             });
         }
