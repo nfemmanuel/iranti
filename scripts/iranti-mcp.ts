@@ -2,8 +2,9 @@ import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import * as z from 'zod/v4';
-import { Iranti } from '../src/sdk';
+import type { Iranti } from '../src/sdk';
 import { rewriteCommandError } from '../src/lib/commandErrors';
+import { createFirstPartyIranti } from '../src/lib/createFirstPartyIranti';
 import { loadRuntimeEnv } from '../src/lib/runtimeEnv';
 import { autoRememberPromptFacts, isAutoRememberEnabled, rememberAssistantResponseFacts, resolvePersonalWriteTarget } from '../src/lib/autoRemember';
 
@@ -124,7 +125,7 @@ async function main(): Promise<void> {
         return;
     }
 
-    const iranti = new Iranti({
+    const iranti = createFirstPartyIranti({
         connectionString: requireConnectionString(),
         llmProvider: process.env.LLM_PROVIDER,
     });

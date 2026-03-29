@@ -96,7 +96,58 @@ async function testMissingTableWarnsOnce(): Promise<void> {
 
 async function testServerRegistersDbEmitter(): Promise<void> {
     const serverSource = await fs.readFile('src/api/server.ts', 'utf8');
-    assert.match(serverSource, /staffEventEmitter:\s*new DbStaffEventEmitter\(\)/);
+    assert.match(serverSource, /createFirstPartyIranti\(/);
+}
+
+async function testFirstPartyHostsUseConcreteEmitterHelper(): Promise<void> {
+    const files = [
+        'scripts/iranti-cli.ts',
+        'scripts/iranti-mcp.ts',
+        'scripts/claude-code-memory-hook.ts',
+    ];
+
+    for (const file of files) {
+        const source = await fs.readFile(file, 'utf8');
+        assert.match(source, /createFirstPartyIranti\(/, `expected ${file} to construct Iranti through the first-party helper`);
+    }
+}
+
+async function testEmitterFlushWaitsForPendingWrites(): Promise<void> {
+    const originalGetDb = client.getDb;
+    let release: (() => void) | null = null;
+    let writes = 0;
+
+    const fakeDb = {
+        $executeRaw: async () => {
+            writes += 1;
+            await new Promise<void>((resolve) => {
+                release = resolve;
+            });
+            return 1;
+        },
+    };
+
+    (client as typeof client & { getDb: typeof client.getDb }).getDb = (() => fakeDb as any) as typeof client.getDb;
+
+    try {
+        const emitter = new DbStaffEventEmitter();
+        emitter.emit({
+            staffComponent: 'Attendant',
+            actionType: 'attend_completed',
+            agentId: 'flush_tester',
+            source: 'cli',
+            level: 'debug',
+        });
+
+        assert.equal(writes, 1, 'expected one pending DB write before flush');
+        const flushPromise = emitter.flush();
+        const resolvePending = release as (() => void) | null;
+        assert.ok(resolvePending, 'expected flush test to hold a pending write');
+        (resolvePending as () => void)();
+        await flushPromise;
+    } finally {
+        (client as typeof client & { getDb: typeof client.getDb }).getDb = originalGetDb;
+    }
 }
 
 async function testSdkDoesNotDowngradeConcreteEmitter(): Promise<void> {
@@ -120,7 +171,9 @@ async function testSdkDoesNotDowngradeConcreteEmitter(): Promise<void> {
 async function main(): Promise<void> {
     await testEmitterWritesStaffEvents();
     await testMissingTableWarnsOnce();
+    await testEmitterFlushWaitsForPendingWrites();
     await testServerRegistersDbEmitter();
+    await testFirstPartyHostsUseConcreteEmitterHelper();
     await testSdkDoesNotDowngradeConcreteEmitter();
     console.log('db staff event emitter tests passed');
 }

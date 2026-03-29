@@ -1,7 +1,9 @@
 import 'dotenv/config';
 import path from 'path';
-import { Iranti } from '../src/sdk';
+import type { Iranti } from '../src/sdk';
+import { createFirstPartyIranti } from '../src/lib/createFirstPartyIranti';
 import { loadRuntimeEnv } from '../src/lib/runtimeEnv';
+import { flushStaffEventEmitter } from '../src/lib/staffEventRegistry';
 import {
     autoRememberAssistantFacts,
     autoRememberPromptFacts,
@@ -483,7 +485,7 @@ async function main(): Promise<void> {
         instanceEnvFile: args['instance-env'],
         explicitEnvFile: args['env-file'],
     });
-    const iranti = new Iranti({
+    const iranti = createFirstPartyIranti({
         connectionString: requireConnectionString(),
         llmProvider: process.env.LLM_PROVIDER,
     });
@@ -493,14 +495,19 @@ async function main(): Promise<void> {
         payload,
     });
     if (!context) {
+        await flushStaffEventEmitter();
         process.exit(0);
     }
     emitHookContext(event, context);
+    await flushStaffEventEmitter();
     process.exit(0);
 }
 
 if (require.main === module) {
-    main().catch((error) => {
+    main().catch(async (error) => {
+        try {
+            await flushStaffEventEmitter();
+        } catch {}
         console.error('[claude-code-memory-hook] fatal:', error instanceof Error ? error.message : String(error));
         process.exit(1);
     });

@@ -4,7 +4,6 @@ config();
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
-import { Iranti } from '../sdk';
 import { knowledgeRoutes } from './routes/knowledge';
 import { memoryRoutes } from './routes/memory';
 import { agentRoutes } from './routes/agents';
@@ -26,7 +25,7 @@ import {
     resolveRuntimeAuthorityFromEnv,
     writeRuntimeState,
 } from '../lib/runtimeLifecycle';
-import { DbStaffEventEmitter } from '../lib/dbStaffEventEmitter';
+import { createFirstPartyIranti } from '../lib/createFirstPartyIranti';
 
 const app = express();
 
@@ -250,10 +249,9 @@ app.get(ROUTES.health, (_req, res) => {
 });
 
 // Initialize Iranti SDK
-const iranti = new Iranti({
+const iranti = createFirstPartyIranti({
     connectionString: process.env.DATABASE_URL!,
     llmProvider: (process.env.LLM_PROVIDER as 'gemini' | 'openai' | 'mock') ?? 'mock',
-    staffEventEmitter: new DbStaffEventEmitter(),
 });
 
 let stopArchivistScheduler: (() => void) | null = null;

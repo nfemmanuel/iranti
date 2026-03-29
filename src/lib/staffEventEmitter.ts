@@ -58,6 +58,7 @@ export interface IStaffEventEmitter {
    * all errors are caught internally and logged.
    */
   emit(event: StaffEventInput): void;
+  flush?(): Promise<void>;
 }
 
 // ─── NoopEventEmitter ────────────────────────────────────────────────────────
@@ -68,6 +69,10 @@ export class NoopEventEmitter implements IStaffEventEmitter {
   emit(_event: StaffEventInput): void {
     // Intentionally empty. Zero overhead for deployments without an
     // observability integration. This is the default.
+  }
+
+  async flush(): Promise<void> {
+    // Nothing to flush.
   }
 }
 

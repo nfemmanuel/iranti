@@ -23,6 +23,12 @@ export function getStaffEventEmitter(): IStaffEventEmitter {
   return _emitter;
 }
 
+export async function flushStaffEventEmitter(): Promise<void> {
+  if (typeof _emitter.flush === 'function') {
+    await _emitter.flush();
+  }
+}
+
 /**
  * Reset to NoopEventEmitter. For use in test beforeEach/afterEach only.
  * Do not call in production code.

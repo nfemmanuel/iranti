@@ -46,13 +46,15 @@ import { resolveCommandInvocation, spawnResolved, spawnSyncResolved } from '../s
 import { loadRuntimeEnv } from '../src/lib/runtimeEnv';
 import { ensureFileContainsLinesLocked, writeTextFileLocked } from '../src/lib/fileMutation';
 import { describeInstanceDependency, ensureInstanceDependenciesHealthy, InstanceDependency, parseInstanceDependencies } from '../src/lib/runtimeDependencies';
+import { createFirstPartyIranti } from '../src/lib/createFirstPartyIranti';
 import { resolveInteractive } from '../src/resolutionist';
 import { startChatSession } from '../src/chat';
 import { createVectorBackend, resolveVectorBackendName } from '../src/library/backends';
 import { InstanceRuntimeState, RuntimeInspection, inspectRuntimeState, isPidRunning, resolveRuntimeAuthorityFromEnv, waitForPidExit } from '../src/lib/runtimeLifecycle';
-import { Iranti } from '../src/sdk';
+import type { Iranti } from '../src/sdk';
 import { auditVectorIndexConsistency } from '../src/library/queries';
 import { backfillChatHistory, parseBackfillChatTranscript } from '../src/lib/autoRemember';
+import { flushStaffEventEmitter } from '../src/lib/staffEventRegistry';
 
 type Scope = 'user' | 'system';
 
@@ -2087,7 +2089,7 @@ async function resolveAttendantCliTarget(args: ParsedArgs): Promise<AttendantCli
         projectEnvFile,
         instanceEnvFile,
         agentId,
-        iranti: new Iranti({ connectionString }),
+        iranti: createFirstPartyIranti({ connectionString }),
     };
 }
 
@@ -7154,6 +7156,7 @@ async function handshakeCommand(args: ParsedArgs): Promise<void> {
             task,
             recentMessages,
         });
+        await flushStaffEventEmitter().catch(() => undefined);
 
         if (json) {
             console.log(JSON.stringify({
@@ -7192,6 +7195,7 @@ async function handshakeCommand(args: ParsedArgs): Promise<void> {
         console.log('');
         console.log(`${infoLabel()} This is a manual Attendant inspection tool. Claude Code should still use hooks + MCP in normal operation.`);
     } finally {
+        await flushStaffEventEmitter().catch(() => undefined);
         await disconnectDb().catch(() => undefined);
     }
 }
@@ -7216,6 +7220,7 @@ async function attendCommand(args: ParsedArgs): Promise<void> {
             maxFacts,
             entityHints: entityHint ? [entityHint] : undefined,
         });
+        await flushStaffEventEmitter().catch(() => undefined);
 
         if (json) {
             console.log(JSON.stringify({
@@ -7236,6 +7241,7 @@ async function attendCommand(args: ParsedArgs): Promise<void> {
         console.log('');
         console.log(`${infoLabel()} This is a manual Attendant inspection tool. Claude Code should still use hooks + MCP in normal operation.`);
     } finally {
+        await flushStaffEventEmitter().catch(() => undefined);
         await disconnectDb().catch(() => undefined);
     }
 }
@@ -7336,6 +7342,7 @@ async function handoffCommand(args: ParsedArgs): Promise<void> {
                 agent: target.agentId,
             });
         }
+        await flushStaffEventEmitter().catch(() => undefined);
 
         if (json) {
             console.log(JSON.stringify({
@@ -7353,6 +7360,7 @@ async function handoffCommand(args: ParsedArgs): Promise<void> {
         console.log('');
         console.log(`${infoLabel()} Handoffs are shared-memory facts. Pair this with checkpoint() if the sender also needs agent-local recovery.`);
     } finally {
+        await flushStaffEventEmitter().catch(() => undefined);
         await disconnectDb().catch(() => undefined);
     }
 }
@@ -8055,7 +8063,12 @@ async function main(): Promise<void> {
     );
 }
 
-main().catch((err) => {
+main().then(async () => {
+    await flushStaffEventEmitter();
+}).catch(async (err) => {
+    try {
+        await flushStaffEventEmitter();
+    } catch {}
     const formattedError = rewriteCommandError('iranti', err);
     const message = formattedError.message;
     const code = err instanceof CliError ? err.code : null;

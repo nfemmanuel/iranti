@@ -119,3 +119,19 @@ This is good enough for a release with an honest claim:
 - Iranti first-party paths consistently follow the handshake/attend lifecycle
 - external MCP hosts are strongly guided and safely backstopped, but not fully
   enforceable from inside Iranti alone
+
+## Observability Follow-up
+
+Status: COMPLETE FOR FIRST-PARTY HOSTS
+
+As of `0.2.50+` development, first-party hosts now construct Iranti through a
+shared helper that installs the DB-backed `staff_events` emitter by default:
+
+- API server
+- CLI attendant flows
+- Claude Code hook helper
+- MCP server used by Codex and other MCP clients
+
+That closes the previous gap where these hosts could perform real memory work
+without leaving audit rows. Routine Control Plane health probes remain
+suppressed separately so the logs stay readable.

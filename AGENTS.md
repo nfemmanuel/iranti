@@ -245,6 +245,7 @@ iranti/
 â”‚   â”‚   â”œâ”€â”€ runtimeEnv.ts       â€” Runtime env resolution for CLI/MCP/hook integrations
 â”‚   â”‚   â”œâ”€â”€ runtimeLifecycle.ts â€” Runtime metadata read/write, pid probes, restart helpers
 â”‚   â”‚   â”œâ”€â”€ autoRemember.ts    â€” Opt-in explicit prompt memory capture for Claude/Codex integrations, routing personal facts separately from project facts
+â”‚   â”‚   â”œâ”€â”€ createFirstPartyIranti.ts â€” Shared first-party Iranti constructor that installs DB-backed staff event logging
 â”‚   â”‚   â”œâ”€â”€ cliHelpCatalog.ts   â€” Extracted command/help catalog text for CLI guidance surfaces
 â”‚   â”‚   â”œâ”€â”€ cliHelpRenderer.ts  â€” Shared CLI help rendering for command and wizard guidance
 â”‚   â”‚   â”œâ”€â”€ escalationPaths.ts  â€” Escalation runtime path resolution + folder bootstrap

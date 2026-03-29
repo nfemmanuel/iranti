@@ -13,21 +13,33 @@ function summarizeError(error: unknown): string {
 
 export class DbStaffEventEmitter implements IStaffEventEmitter {
     private warnedTableMissing = false;
+    private pending = new Set<Promise<void>>();
 
     emit(input: Parameters<IStaffEventEmitter['emit']>[0]): void {
         const event = buildStaffEvent(input);
 
-        void this.insertEvent(event).catch((error) => {
-            if (isMissingStaffEventsTable(error)) {
-                if (!this.warnedTableMissing) {
-                    this.warnedTableMissing = true;
-                    console.warn('[staff-events] staff_events table is missing; event emission is disabled until the table exists.');
+        const task = this.insertEvent(event)
+            .catch((error) => {
+                if (isMissingStaffEventsTable(error)) {
+                    if (!this.warnedTableMissing) {
+                        this.warnedTableMissing = true;
+                        console.warn('[staff-events] staff_events table is missing; event emission is disabled until the table exists.');
+                    }
+                    return;
                 }
-                return;
-            }
 
-            console.error(`[staff-events] failed to persist event ${event.eventId}: ${summarizeError(error)}`);
-        });
+                console.error(`[staff-events] failed to persist event ${event.eventId}: ${summarizeError(error)}`);
+            })
+            .finally(() => {
+                this.pending.delete(task);
+            });
+        this.pending.add(task);
+    }
+
+    async flush(): Promise<void> {
+        const pending = Array.from(this.pending);
+        if (pending.length === 0) return;
+        await Promise.allSettled(pending);
     }
 
     private async insertEvent(event: StaffEvent): Promise<void> {
