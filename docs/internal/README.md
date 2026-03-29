@@ -21,6 +21,7 @@ These are the internal files most likely to stay useful during normal developmen
 - [`consistency_model.md`](./consistency_model.md) - current consistency model explanation
 - [`decay.md`](./decay.md) - current memory-decay design note
 - [`HOST_MEMORY_CALL_AUDIT_2026-03-28.md`](./HOST_MEMORY_CALL_AUDIT_2026-03-28.md) - end-to-end host audit for handshake/attend call patterns
+- [`session-ledger-design-2026-03-28.md`](./session-ledger-design-2026-03-28.md) - canonical internal contract for turning `staff_events` into a real cross-host session ledger and Attendant recovery source
 
 ## Historical Summaries And Validation Artifacts
 
