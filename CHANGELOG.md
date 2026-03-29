@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.51 - Unreleased
+
+### Changed
+
+- First-party `iranti` hosts now install the DB-backed `staff_events` emitter by default, so the API server, CLI attendant flows, MCP server, and Claude hook all contribute to the same audit trail.
+
+### Fixed
+
+- Short-lived first-party processes now flush pending `staff_events` writes before disconnecting from the database, which closes the gap where real handshake/attend activity could succeed without leaving observable audit rows.
+
 ## 0.2.50 - Unreleased
 
 ### Fixed
