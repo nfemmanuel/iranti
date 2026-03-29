@@ -2306,6 +2306,22 @@ function makeClaudeHookEntry(event: 'SessionStart' | 'UserPromptSubmit' | 'Stop'
     };
 }
 
+const IRANTI_CLAUDE_ALLOWED_TOOLS = [
+    'mcp__iranti__iranti_handshake',
+    'mcp__iranti__iranti_attend',
+    'mcp__iranti__iranti_observe',
+    'mcp__iranti__iranti_checkpoint',
+    'mcp__iranti__iranti_query',
+    'mcp__iranti__iranti_search',
+    'mcp__iranti__iranti_write',
+    'mcp__iranti__iranti_remember_response',
+    'mcp__iranti__iranti_ingest',
+    'mcp__iranti__iranti_relate',
+    'mcp__iranti__iranti_related',
+    'mcp__iranti__iranti_related_deep',
+    'mcp__iranti__iranti_who_knows',
+] as const;
+
 function isClaudeHooksObject(value: unknown): value is Record<string, unknown> {
     return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -2341,6 +2357,27 @@ function needsClaudeHookSettingsUpgrade(value: unknown): boolean {
     return false;
 }
 
+function mergeClaudePermissionAllowList(existing?: Record<string, unknown>): Record<string, unknown> {
+    const currentPermissions = existing && typeof existing.permissions === 'object' && existing.permissions !== null && !Array.isArray(existing.permissions)
+        ? { ...(existing.permissions as Record<string, unknown>) }
+        : {};
+
+    const allow = Array.isArray(currentPermissions.allow)
+        ? [...currentPermissions.allow.map((value) => String(value))]
+        : [];
+
+    for (const toolName of IRANTI_CLAUDE_ALLOWED_TOOLS) {
+        if (!allow.includes(toolName)) {
+            allow.push(toolName);
+        }
+    }
+
+    return {
+        ...currentPermissions,
+        allow,
+    };
+}
+
 function makeClaudeHookSettings(projectEnvPath?: string, existing?: Record<string, unknown>): Record<string, unknown> {
     const existingHooks = existing && isClaudeHooksObject(existing.hooks)
         ? existing.hooks
@@ -2348,6 +2385,7 @@ function makeClaudeHookSettings(projectEnvPath?: string, existing?: Record<strin
 
     return {
         ...(existing ?? {}),
+        permissions: mergeClaudePermissionAllowList(existing),
         hooks: {
             ...existingHooks,
             SessionStart: [makeClaudeHookEntry('SessionStart', projectEnvPath)],

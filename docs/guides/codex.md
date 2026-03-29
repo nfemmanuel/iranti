@@ -7,6 +7,13 @@ Use Iranti with Codex through:
 
 This guide is written for the installed-package path, not for running Iranti out of a source checkout.
 
+For shared "RAM-like" project memory, do not rely only on retrieval plus occasional writes.
+The strong pattern for Codex is:
+- `iranti_handshake` at session start
+- `iranti_attend` before each reply
+- `iranti_checkpoint` at meaningful milestones while work is in flight
+- `iranti_remember_response` when your final answer contains a strict durable summary
+
 ## Prerequisites
 
 - `npm install -g iranti`
@@ -131,12 +138,19 @@ Optional opt-in memory capture:
 
 Codex does not have the Claude `Stop` hook path. If Codex itself is about to say a durable structured summary, use:
 - `iranti_remember_response`
+- and while work is still in progress, use:
+  - `iranti_checkpoint`
 
 Good uses:
 - `The next step is rerun the db validation.`
 - `The blocker is missing provider credentials.`
 - `We decided to ship the patch release first.`
 - `The current owner is codex_code_main.`
+
+Good `iranti_checkpoint` uses:
+- after you finish a debugging slice and know the current step + next step
+- when you have open risks another agent should not rediscover
+- when you created or validated important outputs and want shared breadcrumbs
 
 If Codex needs to pin the target explicitly instead of relying on the bound project defaults, pass `projectEntity` or `personalEntity` to `iranti_remember_response`.
 
@@ -170,6 +184,7 @@ Use the integration like this:
 - if the host has no startup hook, `iranti_handshake` on the first user turn before doing recall-sensitive work
 - treat recall prompts such as `what is my favorite ...`, `what is the next step`, `what did we decide`, and `what is the blocker` as mandatory Iranti turns
 - `iranti_attend` before every reply generation, not only when recall feels likely
+- `iranti_checkpoint` whenever the task reaches a meaningful milestone, handoff point, or resumable breakpoint
 - `iranti_query` when you know the exact entity and key
 - `iranti_search` when you need discovery
 - `iranti_remember_response` when your own final answer contains a strict durable summary worth persisting

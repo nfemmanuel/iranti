@@ -17,6 +17,7 @@ This feature connects Codex to Iranti through Codex's MCP client using the insta
 | `.env.iranti` | file | Project binding file containing `IRANTI_URL`, `IRANTI_API_KEY`, `IRANTI_AGENT_ID`, and `IRANTI_INSTANCE_ENV`. |
 | `IRANTI_AUTO_REMEMBER` | boolean? | Opt-in explicit prompt auto-save into `IRANTI_MEMORY_ENTITY` before `iranti_attend` retrieval. |
 | `IRANTI_PERSONAL_MEMORY_ENTITY` | string? | Optional personal-memory target for auto-remembered user facts. Defaults to `user/main`. |
+| `iranti_checkpoint` | MCP tool | Explicit shared progress checkpointing for Codex and other MCP clients so in-flight work survives across turns, sessions, and agents. |
 | `iranti_remember_response` | MCP tool | Explicit strict assistant-summary persistence for Codex and other MCP clients without a `Stop` hook; may optionally pin `projectEntity` or `personalEntity`. |
 | linked instance env | file | Instance environment file referenced by `IRANTI_INSTANCE_ENV`, containing `DATABASE_URL`, `LLM_PROVIDER`, and provider keys. |
 
@@ -57,8 +58,9 @@ This feature connects Codex to Iranti through Codex's MCP client using the insta
 23. If Codex explicitly calls `iranti_write` for a personal-memory key such as `favorite_book`, the MCP server reroutes that write to the configured canonical personal entity instead of allowing project-local identity forks like `user/nf` vs `user/main`.
 24. Recall questions about remembered preferences, decisions, blockers, next steps, or prior project facts are treated as mandatory memory prompts and bypass the LLM memory-needed classifier.
 25. Handshake may also return a backfill suggestion when recent messages appear to contain durable facts that have not yet been persisted.
-26. If Codex's own final answer contains a strict durable summary such as `The next step is ...`, `The current step is ...`, `Open risks are ...`, `Important artifacts are ...`, or `We decided ...`, call `iranti_remember_response` explicitly because there is no Codex-side `Stop` hook.
-27. Shared checkpoints now leave `checkpoint_*` breadcrumbs on explicit entity targets so Codex can recover shared work without inheriting another agent's private attendant state.
+26. At meaningful milestones during active work, Codex calls `iranti_checkpoint` so current step, next step, open risks, recent outputs, and shared entity breadcrumbs persist without waiting for a final answer.
+27. If Codex's own final answer contains a strict durable summary such as `The next step is ...`, `The current step is ...`, `Open risks are ...`, `Important artifacts are ...`, or `We decided ...`, call `iranti_remember_response` explicitly because there is no Codex-side `Stop` hook.
+28. Shared checkpoints leave `checkpoint_*` breadcrumbs on explicit entity targets so Codex can recover shared work without inheriting another agent's private attendant state.
 28. Launch Codex with `codex -C <project>` for the intended workspace context.
 
 ## Edge Cases
@@ -84,7 +86,7 @@ This feature connects Codex to Iranti through Codex's MCP client using the insta
 ## Test Results
 
 - `npm run build` passes with the updated Codex setup script included.
-- `npm run test:mcp-smoke` exercises `iranti_remember_response` and verifies it persists `next_step`, `current_step`, and `open_risks`.
+- `npm run test:mcp-smoke` exercises `iranti_checkpoint` plus `iranti_remember_response` and verifies they persist shared checkpoint breadcrumbs and strict summary facts.
 - `iranti codex-setup` successfully registers `iranti` in Codex MCP config.
 - `iranti codex-setup` writes or merges project-local `.mcp.json` and `.vscode/mcp.json` files when run from a bound project.
 - `iranti integrate codex` resolves to the same setup path.

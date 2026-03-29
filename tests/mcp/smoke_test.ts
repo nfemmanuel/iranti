@@ -68,7 +68,7 @@ async function main(): Promise<void> {
 
         const tools = { tools: allTools };
         const toolNames = tools.tools.map((tool: { name: string }) => tool.name);
-        for (const required of ['iranti_handshake', 'iranti_attend', 'iranti_query', 'iranti_search', 'iranti_write', 'iranti_remember_response', 'iranti_related', 'iranti_related_deep']) {
+        for (const required of ['iranti_handshake', 'iranti_attend', 'iranti_checkpoint', 'iranti_query', 'iranti_search', 'iranti_write', 'iranti_remember_response', 'iranti_related', 'iranti_related_deep']) {
             expect(toolNames.includes(required), `Expected MCP tool ${required} to be listed.`);
         }
 
@@ -109,6 +109,13 @@ the session first and report that in the result metadata.
 This is the minimum safe pre-reply call even when the host skipped handshake.
 Omitting currentContext falls back to latestMessage only; pass the
 full visible context when available.`,
+            iranti_checkpoint: `Persist a shared progress checkpoint while you work.
+Use this at meaningful milestones so current step, next step, open risks,
+recent outputs, and shared entity breadcrumbs survive across turns,
+sessions, and agents. This is the strongest shared-RAM tool for active work:
+prefer it over ad-hoc prose when you need another session or another agent
+to pick up where you left off. If entityTargets are supplied, Iranti also
+writes compact shared checkpoint_* breadcrumbs to those entities for handoff.`,
             iranti_handshake: `Initialize or refresh an agent's working-memory brief for the current task.
 Call this at session start or when a new task begins, passing the task and
 recent messages. Returns operating rules plus prioritized relevant memory
@@ -141,6 +148,20 @@ Do not use this as a per-turn retrieval tool; use iranti_attend.`,
             },
         });
         expect(!handshake.isError, 'Expected iranti_handshake to succeed.');
+
+        const checkpoint = await client.callTool({
+            name: 'iranti_checkpoint',
+            arguments: {
+                task: 'Validate MCP smoke test setup.',
+                recentMessages: ['Checkpointing shared progress for MCP smoke test.'],
+                currentStep: 'validate the MCP tool surface',
+                nextStep: 'rerun the smoke query assertions',
+                openRisks: ['tool registration drift'],
+                recentOutputs: ['verified handshake and write tools'],
+                entityTargets: ['project/mcp_smoke_project_memory'],
+            },
+        });
+        expect(!checkpoint.isError, 'Expected iranti_checkpoint to succeed.');
 
         const write = await client.callTool({
             name: 'iranti_write',
@@ -285,6 +306,19 @@ Do not use this as a per-turn retrieval tool; use iranti_attend.`,
         expect(
             JSON.stringify(openRisksQuery.structuredContent).includes('stale runtime metadata'),
             'Expected iranti_remember_response to persist open_risks assistant summary facts.'
+        );
+
+        const checkpointStepQuery = await client.callTool({
+            name: 'iranti_query',
+            arguments: {
+                entity: 'project/mcp_smoke_project_memory',
+                key: 'checkpoint_current_step',
+            },
+        });
+        expect(!checkpointStepQuery.isError, 'Expected checkpoint_current_step query to succeed.');
+        expect(
+            JSON.stringify(checkpointStepQuery.structuredContent).includes('validate the MCP tool surface'),
+            'Expected iranti_checkpoint to persist shared checkpoint breadcrumbs.'
         );
 
         const related = await client.callTool({

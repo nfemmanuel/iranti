@@ -7,6 +7,13 @@ Use Iranti with Claude Code through:
 
 This guide is written for the installed-package path, not for running Iranti out of a source checkout.
 
+For shared "RAM-like" project memory, Claude should not rely on retrieval alone.
+The strong pattern is:
+- `SessionStart` hook -> `handshake()`
+- `UserPromptSubmit` hook -> `attend()`
+- explicit `iranti_checkpoint` calls at meaningful milestones during active work
+- `Stop` hook or `iranti_remember_response` for strict final summaries
+
 ## Prerequisites
 
 - `npm install -g iranti`
@@ -129,6 +136,7 @@ This exposes these tools to Claude Code:
 - `iranti_handshake`
 - `iranti_attend`
 - `iranti_observe`
+- `iranti_checkpoint`
 - `iranti_query`
 - `iranti_search`
 - `iranti_write`
@@ -201,6 +209,13 @@ If you want the same strict assistant-summary persistence through the MCP tool s
 - `We decided ...`
 - `The current owner is ...`
 
+While work is still in progress, use `iranti_checkpoint` explicitly for active shared progress such as:
+- current step
+- next step
+- open risks
+- recent outputs
+- shared handoff breadcrumbs via `entityTargets`
+
 Optional explicit overrides:
 
 ```json
@@ -229,6 +244,7 @@ Use the integration like this:
 - `iranti_query` when you know the exact entity and key
 - `iranti_search` when you do not know the key yet
 - `iranti_attend` or hooks for short-turn working-memory retrieval
+- `iranti_checkpoint` when the task reaches a meaningful milestone, handoff point, or resumable breakpoint
 - `iranti_write` only for durable facts
 - `iranti_ingest` for larger stable text blocks worth chunking
 

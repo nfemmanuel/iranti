@@ -60,15 +60,16 @@ This feature defines how Iranti should participate across an agent turn without 
     - `File deleted ...`
     - `The failed path is ...`
     - `The alternative route is ...`
-13. Codex and other MCP clients without a `Stop` hook use `iranti_remember_response` explicitly for the post-response step.
-14. For list-like project facts such as open risks, artifacts, file changes, failed paths, and alternative routes, append and dedupe rather than blindly replacing the prior value.
-15. Auto-remembered facts should carry structured metadata describing scope, capture phase, durable class, canonical key, and merge behavior so retrieval and audit tools can explain why the fact exists.
-16. `checkpoint()` remains agent-scoped for private session recovery, but when `entityTargets` are supplied it also writes shared checkpoint breadcrumbs:
+13. During active work, MCP clients should use `iranti_checkpoint` explicitly at meaningful milestones so shared progress persists without waiting for a final answer.
+14. Codex and other MCP clients without a `Stop` hook use `iranti_remember_response` explicitly for the post-response step.
+15. For list-like project facts such as open risks, artifacts, file changes, failed paths, and alternative routes, append and dedupe rather than blindly replacing the prior value.
+16. Auto-remembered facts should carry structured metadata describing scope, capture phase, durable class, canonical key, and merge behavior so retrieval and audit tools can explain why the fact exists.
+17. `checkpoint()` remains agent-scoped for private session recovery, but when `entityTargets` are supplied it also writes shared checkpoint breadcrumbs:
    - `checkpoint_summary`
    - `checkpoint_current_step`
    - `checkpoint_next_step`
    - `checkpoint_open_risks`
-17. Shared checkpoint breadcrumbs should not replace the canonical project facts such as `next_step` or `decision`; they are resumability hints, not the sole source of truth.
+18. Shared checkpoint breadcrumbs should not replace the canonical project facts such as `next_step` or `decision`; they are resumability hints, not the sole source of truth.
 
 ## Conflict / Correction Rules
 - Direct user correction of a personal-memory fact should override an older non-human hook-written value for the same key.

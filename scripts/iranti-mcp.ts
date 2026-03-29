@@ -202,6 +202,44 @@ full visible context when available.`,
         return textResult(result);
     });
 
+    server.registerTool('iranti_checkpoint', {
+        description: `Persist a shared progress checkpoint while you work.
+Use this at meaningful milestones so current step, next step, open risks,
+recent outputs, and shared entity breadcrumbs survive across turns,
+sessions, and agents. This is the strongest shared-RAM tool for active work:
+prefer it over ad-hoc prose when you need another session or another agent
+to pick up where you left off. If entityTargets are supplied, Iranti also
+writes compact shared checkpoint_* breadcrumbs to those entities for handoff.`,
+        inputSchema: {
+            task: z.string().min(1).describe('Current task or objective for the active checkpoint.'),
+            recentMessages: z.array(z.string()).optional().describe('Recent messages that help fingerprint the active task.'),
+            currentStep: z.string().optional().describe('What is being worked on right now.'),
+            nextStep: z.string().optional().describe('The next step another session or agent should take.'),
+            openRisks: z.array(z.string()).optional().describe('Open risks or blockers that still matter.'),
+            recentOutputs: z.array(z.string()).optional().describe('Important outputs or artifacts produced so far.'),
+            entityTargets: z.array(z.string()).optional().describe('Shared entities that should receive checkpoint breadcrumbs, in entityType/entityId format.'),
+            notes: z.string().optional().describe('Compact extra checkpoint notes that aid handoff.'),
+            sessionId: z.string().optional().describe('Optional existing session id to refresh.'),
+            agent: z.string().optional().describe('Override the default agent id.'),
+        },
+    }, async ({ task, recentMessages, currentStep, nextStep, openRisks, recentOutputs, entityTargets, notes, sessionId, agent }) => {
+        const result = await iranti.checkpoint({
+            agent: withDefaultAgent(agent),
+            task,
+            recentMessages: normalizeRecentMessages(recentMessages),
+            sessionId,
+            checkpoint: {
+                currentStep,
+                nextStep,
+                openRisks,
+                recentOutputs,
+                entityTargets,
+                notes,
+            },
+        });
+        return textResult(result);
+    });
+
     server.registerTool('iranti_observe', {
         description: 'Recover relevant facts that have fallen out of Claude context.',
         inputSchema: {

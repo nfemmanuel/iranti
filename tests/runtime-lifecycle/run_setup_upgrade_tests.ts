@@ -233,10 +233,18 @@ async function main(): Promise<void> {
         assert.strictEqual(vscodeMcpConfig.servers.iranti.command, 'iranti');
         assert.deepStrictEqual(vscodeMcpConfig.servers.iranti.args, ['mcp']);
         assert.strictEqual(vscodeMcpConfig.servers.iranti.envFile, '${workspaceFolder}/.env.iranti', 'Expected scaffolded .vscode/mcp.json to load the local binding via envFile');
-        const claudeSettings = readJson<{ hooks?: Record<string, unknown> }>(claudeSettingsFile);
+        const claudeSettings = readJson<{ hooks?: Record<string, unknown>; permissions?: { allow?: string[] } }>(claudeSettingsFile);
         assert.ok(claudeSettings.hooks?.SessionStart, 'Expected scaffolded Claude settings to include SessionStart hook.');
         assert.ok(claudeSettings.hooks?.UserPromptSubmit, 'Expected scaffolded Claude settings to include UserPromptSubmit hook.');
         assert.ok(claudeSettings.hooks?.Stop, 'Expected scaffolded Claude settings to include Stop hook.');
+        assert.ok(
+            claudeSettings.permissions?.allow?.includes('mcp__iranti__iranti_checkpoint'),
+            'Expected scaffolded Claude settings to allow iranti_checkpoint.',
+        );
+        assert.ok(
+            claudeSettings.permissions?.allow?.includes('mcp__iranti__iranti_attend'),
+            'Expected scaffolded Claude settings to allow iranti_attend.',
+        );
 
         const localGuardRoot = path.join(tempRoot, 'local-guard-runtime');
         const localGuardPort = await reservePort();
@@ -327,8 +335,12 @@ async function main(): Promise<void> {
                 };
             }>(path.join(projectPath, '.vscode', 'mcp.json'));
             assert.strictEqual(sharedVsCodeMcp.servers.iranti.envFile, '${workspaceFolder}/.env.iranti', 'Expected shared scaffolding to pin each project binding in .vscode/mcp.json');
-            const sharedClaudeSettings = readJson<{ hooks?: Record<string, unknown> }>(path.join(projectPath, '.claude', 'settings.local.json'));
+            const sharedClaudeSettings = readJson<{ hooks?: Record<string, unknown>; permissions?: { allow?: string[] } }>(path.join(projectPath, '.claude', 'settings.local.json'));
             assert.ok(sharedClaudeSettings.hooks?.Stop, 'Expected shared Claude scaffolding to include Stop hook.');
+            assert.ok(
+                sharedClaudeSettings.permissions?.allow?.includes('mcp__iranti__iranti_checkpoint'),
+                'Expected shared Claude scaffolding to allow iranti_checkpoint.',
+            );
         }
 
         const projectInitRun = runCli([

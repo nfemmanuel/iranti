@@ -52,7 +52,7 @@ const STAFF_ENTRIES = [
                 'When a file is created, renamed, moved, deleted, or substantially repurposed, capture that change and what the file is for whenever the state will matter to another agent or a later session.',
                 'When a task reaches a useful checkpoint, store the current step, next step, open risks, and any important artifacts or paths so another agent can resume without reconstructing context from scratch.',
                 'When an approach fails and the failure or workaround is likely to matter later, store the failed path and the chosen alternative route as durable memory.',
-                'Use iranti_write for durable facts, iranti_ingest for stable source material worth chunking, and iranti_remember_response for strict assistant summaries such as next steps or blockers.',
+                'Use iranti_checkpoint for active shared progress, iranti_write for durable facts, iranti_ingest for stable source material worth chunking, and iranti_remember_response for strict assistant summaries such as next steps or blockers.',
                 'Do not save every turn. Skip ephemeral chatter, speculative thoughts, or transient execution noise that will degrade retrieval quality later.',
                 'Deliver a compressed working-memory brief, not the full knowledge base. Load only what is relevant to the current task.',
                 'Reconvene or attend again when context shifts, when the visible window is missing needed facts, or when a different entity becomes relevant.',

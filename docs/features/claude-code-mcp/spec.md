@@ -23,7 +23,7 @@ This feature exposes Iranti to Claude Code through the installed CLI surface: `i
 ## Outputs
 | Output | Type | Description |
 |---|---|---|
-| MCP tools | stdio MCP server | Exposes `iranti_handshake`, `iranti_attend`, `iranti_observe`, `iranti_query`, `iranti_search`, `iranti_write`, `iranti_remember_response`, `iranti_ingest`, `iranti_relate`, and `iranti_who_knows`. |
+| MCP tools | stdio MCP server | Exposes `iranti_handshake`, `iranti_attend`, `iranti_observe`, `iranti_checkpoint`, `iranti_query`, `iranti_search`, `iranti_write`, `iranti_remember_response`, `iranti_ingest`, `iranti_relate`, and `iranti_who_knows`. |
 | Hook context | JSON | Emits `hookSpecificOutput.additionalContext` for Claude Code hook events. |
 | Structured tool results | JSON | Returns tool output as both plain text and `structuredContent` for MCP clients. |
 | Claude scaffold files | filesystem | Writes `.mcp.json`, `.vscode/mcp.json`, and `.claude/settings.local.json` in the target project. |
@@ -71,10 +71,11 @@ This feature exposes Iranti to Claude Code through the installed CLI surface: `i
    - `recent_file_changes`
    - `failed_paths`
    - `alternative_routes`
-28. MCP clients may call `iranti_remember_response` explicitly to persist a strict assistant summary such as `The next step is ...` without relying on the Claude `Stop` hook path.
-29. MCP tool descriptions explicitly tell Claude-facing clients to consult Iranti for recall questions about remembered preferences, decisions, blockers, next steps, and prior project facts before guessing or saying they do not know.
-30. Handshake may also return a backfill suggestion when recent messages appear to contain durable facts that have not yet been persisted.
-31. Keep durable writes explicit through MCP tool calls rather than auto-saving all turns; the hook never bulk-saves Claude responses.
+28. MCP clients may call `iranti_checkpoint` explicitly during active work to persist current step, next step, open risks, recent outputs, and shared entity breadcrumbs without waiting for a final answer.
+29. MCP clients may call `iranti_remember_response` explicitly to persist a strict assistant summary such as `The next step is ...` without relying on the Claude `Stop` hook path.
+30. MCP tool descriptions explicitly tell Claude-facing clients to consult Iranti for recall questions about remembered preferences, decisions, blockers, next steps, and prior project facts before guessing or saying they do not know.
+31. Handshake may also return a backfill suggestion when recent messages appear to contain durable facts that have not yet been persisted.
+32. Keep durable writes explicit through MCP tool calls rather than auto-saving all turns; the hook never bulk-saves Claude responses.
 
 ## Edge Cases
 - Missing `DATABASE_URL`: process exits with a fatal configuration error.
@@ -103,7 +104,7 @@ This feature exposes Iranti to Claude Code through the installed CLI surface: `i
 - `iranti claude-setup --scan <dir> --recursive` finds nested Claude-enabled projects.
 - `iranti claude-setup` writes both `.mcp.json` and `.vscode/mcp.json` when a bound project is available.
 - `iranti mcp --help` works through the installed CLI handoff path.
-- `npm run test:mcp-smoke` starts the stdio MCP server, lists tools, and successfully calls `iranti_handshake`, `iranti_write`, `iranti_query`, `iranti_search`, `iranti_attend`, and `iranti_remember_response`.
+- `npm run test:mcp-smoke` starts the stdio MCP server, lists tools, and successfully calls `iranti_handshake`, `iranti_checkpoint`, `iranti_write`, `iranti_query`, `iranti_search`, `iranti_attend`, and `iranti_remember_response`.
 - `iranti claude-hook --help` works through the installed CLI handoff path.
 - Installed-package Claude Code integration no longer requires hardcoded `DATABASE_URL` in hook commands when `.env.iranti` points to a valid instance env.
 - `npm run test:claude-hook` verifies project prompt durability for `current_step` and `open_risks` in addition to the existing favorite and `next_step` paths.
