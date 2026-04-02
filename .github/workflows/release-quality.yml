@@ -122,6 +122,9 @@ jobs:
       - name: Generate Prisma client
         run: npm run prisma:generate
 
+      - name: Build
+        run: npm run build
+
       - name: Seed staff namespace
         run: npm run seed
 

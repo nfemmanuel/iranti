@@ -9,15 +9,18 @@ import { Iranti } from '../../src/sdk';
 import { findEntry } from '../../src/library/queries';
 import { disconnectDb } from '../../src/library/client';
 
+const repoRoot = path.resolve(__dirname, '..', '..');
+const cliSourcePath = path.join(repoRoot, 'scripts', 'iranti-cli.ts');
+const tsNodeTranspileOnlyRegister = require.resolve('ts-node/register/transpile-only');
+
 function uniqueId(prefix: string): string {
     return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function runCli(args: string[], options?: { cwd?: string }): { status: number | null; stdout: string; stderr: string } {
-    const repoRoot = path.resolve(__dirname, '..', '..');
     const proc = spawnSync(
         process.execPath,
-        ['-r', 'ts-node/register/transpile-only', path.join(repoRoot, 'scripts', 'iranti-cli.ts'), ...args],
+        ['-r', tsNodeTranspileOnlyRegister, cliSourcePath, ...args],
         {
             cwd: options?.cwd ?? repoRoot,
             env: process.env,

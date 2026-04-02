@@ -7,6 +7,7 @@ import { rewriteCommandError } from '../../src/lib/commandErrors';
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const cliSourcePath = path.join(repoRoot, 'scripts', 'iranti-cli.ts');
+const tsNodeTranspileOnlyRegister = require.resolve('ts-node/register/transpile-only');
 
 type CommandResult = {
     status: number | null;
@@ -15,7 +16,7 @@ type CommandResult = {
 };
 
 function runCli(args: string[], options?: { cwd?: string; env?: NodeJS.ProcessEnv }): CommandResult {
-    const proc = spawnSync(process.execPath, ['-r', 'ts-node/register/transpile-only', cliSourcePath, ...args], {
+    const proc = spawnSync(process.execPath, ['-r', tsNodeTranspileOnlyRegister, cliSourcePath, ...args], {
         cwd: options?.cwd ?? repoRoot,
         env: options?.env ?? process.env,
         encoding: 'utf8',

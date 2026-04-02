@@ -9,6 +9,7 @@ import {
 } from '../../src/lib/sharedStateInvalidation';
 
 const DEFAULT_VALIDATION_DATABASE_URL = 'postgresql://postgres:053435@localhost:5433/iranti_temporal';
+const tsNodeTranspileOnlyRegister = require.resolve('ts-node/register/transpile-only');
 
 function uniqueId(prefix: string): string {
     return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`;
@@ -101,7 +102,7 @@ async function main(): Promise<void> {
 
         const child = spawnSync(
             process.execPath,
-            ['-r', 'ts-node/register/transpile-only', '-e', childScript, watchedEntity, 'recent_file_changes'],
+            ['-r', tsNodeTranspileOnlyRegister, '-e', childScript, watchedEntity, 'recent_file_changes'],
             {
                 cwd: repoRoot,
                 env: {
