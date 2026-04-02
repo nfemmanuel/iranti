@@ -1,8 +1,9 @@
 import { Router, Request, Response } from 'express';
-import { Iranti } from '../../sdk';
+import { Iranti, ProtocolViolationError } from '../../sdk';
 import { addAlias, listAliases, parseEntityString, resolveEntity } from '../../library/entity-resolution';
 import { validateInput } from '../middleware/validation';
 import { EntityTarget, requireAnyScope, requireEntityScopeByMethod } from '../middleware/authorization';
+import type { IrantiAuthContext } from '../middleware/auth';
 
 function heuristicEntityId(name: string): string {
     return name
@@ -63,6 +64,42 @@ function fromParams(req: Request): EntityTarget {
         throw new Error('entityType and entityId are required.');
     }
     return { entityType, entityId };
+}
+
+function fallbackProtocolAgent(req: Request): string | null {
+    const auth = (req as Request & { irantiAuth?: IrantiAuthContext }).irantiAuth;
+    const explicit = typeof req.query.agentId === 'string'
+        ? req.query.agentId.trim()
+        : typeof req.query.agent === 'string'
+            ? req.query.agent.trim()
+            : '';
+    if (explicit) return explicit;
+    const keyId = auth?.keyId?.trim();
+    // Intentional fallback: protocol state is keyed to the authenticated API key
+    // when the caller does not send agentId, so protocol-gated reads still have a
+    // stable principal. Explicit agentId/query aliases still override this path.
+    return keyId ? `api:${keyId}` : null;
+}
+
+function applyProtocolContext(iranti: Iranti, req: Request): void {
+    const agentId = fallbackProtocolAgent(req);
+    iranti.setSessionLedgerContext({
+        source: 'api',
+        host: 'api',
+        agentId: agentId ?? undefined,
+    });
+}
+
+function handleProtocolViolation(res: Response, error: unknown): boolean {
+    if (!(error instanceof ProtocolViolationError)) {
+        return false;
+    }
+    res.status(428).json({
+        error: error.message,
+        code: error.protocolViolation.code,
+        protocolViolation: error.protocolViolation,
+    });
+    return true;
 }
 
 export function knowledgeRoutes(iranti: Iranti): Router {
@@ -156,6 +193,7 @@ export function knowledgeRoutes(iranti: Iranti): Router {
     // GET /query/:entityType/:entityId/:key
     router.get('/query/:entityType/:entityId/:key', requireEntityScopeByMethod('kb:read', 'kb:write', fromParams), async (req: Request, res: Response) => {
         try {
+            applyProtocolContext(iranti, req);
             const entityType = Array.isArray(req.params.entityType) ? req.params.entityType[0] : req.params.entityType;
             const entityId = Array.isArray(req.params.entityId) ? req.params.entityId[0] : req.params.entityId;
             const key = Array.isArray(req.params.key) ? req.params.key[0] : req.params.key;
@@ -172,6 +210,7 @@ export function knowledgeRoutes(iranti: Iranti): Router {
             });
             res.json(result);
         } catch (err) {
+            if (handleProtocolViolation(res, err)) return;
             res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
         }
     });
@@ -179,6 +218,7 @@ export function knowledgeRoutes(iranti: Iranti): Router {
     // GET /history/:entityType/:entityId/:key
     router.get('/history/:entityType/:entityId/:key', requireEntityScopeByMethod('kb:read', 'kb:write', fromParams), async (req: Request, res: Response) => {
         try {
+            applyProtocolContext(iranti, req);
             const entityType = Array.isArray(req.params.entityType) ? req.params.entityType[0] : req.params.entityType;
             const entityId = Array.isArray(req.params.entityId) ? req.params.entityId[0] : req.params.entityId;
             const key = Array.isArray(req.params.key) ? req.params.key[0] : req.params.key;
@@ -190,6 +230,7 @@ export function knowledgeRoutes(iranti: Iranti): Router {
             });
             res.json(result);
         } catch (err) {
+            if (handleProtocolViolation(res, err)) return;
             res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
         }
     });
@@ -197,10 +238,12 @@ export function knowledgeRoutes(iranti: Iranti): Router {
     // GET /query/:entityType/:entityId
     router.get('/query/:entityType/:entityId', requireEntityScopeByMethod('kb:read', 'kb:write', fromParams), async (req: Request, res: Response) => {
         try {
+            applyProtocolContext(iranti, req);
             const { entityType, entityId } = req.params;
             const result = await iranti.queryAll(`${entityType}/${entityId}`);
             res.json(result);
         } catch (err) {
+            if (handleProtocolViolation(res, err)) return;
             res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
         }
     });
@@ -208,6 +251,7 @@ export function knowledgeRoutes(iranti: Iranti): Router {
     // GET /search
     router.get('/search', requireAnyScope(['kb:read']), async (req: Request, res: Response) => {
         try {
+            applyProtocolContext(iranti, req);
             const query = String(req.query.query ?? '').trim();
             if (!query) {
                 return res.status(400).json({ error: 'query is required.' });
@@ -251,6 +295,7 @@ export function knowledgeRoutes(iranti: Iranti): Router {
 
             res.json({ results: result });
         } catch (err) {
+            if (handleProtocolViolation(res, err)) return;
             res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
         }
     });
@@ -272,10 +317,12 @@ export function knowledgeRoutes(iranti: Iranti): Router {
     // GET /related/:entityType/:entityId
     router.get('/related/:entityType/:entityId', requireEntityScopeByMethod('kb:read', 'kb:write', fromParams), async (req: Request, res: Response) => {
         try {
+            applyProtocolContext(iranti, req);
             const { entityType, entityId } = req.params;
             const result = await iranti.getRelated(`${entityType}/${entityId}`);
             res.json(result);
         } catch (err) {
+            if (handleProtocolViolation(res, err)) return;
             res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
         }
     });
@@ -283,12 +330,14 @@ export function knowledgeRoutes(iranti: Iranti): Router {
     // GET /related/:entityType/:entityId/deep
     router.get('/related/:entityType/:entityId/deep', requireEntityScopeByMethod('kb:read', 'kb:write', fromParams), async (req: Request, res: Response) => {
         try {
+            applyProtocolContext(iranti, req);
             const { entityType, entityId } = req.params;
             const rawDepth = parseInt(req.query.depth as string ?? '2', 10);
             const depth = Number.isFinite(rawDepth) ? Math.min(Math.max(1, rawDepth), 5) : 2;
             const result = await iranti.getRelatedDeep(`${entityType}/${entityId}`, depth);
             res.json(result);
         } catch (err) {
+            if (handleProtocolViolation(res, err)) return;
             res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
         }
     });

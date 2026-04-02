@@ -6,6 +6,7 @@
 import { Request, Response, NextFunction } from 'express';
 import type { SessionListInput, SessionListSort, SessionOperatorState } from '../../sdk';
 import type { EventLevel } from '../../lib/staffEventEmitter';
+import type { IrantiAuthContext } from './auth';
 
 // Validation schemas
 const schemas = {
@@ -24,7 +25,7 @@ const schemas = {
   observe: {
     agent: { type: 'string', required: false, maxLength: 200 },
     agentId: { type: 'string', required: false, maxLength: 200 },
-    currentContext: { type: 'string', required: true, maxLength: 50000 },
+    currentContext: { type: 'string', required: false, maxLength: 50000 },
     maxFacts: { type: 'number', required: false, min: 1, max: 100, default: 10 },
     entityHints: { type: 'array', required: false, maxLength: 100 }
   },
@@ -68,7 +69,8 @@ const schemas = {
     maxFacts: { type: 'number', required: false, min: 1, max: 100, default: 10 },
     entityHints: { type: 'array', required: false, maxLength: 100 },
     forceInject: { type: 'boolean', required: false },
-    suppressEvents: { type: 'boolean', required: false }
+    suppressEvents: { type: 'boolean', required: false },
+    phase: { type: 'string', required: false, maxLength: 20 }
   },
   relate: {
     fromEntity: { type: 'string', required: true, pattern: /^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_/-]+$/, maxLength: 200 },
@@ -187,11 +189,38 @@ export function validateInput(schemaName: keyof typeof schemas) {
     ) {
       const agent = typeof data.agent === 'string' ? data.agent.trim() : '';
       const agentId = typeof data.agentId === 'string' ? data.agentId.trim() : '';
-      if (!agent && !agentId) {
+      const auth = (req as Request & { irantiAuth?: IrantiAuthContext }).irantiAuth;
+      const authBackedAgent = typeof auth?.keyId === 'string' && auth.keyId.trim().length > 0;
+      if (!agent && !agentId && !authBackedAgent) {
         return res.status(400).json({
           error: 'agentId is required (agent is accepted as a legacy alias).',
           code: 'VALIDATION_ERROR',
           field: 'agentId'
+        });
+      }
+    }
+
+    if (schemaName === 'observe') {
+      const currentContext = typeof data.currentContext === 'string' ? data.currentContext.trim() : '';
+      const hasEntityHints = Array.isArray(data.entityHints)
+        && data.entityHints.some((hint: unknown) => typeof hint === 'string' && hint.trim().length > 0);
+
+      if (currentContext.length === 0 && !hasEntityHints) {
+        return res.status(400).json({
+          error: 'currentContext or entityHints is required for observe.',
+          code: 'VALIDATION_ERROR',
+          field: 'currentContext',
+        });
+      }
+    }
+
+    if (schemaName === 'attend' && data.phase !== undefined) {
+      const allowedPhases = ['pre-response', 'post-response', 'mid-turn'];
+      if (typeof data.phase !== 'string' || !allowedPhases.includes(data.phase)) {
+        return res.status(400).json({
+          error: `phase must be one of: ${allowedPhases.join(', ')}`,
+          code: 'VALIDATION_ERROR',
+          field: 'phase'
         });
       }
     }

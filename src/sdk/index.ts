@@ -1405,6 +1405,9 @@ export class Iranti {
             phase: input.phase,
             ledgerContext: this.buildSessionLedgerContext(),
         });
+        if (result.bootstrap?.handshakePerformed) {
+            this.protocolTracker.markHandshake(agentId);
+        }
         this.protocolTracker.markAttend(agentId, input.phase);
         return result;
     }

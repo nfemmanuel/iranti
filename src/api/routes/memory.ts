@@ -22,6 +22,9 @@ function normalizeAgent(req: Request): string | null {
 function fallbackProtocolAgent(req: Request): string | null {
     const auth = (req as Request & { irantiAuth?: IrantiAuthContext }).irantiAuth;
     const keyId = auth?.keyId?.trim();
+    // Intentional fallback: when a caller omits agentId on protocol-gated API routes,
+    // scope protocol state to the authenticated API key so the caller still has a
+    // stable principal. An explicit agentId still wins when provided.
     return keyId ? `api:${keyId}` : null;
 }
 

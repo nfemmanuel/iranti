@@ -172,6 +172,88 @@ async function main(): Promise<void> {
         const searchAfterConsumedBudgetBody = await searchAfterConsumedBudget.json() as { code?: string };
         assert.equal(searchAfterConsumedBudgetBody.code, 'attend_required', `Expected attend_required after the discovery budget was consumed, got ${JSON.stringify(searchAfterConsumedBudgetBody)}.`);
 
+        const bootstrapAgentId = uniqueId('protocol_route_bootstrap_agent');
+        const bootstrapEntity = `project/${uniqueId('protocol_route_bootstrap_project')}`;
+        const [, bootstrapEntityId] = bootstrapEntity.split('/');
+
+        await iranti.write({
+            entity: bootstrapEntity,
+            key: 'status',
+            value: { phase: 'auto_bootstrap' },
+            summary: 'Protocol enforcement auto-bootstrap project status is auto_bootstrap.',
+            confidence: 91,
+            source: 'protocol_route_test',
+            agent: bootstrapAgentId,
+        });
+
+        const autoBootstrapAttend = await fetch(`${baseUrl}/memory/attend`, {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+                agentId: bootstrapAgentId,
+                latestMessage: 'What is the auto-bootstrap project status?',
+                currentContext: 'We are validating attend auto-bootstrap under strict protocol.',
+                entityHints: [bootstrapEntity],
+                phase: 'pre-response',
+            }),
+        });
+        assert.equal(autoBootstrapAttend.status, 200, `Expected auto-bootstrap attend to succeed, got ${autoBootstrapAttend.status}.`);
+        const autoBootstrapAttendBody = await autoBootstrapAttend.json() as { bootstrap?: { handshakePerformed?: boolean; reason?: string } };
+        assert.equal(autoBootstrapAttendBody.bootstrap?.handshakePerformed, true, 'Expected attend() to auto-bootstrap a missing brief.');
+
+        const autoBootstrapQuery = await fetch(`${baseUrl}/kb/query/project/${bootstrapEntityId}/status?agentId=${encodeURIComponent(bootstrapAgentId)}`);
+        assert.equal(autoBootstrapQuery.status, 200, `Expected /kb/query after auto-bootstrap attend to succeed, got ${autoBootstrapQuery.status}.`);
+        const autoBootstrapQueryBody = await autoBootstrapQuery.json() as { found?: boolean; value?: { phase?: string } };
+        assert.equal(autoBootstrapQueryBody.found, true, 'Expected auto-bootstrap query to return the fact.');
+        assert.equal(autoBootstrapQueryBody.value?.phase, 'auto_bootstrap', 'Expected auto-bootstrap query to return the written value.');
+
+        const apiFallbackEntity = `project/${uniqueId('protocol_route_api_fallback_project')}`;
+        const [, apiFallbackEntityId] = apiFallbackEntity.split('/');
+
+        await iranti.write({
+            entity: apiFallbackEntity,
+            key: 'status',
+            value: { phase: 'api_fallback' },
+            summary: 'Protocol enforcement API fallback project status is api_fallback.',
+            confidence: 91,
+            source: 'protocol_route_test',
+            agent: 'protocol_route_api_fallback_seed',
+        });
+
+        const apiFallbackHandshake = await fetch(`${baseUrl}/memory/handshake`, {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+                task: 'Validate api-key fallback identity for protocol-gated routes.',
+                recentMessages: ['Starting API fallback principal coverage.'],
+            }),
+        });
+        assert.equal(apiFallbackHandshake.status, 200, `Expected /memory/handshake without agentId to succeed via api key fallback, got ${apiFallbackHandshake.status}.`);
+
+        const apiFallbackAttend = await fetch(`${baseUrl}/memory/attend`, {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+                latestMessage: 'What is the API fallback project status?',
+                currentContext: 'We are validating omitted agentId still yields a stable API key principal.',
+                entityHints: [apiFallbackEntity],
+                phase: 'pre-response',
+            }),
+        });
+        assert.equal(apiFallbackAttend.status, 200, `Expected /memory/attend without agentId to succeed via api key fallback, got ${apiFallbackAttend.status}.`);
+
+        const apiFallbackQuery = await fetch(`${baseUrl}/kb/query/project/${apiFallbackEntityId}/status`);
+        assert.equal(apiFallbackQuery.status, 200, `Expected /kb/query without agentId to succeed via api key fallback, got ${apiFallbackQuery.status}.`);
+        const apiFallbackQueryBody = await apiFallbackQuery.json() as { found?: boolean; value?: { phase?: string } };
+        assert.equal(apiFallbackQueryBody.found, true, 'Expected api fallback query to return the fact.');
+        assert.equal(apiFallbackQueryBody.value?.phase, 'api_fallback', 'Expected api fallback query to return the written value.');
+
         console.log('protocol enforcement route tests passed');
     } finally {
         await new Promise<void>((resolve) => server.close(() => resolve()));
