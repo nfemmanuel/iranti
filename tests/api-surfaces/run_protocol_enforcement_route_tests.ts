@@ -7,6 +7,7 @@ import { Iranti } from '../../src/sdk';
 import { knowledgeRoutes } from '../../src/api/routes/knowledge';
 import { memoryRoutes } from '../../src/api/routes/memory';
 import { disconnectDb } from '../../src/library/client';
+import { resolveValidationDatabaseUrl } from '../helpers/resolveValidationDatabase';
 
 function uniqueId(prefix: string): string {
     return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`;
@@ -27,16 +28,12 @@ async function listen(app: express.Express): Promise<{ server: ReturnType<typeof
 
 async function main(): Promise<void> {
     process.env.LLM_PROVIDER = process.env.LLM_PROVIDER || 'mock';
+    const connectionString = await resolveValidationDatabaseUrl('protocol enforcement route tests');
     bootstrapHarness({
         requireDb: true,
         forceLocalEscalationDir: true,
         dbApplicationName: 'iranti:test:protocol_enforcement_routes',
     });
-
-    const connectionString = process.env.DATABASE_URL?.trim();
-    if (!connectionString) {
-        throw new Error('DATABASE_URL is required for protocol-enforcement route test.');
-    }
 
     const iranti = new Iranti({
         connectionString,

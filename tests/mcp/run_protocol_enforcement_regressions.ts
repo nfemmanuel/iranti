@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { bootstrapHarness, ensureHarnessStaffEventsTable } from '../../scripts/harness';
+import { resolveValidationDatabaseUrl } from '../helpers/resolveValidationDatabase';
 
 const mcpSdkRoot = path.resolve(process.cwd(), 'node_modules', '@modelcontextprotocol', 'sdk', 'dist', 'cjs', 'client');
 const { Client } = require(path.join(mcpSdkRoot, 'index.js'));
@@ -16,17 +17,13 @@ function expect(condition: unknown, message: string): asserts condition {
 
 async function main(): Promise<void> {
     process.env.LLM_PROVIDER = process.env.LLM_PROVIDER || 'mock';
+    const connectionString = await resolveValidationDatabaseUrl('MCP protocol enforcement regressions');
     bootstrapHarness({
         requireDb: true,
         forceLocalEscalationDir: true,
         dbApplicationName: 'iranti:test:mcp_protocol_enforcement',
     });
     await ensureHarnessStaffEventsTable();
-
-    const connectionString = process.env.DATABASE_URL?.trim();
-    if (!connectionString) {
-        throw new Error('DATABASE_URL is required for MCP protocol enforcement regressions.');
-    }
 
     const serverCwd = path.join(os.tmpdir(), 'iranti-mcp-protocol-enforcement');
     fs.mkdirSync(serverCwd, { recursive: true });
