@@ -3154,6 +3154,11 @@ async function isPortAvailable(port: number, host: string = '0.0.0.0'): Promise<
 }
 
 function listPublishedDockerHostPorts(): Set<number> {
+    const injected = process.env.IRANTI_FAKE_DOCKER_PORTS?.trim();
+    if (injected) {
+        return parsePublishedDockerHostPorts(injected);
+    }
+
     const docker = inspectDockerAvailability();
     if (!docker.daemonReachable) return new Set();
 
