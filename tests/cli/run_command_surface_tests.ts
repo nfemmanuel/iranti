@@ -15,10 +15,19 @@ type CommandResult = {
     stderr: string;
 };
 
+function buildTsNodeEnv(extraEnv: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+    return {
+        ...process.env,
+        ...extraEnv,
+        TS_NODE_PROJECT: path.join(repoRoot, 'tsconfig.json'),
+        TS_NODE_TRANSPILE_ONLY: 'true',
+    };
+}
+
 function runCli(args: string[], options?: { cwd?: string; env?: NodeJS.ProcessEnv }): CommandResult {
     const proc = spawnSync(process.execPath, ['-r', tsNodeTranspileOnlyRegister, cliSourcePath, ...args], {
         cwd: options?.cwd ?? repoRoot,
-        env: options?.env ?? process.env,
+        env: buildTsNodeEnv(options?.env),
         encoding: 'utf8',
     });
 
