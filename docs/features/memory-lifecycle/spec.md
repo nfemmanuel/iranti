@@ -73,9 +73,9 @@ This feature defines how Iranti should participate across an agent turn without 
 19. Auto-remembered facts should carry structured metadata describing scope, capture phase, durable class, canonical key, merge behavior, and deterministic semantic labels so retrieval and audit tools can explain why the fact exists without needing an LLM re-interpretation pass.
 20. `checkpoint()` remains agent-scoped for private session recovery, but when `entityTargets` are supplied it also writes shared checkpoint breadcrumbs:
    - `checkpoint_summary`
-   - `checkpoint_current_step`
-   - `checkpoint_next_step`
-   - `checkpoint_open_risks`
+   - `current_step`
+   - `next_step`
+   - `open_risks`
 21. When `checkpoint().actions` is supplied alongside `entityTargets`, Iranti should also append those structured activity breadcrumbs into the shared entity's canonical `recent_actions` fact so later sessions can see which commands, validations, searches, and decisions already happened.
 22. When `checkpoint().fileChanges` is supplied alongside `entityTargets`, Iranti should also append those structured file actions into the shared entity's canonical `recent_file_changes` fact so file edits are logged as they happen rather than only in a final summary.
 23. Shared checkpoint breadcrumbs should not replace the canonical project facts such as `next_step` or `decision`; they are resumability hints, not the sole source of truth.

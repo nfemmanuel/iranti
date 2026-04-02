@@ -18,6 +18,7 @@ type Fixture = {
     bindingFile: string;
     mcpFile: string;
     claudeSettingsFile: string;
+    agentsFile: string;
     fakeStateFile: string;
     fakeLogFile: string;
     env: Record<string, string>;
@@ -119,6 +120,7 @@ function buildFixture(): Fixture {
     const bindingFile = path.join(projectDir, '.env.iranti');
     const mcpFile = path.join(projectDir, '.mcp.json');
     const claudeSettingsFile = path.join(projectDir, '.claude', 'settings.local.json');
+    const agentsFile = path.join(projectDir, 'AGENTS.md');
 
     writeText(bindingFile, [
         'IRANTI_URL=http://localhost:3001',
@@ -163,6 +165,14 @@ function buildFixture(): Fixture {
             ],
         },
     });
+    writeText(agentsFile, [
+        '<!-- iranti-rules -->',
+        '# Iranti MCP Protocol',
+        '',
+        'Codex scaffold block for uninstall coverage.',
+        '<!-- /iranti-rules -->',
+        '',
+    ].join('\n'));
 
     const binDir = path.join(tempRoot, 'bin');
     fs.mkdirSync(binDir, { recursive: true });
@@ -241,6 +251,7 @@ process.exit(1);
         bindingFile,
         mcpFile,
         claudeSettingsFile,
+        agentsFile,
         fakeStateFile,
         fakeLogFile,
         env: {
@@ -293,12 +304,14 @@ function testConservativeUninstall(): void {
         assert.ok(fs.existsSync(fixture.bindingFile), 'project binding should remain when --all is not used');
         assert.ok(fs.existsSync(fixture.mcpFile), '.mcp.json should remain when --all is not used');
         assert.ok(fs.existsSync(fixture.claudeSettingsFile), 'Claude settings should remain when --all is not used');
+        assert.ok(fs.existsSync(fixture.agentsFile), 'AGENTS.md should remain when --all is not used');
 
         const mcpPayload = JSON.parse(fs.readFileSync(fixture.mcpFile, 'utf8')) as { mcpServers?: Record<string, unknown> };
         assert.ok(mcpPayload.mcpServers?.iranti, 'Iranti MCP server should remain during conservative uninstall');
         const claudePayload = JSON.parse(fs.readFileSync(fixture.claudeSettingsFile, 'utf8')) as { hooks?: Record<string, unknown> };
         assert.ok(claudePayload.hooks?.UserPromptSubmit, 'Iranti Claude hooks should remain during conservative uninstall');
         assert.ok(claudePayload.hooks?.Stop, 'Iranti Claude Stop hook should remain during conservative uninstall');
+        assert.match(fs.readFileSync(fixture.agentsFile, 'utf8'), /Codex scaffold block for uninstall coverage\./, 'AGENTS.md should remain during conservative uninstall.');
 
         const logLines = readLogLines(fixture.fakeLogFile);
         assert.ok(logLines.some((entry) => entry.tool === 'npm' && entry.args.includes('uninstall')), 'npm uninstall should run during conservative uninstall');
@@ -355,6 +368,7 @@ function testFullUninstall(): void {
         assert.strictEqual(executeRun.status, 0, `execute failed:\n${executeRun.stdout}\n${executeRun.stderr}`);
         assert.strictEqual(fs.existsSync(fixture.runtimeRoot), false, 'runtime root should be removed');
         assert.strictEqual(fs.existsSync(fixture.bindingFile), false, 'project binding should be removed');
+        assert.strictEqual(fs.existsSync(fixture.agentsFile), false, 'AGENTS.md should be removed during full uninstall.');
 
         const mcpPayload = JSON.parse(fs.readFileSync(fixture.mcpFile, 'utf8')) as { mcpServers?: Record<string, unknown> };
         assert.ok(mcpPayload.mcpServers?.other, 'non-Iranti MCP server should be preserved');

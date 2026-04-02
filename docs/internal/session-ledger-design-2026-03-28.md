@@ -103,7 +103,7 @@ Use `staff_events` for:
 The same situation may produce both:
 
 - a ledger row explaining that a checkpoint happened
-- durable shared facts like `checkpoint_next_step`
+- durable shared facts like `next_step`
 
 That is correct. The ledger explains the behavior; the KB holds the durable
 truth that other agents can read directly.

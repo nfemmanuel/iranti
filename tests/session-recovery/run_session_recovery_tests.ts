@@ -96,12 +96,12 @@ async function main(): Promise<void> {
         learnings: [
             {
                 actionType: 'persistence_lesson',
-                summary: 'Recent persistence lesson: project/project_atlas/checkpoint_next_step is being handed off through shared checkpoints.',
+                summary: 'Recent persistence lesson: project/project_atlas/next_step is being handed off through shared checkpoints.',
                 timestamp: new Date(Date.now() - 60 * 1000).toISOString(),
                 source: 'cli',
                 host: 'plain_cli',
                 sessionId,
-                entityKey: 'project/project_atlas/checkpoint_next_step',
+                entityKey: 'project/project_atlas/next_step',
                 reason: null,
                 category: 'persistence',
                 evidenceActionTypes: ['checkpoint_written'],
@@ -110,8 +110,8 @@ async function main(): Promise<void> {
         profile: {
             scopesUsed: ['task', 'global'],
             preferMemoryForAmbiguousTurns: true,
-            priorityKeys: ['checkpoint_next_step', 'checkpoint_open_risks'],
-            summaries: ['Recent persistence lesson: project/project_atlas/checkpoint_next_step is being handed off through shared checkpoints.'],
+            priorityKeys: ['next_step', 'open_risks'],
+            summaries: ['Recent persistence lesson: project/project_atlas/next_step is being handed off through shared checkpoints.'],
             matchedTaskType: 'Continue the launch checklist and recover the next step.',
             needsCheckpointReminder: true,
             checkpointReminder: 'Recent compliance lesson: plain_cli left an under-logged run after substantial retrieval work without a checkpoint or durable write. This is non-compliant for Iranti; before the next pause, write what you found, what worked, and what remains risky and what happens next and checkpoint shared progress.',
@@ -126,8 +126,8 @@ async function main(): Promise<void> {
         return {
             facts: [
                 {
-                    entityKey: 'project/project_atlas/checkpoint_next_step',
-                    summary: 'checkpoint next step is collect approvals',
+                    entityKey: 'project/project_atlas/next_step',
+                    summary: 'next step is collect approvals',
                     value: { instruction: 'collect approvals' },
                     confidence: 95,
                     source: 'AttendantCheckpoint',
@@ -186,8 +186,9 @@ async function main(): Promise<void> {
     );
     expect(advisoryAttend.decision.method === 'advisory', 'Expected advisory learning to trigger the memory decision for an ambiguous prompt.');
     expect(advisoryAttend.shouldInject === true, 'Expected advisory-guided attend() to inject the learned checkpoint fact.');
+    expect(advisoryAttend.facts[0]?.factId === 'F1', 'Expected advisory-guided attend() to assign stable fact IDs.');
     expect(
-        advisoryObservePriorityKeys.includes('checkpoint_next_step'),
+        advisoryObservePriorityKeys.includes('next_step'),
         'Expected advisory learning to add learned priority keys to observe().'
     );
 
@@ -201,8 +202,8 @@ async function main(): Promise<void> {
     heuristicAttendant.observe = async () => ({
         facts: [
             {
-                entityKey: 'project/project_atlas/checkpoint_next_step',
-                summary: 'checkpoint next step is collect approvals',
+                entityKey: 'project/project_atlas/next_step',
+                summary: 'next step is collect approvals',
                 value: { instruction: 'collect approvals' },
                 confidence: 95,
                 source: 'AttendantCheckpoint',
@@ -332,6 +333,49 @@ async function main(): Promise<void> {
     expect(parseFailureShortWorkFallback.needed === true, 'Expected terse non-greeting work prompts to safe-default to memory after classifier parse failure.');
     expect(parseFailureShortWorkFallback.explanation === 'classification_parse_failed_safe_default_true', 'Expected terse non-greeting work prompts to use the safe-default memory explanation.');
 
+    const complianceAttendant: any = new AttendantInstance(`${agentId}_compliance`);
+    complianceAttendant.loadPersistedState = async () => null;
+    complianceAttendant.loadOperatingRules = async () => 'Always close turns with post-response attend.';
+    complianceAttendant.inferTask = async () => 'Validate session compliance tracking.';
+    complianceAttendant.buildWorkingMemory = async () => [];
+    complianceAttendant.loadSessionLedgerSignals = async () => ({ learnings: [], profile: null });
+    complianceAttendant.persistState = async () => {};
+    complianceAttendant.observe = async () => ({
+        facts: [],
+        entitiesDetected: ['project/project_atlas'],
+        alreadyPresent: 0,
+        totalFound: 0,
+        entitiesResolved: [],
+        debug: {
+            contextLength: 0,
+            detectionWindowChars: 0,
+            detectedCandidates: 0,
+            keptCandidates: 0,
+            hintsProvided: 1,
+            hintsResolved: 1,
+            dropped: [],
+        },
+    });
+    await complianceAttendant.attend({
+        latestMessage: 'Start the first turn.',
+        currentContext: '',
+        entityHints: ['project/project_atlas'],
+        suppressEvents: true,
+        phase: 'pre-response',
+    });
+    const repeatedPreResponse = await complianceAttendant.attend({
+        latestMessage: 'Start the next turn without closing the first.',
+        currentContext: '',
+        entityHints: ['project/project_atlas'],
+        suppressEvents: true,
+        phase: 'pre-response',
+    });
+    expect(repeatedPreResponse.compliance.status === 'non_compliant', 'Expected repeated pre-response attends to produce a non-compliant compliance state.');
+    expect(
+        repeatedPreResponse.compliance.issues.some((issue: { code: string }) => issue.code === 'missing_post_response_attend'),
+        'Expected repeated pre-response attends to flag the missing post-response issue.'
+    );
+
     const inspected = await attendant.inspectSession({
         task,
         recentMessages: ['Need to continue the launch checklist.'],
@@ -342,6 +386,7 @@ async function main(): Promise<void> {
     expect(inspected.summary.operatorState === 'interrupted', 'Expected inspectSession() summary to classify stale active checkpoints as interrupted.');
     expect(inspected.summary.isStale === true, 'Expected inspectSession() summary to flag the stale checkpoint.');
     expect(inspected.summary.checkpointSummary?.openRiskCount === 1, 'Expected inspectSession() summary to expose checkpoint risk counts.');
+    expect(inspected.compliance.status === 'healthy', 'Expected inspectSession() to return a healthy compliance state when no violations were persisted.');
 
     const unscopedInspection = await attendant.inspectSession();
     expect(unscopedInspection.hasCheckpoint === true, 'Expected inspectSession() without task context to keep exposing the checkpoint.');
@@ -351,6 +396,7 @@ async function main(): Promise<void> {
     const routeApp = express();
     routeApp.use(express.json());
     routeApp.use('/memory', memoryRoutes({
+        setSessionLedgerContext: () => {},
         inspectSession: async (input: { agentId: string; task?: string; recentMessages?: string[] }) => ({
             agentId: input.agentId,
             hasCheckpoint: true,
@@ -392,6 +438,18 @@ async function main(): Promise<void> {
                 },
             } : null,
             persistedBriefGeneratedAt: new Date().toISOString(),
+            compliance: {
+                status: 'healthy',
+                summary: 'Lifecycle is currently compliant.',
+                issues: [],
+                lastUpdated: new Date().toISOString(),
+                counters: {
+                    attendsWithoutPersist: 0,
+                    consecutivePreResponseWithoutPost: 0,
+                    pendingPostResponse: false,
+                    lastAttendPhase: null,
+                },
+            },
             summary: {
                 agentId: input.agentId,
                 hasCheckpoint: true,
@@ -431,10 +489,12 @@ async function main(): Promise<void> {
         const routeInspection = await response.json() as {
             agentId: string;
             sessionRecovery: { recommendation: string } | null;
+            compliance: { status: string };
             summary: { operatorState: string };
         };
         expect(routeInspection.agentId === agentId, 'Expected route inspection to preserve the requested agentId.');
         expect(routeInspection.sessionRecovery?.recommendation === 'resume', 'Expected route inspection to forward task context into recovery recommendation building.');
+        expect(routeInspection.compliance.status === 'healthy', 'Expected route inspection to expose compliance state.');
         expect(routeInspection.summary.operatorState === 'interrupted', 'Expected route inspection summary to remain operator-oriented.');
     } finally {
         await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));

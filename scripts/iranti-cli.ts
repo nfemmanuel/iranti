@@ -59,6 +59,7 @@ import { backfillChatHistory, parseBackfillChatTranscript } from '../src/lib/aut
 import { buildSemanticFactTags } from '../src/lib/semanticFactTags';
 import { flushStaffEventEmitter } from '../src/lib/staffEventRegistry';
 import { writeProjectScaffoldCloseout, type ScaffoldCloseoutStatus } from '../src/lib/scaffoldCloseout';
+import { deriveProjectCodebaseEntity, writeProjectLearningSnapshot, type ProjectLearningStatus } from '../src/lib/projectLearning';
 
 type Scope = 'user' | 'system';
 
@@ -216,6 +217,7 @@ type UninstallProjectArtifact = {
     bindingFile?: string;
     mcpFile?: string;
     claudeSettingsFile?: string;
+    agentsFile?: string;
 };
 
 type UninstallRuntimeRoot = {
@@ -1509,14 +1511,25 @@ async function writeProjectBinding(projectPath: string, updates: Record<string, 
     const previousBinding = fs.existsSync(outFile)
         ? await readEnvFile(outFile).catch(() => ({} as Record<string, string>))
         : {};
+    const normalizedUpdates = {
+        ...updates,
+        IRANTI_CODEBASE_ENTITY: updates.IRANTI_CODEBASE_ENTITY ?? previousBinding.IRANTI_CODEBASE_ENTITY ?? deriveProjectCodebaseEntity(projectPath),
+    };
     if (!fs.existsSync(outFile)) {
         await writeText(outFile, '# Iranti project binding\n');
     }
-    await upsertEnvFile(outFile, updates);
+    await upsertEnvFile(outFile, normalizedUpdates);
     await ensureProjectGitignore(projectPath);
     const writtenBinding = await readEnvFile(outFile).catch(() => ({} as Record<string, string>));
     await syncProjectBindingRegistry(projectPath, writtenBinding, previousBinding);
     return outFile;
+}
+
+function normalizeProjectRegistryPath(projectPath: string): string {
+    const normalized = path.resolve(projectPath);
+    return process.platform === 'win32'
+        ? normalized.toLowerCase()
+        : normalized;
 }
 
 async function removeProjectPathFromRegistry(runtimeRoot: string, instanceName: string, projectPath: string): Promise<boolean> {
@@ -1524,9 +1537,10 @@ async function removeProjectPathFromRegistry(runtimeRoot: string, instanceName: 
     if (!fs.existsSync(registryPath)) return false;
     const parsed = readJsonFile<{ projects?: Array<Record<string, unknown>> }>(registryPath);
     if (!parsed || !Array.isArray(parsed.projects)) return false;
+    const expectedProjectPath = normalizeProjectRegistryPath(projectPath);
     const nextProjects = parsed.projects.filter((entry) => {
         if (!entry || typeof entry !== 'object') return false;
-        return String((entry as Record<string, unknown>).projectPath ?? '') !== projectPath;
+        return normalizeProjectRegistryPath(String((entry as Record<string, unknown>).projectPath ?? '')) !== expectedProjectPath;
     });
     if (nextProjects.length === parsed.projects.length) return false;
     await writeText(registryPath, `${JSON.stringify({ projects: nextProjects }, null, 2)}\n`);
@@ -1557,13 +1571,22 @@ async function syncProjectBindingRegistry(
         ? readJsonFile<{ projects?: Array<Record<string, unknown>> } | null>(registryPath)
         : null;
     const existingProjects = Array.isArray(existingRegistry?.projects) ? existingRegistry.projects : [];
-    const previousEntry = existingProjects.find((entry) => entry && typeof entry === 'object' && String(entry.projectPath ?? '') === projectPath);
+    const normalizedProjectPath = normalizeProjectRegistryPath(projectPath);
+    const previousEntry = existingProjects.find((entry) =>
+        entry
+        && typeof entry === 'object'
+        && normalizeProjectRegistryPath(String(entry.projectPath ?? '')) === normalizedProjectPath
+    );
     const boundAt = typeof previousEntry?.boundAt === 'string' && previousEntry.boundAt.trim().length > 0
         ? previousEntry.boundAt
         : new Date().toISOString();
 
     const nextProjects = existingProjects
-        .filter((entry) => !entry || typeof entry !== 'object' || String(entry.projectPath ?? '') !== projectPath)
+        .filter((entry) =>
+            !entry
+            || typeof entry !== 'object'
+            || normalizeProjectRegistryPath(String(entry.projectPath ?? '')) !== normalizedProjectPath
+        )
         .concat({
             projectPath,
             agentId: binding.IRANTI_AGENT_ID?.trim() || 'project_main',
@@ -1617,6 +1640,8 @@ type SetupProjectBinding = {
     agentId: string;
     projectMode: ProjectMemoryMode;
     autoRemember: boolean;
+    codebaseEntity: string;
+    learningStatus: ProjectLearningStatus;
 };
 
 type ProjectMemoryMode = 'isolated' | 'shared';
@@ -2725,6 +2750,11 @@ function printAttendResult(
     console.log(`  confidence    ${result.decision.confidence}`);
     console.log(`  explanation   ${result.decision.explanation}`);
     console.log(`  facts         ${result.facts.length}`);
+    if ((result.memoryAttributions?.length ?? 0) > 0) {
+        const firstAttribution = result.memoryAttributions![0];
+        console.log(`  injection id  ${firstAttribution.injectionId}`);
+        console.log(`  attribution   ${firstAttribution.status} surfaced=${firstAttribution.surfaced} used=${firstAttribution.used} helpful=${firstAttribution.helpful}`);
+    }
     if (result.facts.length === 0) {
         console.log('');
         console.log('No facts selected for injection.');
@@ -3399,12 +3429,21 @@ async function executeSetupPlan(plan: SetupExecutionPlan): Promise<SetupExecutio
             IRANTI_INSTANCE: plan.instanceName,
             IRANTI_INSTANCE_ENV: configured.envFile,
         });
+        const bindingEnv = await readEnvFile(written);
+        const learningStatus = await writeProjectLearningSnapshot({
+            projectPath,
+            projectEnvFile: written,
+            binding: bindingEnv,
+            agentId: project.agentId,
+        });
         bindings.push({
             projectPath,
             envFile: written,
             agentId: project.agentId,
             projectMode: project.projectMode,
             autoRemember: project.autoRemember,
+            codebaseEntity: bindingEnv.IRANTI_CODEBASE_ENTITY ?? deriveProjectCodebaseEntity(projectPath),
+            learningStatus,
         });
         if (project.claudeCode) {
             await writeClaudeCodeProjectFiles(projectPath);
@@ -3436,7 +3475,7 @@ async function executeSetupPlan(plan: SetupExecutionPlan): Promise<SetupExecutio
     };
 }
 
-function parseSetupConfig(filePath: string): SetupExecutionPlan {
+async function parseSetupConfig(filePath: string): Promise<SetupExecutionPlan> {
     const resolved = path.resolve(filePath);
     if (!fs.existsSync(resolved)) {
         throw new Error(`Setup config file not found: ${resolved}`);
@@ -3458,7 +3497,11 @@ function parseSetupConfig(filePath: string): SetupExecutionPlan {
             : databaseModeRaw === 'existing' || databaseModeRaw === 'local' || databaseModeRaw.length === 0
                 ? 'local'
                 : (() => { throw new Error(`Unsupported databaseMode in setup config: ${databaseModeRaw}`); })();
-    const databaseUrl = deriveDatabaseUrlForMode(databaseMode, instanceName, String(raw?.databaseUrl ?? raw?.dbUrl ?? '').trim());
+    const databaseUrl = await resolveSetupDatabaseUrl(
+        databaseMode,
+        instanceName,
+        String(raw?.databaseUrl ?? raw?.dbUrl ?? '').trim(),
+    );
     const databaseIntentStrategy = parseDatabaseIntentStrategyFlag(String(raw?.databaseIntent ?? raw?.dbIntent ?? '').trim(), 'databaseIntent');
     const provider = normalizeProvider(String(raw?.provider ?? 'mock')) ?? 'mock';
     if (!isSupportedProvider(provider)) {
@@ -3523,7 +3566,7 @@ function parseSetupConfig(filePath: string): SetupExecutionPlan {
     };
 }
 
-function defaultsSetupPlan(args: ParsedArgs): SetupExecutionPlan {
+async function defaultsSetupPlan(args: ParsedArgs): Promise<SetupExecutionPlan> {
     const scope = normalizeScope(getFlag(args, 'scope'));
     const root = path.resolve(getFlag(args, 'root') ?? resolveInstallRoot(args, scope));
     const mode: 'shared' | 'isolated' = getFlag(args, 'mode') === 'shared' ? 'shared' : 'isolated';
@@ -3549,7 +3592,7 @@ function defaultsSetupPlan(args: ParsedArgs): SetupExecutionPlan {
         ?? (databaseMode === 'managed' ? process.env.DATABASE_URL : '')
         ?? ''
     ).trim();
-    const databaseUrl = deriveDatabaseUrlForMode(databaseMode, instanceName, explicitDatabaseUrl);
+    const databaseUrl = await resolveSetupDatabaseUrl(databaseMode, instanceName, explicitDatabaseUrl);
     const databaseIntentStrategy = parseDatabaseIntentStrategyFlag(getFlag(args, 'db-intent'), '--db-intent');
 
     const provider = normalizeProvider(getFlag(args, 'provider') ?? process.env.LLM_PROVIDER ?? 'mock') ?? 'mock';
@@ -4240,6 +4283,30 @@ function deriveDatabaseUrlForMode(
         return `postgresql://${user}:${password}@${localDatabaseHost}:5432/iranti_${instanceName}`;
     }
     return `postgresql://${user}:${password}@${localDatabaseHost}:5432/iranti_${instanceName}`;
+}
+
+async function resolveSetupDatabaseUrl(
+    mode: DatabaseSetupMode,
+    instanceName: string,
+    explicitDatabaseUrl?: string,
+): Promise<string> {
+    if (mode !== 'docker') {
+        return deriveDatabaseUrlForMode(mode, instanceName, explicitDatabaseUrl);
+    }
+
+    const explicit = explicitDatabaseUrl?.trim() ?? '';
+    if (explicit && !detectPlaceholder(explicit)) {
+        return explicit;
+    }
+
+    const preferredPort = 5432;
+    const dockerPublishedPorts = listPublishedDockerHostPorts();
+    const selectedPort = await isPortUsable(preferredPort, '0.0.0.0', dockerPublishedPorts)
+        ? preferredPort
+        : await findNextAvailablePort(preferredPort + 1, '0.0.0.0', 50, dockerPublishedPorts);
+    const user = encodeURIComponent((process.env.POSTGRES_USER ?? 'postgres').trim() || 'postgres');
+    const password = encodeURIComponent((process.env.POSTGRES_PASSWORD ?? 'postgres').trim() || 'postgres');
+    return `postgresql://${user}:${password}@${preferredLocalDatabaseHost()}:${selectedPort}/iranti_${instanceName}`;
 }
 
 function preferredLocalDatabaseHost(): string {
@@ -5200,6 +5267,17 @@ function removeIrantiClaudeHooksFromValue(value: Record<string, unknown>): Recor
     return Object.keys(next).length === 0 ? null : next;
 }
 
+function removeIrantiAgentsBlockFromText(value: string): string | null {
+    if (!value.includes('<!-- iranti-rules -->')) return value;
+
+    const next = value
+        .replace(/<!-- iranti-rules -->[\s\S]*?<!-- \/iranti-rules -->/g, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+
+    return next.length === 0 ? null : `${next}\n`;
+}
+
 type ProjectUnbindCleanupResult = {
     removed: string[];
     updated: string[];
@@ -5247,6 +5325,25 @@ async function cleanupProjectBindingIntegrations(projectPath: string): Promise<P
                     result.updated.push(claudeSettingsFile);
                 }
             }
+        }
+    }
+
+    const agentsFile = path.join(projectPath, 'AGENTS.md');
+    if (fs.existsSync(agentsFile)) {
+        try {
+            const existing = await fsp.readFile(agentsFile, 'utf8');
+            const next = removeIrantiAgentsBlockFromText(existing);
+            if (next !== existing) {
+                if (!next) {
+                    await fsp.rm(agentsFile, { force: true });
+                    result.removed.push(agentsFile);
+                } else {
+                    await writeText(agentsFile, next);
+                    result.updated.push(agentsFile);
+                }
+            }
+        } catch {
+            result.warnings.push(`Skipped unreadable Codex agents file ${agentsFile}`);
         }
     }
 
@@ -5317,6 +5414,36 @@ async function cleanupProjectArtifacts(artifacts: UninstallProjectArtifact[]): P
                     label: 'project-claude',
                     status: 'warn',
                     detail: `Skipped unreadable JSON file ${artifact.claudeSettingsFile}`,
+                });
+            }
+        }
+
+        if (artifact.agentsFile && fs.existsSync(artifact.agentsFile)) {
+            try {
+                const existing = await fsp.readFile(artifact.agentsFile, 'utf8');
+                const next = removeIrantiAgentsBlockFromText(existing);
+                if (next !== existing) {
+                    if (!next) {
+                        await fsp.rm(artifact.agentsFile, { force: true });
+                        results.push({
+                            label: 'project-agents',
+                            status: 'pass',
+                            detail: `Removed ${artifact.agentsFile}`,
+                        });
+                    } else {
+                        await writeText(artifact.agentsFile, next);
+                        results.push({
+                            label: 'project-agents',
+                            status: 'pass',
+                            detail: `Removed Iranti Codex block from ${artifact.agentsFile}`,
+                        });
+                    }
+                }
+            } catch {
+                results.push({
+                    label: 'project-agents',
+                    status: 'warn',
+                    detail: `Skipped unreadable text file ${artifact.agentsFile}`,
                 });
             }
         }
@@ -5473,7 +5600,7 @@ async function uninstallCommand(args: ParsedArgs): Promise<void> {
     if (execute && !dryRun) {
         if (requiresDetachedWindowsSelfUninstall) {
             const artifactFiles = projectArtifacts.flatMap((artifact) =>
-                [artifact.bindingFile, artifact.mcpFile, artifact.claudeSettingsFile]
+                [artifact.bindingFile, artifact.mcpFile, artifact.claudeSettingsFile, artifact.agentsFile]
                     .filter((value): value is string => Boolean(value))
             );
             const script = buildDetachedWindowsUninstallScript({
@@ -5801,7 +5928,7 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
         const dependencyChecks = await collectDependencyChecks();
         printDependencyChecks(dependencyChecks);
         console.log('');
-        const plan = configPath ? parseSetupConfig(configPath) : defaultsSetupPlan(args);
+        const plan = configPath ? await parseSetupConfig(configPath) : await defaultsSetupPlan(args);
         const result = await executeSetupPlan(plan);
 
         console.log(sectionTitle('Setup Complete'));
@@ -5818,7 +5945,10 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
         } else {
             console.log('  projects');
             for (const binding of result.bindings) {
-                console.log(`    - ${binding.projectPath} (${binding.agentId}, ${binding.projectMode})`);
+                const learningSuffix = binding.learningStatus.status === 'written'
+                    ? `, learned=${binding.codebaseEntity}`
+                    : `, project-learning=${binding.learningStatus.status}`;
+                console.log(`    - ${binding.projectPath} (${binding.agentId}, ${binding.projectMode}${learningSuffix})`);
             }
         }
         printNextSteps([
@@ -6236,7 +6366,10 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
     } else {
         console.log('  projects');
         for (const binding of finalResult.bindings) {
-            console.log(`    - ${binding.projectPath} (${binding.agentId}, ${binding.projectMode}, auto-remember=${binding.autoRemember ? 'true' : 'false'})`);
+            const learningSuffix = binding.learningStatus.status === 'written'
+                ? `, codebase=${binding.codebaseEntity}`
+                : `, project-learning=${binding.learningStatus.status}`;
+            console.log(`    - ${binding.projectPath} (${binding.agentId}, ${binding.projectMode}, auto-remember=${binding.autoRemember ? 'true' : 'false'}${learningSuffix})`);
         }
     }
     const nextSteps = [
@@ -7503,11 +7636,22 @@ async function projectInitCommand(args: ParsedArgs): Promise<void> {
         IRANTI_INSTANCE: instanceName,
         IRANTI_INSTANCE_ENV: envFile,
     });
+    const writtenBinding = await readEnvFile(outFile);
+    const learningStatus = await writeProjectLearningSnapshot({
+        projectPath,
+        projectEnvFile: outFile,
+        binding: writtenBinding,
+        agentId,
+    });
 
     console.log(sectionTitle('Project Initialized'));
     console.log(`  status ${okLabel()}`);
     console.log(`  wrote ${outFile}`);
     console.log(`  mode  ${projectMode}`);
+    console.log(`  codebase ${writtenBinding.IRANTI_CODEBASE_ENTITY ?? deriveProjectCodebaseEntity(projectPath)}`);
+    if (learningStatus.status !== 'written') {
+        console.log(`  learn ${paint(learningStatus.status, learningStatus.status === 'failed' ? 'red' : 'yellow')} (${learningStatus.detail})`);
+    }
     printNextSteps([
         `iranti doctor --instance ${instanceName}`,
         'iranti chat',
@@ -7844,7 +7988,7 @@ async function configureProjectCommand(args: ParsedArgs): Promise<void> {
         IRANTI_PERSONAL_MEMORY_ENTITY: explicitPersonalMemoryEntity ?? existing.IRANTI_PERSONAL_MEMORY_ENTITY ?? 'user/main',
         IRANTI_AUTO_REMEMBER: String(explicitAutoRemember ?? envFlagEnabled(existing.IRANTI_AUTO_REMEMBER)),
         IRANTI_PROJECT_MODE: normalizeProjectMode(explicitProjectMode, normalizeProjectMode(existing.IRANTI_PROJECT_MODE, inferProjectMode(projectPath, instanceEnvFile))),
-        IRANTI_INSTANCE: instanceName,
+        IRANTI_INSTANCE: instanceName ?? existing.IRANTI_INSTANCE,
         IRANTI_INSTANCE_ENV: instanceEnvFile,
     };
 
@@ -7856,6 +8000,13 @@ async function configureProjectCommand(args: ParsedArgs): Promise<void> {
     }
 
     const written = await writeProjectBinding(projectPath, updates);
+    const writtenBinding = await readEnvFile(written);
+    const learningStatus = await writeProjectLearningSnapshot({
+        projectPath,
+        projectEnvFile: written,
+        binding: writtenBinding,
+        agentId: updates.IRANTI_AGENT_ID,
+    });
     const json = hasFlag(args, 'json');
     const result = {
         projectPath,
@@ -7865,6 +8016,8 @@ async function configureProjectCommand(args: ParsedArgs): Promise<void> {
         autoRemember: updates.IRANTI_AUTO_REMEMBER === 'true',
         projectMode: updates.IRANTI_PROJECT_MODE,
         instance: updates.IRANTI_INSTANCE ?? null,
+        codebaseEntity: writtenBinding.IRANTI_CODEBASE_ENTITY ?? deriveProjectCodebaseEntity(projectPath),
+        projectLearning: learningStatus,
     };
 
     if (json) {
@@ -7880,8 +8033,12 @@ async function configureProjectCommand(args: ParsedArgs): Promise<void> {
     console.log(`  agent    ${updates.IRANTI_AGENT_ID}`);
     console.log(`  remember ${updates.IRANTI_AUTO_REMEMBER}`);
     console.log(`  mode     ${updates.IRANTI_PROJECT_MODE}`);
+    console.log(`  codebase ${writtenBinding.IRANTI_CODEBASE_ENTITY ?? deriveProjectCodebaseEntity(projectPath)}`);
     if (updates.IRANTI_INSTANCE) {
         console.log(`  instance ${updates.IRANTI_INSTANCE}`);
+    }
+    if (learningStatus.status !== 'written') {
+        console.log(`  learn    ${paint(learningStatus.status, learningStatus.status === 'failed' ? 'red' : 'yellow')} (${learningStatus.detail})`);
     }
     printNextSteps([
         `iranti doctor${updates.IRANTI_INSTANCE ? ` --instance ${updates.IRANTI_INSTANCE}` : ''}`,
@@ -7926,7 +8083,7 @@ async function authCreateKeyCommand(args: ParsedArgs): Promise<void> {
         const resolvedProjectPath = path.resolve(projectPath);
         const existingBindingFile = path.join(resolvedProjectPath, '.env.iranti');
         const existingBinding = fs.existsSync(existingBindingFile) ? await readEnvFile(existingBindingFile) : {};
-        await writeProjectBinding(resolvedProjectPath, {
+        const written = await writeProjectBinding(resolvedProjectPath, {
             IRANTI_URL: `http://localhost:${env.IRANTI_PORT ?? '3001'}`,
             IRANTI_API_KEY: created.token,
             IRANTI_AGENT_ID: agentId ?? existingBinding.IRANTI_AGENT_ID ?? 'my_agent',
@@ -7935,6 +8092,13 @@ async function authCreateKeyCommand(args: ParsedArgs): Promise<void> {
             IRANTI_AUTO_REMEMBER: existingBinding.IRANTI_AUTO_REMEMBER ?? 'false',
             IRANTI_INSTANCE: instanceName,
             IRANTI_INSTANCE_ENV: envFile,
+        });
+        const binding = await readEnvFile(written);
+        await writeProjectLearningSnapshot({
+            projectPath: resolvedProjectPath,
+            projectEnvFile: written,
+            binding,
+            agentId: agentId ?? binding.IRANTI_AGENT_ID ?? 'my_agent',
         });
     }
 
@@ -8462,6 +8626,7 @@ async function discoverProjectArtifacts(scanRoots: string[]): Promise<UninstallP
             const bindingFile = path.join(current, '.env.iranti');
             const mcpFile = path.join(current, '.mcp.json');
             const claudeSettingsFile = path.join(current, '.claude', 'settings.local.json');
+            const agentsFile = path.join(current, 'AGENTS.md');
 
             const artifact: UninstallProjectArtifact = { projectPath: current };
             if (fs.existsSync(bindingFile)) artifact.bindingFile = bindingFile;
@@ -8471,8 +8636,18 @@ async function discoverProjectArtifacts(scanRoots: string[]): Promise<UninstallP
             if (fs.existsSync(claudeSettingsFile) && hasIrantiClaudeHookSettings(readJsonFile<Record<string, unknown>>(claudeSettingsFile))) {
                 artifact.claudeSettingsFile = claudeSettingsFile;
             }
+            if (fs.existsSync(agentsFile)) {
+                try {
+                    const agentsText = await fsp.readFile(agentsFile, 'utf8');
+                    if (agentsText.includes('<!-- iranti-rules -->')) {
+                        artifact.agentsFile = agentsFile;
+                    }
+                } catch {
+                    // Ignore unreadable AGENTS files during discovery; cleanup will warn if selected.
+                }
+            }
 
-            if (artifact.bindingFile || artifact.mcpFile || artifact.claudeSettingsFile) {
+            if (artifact.bindingFile || artifact.mcpFile || artifact.claudeSettingsFile || artifact.agentsFile) {
                 projects.set(current, artifact);
             }
 

@@ -9,6 +9,7 @@ import { loadRuntimeEnv } from '../lib/runtimeEnv';
 import { flushStaffEventEmitter, setStaffEventEmitter } from '../lib/staffEventRegistry';
 import { resolveInteractive } from '../resolutionist';
 import { disconnectDb, initDb } from '../library/client';
+import { formatStructuredFactBlock } from '../lib/hostMemoryFormatting';
 
 type ChatRole = 'user' | 'assistant';
 
@@ -29,6 +30,7 @@ type WorkingMemoryBrief = {
 };
 
 type FactInjection = {
+    factId?: string;
     entityKey: string;
     summary: string;
     value: unknown;
@@ -143,11 +145,12 @@ class ApiClient {
         });
     }
 
-    attend(agentId: string, currentContext: string, latestMessage: string): Promise<AttendResult> {
+    attend(agentId: string, currentContext: string, latestMessage: string, phase?: 'pre-response' | 'post-response' | 'mid-turn'): Promise<AttendResult> {
         return this.request('POST', '/memory/attend', {
             agentId,
             currentContext,
             latestMessage,
+            phase,
         });
     }
 
@@ -158,23 +161,23 @@ class ApiClient {
         });
     }
 
-    query(entity: string, key: string): Promise<QueryResult> {
+    query(agentId: string, entity: string, key: string): Promise<QueryResult> {
         const [entityType, entityId] = splitEntity(entity);
-        return this.request('GET', `/kb/query/${entityType}/${entityId}/${encodeURIComponent(key)}`);
+        return this.request('GET', `/kb/query/${entityType}/${entityId}/${encodeURIComponent(key)}?agentId=${encodeURIComponent(agentId)}`);
     }
 
-    queryAll(entity: string): Promise<QueryAllFact[]> {
+    queryAll(agentId: string, entity: string): Promise<QueryAllFact[]> {
         const [entityType, entityId] = splitEntity(entity);
-        return this.request('GET', `/kb/query/${entityType}/${entityId}`);
+        return this.request('GET', `/kb/query/${entityType}/${entityId}?agentId=${encodeURIComponent(agentId)}`);
     }
 
-    history(entity: string, key: string): Promise<HistoryEntry[]> {
+    history(agentId: string, entity: string, key: string): Promise<HistoryEntry[]> {
         const [entityType, entityId] = splitEntity(entity);
-        return this.request('GET', `/kb/history/${entityType}/${entityId}/${encodeURIComponent(key)}`);
+        return this.request('GET', `/kb/history/${entityType}/${entityId}/${encodeURIComponent(key)}?agentId=${encodeURIComponent(agentId)}`);
     }
 
-    async search(query: string): Promise<SearchResult[]> {
-        const search = new URLSearchParams({ query });
+    async search(agentId: string, query: string): Promise<SearchResult[]> {
+        const search = new URLSearchParams({ query, agentId });
         const payload = await this.request<{ results: SearchResult[] }>('GET', `/kb/search?${search.toString()}`);
         return payload.results;
     }
@@ -210,9 +213,9 @@ class ApiClient {
         return this.request('POST', '/kb/relate', params);
     }
 
-    related(entity: string): Promise<RelatedResult[]> {
+    related(agentId: string, entity: string): Promise<RelatedResult[]> {
         const [entityType, entityId] = splitEntity(entity);
-        return this.request('GET', `/kb/related/${entityType}/${entityId}`);
+        return this.request('GET', `/kb/related/${entityType}/${entityId}?agentId=${encodeURIComponent(agentId)}`);
     }
 }
 
@@ -256,8 +259,11 @@ function formatJson(value: unknown): string {
     return typeof value === 'string' ? value : JSON.stringify(value);
 }
 
-function buildMemoryBlock(fact: FactInjection): string {
-    return `[MEMORY: ${fact.entityKey}] ${fact.summary} | value=${formatJson(fact.value)} | confidence=${fact.confidence} | source=${fact.source}`;
+export function buildMemoryBlock(facts: FactInjection[]): string {
+    return formatStructuredFactBlock(facts, {
+        title: 'Iranti Retrieved Memory',
+        includeValues: true,
+    });
 }
 
 function formatConversation(history: ChatTurn[]): string {
@@ -290,6 +296,14 @@ export function buildGracefulShutdownCheckpoint(
         recentOutputs,
         notes: 'Chat session exited gracefully. Resume from the recent conversation state if applicable.',
     };
+}
+
+async function beginDiscoveryTurn(client: ApiClient, agentId: string, history: ChatTurn[], summary: string): Promise<void> {
+    await client.attend(agentId, formatConversation(history), summary, 'mid-turn');
+}
+
+async function closeDiscoveryTurn(client: ApiClient, agentId: string, history: ChatTurn[], summary: string): Promise<void> {
+    await client.attend(agentId, formatConversation(history), summary, 'post-response');
 }
 
 function buildPreamble(agentId: string, brief: WorkingMemoryBrief): string {
@@ -452,14 +466,17 @@ export async function startChatSession(options: ChatSessionOptions = {}): Promis
                 }
 
                 if (command === '/memory') {
-                    const facts = await client.queryAll(sessionEntity);
+                    await beginDiscoveryTurn(client, agentId, history, 'Manual /memory command');
+                    const facts = await client.queryAll(agentId, sessionEntity);
                     if (facts.length === 0) {
                         console.log('No memory entries for this session.');
+                        await closeDiscoveryTurn(client, agentId, history, 'Manual /memory command completed with no facts.');
                         continue;
                     }
                     for (const fact of facts) {
                         console.log(`${fact.key} | ${fact.summary} | ${fact.confidence} | ${fact.source}`);
                     }
+                    await closeDiscoveryTurn(client, agentId, history, 'Manual /memory command completed.');
                     continue;
                 }
 
@@ -469,14 +486,17 @@ export async function startChatSession(options: ChatSessionOptions = {}): Promis
                         console.log('Usage: /search <query>');
                         continue;
                     }
-                    const results = await client.search(query);
+                    await beginDiscoveryTurn(client, agentId, history, `Manual /search command: ${query}`);
+                    const results = await client.search(agentId, query);
                     if (results.length === 0) {
                         console.log('No search results.');
+                        await closeDiscoveryTurn(client, agentId, history, `Manual /search command completed with no results: ${query}`);
                         continue;
                     }
                     for (const result of results) {
                         console.log(`${result.entity} | ${result.key} | ${result.summary} | ${result.score.toFixed(3)}`);
                     }
+                    await closeDiscoveryTurn(client, agentId, history, `Manual /search command completed: ${query}`);
                     continue;
                 }
 
@@ -487,9 +507,11 @@ export async function startChatSession(options: ChatSessionOptions = {}): Promis
                     }
                     const entity = parts[1];
                     const key = parts[2];
-                    const fact = await client.query(entity, key);
+                    await beginDiscoveryTurn(client, agentId, history, `Manual /inject command: ${entity}/${key}`);
+                    const fact = await client.query(agentId, entity, key);
                     if (!fact.found) {
                         console.log(`No fact found for ${entity}/${key}.`);
+                        await closeDiscoveryTurn(client, agentId, history, `Manual /inject command completed with no fact: ${entity}/${key}`);
                         continue;
                     }
                     manualInjections.push({
@@ -500,6 +522,7 @@ export async function startChatSession(options: ChatSessionOptions = {}): Promis
                         source: fact.source ?? 'unknown',
                     });
                     console.log(`Injected: [${entity}/${key}] ${fact.summary ?? buildSummary(key, fact.value)}`);
+                    await closeDiscoveryTurn(client, agentId, history, `Manual /inject command completed: ${entity}/${key}`);
                     continue;
                 }
 
@@ -522,13 +545,16 @@ export async function startChatSession(options: ChatSessionOptions = {}): Promis
                 }
 
                 if (command === '/observe') {
+                    await beginDiscoveryTurn(client, agentId, history, 'Manual /observe command');
                     const observed = await client.observe(agentId, formatConversation(history));
                     if (observed.facts.length === 0) {
                         console.log('Nothing to inject.');
+                        await closeDiscoveryTurn(client, agentId, history, 'Manual /observe command completed with no injected facts.');
                         continue;
                     }
                     manualInjections = [...manualInjections, ...observed.facts];
                     console.log(`Queued ${observed.facts.length} memory facts for the next turn.`);
+                    await closeDiscoveryTurn(client, agentId, history, 'Manual /observe command completed.');
                     continue;
                 }
 
@@ -544,9 +570,11 @@ export async function startChatSession(options: ChatSessionOptions = {}): Promis
                         continue;
                     }
                     try {
-                        const entries = await client.history(entity, key);
+                        await beginDiscoveryTurn(client, agentId, history, `Manual /history command: ${entity}/${key}`);
+                        const entries = await client.history(agentId, entity, key);
                         if (entries.length === 0) {
                             console.log(`No history found for ${entity}/${key}.`);
+                            await closeDiscoveryTurn(client, agentId, history, `Manual /history command completed with no entries: ${entity}/${key}`);
                             continue;
                         }
                         const ordered = [...entries].sort((left, right) => left.validFrom.localeCompare(right.validFrom));
@@ -557,6 +585,7 @@ export async function startChatSession(options: ChatSessionOptions = {}): Promis
                         });
                         console.log(line(53));
                         console.log(`${ordered.length} interval${ordered.length === 1 ? '' : 's'}`);
+                        await closeDiscoveryTurn(client, agentId, history, `Manual /history command completed: ${entity}/${key}`);
                     } catch (error) {
                         console.log(error instanceof Error ? error.message : String(error));
                     }
@@ -604,9 +633,11 @@ export async function startChatSession(options: ChatSessionOptions = {}): Promis
                         continue;
                     }
                     try {
-                        const relationships = await client.related(entity);
+                        await beginDiscoveryTurn(client, agentId, history, `Manual /related command: ${entity}`);
+                        const relationships = await client.related(agentId, entity);
                         if (relationships.length === 0) {
                             console.log(`No relationships found for ${entity}.`);
+                            await closeDiscoveryTurn(client, agentId, history, `Manual /related command completed with no relationships: ${entity}`);
                             continue;
                         }
                         console.log(`Related entities: ${entity}`);
@@ -617,6 +648,7 @@ export async function startChatSession(options: ChatSessionOptions = {}): Promis
                         }
                         console.log(line(33));
                         console.log(`${relationships.length} relationship${relationships.length === 1 ? '' : 's'}`);
+                        await closeDiscoveryTurn(client, agentId, history, `Manual /related command completed: ${entity}`);
                     } catch (error) {
                         console.log(error instanceof Error ? error.message : String(error));
                     }
@@ -667,9 +699,11 @@ export async function startChatSession(options: ChatSessionOptions = {}): Promis
                         continue;
                     }
                     try {
-                        const current = await client.query(entity, key);
+                        await beginDiscoveryTurn(client, agentId, history, `Manual /confidence command: ${entity}/${key}`);
+                        const current = await client.query(agentId, entity, key);
                         if (!current.found) {
                             console.log(`No fact found for ${entity}/${key}.`);
+                            await closeDiscoveryTurn(client, agentId, history, `Manual /confidence command completed with no fact: ${entity}/${key}`);
                             continue;
                         }
                         const oldConfidence = current.confidence ?? 0;
@@ -685,6 +719,7 @@ export async function startChatSession(options: ChatSessionOptions = {}): Promis
                             current.source ?? 'iranti_chat',
                         );
                         console.log(`confidence updated: ${oldConfidence} -> ${nextConfidence} | ${result.action}`);
+                        await closeDiscoveryTurn(client, agentId, history, `Manual /confidence command completed: ${entity}/${key}`);
                     } catch (error) {
                         console.log(error instanceof Error ? error.message : String(error));
                     }
@@ -725,9 +760,9 @@ export async function startChatSession(options: ChatSessionOptions = {}): Promis
             }
 
             const currentContext = formatConversation(history);
-            const attended = await client.attend(agentId, currentContext, input);
-            const autoBlocks = attended.shouldInject ? attended.facts.map(buildMemoryBlock) : [];
-            const manualBlocks = manualInjections.map(buildMemoryBlock);
+            const attended = await client.attend(agentId, currentContext, input, 'pre-response');
+            const autoBlocks = attended.shouldInject ? [buildMemoryBlock(attended.facts)] : [];
+            const manualBlocks = manualInjections.length > 0 ? [buildMemoryBlock(manualInjections)] : [];
             const memoryBlocks = [...manualBlocks, ...autoBlocks];
             manualInjections = [];
 
@@ -762,6 +797,7 @@ export async function startChatSession(options: ChatSessionOptions = {}): Promis
 
             history.push({ role: 'user', content: input });
             history.push({ role: 'assistant', content: response.text.trim() });
+            await client.attend(agentId, formatConversation(history), response.text.trim(), 'post-response').catch(() => undefined);
 
             // observe() is retrieval-only in the current codebase; this background call just warms the next-turn memory path.
             void client.observe(agentId, formatConversation(history)).catch(() => undefined);

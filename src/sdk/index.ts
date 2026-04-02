@@ -12,6 +12,7 @@ import { librarianWrite, librarianIngest } from '../librarian';
 import type {
     WorkingMemoryBrief,
     AttendResult,
+    SessionComplianceState,
     SessionSummary as AttendantSessionSummary,
     SessionCheckpointSummary as AttendantSessionCheckpointSummary,
     SessionOperatorState as AttendantSessionOperatorState,
@@ -26,6 +27,7 @@ import { resolveEntity } from '../library/entity-resolution';
 import { getPersonalRecallEntities, isPersonalMemoryKey } from '../lib/autoRemember';
 import { buildIssueFactWrite, IssueFactInput, IssueSeverity, IssueStatus } from '../lib/issueFacts';
 import { configureMock, MockConfig } from '../lib/providers/mock';
+import { AgentProtocolTracker, ProtocolEnforcementMode, ProtocolOperation, ProtocolViolation, ProtocolViolationError } from '../lib/protocolEnforcement';
 import { EntityType } from '../types';
 import { ArchivedReason, ResolutionOutcome, ResolutionState } from '../generated/prisma/client';
 import { querySessionLedger, SessionLedgerEvent, SessionLedgerQuery } from '../lib/sessionLedger';
@@ -40,6 +42,7 @@ export interface IrantiConfig {
     sessionLedgerAgentId?: string;
     dbApplicationName?: string;
     dbPoolMax?: number;
+    protocolEnforcement?: ProtocolEnforcementMode;
     /**
      * Optional event emitter for observability integrations (e.g., the Iranti
      * Control Plane). Defaults to a no-op emitter if not provided.
@@ -177,6 +180,7 @@ export interface SessionInspection {
     sessionRecovery: SessionRecoveryInfo | null;
     persistedBriefGeneratedAt?: string;
     summary: SessionSummary;
+    compliance: SessionComplianceState;
 }
 
 export interface SessionLedgerInput extends SessionLedgerQuery {}
@@ -209,6 +213,9 @@ export interface QueryResult {
     resolvedEntity?: string;
     inputEntity?: string;
 }
+
+export type { ProtocolEnforcementMode, ProtocolViolation };
+export { ProtocolViolationError };
 
 export interface HistoryEntry {
     value: unknown;
@@ -476,9 +483,11 @@ function mapArchiveResult(result: {
 export class Iranti {
     private config: IrantiConfig;
     private sessionLedgerContext: SessionLedgerContext;
+    private readonly protocolTracker: AgentProtocolTracker;
 
     constructor(config: IrantiConfig = {}) {
         this.config = config;
+        this.protocolTracker = new AgentProtocolTracker();
         this.sessionLedgerContext = {
             source: config.sessionLedgerSource?.trim() || undefined,
             host: typeof config.sessionLedgerHost === 'string'
@@ -507,6 +516,53 @@ export class Iranti {
         // default no-op just because a later SDK consumer omitted the option.
         if (config.staffEventEmitter) {
             setStaffEventEmitter(config.staffEventEmitter);
+        }
+    }
+
+    private protocolMode(): ProtocolEnforcementMode {
+        return this.config.protocolEnforcement ?? 'off';
+    }
+
+    private protocolAgentId(): string | undefined {
+        return this.sessionLedgerContext.agentId?.trim() || undefined;
+    }
+
+    private checkProtocol(operation: ProtocolOperation, requirements: {
+        handshake?: boolean;
+        attend?: boolean;
+        postResponse?: boolean;
+    }): void {
+        const mode = this.protocolMode();
+        if (mode === 'off') return;
+        const agentId = this.protocolAgentId();
+        if (!agentId) return;
+
+        const violation = this.protocolTracker.check(agentId, operation, requirements);
+        if (!violation) return;
+        if (mode === 'warn') {
+            this.emitLedgerEvent({
+                staffComponent: 'Attendant',
+                actionType: 'host_failure',
+                agentId,
+                source: 'sdk',
+                reason: violation.code,
+                level: 'audit',
+                metadata: {
+                    operation,
+                    protocolViolation: violation,
+                },
+            });
+            return;
+        }
+        throw new ProtocolViolationError(violation);
+    }
+
+    private consumeDiscoveryBudget(operation: ProtocolOperation): void {
+        if (this.protocolMode() === 'off') return;
+        const agentId = this.protocolAgentId();
+        if (!agentId) return;
+        if (['query', 'history', 'queryAll', 'search', 'related', 'related_deep', 'who_knows'].includes(operation)) {
+            this.protocolTracker.notifyDiscoveryConsumed(agentId);
         }
     }
 
@@ -561,6 +617,12 @@ export class Iranti {
         });
     }
 
+    private async noteRediscoveryEvidence(): Promise<void> {
+        const agentId = this.protocolAgentId();
+        if (!agentId) return;
+        await getAttendant(agentId).noteDiscoveryOccurred();
+    }
+
     // ── Write ───────────────────────────────────────────────────────────────
 
     async write(input: WriteInput): Promise<WriteResult> {
@@ -593,7 +655,7 @@ export class Iranti {
             properties: input.properties,
         });
 
-        getAttendant(input.agent).notifyWriteOccurred();
+        await getAttendant(input.agent).notifyWriteOccurred();
         return {
             action: result.action,
             key: input.key,
@@ -620,6 +682,7 @@ export class Iranti {
             confidence: input.confidence,
             createdBy: input.agent,
         });
+        await getAttendant(input.agent).notifyWriteOccurred();
 
         return {
             extractedCandidates: result.extractedCandidates,
@@ -639,12 +702,15 @@ export class Iranti {
     // ── Handshake ───────────────────────────────────────────────────────────
 
     async handshake(input: HandshakeInput): Promise<WorkingMemoryBrief> {
-        const attendant = getAttendant(resolveAgentId(input, 'handshake'));
-        return attendant.handshake({
+        const agentId = resolveAgentId(input, 'handshake');
+        const attendant = getAttendant(agentId);
+        const result = await attendant.handshake({
             task: input.task,
             recentMessages: input.recentMessages,
             ledgerContext: this.buildSessionLedgerContext(),
         });
+        this.protocolTracker.markHandshake(agentId);
+        return result;
     }
 
     // ── Reconvene ───────────────────────────────────────────────────────────
@@ -719,6 +785,7 @@ export class Iranti {
                     entry.entityId,
                     checkpoint,
                     typeof raw?.briefGeneratedAt === 'string' ? raw.briefGeneratedAt : undefined,
+                    raw?.compliance ?? null,
                 );
             })
             .filter((entry): entry is SessionSummary => Boolean(entry));
@@ -750,6 +817,7 @@ export class Iranti {
     // ── Query ───────────────────────────────────────────────────────────────
 
     async query(entity: string, key: string, options: TemporalQueryOptions = {}): Promise<QueryResult> {
+        this.checkProtocol('query', { handshake: true, attend: true });
         const resolved = await resolveQueryEntity(entity);
         const personalRecallCandidates = (
             isPersonalEntityString(entity) && isPersonalMemoryKey(key)
@@ -764,6 +832,7 @@ export class Iranti {
                 const currentMatches = current && !current.isProtected && current.validFrom <= options.asOf;
 
                 if (currentMatches) {
+                    this.consumeDiscoveryBudget('query');
                     await recordKnowledgeEntryAccess([current.id]);
                     this.emitLedgerEvent({
                         staffComponent: 'Attendant',
@@ -781,6 +850,7 @@ export class Iranti {
                             asOf: options.asOf.toISOString(),
                         },
                     });
+                    await this.noteRediscoveryEvidence();
                     return {
                         found: true,
                         value: current.valueRaw,
@@ -809,6 +879,7 @@ export class Iranti {
                 );
 
                 if (historical) {
+                    this.consumeDiscoveryBudget('query');
                     this.emitLedgerEvent({
                         staffComponent: 'Attendant',
                         actionType: 'query_executed',
@@ -825,6 +896,7 @@ export class Iranti {
                             asOf: options.asOf.toISOString(),
                         },
                     });
+                    await this.noteRediscoveryEvidence();
                     return {
                         found: true,
                         ...mapArchiveResult(historical),
@@ -849,6 +921,7 @@ export class Iranti {
                         asOf: options.asOf.toISOString(),
                     },
                 });
+                await this.noteRediscoveryEvidence();
                 return { found: false, resolvedEntity: resolved.canonicalEntity, inputEntity: entity };
             }
 
@@ -886,10 +959,12 @@ export class Iranti {
                         inputEntity: entity,
                     },
                 });
+                await this.noteRediscoveryEvidence();
                 return { found: false, resolvedEntity, inputEntity: entity };
             }
 
             await recordKnowledgeEntryAccess([entry.id]);
+            this.consumeDiscoveryBudget('query');
             this.emitLedgerEvent({
                 staffComponent: 'Attendant',
                 actionType: 'query_executed',
@@ -906,6 +981,7 @@ export class Iranti {
                     inputEntity: entity,
                 },
             });
+            await this.noteRediscoveryEvidence();
             return {
                 found: true,
                 value: entry.valueRaw,
@@ -944,6 +1020,7 @@ export class Iranti {
     }
 
     async history(entity: string, key: string, options: Omit<TemporalQueryOptions, 'asOf'> = {}): Promise<HistoryEntry[]> {
+        this.checkProtocol('history', { handshake: true, attend: true });
         const resolved = await resolveQueryEntity(entity);
         const [archiveRows, current] = await Promise.all([
             findArchiveHistory(
@@ -996,6 +1073,7 @@ export class Iranti {
             });
         }
 
+        this.consumeDiscoveryBudget('history');
         return history.sort((a, b) => a.validFrom.getTime() - b.validFrom.getTime());
     }
 
@@ -1008,11 +1086,14 @@ export class Iranti {
         confidence: number;
         source: string;
     }>> {
+        this.checkProtocol('queryAll', { handshake: true, attend: true });
         const resolved = await resolveQueryEntity(entity);
 
         const entries = await findEntriesByEntity(resolved.entityType, resolved.entityId);
         const visibleEntries = entries.filter((e) => !e.isProtected);
         await recordKnowledgeEntryAccess(visibleEntries.map((entry) => entry.id));
+        this.consumeDiscoveryBudget('queryAll');
+        await this.noteRediscoveryEvidence();
 
         return visibleEntries
             .map((e) => ({
@@ -1027,6 +1108,7 @@ export class Iranti {
     // ── Maintenance ─────────────────────────────────────────────────────────
 
     async search(input: HybridSearchInput): Promise<HybridSearchResult[]> {
+        this.checkProtocol('search', { handshake: true, attend: true });
         if (!input.query || typeof input.query !== 'string' || input.query.trim().length === 0) {
             throw new Error('query is required for search().');
         }
@@ -1057,6 +1139,8 @@ export class Iranti {
                 },
             });
 
+            this.consumeDiscoveryBudget('search');
+            await this.noteRediscoveryEvidence();
             return rows.map((row) => ({
                 id: row.id,
                 entity: `${row.entityType}/${row.entityId}`,
@@ -1118,12 +1202,15 @@ export class Iranti {
             createdBy: options.createdBy,
             properties: options.properties,
         });
+        await getAttendant(options.createdBy).notifyWriteOccurred();
     }
 
     async getRelated(entity: string): Promise<RelatedEntity[]> {
+        this.checkProtocol('related', { handshake: true, attend: true });
         const { entityType, entityId } = parseEntity(entity);
         try {
             const result = await getRelated(entityType, entityId);
+            this.consumeDiscoveryBudget('related');
             this.emitLedgerEvent({
                 staffComponent: 'Attendant',
                 actionType: 'related_executed',
@@ -1137,6 +1224,7 @@ export class Iranti {
                     resultCount: result.length,
                 },
             });
+            await this.noteRediscoveryEvidence();
             return result;
         } catch (error) {
             this.emitLedgerEvent({
@@ -1158,9 +1246,11 @@ export class Iranti {
     }
 
     async getRelatedDeep(entity: string, depth: number = 2): Promise<RelatedEntity[]> {
+        this.checkProtocol('related_deep', { handshake: true, attend: true });
         const { entityType, entityId } = parseEntity(entity);
         try {
             const result = await getRelatedDeep(entityType, entityId, depth);
+            this.consumeDiscoveryBudget('related_deep');
             this.emitLedgerEvent({
                 staffComponent: 'Attendant',
                 actionType: 'related_deep_executed',
@@ -1175,6 +1265,7 @@ export class Iranti {
                     depth,
                 },
             });
+            await this.noteRediscoveryEvidence();
             return result;
         } catch (error) {
             this.emitLedgerEvent({
@@ -1211,9 +1302,11 @@ export class Iranti {
         keys: string[];
         totalContributions: number;
     }>> {
+        this.checkProtocol('who_knows', { handshake: true, attend: true });
         const { entityType, entityId } = parseEntity(entity);
         try {
             const result = await whoKnows(entityType, entityId);
+            this.consumeDiscoveryBudget('who_knows');
             this.emitLedgerEvent({
                 staffComponent: 'Attendant',
                 actionType: 'whoknows_executed',
@@ -1227,6 +1320,7 @@ export class Iranti {
                     resultCount: result.length,
                 },
             });
+            await this.noteRediscoveryEvidence();
             return result;
         } catch (error) {
             this.emitLedgerEvent({
@@ -1259,6 +1353,7 @@ export class Iranti {
 
     async observe(input: ObserveInput): Promise<import('../attendant/AttendantInstance').ObserveResult> {
         const agentId = resolveAgentId(input, 'observe');
+        this.checkProtocol('observe', { handshake: true });
 
         if (input.entityHints !== undefined) {
             if (!Array.isArray(input.entityHints)) {
@@ -1283,6 +1378,9 @@ export class Iranti {
 
     async attend(input: AttendInput): Promise<AttendResult> {
         const agentId = resolveAgentId(input, 'attend');
+        if (input.phase === 'pre-response') {
+            this.checkProtocol('attend', { postResponse: true });
+        }
 
         if (input.entityHints !== undefined) {
             if (!Array.isArray(input.entityHints)) {
@@ -1297,7 +1395,7 @@ export class Iranti {
         }
 
         const attendant = getAttendant(agentId);
-        return attendant.attend({
+        const result = await attendant.attend({
             currentContext: input.currentContext,
             maxFacts: input.maxFacts,
             entityHints: input.entityHints,
@@ -1307,6 +1405,8 @@ export class Iranti {
             phase: input.phase,
             ledgerContext: this.buildSessionLedgerContext(),
         });
+        this.protocolTracker.markAttend(agentId, input.phase);
+        return result;
     }
 
     // ── Mock Configuration (dev/test only) ──────────────────────────────────

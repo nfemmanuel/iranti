@@ -9,6 +9,7 @@ export type {
     PersistedSessionState,
     SessionInspection,
     SessionSummary,
+    SessionComplianceState,
     SessionCheckpointSummary,
     SessionOperatorState,
     ObserveInput,
@@ -18,6 +19,8 @@ export type {
     AttendResult,
     AttendDecision,
     AttendBootstrapInfo,
+    MemoryAttributionResult,
+    MemoryAttributionEvidenceKind,
 } from './AttendantInstance';
 
 // Legacy functional API — kept for backward compatibility during transition

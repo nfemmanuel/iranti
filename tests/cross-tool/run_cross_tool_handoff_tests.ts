@@ -215,18 +215,18 @@ async function main(): Promise<void> {
         'Expected Claude checkpoint to include the shared task entity.'
     );
 
-    const checkpointCurrentStep = await iranti.query(taskEntity, 'checkpoint_current_step');
-    expect(checkpointCurrentStep.found === true, 'Expected checkpoint_current_step breadcrumb to be persisted for shared task targets.');
+    const checkpointCurrentStep = await iranti.query(taskEntity, 'current_step');
+    expect(checkpointCurrentStep.found === true, 'Expected current_step breadcrumb to be persisted for shared task targets.');
     expect(
         JSON.stringify(checkpointCurrentStep.value).includes('captured shared task status and next step'),
-        'Expected checkpoint_current_step breadcrumb to preserve the current step.'
+        'Expected current_step breadcrumb to preserve the current step.'
     );
 
-    const checkpointNextStep = await iranti.query(taskEntity, 'checkpoint_next_step');
-    expect(checkpointNextStep.found === true, 'Expected checkpoint_next_step breadcrumb to be persisted for shared task targets.');
+    const checkpointNextStep = await iranti.query(taskEntity, 'next_step');
+    expect(checkpointNextStep.found === true, 'Expected next_step breadcrumb to be persisted for shared task targets.');
     expect(
         JSON.stringify(checkpointNextStep.value).includes('hand task to Codex'),
-        'Expected checkpoint_next_step breadcrumb to preserve the next step.'
+        'Expected next_step breadcrumb to preserve the next step.'
     );
 
     const checkpointSummary = await iranti.query(projectEntity, 'checkpoint_summary');
@@ -255,12 +255,12 @@ async function main(): Promise<void> {
     const checkpointCurrentStepEntry = await findEntry({
         entityType: 'task',
         entityId: taskEntity.split('/')[1]!,
-        key: 'checkpoint_current_step',
+        key: 'current_step',
     });
-    expect(Boolean(checkpointCurrentStepEntry), 'Expected raw checkpoint_current_step entry to exist.');
+    expect(Boolean(checkpointCurrentStepEntry), 'Expected raw current_step entry to exist.');
     const checkpointCurrentStepProperties = checkpointCurrentStepEntry?.properties as Record<string, unknown>;
-    expect(checkpointCurrentStepProperties.capturePhase === 'checkpoint', 'Expected checkpoint_current_step to be tagged as checkpoint capture.');
-    expect(checkpointCurrentStepProperties.canonicalKey === 'checkpoint_current_step', 'Expected checkpoint_current_step canonical key metadata.');
+    expect(checkpointCurrentStepProperties.capturePhase === 'checkpoint', 'Expected current_step to be tagged as checkpoint capture.');
+    expect(checkpointCurrentStepProperties.canonicalKey === 'current_step', 'Expected current_step canonical key metadata.');
     expect(checkpointCurrentStepProperties.semanticIntent === 'task_state_tracking', 'Expected checkpoint current step semantic intent.');
     expect(JSON.stringify(checkpointCurrentStepProperties.semanticTags ?? []).includes('checkpoint'), 'Expected checkpoint current step semantic tags to include checkpoint.');
 

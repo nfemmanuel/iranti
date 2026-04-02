@@ -174,11 +174,11 @@ async function main() {
         const checkpointSummary = await reader.query(entity, 'checkpoint_summary');
         expect(checkpointSummary.found, 'Expected checkpoint_summary to be queryable immediately after checkpoint success.');
 
-        const checkpointNextStep = await reader.query(entity, 'checkpoint_next_step');
-        expect(checkpointNextStep.found, 'Expected checkpoint_next_step to be queryable immediately after checkpoint success.');
+        const checkpointNextStep = await reader.query(entity, 'next_step');
+        expect(checkpointNextStep.found, 'Expected next_step to be queryable immediately after checkpoint success.');
         expect(
             JSON.stringify(checkpointNextStep.value) === JSON.stringify({ instruction: 'collect final approvals' }),
-            `Expected checkpoint_next_step to round-trip immediately, got ${JSON.stringify(checkpointNextStep.value)}.`
+            `Expected next_step to round-trip immediately, got ${JSON.stringify(checkpointNextStep.value)}.`
         );
 
         const checkpointActions = await reader.query(entity, 'recent_actions');

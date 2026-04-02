@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { route } from '../lib/router';
 import { getStaffEventEmitter } from '../lib/staffEventRegistry';
 import { queryEntry, findEntriesByEntity, recordKnowledgeEntryAccess } from '../library/queries';
@@ -28,6 +29,7 @@ import {
     SessionLedgerUnavailableError,
 } from '../lib/sessionLedger';
 import { registerSharedStateInvalidationObserver } from '../lib/sharedStateInvalidation';
+import { assignStructuredFactIds } from '../lib/hostMemoryFormatting';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -60,10 +62,17 @@ export const DEFAULT_ATTENDANT_OPERATING_RULES: string[] = [
 ];
 const CONTEXT_RECOVERY_THRESHOLD = 20;  // LLM calls before context recovery
 const SESSION_INTERRUPTION_TTL_MS = 5 * 60 * 1000;
+const PERSISTENCE_WARNING_THRESHOLD = 3;
+const PERSISTENCE_NON_COMPLIANT_THRESHOLD = 5;
 const ENTITY_DETECTION_WINDOW_CHARS = 1500;
 const MIN_ENTITY_CONFIDENCE = 0.75;
 const MEMORY_DECISION_CONTEXT_WINDOW_CHARS = 2000;
 const LEDGER_WORKING_MEMORY_PREFIX = 'system/session_ledger/recent_learning_';
+const LEGACY_CONTINUITY_KEY_MAP: Record<string, string> = {
+    checkpoint_current_step: 'current_step',
+    checkpoint_next_step: 'next_step',
+    checkpoint_open_risks: 'open_risks',
+};
 const ATTEND_EXPECTED_CALL_SEQUENCE = [
     'Call iranti_handshake at session start and again after context compaction.',
     "Call iranti_attend(phase='pre-response') before replying to the user.",
@@ -76,6 +85,21 @@ const ATTEND_EXPECTED_CALL_SEQUENCE = [
 ];
 const ATTEND_USAGE_REMINDER = 'Iranti is a hive mind. iranti_attend is mandatory before each reply and around knowledge discovery, and knowledge-changing actions must leave breadcrumbs through iranti_write and/or iranti_checkpoint so later sessions do not have to rediscover context.';
 const OBSERVE_USAGE_NOTE = 'observe() is retrieval-only. It surfaces candidate facts for context and warm-up, but it does not persist memory, replace iranti_attend, or count as a checkpoint/write.';
+
+function normalizeContinuityKey(key: string): string {
+    return LEGACY_CONTINUITY_KEY_MAP[key] ?? key;
+}
+
+function expandContinuityPriorityKeys(keys: string[]): string[] {
+    const expanded = new Set<string>();
+    for (const rawKey of keys) {
+        const key = rawKey.trim();
+        if (!key) continue;
+        expanded.add(key);
+        expanded.add(normalizeContinuityKey(key));
+    }
+    return Array.from(expanded);
+}
 
 const MEMORY_NEED_POSITIVE_PATTERNS: RegExp[] = [
     /\bwhat(?:'s| is| was)?\s+my\b/i,
@@ -178,7 +202,9 @@ export interface WorkingMemoryBrief {
     sessionLedgerLearnings?: SessionLedgerLearning[];
     sessionCheckpoint?: SessionCheckpointRecord | null;
     sessionRecovery?: SessionRecoveryInfo | null;
+    compliance?: SessionComplianceState | null;
     watchedEntities?: string[];
+    pendingMemoryAttributions?: MemoryAttributionResult[];
 }
 
 export interface BackfillSuggestion {
@@ -190,6 +216,33 @@ export interface BackfillSuggestion {
 }
 
 export type SessionStatus = 'active' | 'interrupted' | 'completed' | 'abandoned';
+
+export type SessionComplianceStatus = 'healthy' | 'degraded' | 'non_compliant';
+
+export type SessionComplianceIssueCode =
+    | 'missing_post_response_attend'
+    | 'missing_durable_persistence';
+
+export interface SessionComplianceIssue {
+    code: SessionComplianceIssueCode;
+    severity: 'warn' | 'error';
+    count: number;
+    message: string;
+    requiredAction: string;
+}
+
+export interface SessionComplianceState {
+    status: SessionComplianceStatus;
+    summary: string;
+    issues: SessionComplianceIssue[];
+    lastUpdated: string;
+    counters: {
+        attendsWithoutPersist: number;
+        consecutivePreResponseWithoutPost: number;
+        pendingPostResponse: boolean;
+        lastAttendPhase: 'pre-response' | 'post-response' | 'mid-turn' | null;
+    };
+}
 
 export interface SessionCheckpointPayload {
     currentStep?: string;
@@ -248,6 +301,8 @@ export interface PersistedSessionState {
     briefGeneratedAt: string;
     sessionCheckpoint: SessionCheckpointRecord | null;
     sessionRecovery: SessionRecoveryInfo | null;
+    compliance?: SessionComplianceState | null;
+    pendingMemoryAttributions?: MemoryAttributionResult[];
 }
 
 export interface SessionInspection {
@@ -255,6 +310,7 @@ export interface SessionInspection {
     hasCheckpoint: boolean;
     sessionCheckpoint: SessionCheckpointRecord | null;
     sessionRecovery: SessionRecoveryInfo | null;
+    compliance: SessionComplianceState;
     persistedBriefGeneratedAt?: string;
     summary: SessionSummary;
 }
@@ -286,6 +342,7 @@ export interface SessionSummary {
     isStale: boolean;
     persistedBriefGeneratedAt?: string;
     checkpointSummary: SessionCheckpointSummary | null;
+    compliance: SessionComplianceState | null;
 }
 
 // ─── Observe Types ────────────────────────────────────────────────────────────
@@ -300,11 +357,14 @@ export interface ObserveInput {
 }
 
 export interface FactInjection {
+    factId?: string;            // stable only within the current injection block
+    knowledgeEntryId?: number;  // durable KB entry id for attribution/eval
     entityKey: string;          // entityType/entityId/key
     summary: string;
     value: unknown;
     confidence: number;
     source: string;
+    lastUpdated?: string;       // ISO timestamp — when this fact was last written
 }
 
 type RetrievedFact = FactInjection & { entryId: number };
@@ -382,6 +442,30 @@ export interface AttendResult extends ObserveResult {
     bootstrap?: AttendBootstrapInfo | null;
     searchSuggestion?: AttendSearchSuggestion;
     complianceWarning?: string;
+    compliance: SessionComplianceState;
+    memoryAttributions?: MemoryAttributionResult[];
+}
+
+export type MemoryAttributionEvidenceKind =
+    | 'write'
+    | 'checkpoint'
+    | 'rediscovery'
+    | 'response_reference'
+    | 'response_recovery';
+
+export interface MemoryAttributionResult {
+    injectionId: string;
+    surfaced: boolean;
+    used: boolean;
+    helpful: boolean;
+    status: 'pending' | 'scored';
+    phase: 'pre-response' | 'mid-turn';
+    surfacedAt: string;
+    scoredAt?: string;
+    reason: string;
+    injectedKeys: string[];
+    injectedEntryIds: number[];
+    evidenceKinds: MemoryAttributionEvidenceKind[];
 }
 
 export interface AttendBootstrapInfo {
@@ -790,10 +874,72 @@ function buildCheckpointSummary(checkpoint: SessionCheckpointRecord | null): Ses
     };
 }
 
+function buildSessionComplianceState(input: {
+    attendsWithoutPersist: number;
+    consecutivePreResponseWithoutPost: number;
+    lastAttendPhase?: 'pre-response' | 'post-response' | 'mid-turn';
+    lastUpdated?: string;
+}): SessionComplianceState {
+    const pendingPostResponse = input.lastAttendPhase === 'pre-response';
+    const issues: SessionComplianceIssue[] = [];
+
+    if (input.consecutivePreResponseWithoutPost > 0) {
+        issues.push({
+            code: 'missing_post_response_attend',
+            severity: 'error',
+            count: input.consecutivePreResponseWithoutPost,
+            message: 'The previous turn has not been closed with iranti_attend(phase=\'post-response\').',
+            requiredAction: 'Call iranti_attend(phase=\'post-response\') to close the prior turn, then persist any durable findings before the next pre-response attend.',
+        });
+    }
+
+    if (input.attendsWithoutPersist >= PERSISTENCE_WARNING_THRESHOLD) {
+        const severity = input.attendsWithoutPersist >= PERSISTENCE_NON_COMPLIANT_THRESHOLD ? 'error' : 'warn';
+        issues.push({
+            code: 'missing_durable_persistence',
+            severity,
+            count: input.attendsWithoutPersist,
+            message: `There have been ${input.attendsWithoutPersist} attend calls since the last iranti_write or iranti_checkpoint.`,
+            requiredAction: 'Persist durable findings with iranti_write or iranti_checkpoint before the next turn if new knowledge, validation, or file changes occurred.',
+        });
+    }
+
+    let status: SessionComplianceStatus = 'healthy';
+    if (issues.some((issue) => issue.severity === 'error')) {
+        status = 'non_compliant';
+    } else if (issues.length > 0) {
+        status = 'degraded';
+    }
+
+    const summary = status === 'healthy'
+        ? pendingPostResponse
+            ? 'Lifecycle is currently in progress and waiting for a post-response attend.'
+            : 'Lifecycle is currently compliant.'
+        : status === 'degraded'
+            ? 'Lifecycle is degraded: persistence breadcrumbs are lagging.'
+            : input.consecutivePreResponseWithoutPost > 0
+                ? 'Lifecycle is non-compliant: the previous turn is still missing a post-response attend.'
+                : 'Lifecycle is non-compliant: accountability breadcrumbs are missing.';
+
+    return {
+        status,
+        summary,
+        issues,
+        lastUpdated: input.lastUpdated ?? new Date().toISOString(),
+        counters: {
+            attendsWithoutPersist: input.attendsWithoutPersist,
+            consecutivePreResponseWithoutPost: input.consecutivePreResponseWithoutPost,
+            pendingPostResponse,
+            lastAttendPhase: input.lastAttendPhase ?? null,
+        },
+    };
+}
+
 export function summarizeSessionState(
     agentId: string,
     checkpoint: SessionCheckpointRecord | null,
     persistedBriefGeneratedAt?: string,
+    compliance: SessionComplianceState | null = null,
 ): SessionSummary {
     const hasCheckpoint = Boolean(checkpoint);
     const lastHeartbeatAt = checkpoint?.lastHeartbeatAt ?? null;
@@ -825,6 +971,7 @@ export function summarizeSessionState(
         isStale,
         persistedBriefGeneratedAt,
         checkpointSummary: buildCheckpointSummary(checkpoint),
+        compliance,
     };
 }
 
@@ -1314,13 +1461,13 @@ async function persistSharedCheckpointBreadcrumbs(params: {
         if (checkpoint.currentStep) {
             await librarianWrite({
                 ...common,
-                key: 'checkpoint_current_step',
+                key: 'current_step',
                 valueRaw: { text: checkpoint.currentStep },
-                valueSummary: truncate(`checkpoint current step is ${checkpoint.currentStep}`, 220),
+                valueSummary: truncate(`current step is ${checkpoint.currentStep}`, 220),
                 properties: {
                     ...checkpointBaseProperties,
                     durableClass: 'current_step',
-                    canonicalKey: 'checkpoint_current_step',
+                    canonicalKey: 'current_step',
                     mergeStrategy: 'replace',
                     ...buildSemanticFactTags({
                         memoryScope: 'project',
@@ -1333,20 +1480,33 @@ async function persistSharedCheckpointBreadcrumbs(params: {
             expectedKeys.push({
                 entityType: resolved.entityType,
                 entityId: resolved.entityId,
-                key: 'checkpoint_current_step',
+                key: 'current_step',
             });
         }
 
         if (checkpoint.nextStep) {
+            const existingNextStep = await findEntry({
+                entityType: resolved.entityType,
+                entityId: resolved.entityId,
+                key: 'next_step',
+            });
+            const priorInstruction = existingNextStep?.valueRaw && typeof existingNextStep.valueRaw === 'object'
+                ? (existingNextStep.valueRaw as { instruction?: unknown }).instruction
+                : null;
+            const mergedNextStep = typeof priorInstruction === 'string'
+                && priorInstruction.trim().length > 0
+                && priorInstruction.trim() !== checkpoint.nextStep.trim()
+                ? `${checkpoint.nextStep}. Prior task step: ${priorInstruction.trim()}`
+                : checkpoint.nextStep;
             await librarianWrite({
                 ...common,
-                key: 'checkpoint_next_step',
-                valueRaw: { instruction: checkpoint.nextStep },
-                valueSummary: truncate(`checkpoint next step is ${checkpoint.nextStep}`, 220),
+                key: 'next_step',
+                valueRaw: { instruction: mergedNextStep },
+                valueSummary: truncate(`next step is ${mergedNextStep}`, 220),
                 properties: {
                     ...checkpointBaseProperties,
                     durableClass: 'next_step',
-                    canonicalKey: 'checkpoint_next_step',
+                    canonicalKey: 'next_step',
                     mergeStrategy: 'replace',
                     ...buildSemanticFactTags({
                         memoryScope: 'project',
@@ -1359,7 +1519,7 @@ async function persistSharedCheckpointBreadcrumbs(params: {
             expectedKeys.push({
                 entityType: resolved.entityType,
                 entityId: resolved.entityId,
-                key: 'checkpoint_next_step',
+                key: 'next_step',
             });
         }
 
@@ -1436,13 +1596,13 @@ async function persistSharedCheckpointBreadcrumbs(params: {
         if (checkpoint.openRisks && checkpoint.openRisks.length > 0) {
             await librarianWrite({
                 ...common,
-                key: 'checkpoint_open_risks',
+                key: 'open_risks',
                 valueRaw: { items: checkpoint.openRisks },
-                valueSummary: truncate(`checkpoint open risks include ${checkpoint.openRisks.join('; ')}`, 220),
+                valueSummary: truncate(`open risks include ${checkpoint.openRisks.join('; ')}`, 220),
                 properties: {
                     ...checkpointBaseProperties,
                     durableClass: 'open_risks',
-                    canonicalKey: 'checkpoint_open_risks',
+                    canonicalKey: 'open_risks',
                     mergeStrategy: 'replace',
                     ...buildSemanticFactTags({
                         memoryScope: 'project',
@@ -1455,7 +1615,7 @@ async function persistSharedCheckpointBreadcrumbs(params: {
             expectedKeys.push({
                 entityType: resolved.entityType,
                 entityId: resolved.entityId,
-                key: 'checkpoint_open_risks',
+                key: 'open_risks',
             });
         }
     }
@@ -1571,13 +1731,16 @@ export class AttendantInstance {
     private advisoryLearningProfile: SessionLedgerLearningProfile | null = null;
     private contextCallCount: number = 0;
     private attendsWithoutPersist: number = 0;
+    private consecutivePreResponseWithoutPost: number = 0;
     private lastAttendPhase: 'pre-response' | 'post-response' | 'mid-turn' | undefined = undefined;
+    private complianceUpdatedAt: string = new Date().toISOString();
     private sessionStarted: string = new Date().toISOString();
     private sessionCheckpoint: SessionCheckpointRecord | null = null;
     private eventSource: string = 'internal';
     private eventHost: string | null = null;
     private sharedStateObservedAt: string | null = null;
     private pendingSharedStateInvalidations = new Map<string, Set<string>>();
+    private pendingMemoryAttributions: MemoryAttributionResult[] = [];
 
     constructor(agentId: string) {
         this.agentId = agentId;
@@ -1605,6 +1768,167 @@ export class AttendantInstance {
             ...withSession,
             ...(this.eventHost ? { host: this.eventHost } : {}),
         };
+    }
+
+    private updateBriefPendingMemoryAttributions(): void {
+        if (!this.brief) return;
+        this.brief = {
+            ...this.brief,
+            pendingMemoryAttributions: this.pendingMemoryAttributions.map((entry) => ({ ...entry })),
+        };
+    }
+
+    private addPendingMemoryAttribution(input: {
+        phase: 'pre-response' | 'mid-turn';
+        injectedKeys: string[];
+        injectedEntryIds: number[];
+    }): MemoryAttributionResult {
+        const attribution: MemoryAttributionResult = {
+            injectionId: randomUUID(),
+            surfaced: true,
+            used: false,
+            helpful: false,
+            status: 'pending',
+            phase: input.phase,
+            surfacedAt: new Date().toISOString(),
+            reason: 'awaiting_post_response_evaluation',
+            injectedKeys: [...input.injectedKeys],
+            injectedEntryIds: [...input.injectedEntryIds],
+            evidenceKinds: [],
+        };
+        this.pendingMemoryAttributions.push(attribution);
+        this.updateBriefPendingMemoryAttributions();
+        return attribution;
+    }
+
+    private recordMemoryEvidence(kind: MemoryAttributionEvidenceKind): void {
+        if (this.pendingMemoryAttributions.length === 0) {
+            return;
+        }
+
+        for (const attribution of this.pendingMemoryAttributions) {
+            if (attribution.status !== 'pending') continue;
+            if (!attribution.evidenceKinds.includes(kind)) {
+                attribution.evidenceKinds = [...attribution.evidenceKinds, kind];
+            }
+            getStaffEventEmitter().emit({
+                staffComponent: 'Attendant',
+                actionType: 'memory_evidence_observed',
+                agentId: this.agentId,
+                source: this.eventSource,
+                reason: kind,
+                level: 'audit',
+                metadata: this.buildEventMetadata({
+                    injectionId: attribution.injectionId,
+                    injectedKeys: attribution.injectedKeys,
+                    injectedEntryIds: attribution.injectedEntryIds,
+                    evidenceKind: kind,
+                }),
+            });
+        }
+        this.updateBriefPendingMemoryAttributions();
+    }
+
+    private responseMentionsInjectedMemory(response: string, attribution: MemoryAttributionResult): boolean {
+        const responseTokens = new Set(tokenize(response));
+        if (responseTokens.size === 0) return false;
+
+        for (const entityKey of attribution.injectedKeys) {
+            const key = entityKey.split('/').slice(2).join('/');
+            for (const token of tokenize(key.replace(/[_/.-]+/g, ' '))) {
+                if (responseTokens.has(token)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private responseShowsRecoveryValue(response: string, attribution: MemoryAttributionResult): boolean {
+        const normalized = normalizeText(response);
+        if (!normalized) return false;
+        return attribution.injectedKeys.some((entityKey) => {
+            const key = entityKey.split('/').slice(2).join('/');
+            return (
+                /\b(next step|current step|blocker|blockers|risk|risks|status|progress|file|files|changed|handoff|resume|recovery)\b/.test(normalized)
+                && /\b(next_step|current_step|open_risks|status|checkpoint_summary|recent_file_changes|recent_actions|implementation_status|blockers?)\b/i.test(key)
+            );
+        });
+    }
+
+    private scorePendingMemoryAttributions(response: string): MemoryAttributionResult[] {
+        if (this.pendingMemoryAttributions.length === 0) {
+            return [];
+        }
+
+        const scoredAt = new Date().toISOString();
+        const scored = this.pendingMemoryAttributions.map((entry) => {
+            const evidenceKinds = [...entry.evidenceKinds];
+            const rediscoveredManually = evidenceKinds.includes('rediscovery');
+            if (!rediscoveredManually && this.responseMentionsInjectedMemory(response, entry) && !evidenceKinds.includes('response_reference')) {
+                evidenceKinds.push('response_reference');
+            }
+            if (!rediscoveredManually && this.responseShowsRecoveryValue(response, entry) && !evidenceKinds.includes('response_recovery')) {
+                evidenceKinds.push('response_recovery');
+            }
+            const used = evidenceKinds.includes('write')
+                || evidenceKinds.includes('checkpoint')
+                || evidenceKinds.includes('response_reference')
+                || evidenceKinds.includes('response_recovery');
+            const helpful = evidenceKinds.includes('checkpoint')
+                || evidenceKinds.includes('write')
+                || evidenceKinds.includes('response_recovery');
+
+            const reason = helpful
+                ? 'response_or_action_confirmed_memory_helpfulness'
+                : used
+                    ? 'response_referenced_injected_memory'
+                    : 'memory_was_only_surfaced';
+
+            const scoredEntry: MemoryAttributionResult = {
+                ...entry,
+                used,
+                helpful,
+                status: 'scored',
+                scoredAt,
+                reason,
+                evidenceKinds,
+            };
+
+            getStaffEventEmitter().emit({
+                staffComponent: 'Attendant',
+                actionType: 'memory_injection_scored',
+                agentId: this.agentId,
+                source: this.eventSource,
+                reason,
+                level: 'audit',
+                metadata: this.buildEventMetadata({
+                    injectionId: scoredEntry.injectionId,
+                    surfaced: true,
+                    used,
+                    helpful,
+                    phase: scoredEntry.phase,
+                    injectedKeys: scoredEntry.injectedKeys,
+                    injectedEntryIds: scoredEntry.injectedEntryIds,
+                    evidenceKinds,
+                    scoredAt,
+                }),
+            });
+            return scoredEntry;
+        });
+
+        this.pendingMemoryAttributions = [];
+        this.updateBriefPendingMemoryAttributions();
+        return scored;
+    }
+
+    async noteDiscoveryOccurred(): Promise<void> {
+        if (this.pendingMemoryAttributions.length === 0) {
+            return;
+        }
+        this.recordMemoryEvidence('rediscovery');
+        await this.persistState();
     }
 
     private async loadSessionLedgerSignals(taskType: string): Promise<{
@@ -1687,6 +2011,7 @@ export class AttendantInstance {
             sessionLedgerLearnings,
             sessionCheckpoint: this.sessionCheckpoint,
             sessionRecovery: recoveryResult.recovery,
+            compliance: persisted?.compliance ?? this.buildComplianceState(),
             watchedEntities: normalizeWatchedEntities([
                 ...(persisted?.watchedEntities ?? []),
                 ...(this.sessionCheckpoint?.checkpoint.entityTargets ?? []),
@@ -1748,6 +2073,7 @@ export class AttendantInstance {
                 sessionLedgerLearnings: ledgerSignals.learnings,
                 sessionCheckpoint: this.sessionCheckpoint,
                 sessionRecovery: null,
+                compliance: this.buildComplianceState(),
             };
             this.sharedStateObservedAt = this.brief.briefGeneratedAt;
             await this.persistState();
@@ -1780,6 +2106,7 @@ export class AttendantInstance {
             sessionLedgerLearnings: ledgerSignals.learnings,
             sessionCheckpoint: this.sessionCheckpoint,
             sessionRecovery: null,
+            compliance: this.buildComplianceState(),
         };
         this.sharedStateObservedAt = this.brief.briefGeneratedAt;
 
@@ -1874,14 +2201,38 @@ export class AttendantInstance {
         }
     }
 
-    notifyWriteOccurred(): void {
+    private buildComplianceState(lastUpdated?: string): SessionComplianceState {
+        return buildSessionComplianceState({
+            attendsWithoutPersist: this.attendsWithoutPersist,
+            consecutivePreResponseWithoutPost: this.consecutivePreResponseWithoutPost,
+            lastAttendPhase: this.lastAttendPhase,
+            lastUpdated: lastUpdated ?? this.complianceUpdatedAt,
+        });
+    }
+
+    async notifyWriteOccurred(): Promise<void> {
         this.attendsWithoutPersist = 0;
         this.lastAttendPhase = undefined;
+        this.consecutivePreResponseWithoutPost = 0;
+        this.complianceUpdatedAt = new Date().toISOString();
+        this.recordMemoryEvidence('write');
+        if (!this.brief) {
+            return;
+        }
+        this.brief = {
+            ...this.brief,
+            compliance: this.buildComplianceState(this.complianceUpdatedAt),
+            briefGeneratedAt: this.complianceUpdatedAt,
+        };
+        await this.persistState();
     }
 
     async checkpoint(input: SessionCheckpointInput): Promise<WorkingMemoryBrief> {
         this.attendsWithoutPersist = 0;
         this.lastAttendPhase = undefined;
+        this.consecutivePreResponseWithoutPost = 0;
+        this.complianceUpdatedAt = new Date().toISOString();
+        this.recordMemoryEvidence('checkpoint');
         this.setLedgerContext(input.ledgerContext);
         const now = new Date().toISOString();
         if (!this.brief) {
@@ -1917,6 +2268,7 @@ export class AttendantInstance {
             ...this.brief,
             sessionCheckpoint: this.sessionCheckpoint,
             sessionRecovery: null,
+            compliance: this.buildComplianceState(now),
             briefGeneratedAt: now,
             watchedEntities: normalizeWatchedEntities([
                 ...(this.brief.watchedEntities ?? []),
@@ -2017,6 +2369,7 @@ export class AttendantInstance {
             ...this.brief,
             sessionCheckpoint: this.sessionCheckpoint,
             sessionRecovery: null,
+            compliance: this.buildComplianceState(now),
             briefGeneratedAt: now,
         };
         this.sharedStateObservedAt = now;
@@ -2053,6 +2406,7 @@ export class AttendantInstance {
             ...this.brief,
             sessionCheckpoint: this.sessionCheckpoint,
             sessionRecovery: null,
+            compliance: this.buildComplianceState(now),
             briefGeneratedAt: now,
         };
         this.sharedStateObservedAt = now;
@@ -2089,6 +2443,7 @@ export class AttendantInstance {
             ...this.brief,
             sessionCheckpoint: this.sessionCheckpoint,
             sessionRecovery: null,
+            compliance: this.buildComplianceState(now),
             briefGeneratedAt: now,
         };
         this.sharedStateObservedAt = now;
@@ -2101,6 +2456,7 @@ export class AttendantInstance {
         this.setLedgerContext(context?.ledgerContext);
         const persisted = await this.loadPersistedState();
         const checkpoint = persisted?.sessionCheckpoint ?? this.sessionCheckpoint ?? null;
+        const compliance = persisted?.compliance ?? this.buildComplianceState();
         const normalizedTask = typeof context?.task === 'string' ? context.task.trim() : '';
         const recentMessages = Array.isArray(context?.recentMessages) ? context.recentMessages : [];
         const recovery = checkpoint && normalizedTask
@@ -2113,7 +2469,8 @@ export class AttendantInstance {
             sessionCheckpoint: checkpoint,
             sessionRecovery: recovery,
             persistedBriefGeneratedAt: persisted?.briefGeneratedAt,
-            summary: summarizeSessionState(this.agentId, checkpoint, persisted?.briefGeneratedAt),
+            summary: summarizeSessionState(this.agentId, checkpoint, persisted?.briefGeneratedAt, compliance),
+            compliance,
         };
     }
 
@@ -2137,9 +2494,13 @@ export class AttendantInstance {
             // Correct post-response call — reset counters
             this.attendsWithoutPersist = 0;
             this.lastAttendPhase = 'post-response';
+            this.consecutivePreResponseWithoutPost = 0;
         } else if (phase === 'pre-response') {
             if (this.lastAttendPhase === 'pre-response') {
+                this.consecutivePreResponseWithoutPost++;
                 complianceWarning = `COMPLIANCE: iranti_attend(phase='pre-response') was called without a preceding phase='post-response'. The previous response was delivered without the required post-response attend. After every response, call iranti_attend(phase='post-response') then persist durable findings with iranti_write or iranti_checkpoint.`;
+            } else {
+                this.consecutivePreResponseWithoutPost = 0;
             }
             this.lastAttendPhase = 'pre-response';
         } else {
@@ -2148,6 +2509,8 @@ export class AttendantInstance {
                 complianceWarning = `COMPLIANCE: iranti_attend has been called ${this.attendsWithoutPersist} times since the last iranti_write or iranti_checkpoint. You are likely missing post-response attend calls and durable writes. Call iranti_attend(phase='post-response') after every response, then persist durable findings with iranti_write or iranti_checkpoint before the next turn.`;
             }
         }
+        this.complianceUpdatedAt = new Date().toISOString();
+        const compliance = this.buildComplianceState(this.complianceUpdatedAt);
 
         if (!this.brief) {
             const bootstrapTask = buildAttendBootstrapTask(latestMessage, currentContext);
@@ -2183,6 +2546,49 @@ export class AttendantInstance {
                     latestMessage: latestMessage.slice(0, 160),
                 }),
             });
+        }
+
+        if (phase === 'post-response') {
+            const memoryAttributions = this.scorePendingMemoryAttributions(latestMessage || currentContext);
+            if (this.brief) {
+                this.brief = {
+                    ...this.brief,
+                    compliance,
+                    briefGeneratedAt: this.complianceUpdatedAt,
+                };
+                await this.persistState();
+            }
+            timeEnd('attendant.attend_ms', t0);
+            return {
+                shouldInject: false,
+                reason: 'memory_not_needed',
+                decision: {
+                    needed: false,
+                    confidence: 1,
+                    method: 'heuristic',
+                    explanation: 'post_response_closeout',
+                },
+                bootstrap,
+                complianceWarning,
+                compliance,
+                memoryAttributions,
+                usageGuidance: buildUsageGuidance('attend'),
+                facts: [],
+                entitiesDetected: [],
+                alreadyPresent: 0,
+                totalFound: 0,
+                entitiesResolved: [],
+                debug: {
+                    skipped: 'empty_context',
+                    contextLength: currentContext.length,
+                    detectionWindowChars: Math.min(currentContext.length, ENTITY_DETECTION_WINDOW_CHARS),
+                    detectedCandidates: 0,
+                    keptCandidates: 0,
+                    hintsProvided: effectiveEntityHints.length,
+                    hintsResolved: 0,
+                    dropped: [{ name: latestMessage || '(none)', reason: 'post_response_closeout' }],
+                },
+            };
         }
 
         let decision = await this.decideMemoryNeed({
@@ -2229,6 +2635,14 @@ export class AttendantInstance {
                     }),
                 });
             }
+            if (this.brief) {
+                this.brief = {
+                    ...this.brief,
+                    compliance,
+                    briefGeneratedAt: this.complianceUpdatedAt,
+                };
+                await this.persistState();
+            }
             timeEnd('attendant.attend_ms', t0);
             return {
                 shouldInject: false,
@@ -2236,6 +2650,8 @@ export class AttendantInstance {
                 decision,
                 bootstrap,
                 complianceWarning,
+                compliance,
+                memoryAttributions: [],
                 usageGuidance: buildUsageGuidance('attend'),
                 facts: [],
                 entitiesDetected: [],
@@ -2260,11 +2676,11 @@ export class AttendantInstance {
             currentContext: observationContext,
             maxFacts: input.maxFacts,
             entityHints: observeEntityHints,
-            priorityKeys: Array.from(new Set([
+            priorityKeys: expandContinuityPriorityKeys(Array.from(new Set([
                 ...(mandatoryRecall.key ? [mandatoryRecall.key] : []),
                 ...(this.advisoryLearningProfile?.priorityKeys ?? []),
                 ...freshState.priorityKeys,
-            ])),
+            ]))),
             skipContextFilter: forceInject,
             ledgerContext: input.ledgerContext,
         });
@@ -2283,11 +2699,12 @@ export class AttendantInstance {
             const remainder = slashIdx2 === -1 ? '' : fact.entityKey.slice(slashIdx2);
             return { ...fact, entityKey: `${canonicalPersonalType}/${canonicalPersonalId}${remainder}` };
         });
+        const structuredFacts = assignStructuredFactIds(remappedFacts);
         watchedEntitiesChanged = this.updateWatchedEntities(observed.entitiesResolved?.map((entry) => entry.canonicalEntity) ?? []) || watchedEntitiesChanged;
         this.markSharedStateObserved(observeEntityHints.length > 0 ? observeEntityHints : freshState.entities);
 
         let reason: AttendResult['reason'] = 'memory_needed_injected';
-        const shouldInject = remappedFacts.length > 0;
+        const shouldInject = structuredFacts.length > 0;
         let searchSuggestion: AttendSearchSuggestion | undefined;
 
         if (!shouldInject) {
@@ -2310,15 +2727,29 @@ export class AttendantInstance {
             reason = 'forced';
         }
 
+        const memoryAttributions = shouldInject
+            ? [
+                this.addPendingMemoryAttribution({
+                    phase: phase === 'mid-turn' ? 'mid-turn' : 'pre-response',
+                    injectedKeys: structuredFacts.map((fact) => fact.entityKey),
+                    injectedEntryIds: structuredFacts
+                        .map((fact) => fact.knowledgeEntryId)
+                        .filter((value): value is number => typeof value === 'number'),
+                }),
+            ]
+            : [];
+
         const attendResult = {
             ...observed,
-            facts: remappedFacts,
-            shouldInject,
+            facts: structuredFacts,
+            shouldInject: structuredFacts.length > 0,
             reason,
             decision,
             bootstrap,
             searchSuggestion,
             complianceWarning,
+            compliance,
+            memoryAttributions,
             usageGuidance: buildUsageGuidance('attend'),
         };
         if (input.suppressEvents !== true) {
@@ -2333,6 +2764,7 @@ export class AttendantInstance {
                     contextCallCount: this.contextCallCount,
                     shouldInject,
                     attendReason: reason,
+                    injectionId: memoryAttributions[0]?.injectionId ?? null,
                     advisoryDecisionMethod: decision.method,
                     advisoryScopes: this.advisoryLearningProfile?.scopesUsed ?? [],
                     freshStateEntities: freshState.entities,
@@ -2349,7 +2781,11 @@ export class AttendantInstance {
                 metadata: this.buildEventMetadata({
                     shouldInject,
                     factCount: observed.facts.length,
+                    injectionId: memoryAttributions[0]?.injectionId ?? null,
                     injectedKeys: observed.facts.map((fact) => fact.entityKey),
+                    injectedEntryIds: observed.facts
+                        .map((fact) => fact.knowledgeEntryId)
+                        .filter((value): value is number => typeof value === 'number'),
                     entitiesResolved: observed.entitiesResolved?.map((entry) => entry.canonicalEntity) ?? [],
                     alreadyPresent: observed.alreadyPresent,
                     totalFound: observed.totalFound,
@@ -2359,7 +2795,14 @@ export class AttendantInstance {
                 }),
             });
         }
-        if (watchedEntitiesChanged) {
+        if (this.brief) {
+            this.brief = {
+                ...this.brief,
+                compliance,
+                briefGeneratedAt: this.complianceUpdatedAt,
+            };
+        }
+        if (watchedEntitiesChanged || this.brief?.compliance !== compliance || memoryAttributions.length > 0) {
             await this.persistState();
         }
         timeEnd('attendant.attend_ms', t0);
@@ -2661,7 +3104,7 @@ ${detectionWindow}`,
 
             // Priority keys first
             const policyPriorityKeys = policy.observeKeyPriority?.[resolvedInfo.entityType] ?? [];
-            const priorityKeys = new Set([...policyPriorityKeys, ...requestedPriorityKeys]);
+            const priorityKeys = new Set(expandContinuityPriorityKeys([...policyPriorityKeys, ...requestedPriorityKeys]));
             const priorityEntries = allEntries.filter((e) => priorityKeys.has(e.key));
             const remainingEntries = allEntries
                 .filter((e) => !priorityKeys.has(e.key))
@@ -2675,14 +3118,21 @@ ${detectionWindow}`,
                 });
 
             const selectedEntries = [...priorityEntries, ...remainingEntries].slice(0, maxKeysPerEntity);
+            const freshestEntry = allEntries
+                .slice()
+                .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime() || b.confidence - a.confidence)[0];
+            if (freshestEntry && !selectedEntries.some((entry) => entry.id === freshestEntry.id)) {
+                selectedEntries[selectedEntries.length - 1] = freshestEntry;
+            }
 
             for (const entry of selectedEntries) {
                 allFacts.push({
-                    entityKey: `${resolvedInfo.entityType}/${resolvedInfo.entityId}/${entry.key}`,
+                    entityKey: `${resolvedInfo.entityType}/${resolvedInfo.entityId}/${normalizeContinuityKey(entry.key)}`,
                     summary: entry.valueSummary,
                     value: entry.valueRaw,
                     confidence: entry.confidence,
                     source: entry.source,
+                    lastUpdated: entry.updatedAt.toISOString(),
                     entryId: entry.id,
                 });
             }
@@ -2728,13 +3178,15 @@ ${detectionWindow}`,
         });
         timeEnd('attendant.observe_ms', t0);
         return {
-            facts: topFacts.map(({ entityKey, summary, value, confidence, source }) => ({
+            facts: assignStructuredFactIds(topFacts.map(({ entityKey, summary, value, confidence, source, lastUpdated, entryId }) => ({
+                knowledgeEntryId: entryId,
                 entityKey,
                 summary,
                 value,
                 confidence,
                 source,
-            })),
+                lastUpdated,
+            }))),
             entitiesDetected: Array.from(entitiesDetected),
             alreadyPresent,
             totalFound: allFacts.length,
@@ -3311,6 +3763,11 @@ If nothing is relevant, return: none`,
 
     private async persistState(): Promise<void> {
         if (!this.brief) return;
+        this.brief = {
+            ...this.brief,
+            compliance: this.buildComplianceState(),
+            pendingMemoryAttributions: this.pendingMemoryAttributions.map((entry) => ({ ...entry })),
+        };
 
         await getDb().knowledgeEntry.upsert({
             where: {
@@ -3349,6 +3806,13 @@ If nothing is relevant, return: none`,
         this.sessionCheckpoint = state.sessionCheckpoint ?? null;
         this.advisoryLearningProfile = null;
         this.sharedStateObservedAt = state.briefGeneratedAt;
+        this.attendsWithoutPersist = state.compliance?.counters.attendsWithoutPersist ?? 0;
+        this.consecutivePreResponseWithoutPost = state.compliance?.counters.consecutivePreResponseWithoutPost ?? 0;
+        this.lastAttendPhase = state.compliance?.counters.lastAttendPhase ?? undefined;
+        this.complianceUpdatedAt = state.compliance?.lastUpdated ?? state.briefGeneratedAt;
+        this.pendingMemoryAttributions = Array.isArray(state.pendingMemoryAttributions)
+            ? state.pendingMemoryAttributions.map((entry) => ({ ...entry }))
+            : [];
         this.brief = state;
         return state;
     }

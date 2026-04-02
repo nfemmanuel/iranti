@@ -62,6 +62,70 @@ function writeText(filePath: string, value: string): void {
     fs.writeFileSync(filePath, value, 'utf8');
 }
 
+function createFakeDockerHarness(tmpDir: string, portsOutput: string): string {
+    const fakeBin = path.join(tmpDir, 'fake-bin');
+    fs.mkdirSync(fakeBin, { recursive: true });
+
+    const script = `
+const args = process.argv.slice(2);
+const portsOutput = process.env.IRANTI_FAKE_DOCKER_PORTS ?? '';
+
+if (args[0] === '--version') {
+  console.log('Docker version 26.1.0, build test');
+  process.exit(0);
+}
+if (args[0] === 'info') {
+  console.log('26.1.0');
+  process.exit(0);
+}
+if (args[0] === 'ps' && args[1] === '--format') {
+  console.log(portsOutput);
+  process.exit(0);
+}
+console.error('Unsupported fake docker args: ' + args.join(' '));
+process.exit(1);
+`;
+
+    writeText(path.join(fakeBin, 'fake-docker.js'), script);
+    writeText(
+        path.join(fakeBin, 'docker.cmd'),
+        '@echo off\r\nnode "%~dp0fake-docker.js" %*\r\n',
+    );
+
+    return fakeBin;
+}
+
+async function withFakeDockerPorts<T>(portsOutput: string, run: () => Promise<T>): Promise<T> {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'iranti-fake-docker-ports-'));
+    const fakeBin = createFakeDockerHarness(tmpDir, portsOutput);
+    const snapshotPath = process.env.PATH;
+    const snapshotDockerPorts = process.env.IRANTI_FAKE_DOCKER_PORTS;
+    const snapshotDockerBin = process.env.IRANTI_DOCKER_BIN;
+    process.env.PATH = `${fakeBin};${snapshotPath ?? ''}`;
+    process.env.IRANTI_FAKE_DOCKER_PORTS = portsOutput;
+    process.env.IRANTI_DOCKER_BIN = path.join(fakeBin, 'docker.cmd');
+    try {
+        return await run();
+    } finally {
+        if (snapshotPath === undefined) {
+            delete process.env.PATH;
+        } else {
+            process.env.PATH = snapshotPath;
+        }
+        if (snapshotDockerPorts === undefined) {
+            delete process.env.IRANTI_FAKE_DOCKER_PORTS;
+        } else {
+            process.env.IRANTI_FAKE_DOCKER_PORTS = snapshotDockerPorts;
+        }
+        if (snapshotDockerBin === undefined) {
+            delete process.env.IRANTI_DOCKER_BIN;
+        } else {
+            process.env.IRANTI_DOCKER_BIN = snapshotDockerBin;
+        }
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+}
+
 function readEnv(filePath: string): Record<string, string> {
     const env: Record<string, string> = {};
     for (const line of fs.readFileSync(filePath, 'utf8').split(/\r?\n/)) {
@@ -163,6 +227,49 @@ async function main(): Promise<void> {
         }], 'docker setup should persist the Docker dependency host port');
         assert.equal(dockerEnv.IRANTI_PORT, '3660', 'docker setup should persist the actual runtime port into .env');
         assertPepper(dockerEnv, 'docker setup');
+
+        const dockerDefaultsRoot = path.join(tempRoot, 'docker-defaults-runtime');
+        await withFakeDockerPorts('0.0.0.0:5432->5432/tcp', async () => {
+            const dockerDefaultsRun = runCli([
+                'setup',
+                '--defaults',
+                '--root',
+                dockerDefaultsRoot,
+                '--instance',
+                'docker_defaults',
+                '--port',
+                '3665',
+                '--db-mode',
+                'docker',
+                '--provider',
+                'mock',
+                '--api-key',
+                'test_docker_defaults_key',
+            ], repoRoot);
+            assert.equal(dockerDefaultsRun.status, 0, `docker defaults setup failed:\n${dockerDefaultsRun.stdout}\n${dockerDefaultsRun.stderr}`);
+        });
+
+        const dockerDefaultsMeta = readJson<{
+            databaseIntent?: {
+                provisioning: string;
+                port?: number;
+            };
+            dependencies?: Array<{ kind: string; name: string; healthTcpPort?: number }>;
+        }>(path.join(dockerDefaultsRoot, 'instances', 'docker_defaults', 'instance.json'));
+        const dockerDefaultsEnv = readEnv(path.join(dockerDefaultsRoot, 'instances', 'docker_defaults', '.env'));
+        assert.equal(dockerDefaultsMeta.databaseIntent?.provisioning, 'docker', 'docker defaults setup should persist provisioning=docker');
+        assert.notEqual(dockerDefaultsMeta.databaseIntent?.port, 5432, 'docker defaults setup should not bake in an occupied host port');
+        assert.equal(
+            dockerDefaultsMeta.dependencies?.[0]?.healthTcpPort,
+            dockerDefaultsMeta.databaseIntent?.port,
+            'docker defaults setup should align dependency and database host ports',
+        );
+        assert.match(
+            dockerDefaultsEnv.DATABASE_URL ?? '',
+            new RegExp(`:${dockerDefaultsMeta.databaseIntent?.port ?? 0}/iranti_docker_defaults$`),
+            'docker defaults setup should persist the selected Docker host port into DATABASE_URL',
+        );
+        assertPepper(dockerDefaultsEnv, 'docker defaults setup');
 
         const createRoot = path.join(tempRoot, 'create-runtime');
         const installRun = runCli(['install', '--root', createRoot], repoRoot);

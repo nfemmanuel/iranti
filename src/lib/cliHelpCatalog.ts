@@ -92,13 +92,13 @@ export const CONFIGURATION_HELP: HelpEntry[] = [
     },
     {
         command: 'iranti project init [path] --instance <name> [--api-key <token>] [--agent-id <id>] [--mode isolated|shared] [--personal-memory-entity <entity>] [--auto-remember [true|false]] [--force]',
-        description: 'Create a new `.env.iranti` binding for one project.',
+        description: 'Create a new `.env.iranti` binding for one project and write a bounded initial codebase snapshot.',
         useWhen: 'a repo should point at an Iranti instance for first-party host integrations, MCP, or direct SDK/API use.',
         scenario: 'Binding `iranti-control-plane` or another repo root to `local` so it can use shared memory.',
     },
     {
         command: 'iranti configure project [path] [--interactive] [--instance <name>] [--url <http://host:port>] [--api-key <token>] [--agent-id <id>] [--memory-entity <entity>] [--personal-memory-entity <entity>] [--auto-remember [true|false]] [--mode isolated|shared] [--json]',
-        description: 'Refresh or retarget an existing project binding.',
+        description: 'Refresh or retarget an existing project binding and refresh its bounded codebase snapshot.',
         useWhen: 'the project is already bound and you want to change its instance, URL, key, agent identity, or memory entity.',
         scenario: 'Moving a repo from `local` to `shared_team` or fixing a wrong `IRANTI_PROJECT_MODE`.',
     },

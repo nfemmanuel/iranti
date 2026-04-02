@@ -66,13 +66,13 @@ async function main(): Promise<void> {
             calls.push(`checkpoint:${input.agent}:${input.task}:${(input.checkpoint.entityTargets ?? []).join(',')}:${input.checkpoint.currentStep ?? ''}:${input.checkpoint.nextStep ?? ''}`);
             for (const entity of input.checkpoint.entityTargets ?? []) {
                 if (input.checkpoint.currentStep) {
-                    queryValues.set(`${entity}:checkpoint_current_step`, { text: input.checkpoint.currentStep });
+                    queryValues.set(`${entity}:current_step`, { text: input.checkpoint.currentStep });
                 }
                 if (input.checkpoint.nextStep) {
-                    queryValues.set(`${entity}:checkpoint_next_step`, { text: input.checkpoint.nextStep });
+                    queryValues.set(`${entity}:next_step`, { instruction: input.checkpoint.nextStep });
                 }
                 if (input.checkpoint.openRisks && input.checkpoint.openRisks.length > 0) {
-                    queryValues.set(`${entity}:checkpoint_open_risks`, { items: input.checkpoint.openRisks });
+                    queryValues.set(`${entity}:open_risks`, { items: input.checkpoint.openRisks });
                 }
                 if (input.checkpoint.fileChanges && input.checkpoint.fileChanges.length > 0) {
                     queryValues.set(`${entity}:recent_file_changes`, { items: input.checkpoint.fileChanges });
@@ -101,8 +101,8 @@ async function main(): Promise<void> {
                 sessionRecovery: null,
             };
         },
-        async attend(input: { agent?: string; latestMessage: string; currentContext: string; entityHints?: string[] }) {
-            calls.push(`attend:${input.agent}:${input.latestMessage}`);
+        async attend(input: { agent?: string; latestMessage: string; currentContext: string; entityHints?: string[]; phase?: string }) {
+            calls.push(`attend:${input.agent}:${input.phase ?? 'none'}:${input.latestMessage}`);
             if (/favorite movie/i.test(input.latestMessage)) {
                 return {
                     shouldInject: true,
@@ -168,6 +168,7 @@ async function main(): Promise<void> {
 
         assert.ok(sessionContext.includes('[Iranti Session Memory]'), 'Expected SessionStart hook to emit session memory context.');
         assert.ok(sessionContext.includes(factSummary), 'Expected SessionStart hook to surface working memory facts.');
+        assert.ok(sessionContext.includes('F1'), 'Expected SessionStart hook to assign stable fact IDs.');
         assert.ok(calls.some((call) => call.startsWith(`handshake:${agentId}:`)), 'Expected SessionStart hook to call handshake().');
 
         const promptContext = await buildHookAdditionalContext({
@@ -182,9 +183,10 @@ async function main(): Promise<void> {
 
         assert.ok(promptContext.includes('[Iranti Retrieved Memory]'), 'Expected UserPromptSubmit hook to emit retrieved memory context.');
         assert.ok(promptContext.includes(factSummary), 'Expected UserPromptSubmit hook to surface attend() facts.');
+        assert.ok(promptContext.includes('F1'), 'Expected UserPromptSubmit hook to assign stable fact IDs.');
         assert.ok(
-            calls.some((call) => call === `attend:${agentId}:Remind me what we decided about the deployment mode.`),
-            'Expected UserPromptSubmit hook to call attend().'
+            calls.some((call) => call === `attend:${agentId}:pre-response:Remind me what we decided about the deployment mode.`),
+            'Expected UserPromptSubmit hook to call attend() with phase=pre-response.'
         );
 
         const autoRememberContext = await buildHookAdditionalContext({
@@ -283,11 +285,15 @@ async function main(): Promise<void> {
         assert.equal(stopContext, '', 'Expected Stop hook to emit no additional context.');
         assert.ok(
             calls.some((call) => call.startsWith(`write:${memoryEntity}:next_step:`)),
-            'Expected Stop hook auto-remember to persist strict assistant response facts.'
+            'Expected Stop hook to persist strict assistant response facts.'
         );
         assert.ok(
             calls.some((call) => call.startsWith(`checkpoint:${agentId}:`) && call.includes(`:${memoryEntity}:`) && call.endsWith(':rerun the db validation.')),
             'Expected Stop hook to also persist a shared checkpoint for resumable project progress.'
+        );
+        assert.ok(
+            calls.some((call) => call === `attend:${agentId}:post-response:The next step is rerun the db validation.`),
+            'Expected Stop hook to close the turn with phase=post-response.'
         );
 
         const fileStopContext = await buildHookAdditionalContext({
@@ -347,7 +353,7 @@ async function main(): Promise<void> {
             },
         });
         assert.ok(
-            retrievalAnswerContext.includes('Direct answer: favorite movie is zebra asteroid midnight.'),
+            retrievalAnswerContext.includes('Use F1 directly if it fully answers the user question: favorite movie is zebra asteroid midnight.'),
             'Expected self-memory question injection to include a direct answer candidate.'
         );
         assert.ok(

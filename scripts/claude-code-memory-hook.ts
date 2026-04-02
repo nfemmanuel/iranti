@@ -6,16 +6,17 @@ import { loadRuntimeEnv } from '../src/lib/runtimeEnv';
 import { flushStaffEventEmitter, getStaffEventEmitter } from '../src/lib/staffEventRegistry';
 import { disconnectDb } from '../src/library/client';
 import {
-    autoRememberAssistantFacts,
     autoRememberPromptFacts,
     canonicalizeMemoryKey,
     classifyMemoryScope,
-    extractExplicitAssistantMemory,
     extractExplicitPromptMemory,
     getPersonalMemoryEntity,
     getProjectMemoryEntity,
     isAutoRememberEnabled,
+    rememberAssistantResponseFacts,
 } from '../src/lib/autoRemember';
+import { extractAssistantCheckpointPayload, type AssistantCheckpointPayload } from '../src/lib/assistantCheckpoint';
+import { assignStructuredFactIds, formatStructuredFactBlock } from '../src/lib/hostMemoryFormatting';
 
 type HookEventName = 'SessionStart' | 'UserPromptSubmit' | 'Stop' | 'PreCompact';
 type HookPayload = Record<string, unknown>;
@@ -32,26 +33,6 @@ type HookWorkingMemoryEntry = {
     summary?: unknown;
     confidence?: unknown;
     source?: unknown;
-};
-
-type HookCheckpointPayload = {
-    currentStep?: string;
-    nextStep?: string;
-    openRisks?: string[];
-    recentOutputs?: string[];
-    actions?: Array<{
-        kind: string;
-        summary: string;
-        status?: string;
-        target?: string;
-        detail?: string;
-    }>;
-    fileChanges?: Array<{
-        action: string;
-        path: string;
-        toPath?: string;
-        purpose?: string;
-    }>;
 };
 
 const MEMORY_NEED_POSITIVE_PATTERNS: RegExp[] = [
@@ -86,7 +67,7 @@ function printHelp(): void {
         '',
         'Reads Claude Code hook JSON from stdin and returns hookSpecificOutput.additionalContext on stdout.',
         'This helper retrieves working memory; durable KB writes still require explicit iranti_write/ingest calls.',
-        'Set IRANTI_AUTO_REMEMBER=true to auto-save narrow personal facts to IRANTI_PERSONAL_MEMORY_ENTITY/user/main, project summaries to IRANTI_MEMORY_ENTITY, and shared checkpoint breadcrumbs for resumable work.',
+        'Set IRANTI_AUTO_REMEMBER=true to auto-save prompt-side personal/project facts. Assistant-response continuity facts and shared checkpoints are captured on Stop regardless.',
     ].join('\n'));
 }
 
@@ -290,20 +271,31 @@ function getMaxFacts(): number {
 }
 
 function formatSessionContext(facts: HookFact[], cwd: string): string {
-    const limited = facts.slice(0, getMaxFacts());
+    const limited = assignStructuredFactIds(facts.slice(0, getMaxFacts()).map((fact) => ({
+        ...fact,
+        entityKey: `${fact.entity}/${fact.key}`,
+    })));
     const lines = [
         '[Iranti Session Memory]',
         `Project: ${path.basename(cwd)}`,
         'REQUIRED: Call mcp__iranti__iranti_handshake before responding to the first user message.',
-        'REQUIRED: Call mcp__iranti__iranti_attend before every subsequent turn.',
+        'REQUIRED: Call mcp__iranti__iranti_attend(phase=\'pre-response\') before every reply and before factual discovery.',
+        'REQUIRED: After every response, call mcp__iranti__iranti_attend(phase=\'post-response\').',
+        'REQUIRED: Prefer injected Iranti facts before re-inferring project state.',
     ];
 
-    if (limited.length > 0) {
-        lines.push('Relevant memory:');
-        for (const fact of limited) {
-            lines.push(`- ${fact.entity}/${fact.key}: ${fact.summary}`);
-        }
-    }
+    const block = formatStructuredFactBlock(
+        limited,
+        {
+            title: 'Iranti Session Facts',
+            introLines: [
+                'Use these loaded facts as the starting working-memory frame for this session.',
+                'Prefer them before re-inferring project state.',
+                'Fact IDs are stable only within this block.',
+            ],
+        },
+    );
+    if (block) lines.push(block);
 
     return lines.join('\n');
 }
@@ -338,163 +330,24 @@ function extractSelfMemoryQueryKey(prompt: string): string | null {
 function formatPromptContext(facts: HookFact[], prompt?: string): string {
     if (facts.length === 0) return '';
 
-    const lines = ['[Iranti Retrieved Memory]'];
+    const structuredFacts = assignStructuredFactIds(facts.map((fact) => ({
+        ...fact,
+        entityKey: `${fact.entity}/${fact.key}`,
+    })));
+    const lines: string[] = [];
     const targetKey = prompt ? extractSelfMemoryQueryKey(prompt) : null;
     if (targetKey) {
-        const answerCandidate = facts.find((fact) => canonicalizeMemoryKey(fact.key) === targetKey);
+        const answerCandidate = structuredFacts.find((fact) => canonicalizeMemoryKey(fact.entityKey.split('/').slice(2).join('/')) === targetKey);
         if (answerCandidate) {
-            lines.push(`Direct answer: ${answerCandidate.summary}.`);
-            lines.push('Use the direct answer above when it fully answers the user question.');
+            lines.push(`[Iranti Direct Answer]`);
+            lines.push(`Use ${answerCandidate.factId} directly if it fully answers the user question: ${answerCandidate.summary}.`);
         }
     }
-    for (const fact of facts) {
-        lines.push(`- ${fact.entity}/${fact.key}: ${fact.summary}`);
-    }
+    lines.push(formatStructuredFactBlock(
+        structuredFacts,
+        { title: 'Iranti Retrieved Memory' },
+    ));
     return lines.join('\n');
-}
-
-function readTextField(value: unknown, preferredKey: string): string | undefined {
-    if (typeof value !== 'object' || value === null) return undefined;
-    const record = value as Record<string, unknown>;
-    const raw = record[preferredKey];
-    return typeof raw === 'string' && raw.trim() ? raw.trim() : undefined;
-}
-
-function readItems(value: unknown): string[] {
-    if (typeof value !== 'object' || value === null) return [];
-    const record = value as Record<string, unknown>;
-    const items = Array.isArray(record.items) ? record.items : [];
-    return items.map((item) => String(item ?? '').trim()).filter(Boolean);
-}
-
-function readFileChangeOutputs(value: unknown): string[] {
-    if (typeof value !== 'object' || value === null) return [];
-    const record = value as Record<string, unknown>;
-    const items = Array.isArray(record.items) ? record.items : [];
-    return items.map((item) => {
-        if (typeof item !== 'object' || item === null) return '';
-        const change = item as Record<string, unknown>;
-        const action = String(change.action ?? 'updated').trim();
-        const targetPath = String(change.path ?? '').trim();
-        const toPath = String(change.toPath ?? '').trim();
-        if (!targetPath) return '';
-        return toPath ? `${action} ${targetPath} -> ${toPath}` : `${action} ${targetPath}`;
-    }).filter(Boolean);
-}
-
-function readCheckpointActions(value: unknown): Array<{
-    kind: string;
-    summary: string;
-    status?: string;
-    target?: string;
-    detail?: string;
-}> {
-    if (typeof value !== 'object' || value === null) return [];
-    const record = value as Record<string, unknown>;
-    const items = Array.isArray(record.items) ? record.items : [];
-    return items
-        .map((item) => {
-            if (typeof item !== 'object' || item === null) return null;
-            const action = item as Record<string, unknown>;
-            const summary = String(action.summary ?? '').trim();
-            if (!summary) return null;
-            const kind = String(action.kind ?? 'action').trim() || 'action';
-            return {
-                kind,
-                summary,
-                ...(typeof action.status === 'string' && action.status.trim() ? { status: action.status.trim() } : {}),
-                ...(typeof action.target === 'string' && action.target.trim() ? { target: action.target.trim() } : {}),
-                ...(typeof action.detail === 'string' && action.detail.trim() ? { detail: action.detail.trim() } : {}),
-            };
-        })
-        .filter((item): item is {
-            kind: string;
-            summary: string;
-            status?: string;
-            target?: string;
-            detail?: string;
-        } => Boolean(item));
-}
-
-function readActionOutputs(value: unknown): string[] {
-    if (typeof value !== 'object' || value === null) return [];
-    const record = value as Record<string, unknown>;
-    const items = Array.isArray(record.items) ? record.items : [];
-    return items.map((item) => {
-        if (typeof item !== 'object' || item === null) return '';
-        const action = item as Record<string, unknown>;
-        const kind = String(action.kind ?? 'action').trim() || 'action';
-        const summary = String(action.summary ?? '').trim();
-        const status = String(action.status ?? '').trim();
-        if (!summary) return '';
-        return status ? `[${status}] ${kind}: ${summary}` : `${kind}: ${summary}`;
-    }).filter(Boolean);
-}
-
-function extractHookCheckpointPayload(response: string): HookCheckpointPayload | null {
-    const facts = extractExplicitAssistantMemory(response).filter((fact) => fact.scope === 'project');
-    if (facts.length === 0) {
-        return null;
-    }
-
-    const checkpoint: HookCheckpointPayload = {};
-    const outputs: string[] = [];
-    for (const fact of facts) {
-        if (fact.key === 'current_step') {
-            checkpoint.currentStep = readTextField(fact.value, 'text');
-            continue;
-        }
-        if (fact.key === 'next_step') {
-            checkpoint.nextStep = readTextField(fact.value, 'instruction') ?? readTextField(fact.value, 'text');
-            continue;
-        }
-        if (fact.key === 'open_risks') {
-            checkpoint.openRisks = readItems(fact.value);
-            continue;
-        }
-        if (fact.key === 'important_artifacts') {
-            outputs.push(...readItems(fact.value));
-            continue;
-        }
-        if (fact.key === 'recent_file_changes') {
-            const fileChanges = typeof fact.value === 'object' && fact.value !== null && Array.isArray((fact.value as Record<string, unknown>).items)
-                ? ((fact.value as Record<string, unknown>).items as Array<Record<string, unknown>>)
-                    .filter((item) => item && typeof item === 'object')
-                    .map((item) => ({
-                        action: String(item.action ?? 'updated').trim() || 'updated',
-                        path: String(item.path ?? '').trim(),
-                        ...(typeof item.toPath === 'string' && item.toPath.trim() ? { toPath: String(item.toPath).trim() } : {}),
-                        ...(typeof item.purpose === 'string' && item.purpose.trim() ? { purpose: String(item.purpose).trim() } : {}),
-                    }))
-                    .filter((item) => item.path)
-                : [];
-            if (fileChanges.length > 0) {
-                checkpoint.fileChanges = [...(checkpoint.fileChanges ?? []), ...fileChanges];
-            }
-            outputs.push(...readFileChangeOutputs(fact.value));
-            continue;
-        }
-        if (fact.key === 'recent_actions') {
-            const actions = readCheckpointActions(fact.value);
-            if (actions.length > 0) {
-                checkpoint.actions = [...(checkpoint.actions ?? []), ...actions];
-            }
-            outputs.push(...readActionOutputs(fact.value));
-        }
-    }
-
-    if (outputs.length > 0) {
-        checkpoint.recentOutputs = outputs;
-    }
-
-    return checkpoint.currentStep
-        || checkpoint.nextStep
-        || (checkpoint.openRisks && checkpoint.openRisks.length > 0)
-        || (checkpoint.recentOutputs && checkpoint.recentOutputs.length > 0)
-        || (checkpoint.actions && checkpoint.actions.length > 0)
-        || (checkpoint.fileChanges && checkpoint.fileChanges.length > 0)
-        ? checkpoint
-        : null;
 }
 
 function emitHookContext(event: HookEventName, additionalContext: string): void {
@@ -612,8 +465,8 @@ export async function buildHookAdditionalContext(options: {
 
     if (event === 'Stop') {
         const response = getLastAssistantMessage(payload);
-        if (response && isAutoRememberEnabled()) {
-            await autoRememberAssistantFacts({
+        if (response) {
+            await rememberAssistantResponseFacts({
                 iranti,
                 response,
                 agent,
@@ -623,7 +476,7 @@ export async function buildHookAdditionalContext(options: {
                     host: 'claude_code',
                 },
             });
-            const checkpoint = extractHookCheckpointPayload(response);
+            const checkpoint = extractAssistantCheckpointPayload(response);
             const projectEntity = getProjectMemoryEntity();
             if (checkpoint && projectEntity && typeof (iranti as { checkpoint?: unknown }).checkpoint === 'function') {
                 await (iranti as {
@@ -631,7 +484,7 @@ export async function buildHookAdditionalContext(options: {
                         agent?: string;
                         task: string;
                         recentMessages: string[];
-                        checkpoint: HookCheckpointPayload & { entityTargets: string[] };
+                        checkpoint: AssistantCheckpointPayload & { entityTargets: string[] };
                     }): Promise<unknown>;
                 }).checkpoint({
                     agent,
@@ -643,6 +496,14 @@ export async function buildHookAdditionalContext(options: {
                     },
                 });
             }
+            await iranti.attend({
+                agent,
+                latestMessage: response,
+                currentContext: response,
+                entityHints,
+                maxFacts: getMaxFacts(),
+                phase: 'post-response',
+            });
         }
         return '';
     }
@@ -675,6 +536,7 @@ export async function buildHookAdditionalContext(options: {
         currentContext: buildCurrentContext(payload, prompt),
         entityHints,
         maxFacts: getMaxFacts(),
+        phase: 'pre-response',
     });
     const facts = attend.facts.map((fact) => ({
         entity: fact.entityKey.split('/').slice(0, 2).join('/'),

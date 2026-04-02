@@ -4,6 +4,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import * as z from 'zod/v4';
 import type { Iranti } from '../src/sdk';
+import { ProtocolViolationError } from '../src/sdk';
 import { rewriteCommandError } from '../src/lib/commandErrors';
 import { createFirstPartyIranti } from '../src/lib/createFirstPartyIranti';
 import { loadRuntimeEnv } from '../src/lib/runtimeEnv';
@@ -11,17 +12,12 @@ import { autoRememberPromptFacts, isAutoRememberEnabled, rememberAssistantRespon
 import { flushStaffEventEmitter, getStaffEventEmitter } from '../src/lib/staffEventRegistry';
 import { disconnectDb } from '../src/library/client';
 import { activeAttendants, clearAttendant, getAttendant } from '../src/attendant';
+import { extractAssistantCheckpointPayload } from '../src/lib/assistantCheckpoint';
+import { formatStructuredFactBlock } from '../src/lib/hostMemoryFormatting';
 
 type JsonRecord = Record<string, unknown>;
 
-type AgentProtocolState = {
-    lastHandshakeAt?: number;
-    lastAttendAt?: number;
-};
-
 loadRuntimeEnv();
-
-const agentProtocolState = new Map<string, AgentProtocolState>();
 let runtimeHostOverride: string | null = null;
 let shutdownPromise: Promise<void> | null = null;
 let processIranti: Iranti | null = null;
@@ -63,7 +59,7 @@ function printHelp(): void {
         '  IRANTI_MCP_AGENT_MODEL        Default agent model label',
         '  IRANTI_MCP_DEFAULT_SOURCE     Default write source (default: ClaudeCode)',
         '  IRANTI_MCP_HOST               Host label for session ledger events (default: generic_mcp)',
-        '  IRANTI_AUTO_REMEMBER         Opt-in explicit prompt auto-save before attend()',
+        '  IRANTI_AUTO_REMEMBER         Opt-in prompt-side auto-save before pre-response attend()',
         '',
         'This server is intended for Claude Code and other MCP clients over stdio.',
         'If you run `iranti mcp` directly in a terminal, it will stay running and wait for an MCP client.',
@@ -190,64 +186,21 @@ function resolveToolHost(host?: string): string | undefined {
     return currentHost();
 }
 
-function markHandshake(agentId: string): void {
-    const current = agentProtocolState.get(agentId) ?? {};
-    agentProtocolState.set(agentId, {
-        ...current,
-        lastHandshakeAt: Date.now(),
-    });
-}
-
-function markAttend(agentId: string): void {
-    const current = agentProtocolState.get(agentId) ?? {};
-    agentProtocolState.set(agentId, {
-        ...current,
-        lastAttendAt: Date.now(),
-    });
-}
-
-function getReadBeforeAttendWarning(agentId: string, operation: string): string | null {
-    const state = agentProtocolState.get(agentId);
-    if (!state?.lastAttendAt) {
-        return `Protocol warning: ${operation} was called before iranti_attend for agent ${agentId}. Call iranti_attend before discovery tools (query, search, related, who_knows) so retrieval decisions stay truthful.`;
-    }
-    if (state.lastHandshakeAt && state.lastAttendAt < state.lastHandshakeAt) {
-        return `Protocol warning: ${operation} was called after a fresh handshake but before iranti_attend for agent ${agentId}. Call iranti_attend before discovery tools on each new session/task start.`;
-    }
-    return null;
-}
-
-function emitReadBeforeAttendWarning(agentId: string, operation: string, warning: string): void {
-    getStaffEventEmitter().emit({
-        staffComponent: 'Attendant',
-        actionType: 'host_failure',
-        agentId,
-        source: 'mcp',
-        level: 'audit',
-        reason: 'read_before_attend',
-        metadata: {
-            host: currentHost() || 'generic_mcp',
-            operation,
-            warning,
-        },
-    });
-}
-
-function textResultWithProtocolWarning(data: unknown, warning?: string | null): { content: Array<{ type: 'text'; text: string }>; structuredContent: JsonRecord } {
-    const structuredContent = toStructuredContent(data);
-    if (warning) {
-        structuredContent.protocolWarning = warning;
-    }
+function protocolViolationResult(error: ProtocolViolationError): { content: Array<{ type: 'text'; text: string }>; structuredContent: JsonRecord } {
     return {
         content: [
             {
                 type: 'text',
-                text: warning
-                    ? `${warning}\n\n${JSON.stringify(data, null, 2)}`
-                    : JSON.stringify(data, null, 2),
+                text: `${error.protocolViolation.message}\n\n${JSON.stringify({
+                    blocked: true,
+                    protocolViolation: error.protocolViolation,
+                }, null, 2)}`,
             },
         ],
-        structuredContent,
+        structuredContent: {
+            blocked: true,
+            protocolViolation: error.protocolViolation,
+        },
     };
 }
 
@@ -267,7 +220,6 @@ function clearProcessAttendants(): void {
     for (const agentId of activeAttendants()) {
         clearAttendant(agentId);
     }
-    agentProtocolState.clear();
 }
 
 async function checkpointActiveAttendants(iranti: Iranti, reason: string): Promise<void> {
@@ -378,7 +330,7 @@ async function main(): Promise<void> {
 
     const server = new McpServer({
         name: 'iranti-mcp',
-        version: '0.2.52',
+        version: '0.3.0',
     });
 
     server.registerTool('iranti_handshake', {
@@ -407,7 +359,6 @@ Do not use this as a per-turn retrieval tool; use iranti_attend.`,
             task,
             recentMessages: normalizeRecentMessages(recentMessages),
         });
-        markHandshake(resolvedAgent);
         const setupWarnings = checkHostSetup(resolvedHost, process.cwd());
         if (setupWarnings.length > 0) {
             return textResult({ ...result, setupWarnings });
@@ -428,7 +379,9 @@ the session first and report that in the result metadata.
 This is the minimum safe pre-reply call even when the host skipped handshake.
 Omitting currentContext falls back to the latest message only; pass the
 full visible context when available. For host compatibility, message is
-accepted as an alias for latestMessage.`,
+accepted as an alias for latestMessage. When phase='post-response', pass the
+assistant response so Iranti can persist strict continuity facts and shared
+checkpoint breadcrumbs before closing the turn.`,
         inputSchema: {
             latestMessage: z.string().min(1).optional().describe('The latest user or assistant message.'),
             message: z.string().min(1).optional().describe('Alias for latestMessage, accepted for host compatibility.'),
@@ -444,25 +397,64 @@ accepted as an alias for latestMessage.`,
         const resolvedAgent = resolveToolAgent(agent, agentId);
         syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
         const resolvedLatestMessage = resolveAttendLatestMessage({ latestMessage, message });
-        if (isAutoRememberEnabled()) {
-            await autoRememberPromptFacts({
-                iranti,
-                prompt: resolvedLatestMessage,
+        try {
+            if (phase === 'post-response') {
+                await rememberAssistantResponseFacts({
+                    iranti,
+                    response: resolvedLatestMessage,
+                    agent: resolvedAgent,
+                    source: defaultWriteSource(),
+                    ledgerContext: {
+                        source: 'mcp',
+                        host: currentHost() || 'generic_mcp',
+                    },
+                });
+                const checkpoint = extractAssistantCheckpointPayload(resolvedLatestMessage);
+                const projectEntity = process.env.IRANTI_MEMORY_ENTITY?.trim();
+                if (checkpoint && projectEntity) {
+                    await iranti.checkpoint({
+                        agent: resolvedAgent,
+                        task: `Post-response checkpoint for ${resolvedAgent}`,
+                        recentMessages: [],
+                        checkpoint: {
+                            ...checkpoint,
+                            entityTargets: [projectEntity],
+                        },
+                    });
+                }
+            } else if (isAutoRememberEnabled()) {
+                await autoRememberPromptFacts({
+                    iranti,
+                    prompt: resolvedLatestMessage,
+                    agent: resolvedAgent,
+                    source: defaultWriteSource(),
+                });
+            }
+            const result = await iranti.attend({
                 agent: resolvedAgent,
-                source: defaultWriteSource(),
+                latestMessage: resolvedLatestMessage,
+                currentContext: currentContext ?? resolvedLatestMessage,
+                entityHints,
+                maxFacts,
+                forceInject,
+                phase,
             });
+            const injectionBlock = result.shouldInject
+                ? formatStructuredFactBlock(result.facts, {
+                    title: 'Iranti Retrieved Memory',
+                    includeValues: true,
+                })
+                : '';
+            return textResult({
+                ...result,
+                injectionBlock,
+            });
+        } catch (error) {
+            if (error instanceof ProtocolViolationError) {
+                return protocolViolationResult(error);
+            }
+            throw error;
         }
-        const result = await iranti.attend({
-            agent: resolvedAgent,
-            latestMessage: resolvedLatestMessage,
-            currentContext: currentContext ?? resolvedLatestMessage,
-            entityHints,
-            maxFacts,
-            forceInject,
-            phase,
-        });
-        markAttend(resolvedAgent);
-        return textResult(result);
     });
 
     server.registerTool('iranti_checkpoint', {
@@ -472,7 +464,8 @@ recent outputs, structured actions, and shared entity breadcrumbs survive across
 sessions, and agents. This is the strongest shared-RAM tool for active work:
 prefer it over ad-hoc prose when you need another session or another agent
 to pick up where you left off. If entityTargets are supplied, Iranti also
-writes compact shared checkpoint_* breadcrumbs to those entities for handoff.`,
+writes canonical shared breadcrumbs such as current_step, next_step,
+open_risks, recent_actions, and recent_file_changes to those entities for handoff.`,
         inputSchema: {
             task: z.string().min(1).describe('Current task or objective for the active checkpoint.'),
             recentMessages: z.array(z.string()).optional().describe('Recent messages that help fingerprint the active task.'),
@@ -533,13 +526,20 @@ writes compact shared checkpoint_* breadcrumbs to those entities for handoff.`,
     }, async ({ currentContext, entityHints, maxFacts, agent, agentId }) => {
         const resolvedAgent = resolveToolAgent(agent, agentId);
         syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
-        const result = await iranti.observe({
-            agent: resolvedAgent,
-            currentContext,
-            entityHints,
-            maxFacts,
-        });
-        return textResult(result);
+        try {
+            const result = await iranti.observe({
+                agent: resolvedAgent,
+                currentContext,
+                entityHints,
+                maxFacts,
+            });
+            return textResult(result);
+        } catch (error) {
+            if (error instanceof ProtocolViolationError) {
+                return protocolViolationResult(error);
+            }
+            throw error;
+        }
     });
 
     server.registerTool('iranti_query', {
@@ -560,10 +560,15 @@ memory alone before checking Iranti.`,
     }, async ({ entity, key, agent, agentId }) => {
         const resolvedAgent = resolveToolAgent(agent, agentId);
         syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
-        const warning = getReadBeforeAttendWarning(resolvedAgent, 'iranti_query');
-        if (warning) emitReadBeforeAttendWarning(resolvedAgent, 'iranti_query', warning);
-        const result = await iranti.query(entity, key);
-        return textResultWithProtocolWarning(result, warning);
+        try {
+            const result = await iranti.query(entity, key);
+            return textResult(result);
+        } catch (error) {
+            if (error instanceof ProtocolViolationError) {
+                return protocolViolationResult(error);
+            }
+            throw error;
+        }
     });
 
     server.registerTool('iranti_search', {
@@ -588,18 +593,23 @@ the exact key, use this before saying you do not know.`,
     }, async ({ query, entityType, entityId, limit, lexicalWeight, vectorWeight, minScore, agent, agentId }) => {
         const resolvedAgent = resolveToolAgent(agent, agentId);
         syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
-        const warning = getReadBeforeAttendWarning(resolvedAgent, 'iranti_search');
-        if (warning) emitReadBeforeAttendWarning(resolvedAgent, 'iranti_search', warning);
-        const result = await iranti.search({
-            query,
-            entityType,
-            entityId,
-            limit,
-            lexicalWeight,
-            vectorWeight,
-            minScore,
-        });
-        return textResultWithProtocolWarning(result, warning);
+        try {
+            const result = await iranti.search({
+                query,
+                entityType,
+                entityId,
+                limit,
+                lexicalWeight,
+                vectorWeight,
+                minScore,
+            });
+            return textResult(result);
+        } catch (error) {
+            if (error instanceof ProtocolViolationError) {
+                return protocolViolationResult(error);
+            }
+            throw error;
+        }
     });
 
     server.registerTool('iranti_write', {
@@ -787,10 +797,15 @@ whether memory should be injected before graph traversal.`,
     }, async ({ entity, agent, agentId }) => {
         const resolvedAgent = resolveToolAgent(agent, agentId);
         syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
-        const warning = getReadBeforeAttendWarning(resolvedAgent, 'iranti_related');
-        if (warning) emitReadBeforeAttendWarning(resolvedAgent, 'iranti_related', warning);
-        const result = await iranti.getRelated(entity);
-        return textResultWithProtocolWarning(result, warning);
+        try {
+            const result = await iranti.getRelated(entity);
+            return textResult(result);
+        } catch (error) {
+            if (error instanceof ProtocolViolationError) {
+                return protocolViolationResult(error);
+            }
+            throw error;
+        }
     });
 
     server.registerTool('iranti_related_deep', {
@@ -806,10 +821,15 @@ whether memory should be injected before graph traversal.`,
     }, async ({ entity, depth, agent, agentId }) => {
         const resolvedAgent = resolveToolAgent(agent, agentId);
         syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
-        const warning = getReadBeforeAttendWarning(resolvedAgent, 'iranti_related_deep');
-        if (warning) emitReadBeforeAttendWarning(resolvedAgent, 'iranti_related_deep', warning);
-        const result = await iranti.getRelatedDeep(entity, depth ?? 2);
-        return textResultWithProtocolWarning(result, warning);
+        try {
+            const result = await iranti.getRelatedDeep(entity, depth ?? 2);
+            return textResult(result);
+        } catch (error) {
+            if (error instanceof ProtocolViolationError) {
+                return protocolViolationResult(error);
+            }
+            throw error;
+        }
     });
 
     server.registerTool('iranti_who_knows', {
@@ -824,10 +844,15 @@ whether memory should be injected before provenance discovery.`,
     }, async ({ entity, agent, agentId }) => {
         const resolvedAgent = resolveToolAgent(agent, agentId);
         syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
-        const warning = getReadBeforeAttendWarning(resolvedAgent, 'iranti_who_knows');
-        if (warning) emitReadBeforeAttendWarning(resolvedAgent, 'iranti_who_knows', warning);
-        const result = await iranti.whoKnows(entity);
-        return textResultWithProtocolWarning(result, warning);
+        try {
+            const result = await iranti.whoKnows(entity);
+            return textResult(result);
+        } catch (error) {
+            if (error instanceof ProtocolViolationError) {
+                return protocolViolationResult(error);
+            }
+            throw error;
+        }
     });
 
     if (isInteractiveTerminalLaunch()) {

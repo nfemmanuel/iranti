@@ -380,14 +380,17 @@ the session first and report that in the result metadata.
 This is the minimum safe pre-reply call even when the host skipped handshake.
 Omitting currentContext falls back to the latest message only; pass the
 full visible context when available. For host compatibility, message is
-accepted as an alias for latestMessage.`,
+accepted as an alias for latestMessage. When phase='post-response', pass the
+assistant response so Iranti can persist strict continuity facts and shared
+checkpoint breadcrumbs before closing the turn.`,
             iranti_checkpoint: `Persist a shared progress checkpoint while you work.
 Use this at meaningful milestones so current step, next step, open risks,
 recent outputs, structured actions, and shared entity breadcrumbs survive across turns,
 sessions, and agents. This is the strongest shared-RAM tool for active work:
 prefer it over ad-hoc prose when you need another session or another agent
 to pick up where you left off. If entityTargets are supplied, Iranti also
-writes compact shared checkpoint_* breadcrumbs to those entities for handoff.`,
+writes canonical shared breadcrumbs such as current_step, next_step,
+open_risks, recent_actions, and recent_file_changes to those entities for handoff.`,
             iranti_handshake: `Initialize or refresh an agent's working-memory brief for the current task.
 Call this at session start or when a new task begins, passing the task and
 recent messages. Returns operating rules plus prioritized relevant memory
@@ -499,6 +502,20 @@ whether memory should be injected before graph traversal.`,
         expect(writeProperties.issueStatus === 'open', 'Expected iranti_write propertiesJson to persist issueStatus metadata.');
         expect(writeProperties.issueType === 'smoke_test', 'Expected iranti_write propertiesJson to persist issueType metadata.');
 
+        const freshAgentQuery = await client.callTool({
+            name: 'iranti_query',
+            arguments: {
+                agent: `mcp_smoke_fresh_agent_${Date.now()}`,
+                entity,
+                key: 'status',
+            },
+        });
+        expect(!freshAgentQuery.isError, 'Expected iranti_query for a fresh agent to return a structured protocol violation.');
+        expect(
+            JSON.stringify(freshAgentQuery.structuredContent).includes('"code":"handshake_required"'),
+            'Expected iranti_query without handshake to be blocked with handshake_required.'
+        );
+
         const issueWrite = await client.callTool({
             name: 'iranti_write_issue',
             arguments: {
@@ -507,7 +524,7 @@ whether memory should be injected before graph traversal.`,
                 title: 'MCP issue lifecycle missing',
                 status: 'open',
                 summary: 'MCP issue lifecycle is open.',
-                confidence: 91,
+                confidence: 80,
                 severity: 'high',
                 detailsJson: JSON.stringify({ source: 'mcp_smoke' }),
                 tags: ['mcp', 'issue-lifecycle'],
@@ -569,8 +586,8 @@ whether memory should be injected before graph traversal.`,
         });
         expect(!personalQuery.isError, 'Expected iranti_query for personal canonical entity to succeed.');
         expect(
-            JSON.stringify(personalQuery.structuredContent).toLowerCase().includes('the bible'),
-            'Expected personal fact to be stored under user/main.',
+            JSON.stringify(personalQuery.structuredContent).includes('protocolViolation'),
+            'Expected iranti_query before attend to be blocked with a protocol violation.',
         );
 
         const relate = await client.callTool({
@@ -592,12 +609,8 @@ whether memory should be injected before graph traversal.`,
         });
         expect(!query.isError, 'Expected iranti_query to succeed.');
         expect(
-            JSON.stringify(query.structuredContent).includes('smoke_test'),
-            'Expected iranti_query to return the written fact.'
-        );
-        expect(
-            JSON.stringify(query.structuredContent).includes('protocolWarning'),
-            'Expected iranti_query before attend to surface a protocol warning.'
+            JSON.stringify(query.structuredContent).includes('protocolViolation'),
+            'Expected iranti_query before attend to be blocked with a protocol violation.'
         );
 
         const search = await client.callTool({
@@ -609,8 +622,8 @@ whether memory should be injected before graph traversal.`,
         });
         expect(!search.isError, 'Expected iranti_search to succeed.');
         expect(
-            JSON.stringify(search.structuredContent).includes(entity),
-            'Expected iranti_search to surface the written entity.'
+            JSON.stringify(search.structuredContent).includes('protocolViolation'),
+            'Expected iranti_search before attend to be blocked with a protocol violation.'
         );
 
         const rememberResponse = await client.callTool({
@@ -631,8 +644,8 @@ whether memory should be injected before graph traversal.`,
         });
         expect(!rememberedNextStep.isError, 'Expected iranti_query for remembered next_step to succeed.');
         expect(
-            JSON.stringify(rememberedNextStep.structuredContent).includes('rerun the db validation'),
-            'Expected iranti_remember_response to persist strict assistant summary facts.'
+            JSON.stringify(rememberedNextStep.structuredContent).includes('protocolViolation'),
+            'Expected exact query before attend to be blocked with a protocol violation.'
         );
 
         const rememberedCurrentStep = await client.callTool({
@@ -653,8 +666,8 @@ whether memory should be injected before graph traversal.`,
         });
         expect(!currentStepQuery.isError, 'Expected iranti_query for remembered current_step to succeed.');
         expect(
-            JSON.stringify(currentStepQuery.structuredContent).includes('audit the retrieval lifecycle'),
-            'Expected iranti_remember_response to persist current_step assistant summary facts.'
+            JSON.stringify(currentStepQuery.structuredContent).includes('protocolViolation'),
+            'Expected exact query before attend to be blocked with a protocol violation.'
         );
 
         const rememberedOpenRisks = await client.callTool({
@@ -675,21 +688,21 @@ whether memory should be injected before graph traversal.`,
         });
         expect(!openRisksQuery.isError, 'Expected iranti_query for remembered open_risks to succeed.');
         expect(
-            JSON.stringify(openRisksQuery.structuredContent).includes('stale runtime metadata'),
-            'Expected iranti_remember_response to persist open_risks assistant summary facts.'
+            JSON.stringify(openRisksQuery.structuredContent).includes('protocolViolation'),
+            'Expected exact query before attend to be blocked with a protocol violation.'
         );
 
         const checkpointStepQuery = await client.callTool({
             name: 'iranti_query',
             arguments: {
                 entity: 'project/mcp_smoke_project_memory',
-                key: 'checkpoint_current_step',
+                key: 'current_step',
             },
         });
-        expect(!checkpointStepQuery.isError, 'Expected checkpoint_current_step query to succeed.');
+        expect(!checkpointStepQuery.isError, 'Expected current_step query to succeed.');
         expect(
-            JSON.stringify(checkpointStepQuery.structuredContent).includes('validate the MCP tool surface'),
-            'Expected iranti_checkpoint to persist shared checkpoint breadcrumbs.'
+            JSON.stringify(checkpointStepQuery.structuredContent).includes('protocolViolation'),
+            'Expected exact query before attend to be blocked with a protocol violation.'
         );
 
         const related = await client.callTool({
@@ -700,12 +713,8 @@ whether memory should be injected before graph traversal.`,
         });
         expect(!related.isError, 'Expected iranti_related to succeed.');
         expect(
-            JSON.stringify(related.structuredContent).includes(relatedEntity.split('/')[1]),
-            'Expected iranti_related to surface the created relationship.'
-        );
-        expect(
-            JSON.stringify(related.structuredContent).includes('protocolWarning'),
-            'Expected iranti_related before attend to surface a protocol warning.'
+            JSON.stringify(related.structuredContent).includes('protocolViolation'),
+            'Expected iranti_related before attend to be blocked with a protocol violation.'
         );
 
         const relatedDeep = await client.callTool({
@@ -717,8 +726,8 @@ whether memory should be injected before graph traversal.`,
         });
         expect(!relatedDeep.isError, 'Expected iranti_related_deep to succeed.');
         expect(
-            JSON.stringify(relatedDeep.structuredContent).includes('protocolWarning'),
-            'Expected iranti_related_deep before attend to surface a protocol warning.'
+            JSON.stringify(relatedDeep.structuredContent).includes('protocolViolation'),
+            'Expected iranti_related_deep before attend to be blocked with a protocol violation.'
         );
 
         const attend = await client.callTool({
@@ -728,12 +737,21 @@ whether memory should be injected before graph traversal.`,
                 currentContext: 'We are validating MCP memory recall.',
                 entityHints: [entity],
                 maxFacts: 3,
+                phase: 'pre-response',
             },
         });
         expect(!attend.isError, 'Expected iranti_attend to succeed.');
         expect(
             typeof attend.structuredContent === 'object' && attend.structuredContent !== null,
             'Expected iranti_attend to return structured content.'
+        );
+        expect(
+            JSON.stringify(attend.structuredContent).includes('"factId":"F1"'),
+            'Expected iranti_attend to tag injected facts with stable fact IDs.'
+        );
+        expect(
+            JSON.stringify(attend.structuredContent).includes('[Iranti Retrieved Memory]'),
+            'Expected iranti_attend to include a structured injection block for first-party hosts.'
         );
 
         const attendAlias = await client.callTool({
@@ -743,6 +761,7 @@ whether memory should be injected before graph traversal.`,
                 currentContext: 'We are validating MCP message alias handling.',
                 entityHints: [entity],
                 maxFacts: 3,
+                phase: 'mid-turn',
             },
         });
         expect(!attendAlias.isError, 'Expected iranti_attend to accept message as an alias for latestMessage.');
@@ -760,8 +779,41 @@ whether memory should be injected before graph traversal.`,
         });
         expect(!queryAfterAttend.isError, 'Expected iranti_query after attend to succeed.');
         expect(
-            !JSON.stringify(queryAfterAttend.structuredContent).includes('protocolWarning'),
-            'Did not expect iranti_query after attend to surface a protocol warning.'
+            JSON.stringify(queryAfterAttend.structuredContent).includes('smoke_test'),
+            'Expected iranti_query after attend to return the written fact.'
+        );
+
+        const searchAfterConsumedAttend = await client.callTool({
+            name: 'iranti_search',
+            arguments: {
+                query: `${entity} smoke_test`,
+                limit: 5,
+            },
+        });
+        expect(!searchAfterConsumedAttend.isError, 'Expected iranti_search after the attend-backed query to return a structured protocol violation.');
+        expect(
+            JSON.stringify(searchAfterConsumedAttend.structuredContent).includes('"code":"attend_required"'),
+            'Expected discovery budget to be consumed after one read, requiring a fresh iranti_attend.'
+        );
+
+        const postResponseAttend = await client.callTool({
+            name: 'iranti_attend',
+            arguments: {
+                latestMessage: 'File created docs/mcp-followup.md for host contract notes.',
+                currentContext: 'We just finished the smoke-test response and are closing the turn.',
+                phase: 'post-response',
+            },
+        });
+        expect(!postResponseAttend.isError, 'Expected phase=post-response attend to succeed.');
+        const autoFileChange = await findEntry({
+            entityType: 'project',
+            entityId: 'mcp_smoke_project_memory',
+            key: 'recent_file_changes',
+        });
+        expect(Boolean(autoFileChange), 'Expected post-response attend to auto-persist assistant response file changes.');
+        expect(
+            JSON.stringify(autoFileChange?.valueRaw).includes('docs/mcp-followup.md'),
+            'Expected post-response attend to checkpoint the assistant response continuity breadcrumbs.'
         );
 
         await expectMcpWrapperToExitOnStdinClose(connectionString);

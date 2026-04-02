@@ -89,7 +89,13 @@ function readEnv(filePath: string): Record<string, string> {
         if (!trimmed || trimmed.startsWith('#')) continue;
         const index = trimmed.indexOf('=');
         if (index <= 0) continue;
-        env[trimmed.slice(0, index)] = trimmed.slice(index + 1);
+        const value = trimmed.slice(index + 1).trim();
+        env[trimmed.slice(0, index)] = (
+            (value.startsWith('"') && value.endsWith('"'))
+            || (value.startsWith("'") && value.endsWith("'"))
+        )
+            ? value.slice(1, -1)
+            : value;
     }
     return env;
 }
@@ -201,6 +207,43 @@ async function main(): Promise<void> {
             } else {
                 throw dbWriteErr;
             }
+        }
+
+        if (sentinelDbAvailable) {
+            const dbForScaffoldQuery = initDb(upgradeTestDbUrl);
+            const scaffoldCloseout = await dbForScaffoldQuery.knowledgeEntry.findUnique({
+                where: {
+                    entityType_entityId_key: {
+                        entityType: 'user',
+                        entityId: 'main',
+                        key: 'claude_setup_scaffold_status',
+                    },
+                },
+            });
+            assert.ok(scaffoldCloseout, 'Expected Claude setup to write the shared scaffold closeout fact.');
+            assert.strictEqual(scaffoldCloseout?.source, 'ClaudeSetupScaffold');
+            assert.deepStrictEqual(
+                scaffoldCloseout?.valueRaw,
+                {
+                    tool: 'claude-setup',
+                    projectPath: projectDir,
+                    projectEnvFile: path.join(projectDir, '.env.iranti'),
+                    files: [
+                        { path: path.join(projectDir, '.mcp.json'), status: 'created' },
+                        { path: path.join(projectDir, '.vscode', 'mcp.json'), status: 'created' },
+                        { path: path.join(projectDir, '.claude', 'settings.local.json'), status: 'created' },
+                        { path: path.join(projectDir, 'CLAUDE.md'), status: 'created' },
+                    ],
+                    updatedAt: scaffoldCloseout?.valueRaw && typeof scaffoldCloseout.valueRaw === 'object'
+                        ? (scaffoldCloseout.valueRaw as { updatedAt?: string }).updatedAt
+                        : undefined,
+                },
+                'Expected Claude scaffold closeout to preserve the tool, project, binding, and file inventory.'
+            );
+            const scaffoldProperties = scaffoldCloseout?.properties as Record<string, unknown> | null;
+            assert.strictEqual(scaffoldProperties?.durableClass, 'scaffold_status');
+            assert.strictEqual(scaffoldProperties?.canonicalKey, 'claude_setup_scaffold_status');
+            await disconnectDb();
         }
 
         const staleClaudeMdFile = path.join(projectDir, 'CLAUDE.md');
@@ -505,6 +548,7 @@ async function main(): Promise<void> {
         const projectInitBinding = readEnv(path.join(projectInitDir, '.env.iranti'));
         assert.strictEqual(projectInitBinding.IRANTI_PERSONAL_MEMORY_ENTITY, 'user/main');
         assert.strictEqual(projectInitBinding.IRANTI_AUTO_REMEMBER, 'false');
+        assert.match(projectInitBinding.IRANTI_CODEBASE_ENTITY ?? '', /^codebase\/[a-z0-9_-]+_[a-f0-9]{8}$/i, 'Expected project init to persist a derived IRANTI_CODEBASE_ENTITY.');
 
         const configureProjectRun = runCli([
             'configure',
@@ -536,6 +580,110 @@ async function main(): Promise<void> {
         assert.strictEqual(configuredEntry?.agentId, configuredProjectBinding.IRANTI_AGENT_ID);
         assert.strictEqual(configuredEntry?.memoryEntity, configuredProjectBinding.IRANTI_MEMORY_ENTITY);
         assert.strictEqual(configuredEntry?.mode, configuredProjectBinding.IRANTI_PROJECT_MODE);
+        const configuredInstanceEnv = readEnv(configuredProjectBinding.IRANTI_INSTANCE_ENV);
+        const codebaseEntity = configuredProjectBinding.IRANTI_CODEBASE_ENTITY;
+        assert.ok(codebaseEntity, 'Expected configured project binding to retain IRANTI_CODEBASE_ENTITY.');
+        try {
+            const configuredDb = initDb(configuredInstanceEnv.DATABASE_URL);
+            const [codebaseType, codebaseId] = String(codebaseEntity).split('/');
+            const overviewFact = await configuredDb.knowledgeEntry.findUnique({
+                where: {
+                    entityType_entityId_key: {
+                        entityType: codebaseType!,
+                        entityId: codebaseId!,
+                        key: 'project_overview',
+                    },
+                },
+            });
+            const bindingFact = await configuredDb.knowledgeEntry.findUnique({
+                where: {
+                    entityType_entityId_key: {
+                        entityType: codebaseType!,
+                        entityId: codebaseId!,
+                        key: 'project_binding',
+                    },
+                },
+            });
+            assert.ok(overviewFact, 'Expected bind-time project learning to write project_overview.');
+            assert.ok(bindingFact, 'Expected bind-time project learning to write project_binding.');
+            assert.match(overviewFact?.valueSummary ?? '', /Initial project snapshot/i);
+            assert.strictEqual((bindingFact?.valueRaw as { codebaseEntity?: string } | null)?.codebaseEntity, codebaseEntity);
+        } catch (dbAssertErr) {
+            const message = dbAssertErr instanceof Error ? dbAssertErr.message : String(dbAssertErr);
+            if (/P1000|P1001|ECONNREFUSED|authentication|password|connect ETIMEDOUT/i.test(message)) {
+                console.warn('  ⚠ Project-learning DB assertions skipped — configured test DB not accessible from harness.');
+            } else {
+                throw dbAssertErr;
+            }
+        } finally {
+            await disconnectDb().catch(() => undefined);
+        }
+
+        const reboundPort = await reservePort();
+        const reboundInstanceName = 'beta';
+        const reboundApiKey = `test_${randomBytes(16).toString('hex')}`;
+        const reboundDbUrl = 'postgresql://postgres:postgres@localhost:5432/iranti_setup_rebind';
+        const reboundInstanceRun = runCli([
+            'instance',
+            'create',
+            reboundInstanceName,
+            '--root',
+            runtimeRoot,
+            '--port',
+            String(reboundPort),
+            '--db-url',
+            reboundDbUrl,
+            '--provider',
+            'mock',
+            '--api-key',
+            reboundApiKey,
+        ], repoRoot);
+        assert.strictEqual(reboundInstanceRun.status, 0, `rebound instance create failed:\n${reboundInstanceRun.stdout}\n${reboundInstanceRun.stderr}`);
+
+        const rebindProjectRun = runCli([
+            'configure',
+            'project',
+            projectInitDir,
+            '--root',
+            runtimeRoot,
+            '--instance',
+            reboundInstanceName,
+            '--mode',
+            'shared',
+            '--auto-remember',
+            'true',
+        ], repoRoot);
+        assert.strictEqual(rebindProjectRun.status, 0, `configure project rebind failed:\n${rebindProjectRun.stdout}\n${rebindProjectRun.stderr}`);
+
+        const reboundProjectBinding = readEnv(path.join(projectInitDir, '.env.iranti'));
+        assert.strictEqual(reboundProjectBinding.IRANTI_INSTANCE, reboundInstanceName);
+        assert.strictEqual(reboundProjectBinding.IRANTI_INSTANCE_ENV, path.join(runtimeRoot, 'instances', reboundInstanceName, '.env'));
+        assert.strictEqual(reboundProjectBinding.IRANTI_PROJECT_MODE, 'shared');
+        assert.strictEqual(reboundProjectBinding.IRANTI_AUTO_REMEMBER, 'true');
+
+        const rebindSourceRegistry = readJson<{ projects: Array<{ projectPath: string }> }>(projectsRegistryPath);
+        assert.deepStrictEqual(
+            rebindSourceRegistry.projects.map((entry) => entry.projectPath).sort(),
+            [projectDir].sort(),
+            'Expected rebind to remove only the rebound project from the original instance registry while preserving still-bound setup projects.',
+        );
+
+        const reboundProjectsRegistryPath = path.join(runtimeRoot, 'instances', reboundInstanceName, 'projects.json');
+        const reboundProjectsRegistry = readJson<{
+            projects: Array<{
+                projectPath: string;
+                agentId: string;
+                memoryEntity: string;
+                mode: string;
+                boundAt: string;
+            }>;
+        }>(reboundProjectsRegistryPath);
+        assert.deepStrictEqual(reboundProjectsRegistry.projects.map((entry) => entry.projectPath), [projectInitDir]);
+        const reboundEntry = reboundProjectsRegistry.projects[0];
+        assert.strictEqual(reboundEntry.agentId, reboundProjectBinding.IRANTI_AGENT_ID);
+        assert.strictEqual(reboundEntry.memoryEntity, reboundProjectBinding.IRANTI_MEMORY_ENTITY);
+        assert.strictEqual(reboundEntry.mode, reboundProjectBinding.IRANTI_PROJECT_MODE);
+        assert.strictEqual(reboundProjectBinding.IRANTI_CODEBASE_ENTITY, codebaseEntity, 'Expected rebind to preserve the same derived codebase entity for the project path.');
 
         writeJson(path.join(projectInitDir, '.mcp.json'), {
             mcpServers: {
@@ -576,6 +724,14 @@ async function main(): Promise<void> {
                 ],
             },
         });
+        writeText(path.join(projectInitDir, 'AGENTS.md'), [
+            '<!-- iranti-rules -->',
+            '# Iranti MCP Protocol',
+            '',
+            'Codex scaffold block for cleanup coverage.',
+            '<!-- /iranti-rules -->',
+            '',
+        ].join('\n'));
 
         const projectUnbindRun = runCli([
             'project',
@@ -598,7 +754,7 @@ async function main(): Promise<void> {
             };
         };
         assert.strictEqual(projectUnbindPayload.removedBinding, true, 'Expected project unbind to remove the project binding.');
-        assert.deepStrictEqual(projectUnbindPayload.cleanedRegistryInstances, ['local']);
+        assert.deepStrictEqual(projectUnbindPayload.cleanedRegistryInstances, [reboundInstanceName]);
         assert.strictEqual(projectUnbindPayload.keepIntegrations, false, 'Expected project unbind to clean local integrations by default.');
         assert.strictEqual(fs.existsSync(path.join(projectInitDir, '.env.iranti')), false, 'Expected project unbind to remove .env.iranti.');
         assert.strictEqual(fs.existsSync(path.join(projectInitDir, '.mcp.json')), false, 'Expected project unbind to remove a workspace MCP file that only referenced Iranti.');
@@ -608,9 +764,16 @@ async function main(): Promise<void> {
         const claudeSettingsAfterUnbind = readJson<{ hooks?: Record<string, Array<{ hooks?: Array<{ command?: string }> }>> }>(path.join(projectInitDir, '.claude', 'settings.local.json'));
         const remainingSessionStart = claudeSettingsAfterUnbind.hooks?.SessionStart?.[0]?.hooks?.map((entry) => entry.command) ?? [];
         assert.deepStrictEqual(remainingSessionStart, ['echo keep-me'], 'Expected project unbind to remove only Iranti Claude hooks.');
-        const registryAfterUnbind = readJson<{ projects: Array<{ projectPath: string }> }>(projectsRegistryPath);
+        assert.strictEqual(fs.existsSync(path.join(projectInitDir, 'AGENTS.md')), false, 'Expected project unbind to remove the Codex AGENTS scaffold block when it is the only content.');
+        const registryAfterUnbind = readJson<{ projects: Array<{ projectPath: string }> }>(reboundProjectsRegistryPath);
+        const sourceRegistryAfterUnbind = readJson<{ projects: Array<{ projectPath: string }> }>(projectsRegistryPath);
         assert.deepStrictEqual(
-            registryAfterUnbind.projects.map((entry) => entry.projectPath).sort(),
+            registryAfterUnbind.projects,
+            [],
+            'Expected project unbind to clear the rebound instance registry.',
+        );
+        assert.deepStrictEqual(
+            sourceRegistryAfterUnbind.projects.map((entry) => entry.projectPath).sort(),
             [projectDir].sort(),
             'Expected project unbind to keep the still-bound setup project in projects.json.',
         );

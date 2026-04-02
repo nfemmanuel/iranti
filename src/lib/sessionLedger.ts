@@ -66,6 +66,24 @@ export interface SessionLedgerLearningProfile {
     missingWriteCategories: string[];
 }
 
+export interface MemoryAttributionSummary {
+    injectionId: string;
+    sessionId: string | null;
+    agentId: string;
+    source: string;
+    host: string | null;
+    surfacedAt: string;
+    scoredAt: string | null;
+    surfaced: boolean;
+    used: boolean;
+    helpful: boolean;
+    injectedKeys: string[];
+    injectedEntryIds: number[];
+    evidenceKinds: string[];
+    phase: string | null;
+    reason: string | null;
+}
+
 export interface SessionLedgerLearningProfileQuery {
     agentId?: string;
     source?: string;
@@ -226,6 +244,8 @@ const LEDGER_LEARNING_ACTIONS = new Set([
     'integration_probe_failed',
     'mandatory_recall_forced',
     'memory_injected',
+    'memory_evidence_observed',
+    'memory_injection_scored',
     'query_executed',
     'search_executed',
     'related_executed',
@@ -246,6 +266,7 @@ const LEDGER_LEARNING_ACTIONS = new Set([
 
 const LEDGER_SUCCESS_ACTIONS = new Set([
     'memory_injected',
+    'memory_injection_scored',
     'query_executed',
     'search_executed',
     'related_executed',
@@ -269,6 +290,8 @@ const LEDGER_ACTIVITY_ACTIONS = new Set([
     'attend_completed',
     'memory_injected',
     'memory_not_injected',
+    'memory_evidence_observed',
+    'memory_injection_scored',
     'mandatory_recall_forced',
 ]);
 
@@ -300,6 +323,8 @@ const LEDGER_DISCOVERY_ACTIONS = new Set([
     'whoknows_executed',
     'observe_completed',
     'memory_injected',
+    'memory_evidence_observed',
+    'memory_injection_scored',
     'mandatory_recall_forced',
 ]);
 
@@ -435,6 +460,15 @@ function describeEvent(event: SessionLedgerEvent): string | null {
             return injectedKeys.length > 0
                 ? `memory injected from ${host ?? event.source}: ${injectedKeys.slice(0, 3).join(', ')}`
                 : `memory injected from ${host ?? event.source}`;
+        case 'memory_evidence_observed': {
+            const evidenceKind = typeof event.metadata?.evidenceKind === 'string' ? event.metadata.evidenceKind : 'memory_evidence';
+            return `memory evidence observed from ${host ?? event.source}: ${evidenceKind}`;
+        }
+        case 'memory_injection_scored': {
+            const used = event.metadata?.used === true;
+            const helpful = event.metadata?.helpful === true;
+            return `memory injection scored from ${host ?? event.source}: used=${used} helpful=${helpful}`;
+        }
         case 'checkpoint_written':
             return entityKey
                 ? `shared checkpoint written for ${entityKey}`
@@ -1000,6 +1034,73 @@ export async function summarizeSessionLedgerLearnings(
     }
 
     return out;
+}
+
+export async function summarizeMemoryAttribution(input: SessionLedgerQuery = {}): Promise<MemoryAttributionSummary[]> {
+    const events = await querySessionLedger({
+        ...input,
+        actionTypes: ['memory_injected', 'memory_injection_scored'],
+        limit: normalizeLimit(input.limit ?? 200),
+    });
+
+    const byInjectionId = new Map<string, MemoryAttributionSummary>();
+
+    for (const event of events.slice().sort((left, right) => left.timestamp.localeCompare(right.timestamp))) {
+        const injectionId = typeof event.metadata?.injectionId === 'string'
+            ? event.metadata.injectionId
+            : null;
+        if (!injectionId) {
+            continue;
+        }
+
+        const existing = byInjectionId.get(injectionId);
+        const injectedKeys = Array.isArray(event.metadata?.injectedKeys)
+            ? event.metadata!.injectedKeys.map((value) => String(value)).filter(Boolean)
+            : existing?.injectedKeys ?? [];
+        const injectedEntryIds = Array.isArray(event.metadata?.injectedEntryIds)
+            ? event.metadata!.injectedEntryIds
+                .map((value) => Number(value))
+                .filter((value) => Number.isInteger(value))
+            : existing?.injectedEntryIds ?? [];
+        const evidenceKinds = Array.isArray(event.metadata?.evidenceKinds)
+            ? event.metadata!.evidenceKinds.map((value) => String(value)).filter(Boolean)
+            : existing?.evidenceKinds ?? [];
+        const sessionId = typeof event.metadata?.sessionId === 'string'
+            ? event.metadata.sessionId
+            : existing?.sessionId ?? null;
+        const host = typeof event.metadata?.host === 'string'
+            ? event.metadata.host
+            : existing?.host ?? null;
+        const phase = typeof event.metadata?.phase === 'string'
+            ? event.metadata.phase
+            : existing?.phase ?? null;
+
+        byInjectionId.set(injectionId, {
+            injectionId,
+            sessionId,
+            agentId: event.agentId,
+            source: event.source,
+            host,
+            surfacedAt: existing?.surfacedAt ?? event.timestamp,
+            scoredAt: event.actionType === 'memory_injection_scored'
+                ? event.timestamp
+                : (existing?.scoredAt ?? null),
+            surfaced: true,
+            used: event.actionType === 'memory_injection_scored'
+                ? event.metadata?.used === true
+                : (existing?.used ?? false),
+            helpful: event.actionType === 'memory_injection_scored'
+                ? event.metadata?.helpful === true
+                : (existing?.helpful ?? false),
+            injectedKeys,
+            injectedEntryIds,
+            evidenceKinds,
+            phase,
+            reason: event.reason ?? existing?.reason ?? null,
+        });
+    }
+
+    return Array.from(byInjectionId.values()).sort((left, right) => right.surfacedAt.localeCompare(left.surfacedAt));
 }
 
 export async function buildSessionLedgerLearningProfile(
