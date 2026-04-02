@@ -276,11 +276,24 @@ async function main(): Promise<void> {
             database: 'iranti_local',
             dockerContainerName: 'iranti_dev_db',
         });
+        writeJson(path.join(root, 'instances', 'local', 'projects.json'), {
+            projects: [
+                {
+                    projectPath: path.join(root, 'projects', 'control-plane'),
+                    agentId: 'control_plane_main',
+                    memoryEntity: 'project/iranti_control_plane',
+                    mode: 'shared',
+                    boundAt: new Date().toISOString(),
+                },
+            ],
+        });
 
         const show = runCli(['instance', 'show', 'local', '--root', root], repoRoot);
         assert.equal(show.status, 0, `instance show failed:\n${show.stdout}\n${show.stderr}`);
         assert.match(show.stdout, /docker-container:iranti_dev_db -> tcp:5434/i);
         assert.match(show.stdout, /db strategy:\s+shared local database via docker -> localhost:5432\/iranti_local, container iranti_dev_db/i);
+        assert.match(show.stdout, /projects:/i);
+        assert.match(show.stdout, /control-plane/i);
     } finally {
         fs.rmSync(root, { recursive: true, force: true });
     }

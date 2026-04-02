@@ -1,393 +1,155 @@
 # Deployment Guide
 
-How to deploy and use Iranti across different devices.
+This guide describes the current Iranti deployment model:
 
----
+- one or more named Iranti instances
+- project-local `.env.iranti` bindings
+- host integrations layered on top of those bindings
 
-## Architecture Overview
+If you need the detailed operator workflow, use the [Operator Manual](../guides/manual.md). If you need the shortest path, use the [Quickstart](../guides/quickstart.md).
 
-```
-┌─────────────────┐         ┌─────────────────┐         ┌─────────────────┐
-│   Your Laptop   │         │  Server/Cloud   │         │  Other Device   │
-│                 │         │                 │         │                 │
-│  Browser with   │◄────────┤  Iranti API     │────────►│  Python Agents  │
-│  Chrome Ext     │  HTTP   │  + PostgreSQL   │  HTTP   │  (CrewAI, etc)  │
-└─────────────────┘         └─────────────────┘         └─────────────────┘
-```
+## Recommended Model
 
-**Key Point**: Iranti server runs in ONE place. Everything else connects to it via HTTP.
+For most users:
 
----
+1. Create an instance with `iranti setup`
+2. Start it with `iranti run --instance <name>`
+3. Bind each project with `iranti project init`
+4. Run `iranti claude-setup` or `iranti codex-setup` inside each bound project
 
-## Deployment Options
+That model replaces older guidance that centered direct `npm run api`, hand-edited browser config, or copied middleware files as the primary onboarding path.
 
-### Option 1: Local Development (Single Device)
+## Deployment Shapes
 
-**Use case**: Testing, development, personal use
+### Single Machine
 
-```bash
-# On your laptop
-cd iranti
-docker-compose up -d  # PostgreSQL
-npm run api           # Iranti server on localhost:3001
+Best for:
+- local development
+- one operator
+- one or a few projects on the same machine
 
-# Browser extension points to localhost:3001
-# Python agents point to localhost:3001
-```
-
-**Pros**: Simple, no network configuration  
-**Cons**: Only works on one device
-
----
-
-### Option 2: Server Deployment (Multi-Device)
-
-**Use case**: Team collaboration, production, multiple devices
-
-#### Step 1: Deploy Iranti Server
-
-**On a server (AWS, DigitalOcean, your home server, etc.)**:
+Suggested flow:
 
 ```bash
-# 1. Clone repo
-git clone https://github.com/nfemmanuel/iranti
-cd iranti
-
-# 2. Configure environment
-cp .env.example .env
-nano .env
-
-# Set these:
-DATABASE_URL=postgresql://user:pass@localhost:5432/iranti
-IRANTI_API_KEY=replace-with-real-iranti-key
-IRANTI_PORT=3001
-NODE_ENV=production
-
-# 3. Start PostgreSQL
-docker-compose up -d
-
-# 4. Install and setup
-npm install
-npm run setup
-
-# 5. Start API server (production)
-npm run api
-
-# Or use PM2 for auto-restart:
-npm install -g pm2
-pm2 start npm --name iranti -- run api
-pm2 save
-pm2 startup
+npm install -g iranti
+iranti setup
+iranti run --instance local
 ```
 
-**Make server accessible**:
-- Open port 3001 in firewall
-- Or use nginx reverse proxy on port 80/443
-- Get server IP or domain (e.g., `iranti.yourcompany.com`)
-
-#### Step 2: Use from Browser (Any Device)
-
-**On your laptop, tablet, phone**:
-
-1. Install Chrome extension (see `clients/middleware/BROWSER_INTEGRATION.md`)
-
-2. Edit `content.js`:
-   ```javascript
-   const IRANTI_URL = 'http://your-server-ip:3001';  // Change this
-   const IRANTI_API_KEY = 'your_secure_key_here';
-   ```
-
-3. Load extension in Chrome
-
-4. Visit claude.ai or chat.openai.com - memory now works!
-
-#### Step 3: Use from Python Agents (Any Device)
-
-**On your work laptop, home desktop, cloud VM**:
+Then, inside each project:
 
 ```bash
-# 1. Install Python client
-pip install requests python-dotenv
-
-# 2. Copy client files
-# Download these from your Iranti repo:
-# - clients/python/iranti.py
-# - clients/middleware/iranti_middleware.py
-
-# 3. Configure
-export IRANTI_URL=http://your-server-ip:3001
-export IRANTI_API_KEY=replace-with-real-iranti-key
-
-# 4. Use in your code
-from iranti import IrantiClient
-
-client = IrantiClient(
-    base_url="http://your-server-ip:3001",
-    api_key="your_secure_key_here"
-)
-
-# Now all agents on this device share memory via the server
+iranti project init . --instance local --agent-id my_agent
+iranti claude-setup
 ```
 
----
-
-## Production Deployment Checklist
-
-### Security
-
-- [ ] Change default API key in `.env`
-- [ ] Use HTTPS (nginx + Let's Encrypt)
-- [ ] Restrict PostgreSQL to localhost only
-- [ ] Set strong PostgreSQL password
-- [ ] Use firewall to limit port 3001 access
-- [ ] Consider VPN for team access
-
-### Reliability
-
-- [ ] Use PM2 or systemd for auto-restart
-- [ ] Set up PostgreSQL backups
-- [ ] Monitor disk space (PostgreSQL grows over time)
-- [ ] Set up logging (PM2 logs or systemd journal)
-
-### Performance
-
-- [ ] Use PostgreSQL connection pooling (already configured)
-- [ ] Consider Redis for caching (future enhancement)
-- [ ] Monitor API response times
-- [ ] Scale PostgreSQL if needed (vertical scaling works well)
-
----
-
-## Example: Team Setup
-
-**Scenario**: 3 developers, 1 shared Iranti server
-
-### Server (AWS EC2 or similar)
+Or, for Codex:
 
 ```bash
-# Deploy once
-ssh ubuntu@iranti-server.company.com
-git clone https://github.com/nfemmanuel/iranti
-cd iranti
-# ... follow deployment steps above ...
-
-# Server now running at http://iranti-server.company.com:3001
+iranti codex-setup
 ```
 
-### Developer 1 (Laptop with Browser)
+### Shared Team Instance
+
+Best for:
+- several projects intentionally sharing one memory space
+- several devices pointing at one Iranti server
+- hosted or always-on environments
+
+Suggested flow on the instance host:
 
 ```bash
-# Install Chrome extension
-# Edit content.js:
-const IRANTI_URL = 'http://iranti-server.company.com:3001';
-const IRANTI_API_KEY = 'team_shared_key';
-
-# Use Claude.ai - memory persists across all team members
+npm install -g iranti
+iranti setup
+iranti run --instance team_memory
 ```
 
-### Developer 2 (Desktop with Python Agents)
+Use a stable database target and a stable public URL or reverse-proxied hostname for the running instance.
 
-```python
-# agents.py
-from iranti import IrantiClient
-
-client = IrantiClient(
-    base_url="http://iranti-server.company.com:3001",
-    api_key="team_shared_key"
-)
-
-# Write facts - visible to everyone
-client.write(
-    entity="project/alpha",
-    key="status",
-    value={"data": "Phase 2 complete"},
-    summary="status: Phase 2 complete",
-    confidence=90,
-    source="dev2_agent",
-    agent="developer_2"
-)
-```
-
-### Developer 3 (Remote Laptop)
-
-```python
-# Same setup, different agent ID
-client = IrantiClient(
-    base_url="http://iranti-server.company.com:3001",
-    api_key="team_shared_key"
-)
-
-# Read facts written by Dev 2
-facts = client.query_all("project/alpha")
-# Sees "Phase 2 complete" from Dev 2's agent
-```
-
-**Result**: All 3 developers share the same knowledge base. Facts written by one are immediately available to others.
-
----
-
-## Network Configuration
-
-### Local Network (Home/Office)
+Then, inside each client project:
 
 ```bash
-# Server on local network (e.g., 192.168.1.100)
-# Clients use: http://192.168.1.100:3001
+iranti project init . --instance team_memory --agent-id alice_main --mode shared
 ```
 
-### Cloud Deployment
+After the binding exists, add the host integration that project needs:
 
 ```bash
-# Server on cloud (e.g., AWS)
-# Get public IP or domain
-# Clients use: http://3.123.45.67:3001
-# Or: http://iranti.yourcompany.com:3001
+iranti claude-setup
 ```
 
-### HTTPS Setup (Recommended for Production)
+or
 
 ```bash
-# Install nginx
-sudo apt install nginx certbot python3-certbot-nginx
-
-# Configure nginx reverse proxy
-sudo nano /etc/nginx/sites-available/iranti
-
-# Add:
-server {
-    listen 80;
-    server_name iranti.yourcompany.com;
-    
-    location / {
-        proxy_pass http://localhost:3001;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-    }
-}
-
-# Enable site
-sudo ln -s /etc/nginx/sites-available/iranti /etc/nginx/sites-enabled/
-sudo nginx -t
-sudo systemctl restart nginx
-
-# Get SSL certificate
-sudo certbot --nginx -d iranti.yourcompany.com
-
-# Now clients use: https://iranti.yourcompany.com
+iranti codex-setup
 ```
 
----
+### Automated Or Managed Installs
 
-## Client Configuration Files
+When interactive setup is not appropriate, prefer:
 
-### Browser Extension
-
-**manifest.json** - no changes needed
-
-**content.js** - update these lines:
-```javascript
-const IRANTI_URL = 'https://iranti.yourcompany.com';  // Your server
-const IRANTI_API_KEY = 'replace-with-real-iranti-key';                // Your API key
-```
-
-### Python Agents
-
-**Option A: Environment variables** (recommended)
 ```bash
-export IRANTI_URL=https://iranti.yourcompany.com
-export IRANTI_API_KEY=replace-with-real-iranti-key
+iranti setup --defaults
+iranti setup --config ./iranti.setup.json
 ```
 
-**Option B: Code configuration**
-```python
-client = IrantiClient(
-    base_url="https://iranti.yourcompany.com",
-    api_key="replace-with-real-iranti-key"
-)
-```
+If you need lower-level control, the manual documents the install, instance-create, configure, auth, and upgrade commands explicitly.
 
-**Option C: .env file**
-```bash
-# .env
-IRANTI_URL=https://iranti.yourcompany.com
-IRANTI_API_KEY=replace-with-real-iranti-key
-```
+## Runtime Placement
 
-```python
-from dotenv import load_dotenv
-load_dotenv()
+An Iranti deployment has three layers:
 
-client = IrantiClient()  # Reads from env vars
-```
+1. runtime root
+2. named instance
+3. project binding
 
----
+Keep those boundaries clear:
 
-## Troubleshooting
+- runtime and instance settings belong to the instance env
+- project-specific routing belongs in `.env.iranti`
+- host setup commands should be run from the bound project so they pin to the correct binding
 
-### "Connection refused"
+## Production Baseline
 
-- Check server is running: `curl http://your-server:3001/health`
-- Check firewall allows port 3001
-- Check server IP/domain is correct
+For anything beyond local development:
 
-### "401 Unauthorized"
+- use a stable PostgreSQL target with pgvector available
+- put the API behind TLS or a reverse proxy
+- run the instance under a supervisor or service manager
+- monitor `/health` and operator commands such as `iranti status`
+- keep database backup and restore procedures documented
+- use the namespace-aware API key model instead of a single shared secret where possible
 
-- API key mismatch
-- Check `.env` on server matches client config
+Related docs:
 
-### "Slow responses"
+- [Security Quickstart](../guides/security-quickstart.md)
+- [Security Audit](./SECURITY_AUDIT.md)
+- [Troubleshooting](./TROUBLESHOOTING.md)
 
-- Check network latency: `ping your-server`
-- Check PostgreSQL performance
-- Consider deploying server closer to clients
+## Host Integrations
 
-### "Facts not syncing"
+Use the binding-driven guides for host setup instead of treating deployment as a browser-extension-only workflow:
 
-- All clients must point to SAME server URL
-- Check API key is identical across all clients
-- Verify facts exist: `curl -H "X-Iranti-Key: key" http://server:3001/kb/query/project/test`
+- [Claude Code Guide](../guides/claude-code.md)
+- [Codex Guide](../guides/codex.md)
+- [Python Client Guide](../guides/python-client.md)
 
----
+Legacy middleware or extension-specific notes may still exist in `clients/middleware/`, but they are not the primary deployment contract for the current product surface.
 
-## Quick Start Commands
+## Verification Checklist
 
-### Deploy Server
-```bash
-git clone https://github.com/nfemmanuel/iranti
-cd iranti
-cp .env.example .env
-# Edit .env with your settings
-docker-compose up -d
-npm install && npm run setup
-npm run api
-```
+After deployment, confirm:
 
-### Configure Browser Extension
-```bash
-# Edit clients/middleware/iranti-extension/content.js
-# Change IRANTI_URL to your server
-# Load extension in Chrome
-```
+- `iranti status` reports the expected instance
+- `iranti doctor --instance <name>` passes or gives actionable diagnostics
+- `GET /health` reports the expected runtime metadata
+- each project has a valid `.env.iranti`
+- Claude Code or Codex exposes Iranti MCP tools inside the bound project
 
-### Configure Python Client
-```bash
-pip install requests python-dotenv
-export IRANTI_URL=http://your-server:3001
-export IRANTI_API_KEY=replace-with-real-iranti-key
-python your_agent.py
-```
+## Common Mistakes
 
----
-
-## Summary
-
-1. **Server**: Deploy once, runs continuously
-2. **Browser**: Install extension, point to server
-3. **Agents**: Install Python client, point to server
-4. **All devices share the same PostgreSQL database**
-
-No complex setup. Just HTTP connections to a central server.
-
+- Running host setup before creating `.env.iranti`
+- Treating one shared instance as isolated project memory
+- Hand-editing per-project runtime settings instead of using `iranti configure` or `iranti project init`
+- Using a PostgreSQL target without pgvector during bootstrap
+- Treating old implementation notes as the current deployment contract

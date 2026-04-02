@@ -1,7 +1,8 @@
 import { route } from '../lib/router';
 import { getStaffEventEmitter } from '../lib/staffEventRegistry';
 import { queryEntry, findEntriesByEntity, recordKnowledgeEntryAccess } from '../library/queries';
-import { getRelatedDeep } from '../library/relationships';
+import { findEntry } from '../library/queries';
+import { getRelated, getRelatedDeep } from '../library/relationships';
 import { parseEntityString, resolveEntity } from '../library/entity-resolution';
 import { librarianWrite } from '../librarian';
 import { getDb } from '../library/client';
@@ -14,14 +15,19 @@ import {
     detectMandatoryRecall,
     extractExplicitAssistantMemory,
     extractExplicitPromptMemory,
+    getPersonalMemoryEntity,
     getPersonalRecallEntities,
     getProjectMemoryEntity,
 } from '../lib/autoRemember';
+import { buildSemanticFactTags } from '../lib/semanticFactTags';
 import {
+    buildSessionLedgerLearningProfile,
     summarizeSessionLedgerLearnings,
+    type SessionLedgerLearningProfile,
     type SessionLedgerLearning,
     SessionLedgerUnavailableError,
 } from '../lib/sessionLedger';
+import { registerSharedStateInvalidationObserver } from '../lib/sharedStateInvalidation';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -32,17 +38,22 @@ const ATTENDANT_RULES_QUERY: EntryQuery = {
 };
 export const DEFAULT_ATTENDANT_OPERATING_RULES: string[] = [
     'Serve one external agent only; optimize for that agent keeping task context coherent across turns and sessions.',
-    'At session start or when the task changes, run handshake to load operating rules, task context, and the most relevant shared memory.',
+    'ACKNOWLEDGE: This is strictly mandatory — you MUST state the following before proceeding with any user request, and no work should begin until it is stated: "I acknowledge that Iranti is a hive mind. I have read the Iranti operating rules and the protocols for iranti_handshake, iranti_attend, iranti_write, iranti_checkpoint, and iranti_remember_response, and I pledge to use them to persist what I find, what works, what fails, what changes, and what happens next so later sessions do not have to rediscover it." Skipping this acknowledgment is non-compliant regardless of context.',
+    'SESSION START: Call iranti_handshake before responding to the first user message. After context compaction, call iranti_handshake again before responding to the next message.',
+    "ATTEND PROTOCOL — follow this sequence every turn: (1) Call iranti_attend before responding to the user message — pass phase='pre-response' to enable precise compliance tracking. (2) Call iranti_attend before any lookup where Iranti might already hold the answer — this includes Read, Grep, Glob, WebSearch, WebFetch, and Bash commands used as factual basis for a decision. (3) Call iranti_attend after any such lookup to check new findings against stored memory and decide what to inject, write, or checkpoint. (4) Call iranti_write after every Edit or Write tool call — file changes are always durable, record what changed, why, and what the file now does. (5) Call iranti_write after any Bash command that reveals system state — build results, test outcomes, container state, port availability, environment facts, errors. (6) Call iranti_write after any WebSearch or WebFetch that surfaces confirmed external facts. (7) Call iranti_write after any subagent (Agent tool) completes — subagent findings are invisible to the hive mind otherwise. (8) Call iranti_attend after every response without exception — pass phase='post-response'. Even short or conversational replies may contain durable decisions, confirmed facts, or next steps. Assess for write or checkpoint before the next turn. (9) Call iranti_attend again when new knowledge should change what is loaded for the next step.",
     'Treat Iranti as the default shared working-memory layer. Keep using your own private notes if you want, but prefer Iranti for anything another session, another agent, or a later handoff may need.',
     'Before answering recall-style questions about remembered preferences, decisions, blockers, next steps, prior project state, or earlier findings, consult Iranti instead of guessing.',
+    'If a recall-style lookup returns no facts, do not treat empty as confirmation of absence — try at least one alternative retrieval angle before concluding the fact is not stored: switch between exact query and search, try a different entity path or key fragment, or rephrase the search term. Absence is confirmed only after two distinct retrieval attempts with different angles both return empty.',
     'Before making or repeating architectural, product, workflow, or debugging decisions, check Iranti for earlier decisions, constraints, blockers, and validated environment details.',
     'Use exact query when the entity and key are known. Use search or attend when the fact must be discovered from shared memory.',
-    'Persist durable knowledge when it is learned or confirmed: decisions, blockers, next steps, owners, stable preferences, project constraints, important file purposes, and validated environment details.',
+    'Persist durable knowledge when it is learned or confirmed: decisions, blockers, next steps, owners, stable preferences, project constraints, important file purposes, validated environment details, what worked, what failed, and what remains risky.',
+    'Write facts with the depth of someone who built the system — include what the thing does, why it exists, how it connects to other parts, and what would break or change if it were removed. A fact that reads "file X was edited" is insufficient; "file X controls Y because Z, edited to fix W" is the target. Iranti should accumulate enough detail that any agent reading its memory feels like it built the repo.',
     'When a file is created, renamed, moved, deleted, or substantially repurposed, capture that change and what the file is for whenever the state will matter to another agent or a later session.',
     'When a task reaches a useful checkpoint, store the current step, next step, open risks, and any important artifacts or paths so another agent can resume without reconstructing context from scratch.',
     'When an approach fails and the failure or workaround is likely to matter later, store the failed path and the chosen alternative route as durable memory.',
     'Use iranti_checkpoint for active shared progress, iranti_write for durable facts, iranti_ingest for stable source material worth chunking, and iranti_remember_response for strict assistant summaries such as next steps or blockers.',
-    'Do not save every turn. Skip ephemeral chatter, speculative thoughts, or transient execution noise that will degrade retrieval quality later.',
+    'CHECKPOINT PROTOCOL: Call iranti_checkpoint (1) when completing a task, (2) when shifting to a new task mid-session, and (3) at any natural pause point where another session should resume — not only when saving facts with iranti_write. A checkpoint not written means the next handshake recovers from stale data, and a long run without structured writes/checkpoints is non-compliant for Iranti. Write checkpoints like the best possible commit message but with more detail — lead with the why (what problem this solved, what decision was made, what changed and why it matters), then add structured recovery context: current step, next step, what worked, what failed, open risks, and file changes. A checkpoint that reads "did some edits" is non-compliant; one that reads "fixed missing docker dependency in cofactor instance.json — container name was never recorded at setup so iranti run silently skipped docker start; added iranti_cofactor_db dependency, verified against docker ps, control panel start will now auto-boot the container" is the target.',
+    'Do not save every turn. Skip idle chatter and transient execution noise. Do save design options, architectural proposals, and considered-but-not-yet-decided directions with their reasoning — a future session should not have to re-explore ground already covered, even when no final decision was made. Do not skip discoveries, failed paths, validations, file changes, risks, or next steps that another session would otherwise have to rediscover.',
     'Deliver a compressed working-memory brief, not the full knowledge base. Load only what is relevant to the current task.',
     'Reconvene or attend again when context shifts, when the visible window is missing needed facts, or when a different entity becomes relevant.',
     'If context gets stale or the task has gone long enough that reasoning may drift, re-read the operating rules from the Staff Namespace before proceeding.',
@@ -52,21 +63,73 @@ const SESSION_INTERRUPTION_TTL_MS = 5 * 60 * 1000;
 const ENTITY_DETECTION_WINDOW_CHARS = 1500;
 const MIN_ENTITY_CONFIDENCE = 0.75;
 const MEMORY_DECISION_CONTEXT_WINDOW_CHARS = 2000;
+const LEDGER_WORKING_MEMORY_PREFIX = 'system/session_ledger/recent_learning_';
+const ATTEND_EXPECTED_CALL_SEQUENCE = [
+    'Call iranti_handshake at session start and again after context compaction.',
+    "Call iranti_attend(phase='pre-response') before replying to the user.",
+    'Call iranti_attend before any lookup where Iranti might already hold the answer — Read, Grep, Glob, WebSearch, WebFetch, Bash-as-factual-basis.',
+    'Call iranti_attend again after any such lookup when new findings may affect what to inject, write, or checkpoint.',
+    'Call iranti_write after every Edit or Write tool call — file changes are always durable.',
+    'Call iranti_write after Bash commands that reveal system state, after WebSearch/WebFetch with confirmed facts, and after any subagent completes.',
+    "Call iranti_attend(phase='post-response') after every response without exception — even short replies may contain durable findings. Omitting this call is a compliance violation.",
+    'Call iranti_attend again when the new knowledge should change what is loaded next.',
+];
+const ATTEND_USAGE_REMINDER = 'Iranti is a hive mind. iranti_attend is mandatory before each reply and around knowledge discovery, and knowledge-changing actions must leave breadcrumbs through iranti_write and/or iranti_checkpoint so later sessions do not have to rediscover context.';
+const OBSERVE_USAGE_NOTE = 'observe() is retrieval-only. It surfaces candidate facts for context and warm-up, but it does not persist memory, replace iranti_attend, or count as a checkpoint/write.';
 
 const MEMORY_NEED_POSITIVE_PATTERNS: RegExp[] = [
     /\bwhat(?:'s| is| was)?\s+my\b/i,
     /\bdo you remember\b/i,
     /\bremind me\b/i,
+    /\bbring me up to speed\b/i,
+    /\bcatch me up\b/i,
+    /\brecap\b/i,
+    /\bwhere did we leave off\b/i,
+    /\bwhere are we\b/i,
+    /\bwhat did we learn\b/i,
+    /\bwhat did we decide\b/i,
+    /\bwhat do we know\b/i,
+    /\bnext step\b/i,
+    /\bwhat(?:'s| is)?\s+next\b/i,
+    /\b(?:what|which)\s+(?:bugs?|issues?|defects?|tasks?|blockers?|risks?)\s+(?:are\s+)?(?:left|open|remaining)\b/i,
+    /\bwhat\s+(?:changed|worked|failed)\b/i,
+    /\b(?:current\s+)?status\b/i,
+    /\b(?:current\s+)?progress\b/i,
+    /\b(?:summary|summarize|overview)\b/i,
     /\bmy\s+(?:favorite|favourite|name|email|phone|address|city|country|movie|snack|color|colour)\b/i,
     /\bwe decided\b/i,
     /\bearlier\b/i,
     /\bprevious(?:ly)?\b/i,
     /\bagain\b/i,
+    // Common imperative work-task prefixes — short messages like "fix it", "add tests",
+    // "help me debug", "explain this" are almost always project-contextual and benefit from
+    // memory injection. Catching these here prevents fall-through to the LLM classifier and
+    // the classification_parse_failed_default_false silent miss.
+    /^\s*(?:fix|debug|refactor|implement|add|update|change|remove|delete|create|write|check|review|test|run|deploy|build|enable|disable|configure|set up|setup)\b/i,
+    /\bhelp\s+me\b/i,
+    /\bexplain\s+(?:this|that|how|why|what)\b/i,
+    /\bwhat\s+(?:is|are|was|were)\s+(?:the|a|an|this|that|my|our|its)\b/i,
+    /\bhow\s+(?:do|does|did|should|can|could|would|to)\b/i,
+    /\bwhy\s+(?:is|are|was|were|did|does|do|not)\b/i,
+    // Technical vocabulary — file paths, function-call syntax, camelCase/snake_case identifiers,
+    // and dot-notation references are strong signals that the message is project-bound.
+    /(?:\/[\w.\-]+){1,}|[\w]+\.[a-z]{1,5}\b/i,
+    /\b[a-z][a-zA-Z0-9]*(?:[A-Z][a-zA-Z0-9]*)+\b/,   // camelCase
+    /\b[a-z][a-z0-9]*(?:_[a-z][a-z0-9]*)+\b/,         // snake_case
+    /\b\w+\s*\(/,                                       // function call syntax
 ];
 
 const MEMORY_NEED_NEGATIVE_PATTERNS: RegExp[] = [
     /^\s*(hi|hello|hey|yo|sup|good (?:morning|afternoon|evening))\b[!.?\s]*$/i,
     /^\s*(thanks|thank you|cool|great|nice)\b[!.?\s]*$/i,
+];
+
+const MEMORY_PARSE_FAILURE_PROJECT_CUE_PATTERNS: RegExp[] = [
+    /\b(?:status|progress|summary|summar(?:y|ize)|recap|overview|state)\b/i,
+    /\b(?:decision|decisions|findings?|artifacts?|changes?|work|implementation|architecture|code(?:base)?|repo|repository)\b/i,
+    /\b(?:deployment|setup|bug|bugs|issue|issues|defect|defects|task|tasks|blocker|blockers|risk|risks)\b/i,
+    /\bwhat\s+(?:did|do|have)\s+we\b/i,
+    /\bwhere\s+do\s+we\s+stand\b/i,
 ];
 
 const EXPLICIT_TASK_PREFIX_PATTERNS: RegExp[] = [
@@ -115,6 +178,7 @@ export interface WorkingMemoryBrief {
     sessionLedgerLearnings?: SessionLedgerLearning[];
     sessionCheckpoint?: SessionCheckpointRecord | null;
     sessionRecovery?: SessionRecoveryInfo | null;
+    watchedEntities?: string[];
 }
 
 export interface BackfillSuggestion {
@@ -132,6 +196,19 @@ export interface SessionCheckpointPayload {
     nextStep?: string;
     openRisks?: string[];
     recentOutputs?: string[];
+    actions?: Array<{
+        kind: string;
+        summary: string;
+        status?: string;
+        target?: string;
+        detail?: string;
+    }>;
+    fileChanges?: Array<{
+        action: string;
+        path: string;
+        toPath?: string;
+        purpose?: string;
+    }>;
     entityTargets?: string[];
     notes?: string;
 }
@@ -189,6 +266,7 @@ export interface SessionCheckpointSummary {
     nextStep: string | null;
     openRiskCount: number;
     entityTargetCount: number;
+    actionCount: number;
 }
 
 export interface SessionSummary {
@@ -217,6 +295,7 @@ export interface ObserveInput {
     maxFacts?: number;          // default 5 - don't overwhelm context
     entityHints?: string[];     // deterministic canonical entities from caller
     priorityKeys?: string[];    // exact keys to prioritize within resolved entities
+    skipContextFilter?: boolean; // when true, skip already-in-context filtering (used by forceInject)
     ledgerContext?: AgentContext['ledgerContext'];
 }
 
@@ -235,6 +314,12 @@ export interface ObserveResult {
     entitiesDetected: string[];       // entities found in context
     alreadyPresent: number;           // facts skipped (already in context)
     totalFound: number;               // total facts found before filtering
+    usageGuidance: {
+        tool: 'observe' | 'attend';
+        reminder: string;
+        expectedCallSequence: string[];
+        note: string;
+    };
     entitiesResolved?: Array<{
         name: string;
         input: string;
@@ -258,6 +343,7 @@ export interface AttendInput extends ObserveInput {
     latestMessage?: string;
     forceInject?: boolean;
     suppressEvents?: boolean;
+    phase?: 'pre-response' | 'post-response' | 'mid-turn';
 }
 
 export interface SessionCheckpointInput extends AgentContext {
@@ -274,8 +360,14 @@ export interface SessionActionInput {
 export interface AttendDecision {
     needed: boolean;
     confidence: number;
-    method: 'heuristic' | 'llm' | 'forced';
+    method: 'heuristic' | 'llm' | 'forced' | 'advisory';
     explanation: string;
+}
+
+export interface AttendSearchSuggestion {
+    hint: string;
+    suggestedTerms: string[];
+    alternativeEntities: string[];
 }
 
 export interface AttendResult extends ObserveResult {
@@ -288,13 +380,44 @@ export interface AttendResult extends ObserveResult {
         | 'memory_needed_injected';
     decision: AttendDecision;
     bootstrap?: AttendBootstrapInfo | null;
+    searchSuggestion?: AttendSearchSuggestion;
+    complianceWarning?: string;
 }
 
 export interface AttendBootstrapInfo {
     handshakePerformed: boolean;
     reason: 'no_existing_brief';
     task: string;
+    operatingRules?: string;
+    note?: string;
 }
+
+interface RelevantFreshState {
+    hasFreshState: boolean;
+    priorityKeys: string[];
+    entities: string[];
+}
+
+interface FreshEntityTarget {
+    canonicalEntity: string;
+    entityType: string;
+    entityId: string;
+}
+
+const WATCHED_ENTITY_PROMPT_PATTERNS: RegExp[] = [
+    /\bcontinue\b/i,
+    /\bresume\b/i,
+    /\bpick up\b/i,
+    /\bwhat(?:'s| is)?\s+next\b/i,
+    /\bwhat(?:'s| is)?\s+the\s+next\s+step\b/i,
+    /\bwhat(?:'s| is)?\s+the\s+status\b/i,
+    /\bstatus\b/i,
+    /\bprogress\b/i,
+    /\brecap\b/i,
+    /\bwhat\s+changed\b/i,
+    /\bwhat\s+did\s+you\s+change\b/i,
+    /\bwhere\s+were\s+we\b/i,
+];
 
 export function normalizeExplicitTask(task: string | null | undefined): string | null {
     if (typeof task !== 'string') return null;
@@ -379,6 +502,79 @@ function toLedgerWorkingMemoryEntries(entries: SessionLedgerLearning[]): Working
     }));
 }
 
+function mergeWorkingMemoryWithLedger(entries: WorkingMemoryEntry[], learnings: SessionLedgerLearning[]): WorkingMemoryEntry[] {
+    const retained = entries.filter((entry) => !entry.entityKey.startsWith(LEDGER_WORKING_MEMORY_PREFIX));
+    return learnings.length > 0
+        ? [...retained, ...toLedgerWorkingMemoryEntries(learnings)]
+        : retained;
+}
+
+function formatMissingWriteCategories(categories: string[]): string {
+    const labelMap: Record<string, string> = {
+        findings: 'what you found',
+        validated_results: 'what worked',
+        failed_paths: 'what failed',
+        file_changes: 'what changed',
+        risks_and_next_steps: 'what remains risky and what happens next',
+    };
+    const labels = Array.from(new Set(categories.map((category) => labelMap[category] ?? category)));
+    if (labels.length === 0) return 'what you found and what happens next';
+    if (labels.length === 1) return labels[0];
+    if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
+    return `${labels.slice(0, -1).join(', ')}, and ${labels[labels.length - 1]}`;
+}
+
+function applyAdvisoryOperatingRules(
+    operatingRules: string,
+    profile: SessionLedgerLearningProfile | null,
+): string {
+    const reminder = profile?.checkpointReminder?.trim();
+    const categories = profile?.missingWriteCategories ?? [];
+    let nextRules = operatingRules;
+    if (reminder && !nextRules.includes(reminder)) {
+        nextRules = `${nextRules}\n- ${reminder}`;
+    }
+    if (categories.length > 0) {
+        const categoryRule = `Compliance follow-up: before the next pause, persist ${formatMissingWriteCategories(categories)} as structured durable memory when applicable, not just a broad summary.`;
+        if (!nextRules.includes(categoryRule)) {
+            nextRules = `${nextRules}\n- ${categoryRule}`;
+        }
+    }
+    return nextRules;
+}
+
+function advisoryTaskTokens(taskType: string | null | undefined): string[] {
+    if (!taskType) return [];
+    return Array.from(new Set(
+        taskType
+            .toLowerCase()
+            .split(/[^a-z0-9_]+/)
+            .map((token) => token.trim())
+            .filter((token) => token.length >= 4)
+    ));
+}
+
+function buildUsageGuidance(tool: 'observe' | 'attend'): ObserveResult['usageGuidance'] {
+    return {
+        tool,
+        reminder: ATTEND_USAGE_REMINDER,
+        expectedCallSequence: ATTEND_EXPECTED_CALL_SEQUENCE,
+        note: tool === 'observe'
+            ? OBSERVE_USAGE_NOTE
+            : 'After using attend() and any retrieved facts, persist durable learnings with iranti_write and shared progress with iranti_checkpoint when applicable.',
+    };
+}
+
+function messageHasAdvisoryCue(message: string, taskType: string | null | undefined): boolean {
+    const normalized = normalizeMessage(message);
+    if (!normalized) return false;
+    if (/\b(next|status|blocker|owner|risk|issue|bug|weakness|problem|continue|resume|pickup|tackle|ship|release)\b/i.test(normalized)) {
+        return true;
+    }
+    const messageTokens = new Set(advisoryTaskTokens(normalized));
+    return advisoryTaskTokens(taskType).some((token) => messageTokens.has(token));
+}
+
 function collectBackfillCandidates(messages: string[]): BackfillCandidate[] {
     const deduped = new Map<string, BackfillCandidate>();
 
@@ -406,7 +602,7 @@ function buildBackfillSuggestion(
     context: AgentContext,
     workingMemory: WorkingMemoryEntry[],
 ): BackfillSuggestion | null {
-    const recentMessages = context.recentMessages
+    const recentMessages = (context.recentMessages ?? [])
         .map((message) => message.trim())
         .filter(Boolean);
     if (recentMessages.length === 0) return null;
@@ -469,6 +665,92 @@ function buildAttendBootstrapMessages(latestMessage: string, currentContext: str
     return out.slice(-6);
 }
 
+function tokenizePresenceText(value: string): string[] {
+    return value
+        .toLowerCase()
+        .split(/[^a-z0-9_]+/)
+        .map((token) => token.trim())
+        .filter((token) => token.length > 4);
+}
+
+function countPresenceMatches(contextLower: string, tokens: string[]): number {
+    return tokens.filter((token) => contextLower.includes(token)).length;
+}
+
+function factAlreadyPresentInContext(contextLower: string, fact: RetrievedFact): boolean {
+    const summaryLower = fact.summary.toLowerCase().trim();
+    if (summaryLower.length >= 24 && contextLower.includes(summaryLower)) {
+        return true;
+    }
+
+    const [entityType = '', entityId = '', key = ''] = fact.entityKey.split('/');
+    const entityTokens = new Set([
+        ...tokenizePresenceText(entityType),
+        ...tokenizePresenceText(entityId),
+        ...tokenizePresenceText(key),
+    ]);
+
+    const summaryTokens = tokenizePresenceText(fact.summary);
+    const meaningfulTokens = summaryTokens.filter((token) => !entityTokens.has(token));
+    const tokensToCheck = meaningfulTokens.length > 0 ? meaningfulTokens : summaryTokens;
+
+    if (tokensToCheck.length === 0) {
+        return false;
+    }
+
+    const matches = countPresenceMatches(contextLower, tokensToCheck);
+    return matches >= Math.ceil(tokensToCheck.length * 0.6);
+}
+
+function normalizeWatchedEntities(values: string[] | undefined): string[] {
+    const seen = new Set<string>();
+    const normalized: string[] = [];
+    for (const value of values ?? []) {
+        if (typeof value !== 'string') continue;
+        const trimmed = value.trim();
+        if (!trimmed || !trimmed.includes('/') || seen.has(trimmed)) continue;
+        seen.add(trimmed);
+        normalized.push(trimmed);
+        if (normalized.length >= 8) break;
+    }
+    return normalized;
+}
+
+function shouldUseWatchedEntitiesForPrompt(latestMessage: string): boolean {
+    const normalized = normalizeMessage(latestMessage);
+    if (!normalized) return false;
+    if (WATCHED_ENTITY_PROMPT_PATTERNS.some((pattern) => pattern.test(normalized))) {
+        return true;
+    }
+    return classifyMemoryScope(normalized) === 'project';
+}
+
+function inferContextWatchedEntities(task: string, recentMessages: string[]): string[] {
+    const exact = normalizeWatchedEntities([
+        ...extractExactEntityReferences(task),
+        ...recentMessages.flatMap((message) => extractExactEntityReferences(message)),
+    ]);
+    if (exact.length > 0) {
+        return exact;
+    }
+
+    const combined = [task, ...recentMessages]
+        .map((message) => normalizeMessage(message))
+        .filter(Boolean)
+        .join('\n');
+    const scope = classifyMemoryScope(combined);
+    if (scope === 'personal') {
+        return getPersonalRecallEntities();
+    }
+    if (scope === 'project') {
+        const configured = getProjectMemoryEntity();
+        if (configured) {
+            return [configured];
+        }
+    }
+    return [];
+}
+
 async function readPersistedBriefForAgent(agentId: string): Promise<WorkingMemoryBrief | null> {
     const entry = await getDb().knowledgeEntry.findUnique({
         where: {
@@ -504,6 +786,7 @@ function buildCheckpointSummary(checkpoint: SessionCheckpointRecord | null): Ses
         nextStep: checkpoint.checkpoint.nextStep ?? null,
         openRiskCount: Array.isArray(checkpoint.checkpoint.openRisks) ? checkpoint.checkpoint.openRisks.length : 0,
         entityTargetCount: Array.isArray(checkpoint.checkpoint.entityTargets) ? checkpoint.checkpoint.entityTargets.length : 0,
+        actionCount: Array.isArray(checkpoint.checkpoint.actions) ? checkpoint.checkpoint.actions.length : 0,
     };
 }
 
@@ -659,6 +942,27 @@ function extractFallbackCandidates(text: string): EntityCandidate[] {
     return candidates;
 }
 
+function extractExactEntityReferences(text: string): string[] {
+    const matches = text.match(/\b[a-z][a-z0-9_-]*\/[a-z0-9_][a-z0-9_/-]*\b/gi) ?? [];
+    const deduped: string[] = [];
+    const seen = new Set<string>();
+
+    for (const rawMatch of matches) {
+        const candidate = rawMatch.trim().replace(/[.,!?;:]+$/g, '');
+        try {
+            const parsed = parseEntityString(candidate);
+            const normalized = `${parsed.entityType}/${parsed.entityId}`;
+            if (seen.has(normalized)) continue;
+            seen.add(normalized);
+            deduped.push(normalized);
+        } catch {
+            continue;
+        }
+    }
+
+    return deduped;
+}
+
 function normalizeMessage(message: string | undefined): string {
     return (message ?? '').trim();
 }
@@ -730,6 +1034,149 @@ function normalizeStringArray(value: unknown, maxItems: number = 5, maxLength: n
     return out;
 }
 
+function normalizeCheckpointFileChanges(value: unknown, maxItems: number = 25): Array<{
+    action: string;
+    path: string;
+    toPath?: string;
+    purpose?: string;
+}> {
+    if (!Array.isArray(value)) return [];
+
+    const out: Array<{ action: string; path: string; toPath?: string; purpose?: string }> = [];
+    for (const item of value) {
+        if (!item || typeof item !== 'object') continue;
+        const record = item as Record<string, unknown>;
+        const path = typeof record.path === 'string' ? truncate(record.path.trim(), 240) : '';
+        if (!path) continue;
+        const action = typeof record.action === 'string' && record.action.trim()
+            ? truncate(record.action.trim().toLowerCase(), 40)
+            : 'updated';
+        const next: { action: string; path: string; toPath?: string; purpose?: string } = { action, path };
+        if (typeof record.toPath === 'string' && record.toPath.trim()) {
+            next.toPath = truncate(record.toPath.trim(), 240);
+        }
+        if (typeof record.purpose === 'string' && record.purpose.trim()) {
+            next.purpose = truncate(record.purpose.trim(), 180);
+        }
+        out.push(next);
+        if (out.length >= maxItems) break;
+    }
+
+    return out;
+}
+
+function normalizeCheckpointActions(value: unknown, maxItems: number = 25): Array<{
+    kind: string;
+    summary: string;
+    status?: string;
+    target?: string;
+    detail?: string;
+}> {
+    if (!Array.isArray(value)) return [];
+
+    const out: Array<{ kind: string; summary: string; status?: string; target?: string; detail?: string }> = [];
+    for (const item of value) {
+        if (!item || typeof item !== 'object') continue;
+        const record = item as Record<string, unknown>;
+        const summary = typeof record.summary === 'string' ? truncate(record.summary.trim(), 220) : '';
+        if (!summary) continue;
+        const kind = typeof record.kind === 'string' && record.kind.trim()
+            ? truncate(record.kind.trim().toLowerCase(), 40)
+            : 'action';
+        const next: { kind: string; summary: string; status?: string; target?: string; detail?: string } = { kind, summary };
+        if (typeof record.status === 'string' && record.status.trim()) {
+            next.status = truncate(record.status.trim().toLowerCase(), 40);
+        }
+        if (typeof record.target === 'string' && record.target.trim()) {
+            next.target = truncate(record.target.trim(), 240);
+        }
+        if (typeof record.detail === 'string' && record.detail.trim()) {
+            next.detail = truncate(record.detail.trim(), 220);
+        }
+        out.push(next);
+        if (out.length >= maxItems) break;
+    }
+
+    return out;
+}
+
+function readCheckpointFileChanges(value: unknown): Array<Record<string, unknown>> {
+    if (!value || typeof value !== 'object') return [];
+    const record = value as Record<string, unknown>;
+    const items = Array.isArray(record.items) ? record.items : [];
+    return items.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null);
+}
+
+function mergeCheckpointFileChanges(existing: unknown, incoming: Array<Record<string, unknown>>): { items: Array<Record<string, unknown>> } {
+    const seen = new Set<string>();
+    const merged: Array<Record<string, unknown>> = [];
+    for (const item of [...readCheckpointFileChanges(existing), ...incoming]) {
+        const identity = JSON.stringify(item);
+        if (seen.has(identity)) continue;
+        seen.add(identity);
+        merged.push(item);
+    }
+    return { items: merged };
+}
+
+function readCheckpointActions(value: unknown): Array<Record<string, unknown>> {
+    if (!value || typeof value !== 'object') return [];
+    const record = value as Record<string, unknown>;
+    const items = Array.isArray(record.items) ? record.items : [];
+    return items.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null);
+}
+
+function mergeCheckpointActions(existing: unknown, incoming: Array<Record<string, unknown>>): { items: Array<Record<string, unknown>> } {
+    const seen = new Set<string>();
+    const merged: Array<Record<string, unknown>> = [];
+    for (const item of [...readCheckpointActions(existing), ...incoming]) {
+        const identity = JSON.stringify(item);
+        if (seen.has(identity)) continue;
+        seen.add(identity);
+        merged.push(item);
+    }
+    return { items: merged };
+}
+
+function summarizeCheckpointFileChanges(value: { items: Array<Record<string, unknown>> }): string {
+    const parts = value.items.map((item) => {
+        const action = String(item.action ?? 'updated').trim();
+        const path = String(item.path ?? '').trim();
+        const toPath = String(item.toPath ?? '').trim();
+        const purpose = String(item.purpose ?? '').trim();
+        if (!path) return '';
+        if (toPath) {
+            return `${action} ${path} to ${toPath}${purpose ? ` (${purpose})` : ''}`;
+        }
+        return `${action} ${path}${purpose ? ` (${purpose})` : ''}`;
+    }).filter(Boolean);
+    return truncate(
+        parts.length > 0
+            ? `recent file changes include ${parts.join('; ')}`
+            : 'recent file changes were logged.',
+        220,
+    );
+}
+
+function summarizeCheckpointActions(value: { items: Array<Record<string, unknown>> }): string {
+    const parts = value.items.map((item) => {
+        const kind = String(item.kind ?? 'action').trim();
+        const summary = String(item.summary ?? '').trim();
+        const status = String(item.status ?? '').trim();
+        const target = String(item.target ?? '').trim();
+        if (!summary) return '';
+        const prefix = status ? `[${status}] ` : '';
+        const suffix = target ? ` (${target})` : '';
+        return `${prefix}${kind}: ${summary}${suffix}`;
+    }).filter(Boolean);
+    return truncate(
+        parts.length > 0
+            ? `recent actions include ${parts.join('; ')}`
+            : 'recent actions were logged.',
+        220,
+    );
+}
+
 function normalizeCheckpointPayload(
     payload: SessionCheckpointInput['checkpoint']
 ): SessionCheckpointPayload {
@@ -763,6 +1210,16 @@ function normalizeCheckpointPayload(
         normalized.recentOutputs = recentOutputs;
     }
 
+    const actions = normalizeCheckpointActions(raw.actions);
+    if (actions.length > 0) {
+        normalized.actions = actions;
+    }
+
+    const fileChanges = normalizeCheckpointFileChanges(raw.fileChanges);
+    if (fileChanges.length > 0) {
+        normalized.fileChanges = fileChanges;
+    }
+
     const entityTargets = normalizeStringArray(raw.entityTargets, 5, 180);
     if (entityTargets.length > 0) {
         normalized.entityTargets = entityTargets;
@@ -775,20 +1232,29 @@ function normalizeCheckpointPayload(
     return normalized;
 }
 
+type CheckpointAvailabilityKey = {
+    entityType: string;
+    entityId: string;
+    key: string;
+};
+
 async function persistSharedCheckpointBreadcrumbs(params: {
     agentId: string;
     sessionId: string;
     checkpoint: SessionCheckpointPayload;
-}): Promise<void> {
+}): Promise<CheckpointAvailabilityKey[]> {
     const { agentId, sessionId, checkpoint } = params;
     const targets = Array.isArray(checkpoint.entityTargets) ? checkpoint.entityTargets : [];
-    if (targets.length === 0) return;
+    if (targets.length === 0) return [];
+    const expectedKeys: CheckpointAvailabilityKey[] = [];
 
     const checkpointSummary = {
         currentStep: checkpoint.currentStep ?? null,
         nextStep: checkpoint.nextStep ?? null,
         openRisks: checkpoint.openRisks ?? [],
         recentOutputs: checkpoint.recentOutputs ?? [],
+        actions: checkpoint.actions ?? [],
+        fileChanges: checkpoint.fileChanges ?? [],
         notes: checkpoint.notes ?? null,
         sessionId,
     };
@@ -811,13 +1277,12 @@ async function persistSharedCheckpointBreadcrumbs(params: {
             confidence: 95,
             source: 'AttendantCheckpoint',
             createdBy: agentId,
-            properties: {
-                memoryScope: 'project',
-                capturePhase: 'checkpoint',
-                durableClass: 'checkpoint',
-                sessionId,
-            } as Record<string, unknown>,
         };
+        const checkpointBaseProperties = {
+            memoryScope: 'project',
+            capturePhase: 'checkpoint',
+            sessionId,
+        } as const;
 
         await librarianWrite({
             ...common,
@@ -827,6 +1292,23 @@ async function persistSharedCheckpointBreadcrumbs(params: {
                 `checkpoint summary: current step ${checkpoint.currentStep ?? 'n/a'}; next step ${checkpoint.nextStep ?? 'n/a'}`,
                 220,
             ),
+            properties: {
+                ...checkpointBaseProperties,
+                durableClass: 'checkpoint_summary',
+                canonicalKey: 'checkpoint_summary',
+                mergeStrategy: 'replace',
+                ...buildSemanticFactTags({
+                    memoryScope: 'project',
+                    durableClass: 'checkpoint_summary',
+                    mergeStrategy: 'replace',
+                    extraTags: ['checkpoint', 'breadcrumb'],
+                }),
+            } as Record<string, unknown>,
+        });
+        expectedKeys.push({
+            entityType: resolved.entityType,
+            entityId: resolved.entityId,
+            key: 'checkpoint_summary',
         });
 
         if (checkpoint.currentStep) {
@@ -835,6 +1317,23 @@ async function persistSharedCheckpointBreadcrumbs(params: {
                 key: 'checkpoint_current_step',
                 valueRaw: { text: checkpoint.currentStep },
                 valueSummary: truncate(`checkpoint current step is ${checkpoint.currentStep}`, 220),
+                properties: {
+                    ...checkpointBaseProperties,
+                    durableClass: 'current_step',
+                    canonicalKey: 'checkpoint_current_step',
+                    mergeStrategy: 'replace',
+                    ...buildSemanticFactTags({
+                        memoryScope: 'project',
+                        durableClass: 'current_step',
+                        mergeStrategy: 'replace',
+                        extraTags: ['checkpoint', 'breadcrumb'],
+                    }),
+                } as Record<string, unknown>,
+            });
+            expectedKeys.push({
+                entityType: resolved.entityType,
+                entityId: resolved.entityId,
+                key: 'checkpoint_current_step',
             });
         }
 
@@ -844,6 +1343,93 @@ async function persistSharedCheckpointBreadcrumbs(params: {
                 key: 'checkpoint_next_step',
                 valueRaw: { instruction: checkpoint.nextStep },
                 valueSummary: truncate(`checkpoint next step is ${checkpoint.nextStep}`, 220),
+                properties: {
+                    ...checkpointBaseProperties,
+                    durableClass: 'next_step',
+                    canonicalKey: 'checkpoint_next_step',
+                    mergeStrategy: 'replace',
+                    ...buildSemanticFactTags({
+                        memoryScope: 'project',
+                        durableClass: 'next_step',
+                        mergeStrategy: 'replace',
+                        extraTags: ['checkpoint', 'breadcrumb'],
+                    }),
+                } as Record<string, unknown>,
+            });
+            expectedKeys.push({
+                entityType: resolved.entityType,
+                entityId: resolved.entityId,
+                key: 'checkpoint_next_step',
+            });
+        }
+
+        if (Array.isArray(checkpoint.fileChanges) && checkpoint.fileChanges.length > 0) {
+            const existingFileChanges = await findEntry({
+                entityType: resolved.entityType,
+                entityId: resolved.entityId,
+                key: 'recent_file_changes',
+            });
+            const mergedFileChanges = mergeCheckpointFileChanges(
+                existingFileChanges?.valueRaw,
+                checkpoint.fileChanges.map((change) => ({ ...change })),
+            );
+            await librarianWrite({
+                ...common,
+                key: 'recent_file_changes',
+                valueRaw: mergedFileChanges,
+                valueSummary: summarizeCheckpointFileChanges(mergedFileChanges),
+                properties: {
+                    ...checkpointBaseProperties,
+                    durableClass: 'file_change',
+                    canonicalKey: 'recent_file_changes',
+                    mergeStrategy: 'append_dedupe',
+                    ...buildSemanticFactTags({
+                        memoryScope: 'project',
+                        durableClass: 'file_change',
+                        mergeStrategy: 'append_dedupe',
+                        extraTags: ['checkpoint'],
+                    }),
+                } as Record<string, unknown>,
+            });
+            expectedKeys.push({
+                entityType: resolved.entityType,
+                entityId: resolved.entityId,
+                key: 'recent_file_changes',
+            });
+        }
+
+        if (Array.isArray(checkpoint.actions) && checkpoint.actions.length > 0) {
+            const existingActions = await findEntry({
+                entityType: resolved.entityType,
+                entityId: resolved.entityId,
+                key: 'recent_actions',
+            });
+            const mergedActions = mergeCheckpointActions(
+                existingActions?.valueRaw,
+                checkpoint.actions.map((action) => ({ ...action })),
+            );
+            await librarianWrite({
+                ...common,
+                key: 'recent_actions',
+                valueRaw: mergedActions,
+                valueSummary: summarizeCheckpointActions(mergedActions),
+                properties: {
+                    ...checkpointBaseProperties,
+                    durableClass: 'action_log',
+                    canonicalKey: 'recent_actions',
+                    mergeStrategy: 'append_dedupe',
+                    ...buildSemanticFactTags({
+                        memoryScope: 'project',
+                        durableClass: 'action_log',
+                        mergeStrategy: 'append_dedupe',
+                        extraTags: ['checkpoint'],
+                    }),
+                } as Record<string, unknown>,
+            });
+            expectedKeys.push({
+                entityType: resolved.entityType,
+                entityId: resolved.entityId,
+                key: 'recent_actions',
             });
         }
 
@@ -853,9 +1439,28 @@ async function persistSharedCheckpointBreadcrumbs(params: {
                 key: 'checkpoint_open_risks',
                 valueRaw: { items: checkpoint.openRisks },
                 valueSummary: truncate(`checkpoint open risks include ${checkpoint.openRisks.join('; ')}`, 220),
+                properties: {
+                    ...checkpointBaseProperties,
+                    durableClass: 'open_risks',
+                    canonicalKey: 'checkpoint_open_risks',
+                    mergeStrategy: 'replace',
+                    ...buildSemanticFactTags({
+                        memoryScope: 'project',
+                        durableClass: 'open_risks',
+                        mergeStrategy: 'replace',
+                        extraTags: ['checkpoint', 'breadcrumb'],
+                    }),
+                } as Record<string, unknown>,
+            });
+            expectedKeys.push({
+                entityType: resolved.entityType,
+                entityId: resolved.entityId,
+                key: 'checkpoint_open_risks',
             });
         }
     }
+
+    return expectedKeys;
 }
 
 function createSessionId(agentId: string, taskFingerprint: string): string {
@@ -941,6 +1546,16 @@ function heuristicMemoryNeed(message: string): MemoryDecisionHeuristic {
         };
     }
 
+    // Any substantive message in a project-bound context likely benefits from memory.
+    // Greetings and acks are already caught by MEMORY_NEED_NEGATIVE_PATTERNS above.
+    if (normalized.length > 20) {
+        return {
+            needed: true,
+            confidence: 0.75,
+            explanation: 'substantive_project_prompt',
+        };
+    }
+
     return {
         needed: null,
         confidence: 0.55,
@@ -953,14 +1568,20 @@ function heuristicMemoryNeed(message: string): MemoryDecisionHeuristic {
 export class AttendantInstance {
     private agentId: string;
     private brief: WorkingMemoryBrief | null = null;
+    private advisoryLearningProfile: SessionLedgerLearningProfile | null = null;
     private contextCallCount: number = 0;
+    private attendsWithoutPersist: number = 0;
+    private lastAttendPhase: 'pre-response' | 'post-response' | 'mid-turn' | undefined = undefined;
     private sessionStarted: string = new Date().toISOString();
     private sessionCheckpoint: SessionCheckpointRecord | null = null;
     private eventSource: string = 'internal';
     private eventHost: string | null = null;
+    private sharedStateObservedAt: string | null = null;
+    private pendingSharedStateInvalidations = new Map<string, Set<string>>();
 
     constructor(agentId: string) {
         this.agentId = agentId;
+        registerSharedStateInvalidationObserver(agentId, this);
     }
 
     setLedgerContext(context?: AgentContext['ledgerContext']): void {
@@ -986,20 +1607,34 @@ export class AttendantInstance {
         };
     }
 
-    private async loadSessionLedgerLearnings(): Promise<SessionLedgerLearning[]> {
+    private async loadSessionLedgerSignals(taskType: string): Promise<{
+        learnings: SessionLedgerLearning[];
+        profile: SessionLedgerLearningProfile | null;
+    }> {
         try {
-            return await summarizeSessionLedgerLearnings({
-                agentId: this.agentId,
-                source: this.eventSource === 'internal' ? undefined : this.eventSource,
-                host: this.eventHost ?? undefined,
-                limit: 40,
-                maxLearnings: 4,
-            });
+            const source = this.eventSource === 'internal' ? undefined : this.eventSource;
+            const [learnings, profile] = await Promise.all([
+                summarizeSessionLedgerLearnings({
+                    agentId: this.agentId,
+                    source,
+                    host: this.eventHost ?? undefined,
+                    limit: 40,
+                    maxLearnings: 4,
+                }),
+                buildSessionLedgerLearningProfile({
+                    agentId: this.agentId,
+                    source,
+                    host: this.eventHost ?? undefined,
+                    taskType,
+                    limit: 60,
+                }),
+            ]);
+            return { learnings, profile };
         } catch (error) {
             if (error instanceof SessionLedgerUnavailableError) {
-                return [];
+                return { learnings: [], profile: null };
             }
-            return [];
+            return { learnings: [], profile: null };
         }
     }
 
@@ -1018,11 +1653,13 @@ export class AttendantInstance {
         const inferredTaskType = await this.inferTask(context);
 
         // Load knowledge — agent entries + related entities
-        const workingMemory = await this.buildWorkingMemory(inferredTaskType);
-        const sessionLedgerLearnings = await this.loadSessionLedgerLearnings();
-        const workingMemoryWithLedger = sessionLedgerLearnings.length > 0
-            ? [...workingMemory, ...toLedgerWorkingMemoryEntries(sessionLedgerLearnings)]
-            : workingMemory;
+        const [workingMemory, ledgerSignals] = await Promise.all([
+            this.buildWorkingMemory(inferredTaskType),
+            this.loadSessionLedgerSignals(inferredTaskType),
+        ]);
+        const sessionLedgerLearnings = ledgerSignals.learnings;
+        this.advisoryLearningProfile = ledgerSignals.profile;
+        const workingMemoryWithLedger = mergeWorkingMemoryWithLedger(workingMemory, sessionLedgerLearnings);
         const recoveryResult = persisted?.sessionCheckpoint
             ? this.buildRecovery(context, persisted.sessionCheckpoint)
             : { interrupted: false, recovery: null as SessionRecoveryInfo | null };
@@ -1040,7 +1677,7 @@ export class AttendantInstance {
 
         this.brief = {
             agentId: this.agentId,
-            operatingRules,
+            operatingRules: applyAdvisoryOperatingRules(operatingRules, this.advisoryLearningProfile),
             inferredTaskType,
             workingMemory: workingMemoryWithLedger,
             sessionStarted: persisted?.sessionStarted ?? this.sessionStarted,
@@ -1050,7 +1687,13 @@ export class AttendantInstance {
             sessionLedgerLearnings,
             sessionCheckpoint: this.sessionCheckpoint,
             sessionRecovery: recoveryResult.recovery,
+            watchedEntities: normalizeWatchedEntities([
+                ...(persisted?.watchedEntities ?? []),
+                ...(this.sessionCheckpoint?.checkpoint.entityTargets ?? []),
+                ...inferContextWatchedEntities(context.task, context.recentMessages),
+            ]),
         };
+        this.sharedStateObservedAt = this.brief.briefGeneratedAt;
 
         await this.persistState();
         getStaffEventEmitter().emit({
@@ -1063,6 +1706,7 @@ export class AttendantInstance {
             metadata: this.buildEventMetadata({
                 briefSize: this.brief?.workingMemory.length ?? 0,
                 ledgerLearningCount: sessionLedgerLearnings.length,
+                advisoryScopes: this.advisoryLearningProfile?.scopesUsed ?? [],
                 taskSummary: context.task.slice(0, 120),
             }),
         });
@@ -1082,6 +1726,8 @@ export class AttendantInstance {
         }
 
         const newTaskType = await this.inferTask(context);
+        const ledgerSignals = await this.loadSessionLedgerSignals(newTaskType);
+        this.advisoryLearningProfile = ledgerSignals.profile;
 
         // Task hasn't shifted — update timestamp only
         if (newTaskType.toLowerCase() === this.brief.inferredTaskType.toLowerCase()) {
@@ -1095,11 +1741,15 @@ export class AttendantInstance {
             }
             this.brief = {
                 ...this.brief,
+                operatingRules: applyAdvisoryOperatingRules(this.brief.operatingRules, this.advisoryLearningProfile),
+                workingMemory: mergeWorkingMemoryWithLedger(this.brief.workingMemory, ledgerSignals.learnings),
                 briefGeneratedAt: new Date().toISOString(),
                 contextCallCount: this.contextCallCount,
+                sessionLedgerLearnings: ledgerSignals.learnings,
                 sessionCheckpoint: this.sessionCheckpoint,
                 sessionRecovery: null,
             };
+            this.sharedStateObservedAt = this.brief.briefGeneratedAt;
             await this.persistState();
             getStaffEventEmitter().emit({
                 staffComponent: 'Attendant',
@@ -1111,6 +1761,7 @@ export class AttendantInstance {
                 metadata: this.buildEventMetadata({
                     briefSize: this.brief?.workingMemory.length ?? 0,
                     contextCallCount: this.contextCallCount,
+                    advisoryScopes: this.advisoryLearningProfile?.scopesUsed ?? [],
                 }),
             });
             timeEnd('attendant.reconvene_ms', t0);
@@ -1121,13 +1772,16 @@ export class AttendantInstance {
         const workingMemory = await this.buildWorkingMemory(newTaskType);
         this.brief = {
             ...this.brief,
+            operatingRules: applyAdvisoryOperatingRules(this.brief.operatingRules, this.advisoryLearningProfile),
             inferredTaskType: newTaskType,
-            workingMemory,
+            workingMemory: mergeWorkingMemoryWithLedger(workingMemory, ledgerSignals.learnings),
             briefGeneratedAt: new Date().toISOString(),
             contextCallCount: this.contextCallCount,
+            sessionLedgerLearnings: ledgerSignals.learnings,
             sessionCheckpoint: this.sessionCheckpoint,
             sessionRecovery: null,
         };
+        this.sharedStateObservedAt = this.brief.briefGeneratedAt;
 
         await this.persistState();
         getStaffEventEmitter().emit({
@@ -1140,6 +1794,7 @@ export class AttendantInstance {
             metadata: this.buildEventMetadata({
                 briefSize: this.brief?.workingMemory.length ?? 0,
                 contextCallCount: this.contextCallCount,
+                advisoryScopes: this.advisoryLearningProfile?.scopesUsed ?? [],
             }),
         });
         timeEnd('attendant.reconvene_ms', t0);
@@ -1201,7 +1856,32 @@ export class AttendantInstance {
         return this.brief;
     }
 
+    private async verifyCheckpointAvailability(sessionId: string, expectedKeys: CheckpointAvailabilityKey[]): Promise<void> {
+        const persisted = await readPersistedBriefForAgent(this.agentId);
+        if (!persisted?.sessionCheckpoint || persisted.sessionCheckpoint.sessionId !== sessionId) {
+            throw new Error(
+                `CHECKPOINT_AVAILABILITY_FAILED: agent/${this.agentId}/attendant_state was not immediately queryable with session ${sessionId}.`
+            );
+        }
+
+        for (const expected of expectedKeys) {
+            const observed = await findEntry(expected);
+            if (!observed) {
+                throw new Error(
+                    `CHECKPOINT_AVAILABILITY_FAILED: ${expected.entityType}/${expected.entityId}/${expected.key} was not immediately queryable after checkpoint success.`
+                );
+            }
+        }
+    }
+
+    notifyWriteOccurred(): void {
+        this.attendsWithoutPersist = 0;
+        this.lastAttendPhase = undefined;
+    }
+
     async checkpoint(input: SessionCheckpointInput): Promise<WorkingMemoryBrief> {
+        this.attendsWithoutPersist = 0;
+        this.lastAttendPhase = undefined;
         this.setLedgerContext(input.ledgerContext);
         const now = new Date().toISOString();
         if (!this.brief) {
@@ -1238,10 +1918,16 @@ export class AttendantInstance {
             sessionCheckpoint: this.sessionCheckpoint,
             sessionRecovery: null,
             briefGeneratedAt: now,
+            watchedEntities: normalizeWatchedEntities([
+                ...(this.brief.watchedEntities ?? []),
+                ...(normalizedCheckpoint.entityTargets ?? []),
+            ]),
         };
+        this.sharedStateObservedAt = now;
 
+        let expectedSharedKeys: CheckpointAvailabilityKey[] = [];
         try {
-            await persistSharedCheckpointBreadcrumbs({
+            expectedSharedKeys = await persistSharedCheckpointBreadcrumbs({
                 agentId: this.agentId,
                 sessionId,
                 checkpoint: normalizedCheckpoint,
@@ -1259,6 +1945,26 @@ export class AttendantInstance {
                     error: error instanceof Error ? error.message : String(error),
                 }),
             });
+            throw error;
+        }
+        await this.persistState();
+        try {
+            await this.verifyCheckpointAvailability(sessionId, expectedSharedKeys);
+        } catch (error) {
+            getStaffEventEmitter().emit({
+                staffComponent: 'Attendant',
+                actionType: 'checkpoint_availability_failed',
+                agentId: this.agentId,
+                source: this.eventSource,
+                reason: 'checkpoint_not_immediately_queryable',
+                level: 'audit',
+                metadata: this.buildEventMetadata({
+                    sessionId,
+                    sharedKeyCount: expectedSharedKeys.length,
+                    error: error instanceof Error ? error.message : String(error),
+                }),
+            });
+            throw error;
         }
         getStaffEventEmitter().emit({
             staffComponent: 'Attendant',
@@ -1273,10 +1979,13 @@ export class AttendantInstance {
                 nextStep: normalizedCheckpoint.nextStep ?? null,
                 openRiskCount: normalizedCheckpoint.openRisks?.length ?? 0,
                 recentOutputCount: normalizedCheckpoint.recentOutputs?.length ?? 0,
+                actionCount: normalizedCheckpoint.actions?.length ?? 0,
+                fileChangeCount: normalizedCheckpoint.fileChanges?.length ?? 0,
                 entityTargetCount: normalizedCheckpoint.entityTargets?.length ?? 0,
+                sharedKeyCount: expectedSharedKeys.length,
+                availabilityVerified: true,
             }),
         });
-        await this.persistState();
         return this.brief;
     }
 
@@ -1310,6 +2019,7 @@ export class AttendantInstance {
             sessionRecovery: null,
             briefGeneratedAt: now,
         };
+        this.sharedStateObservedAt = now;
 
         await this.persistState();
         return this.brief;
@@ -1345,6 +2055,7 @@ export class AttendantInstance {
             sessionRecovery: null,
             briefGeneratedAt: now,
         };
+        this.sharedStateObservedAt = now;
 
         await this.persistState();
         return this.brief;
@@ -1380,6 +2091,7 @@ export class AttendantInstance {
             sessionRecovery: null,
             briefGeneratedAt: now,
         };
+        this.sharedStateObservedAt = now;
 
         await this.persistState();
         return this.brief;
@@ -1417,9 +2129,29 @@ export class AttendantInstance {
         const forceInject = input.forceInject === true;
         let bootstrap: AttendBootstrapInfo | null = null;
 
+        this.attendsWithoutPersist++;
+        const phase = input.phase;
+        let complianceWarning: string | undefined;
+
+        if (phase === 'post-response') {
+            // Correct post-response call — reset counters
+            this.attendsWithoutPersist = 0;
+            this.lastAttendPhase = 'post-response';
+        } else if (phase === 'pre-response') {
+            if (this.lastAttendPhase === 'pre-response') {
+                complianceWarning = `COMPLIANCE: iranti_attend(phase='pre-response') was called without a preceding phase='post-response'. The previous response was delivered without the required post-response attend. After every response, call iranti_attend(phase='post-response') then persist durable findings with iranti_write or iranti_checkpoint.`;
+            }
+            this.lastAttendPhase = 'pre-response';
+        } else {
+            // No phase provided — fall back to heuristic counter
+            if (this.attendsWithoutPersist >= 3) {
+                complianceWarning = `COMPLIANCE: iranti_attend has been called ${this.attendsWithoutPersist} times since the last iranti_write or iranti_checkpoint. You are likely missing post-response attend calls and durable writes. Call iranti_attend(phase='post-response') after every response, then persist durable findings with iranti_write or iranti_checkpoint before the next turn.`;
+            }
+        }
+
         if (!this.brief) {
             const bootstrapTask = buildAttendBootstrapTask(latestMessage, currentContext);
-            await this.handshake({
+            const bootstrapBrief = await this.handshake({
                 task: bootstrapTask,
                 recentMessages: buildAttendBootstrapMessages(latestMessage, currentContext),
                 ledgerContext: input.ledgerContext,
@@ -1428,10 +2160,14 @@ export class AttendantInstance {
                 handshakePerformed: true,
                 reason: 'no_existing_brief',
                 task: bootstrapTask,
+                operatingRules: bootstrapBrief.operatingRules,
+                note: 'A handshake was auto-performed because no session brief existed. Read operatingRules now and follow any instructions there — including ACKNOWLEDGE — before replying to the user.',
             };
         }
 
         const effectiveEntityHints = this.resolveAttendEntityHints(input.entityHints, latestMessage);
+        let watchedEntitiesChanged = this.updateWatchedEntities(effectiveEntityHints);
+        const freshState = await this.detectRelevantFreshState(effectiveEntityHints, latestMessage);
         const observationContext = currentContext.trim().length > 0 ? currentContext : latestMessage;
         const mandatoryRecall = detectMandatoryRecall(latestMessage);
         if (mandatoryRecall.required && input.suppressEvents !== true) {
@@ -1449,11 +2185,20 @@ export class AttendantInstance {
             });
         }
 
-        const decision = await this.decideMemoryNeed({
+        let decision = await this.decideMemoryNeed({
             currentContext,
             latestMessage,
             forceInject,
+            entityHintCount: effectiveEntityHints.length,
         });
+        if (freshState.hasFreshState && !decision.needed) {
+            decision = {
+                needed: true,
+                confidence: 0.92,
+                method: 'heuristic',
+                explanation: 'relevant_shared_state_changed',
+            };
+        }
 
         if (!decision.needed) {
             if (input.suppressEvents !== true) {
@@ -1490,6 +2235,8 @@ export class AttendantInstance {
                 reason: 'memory_not_needed',
                 decision,
                 bootstrap,
+                complianceWarning,
+                usageGuidance: buildUsageGuidance('attend'),
                 facts: [],
                 entitiesDetected: [],
                 alreadyPresent: 0,
@@ -1508,30 +2255,71 @@ export class AttendantInstance {
             };
         }
 
+        const observeEntityHints = effectiveEntityHints.length > 0 ? effectiveEntityHints : freshState.entities;
         const observed = await this.observe({
             currentContext: observationContext,
             maxFacts: input.maxFacts,
-            entityHints: effectiveEntityHints,
-            priorityKeys: mandatoryRecall.key ? [mandatoryRecall.key] : [],
+            entityHints: observeEntityHints,
+            priorityKeys: Array.from(new Set([
+                ...(mandatoryRecall.key ? [mandatoryRecall.key] : []),
+                ...(this.advisoryLearningProfile?.priorityKeys ?? []),
+                ...freshState.priorityKeys,
+            ])),
+            skipContextFilter: forceInject,
             ledgerContext: input.ledgerContext,
         });
 
+        // Remap facts from personal recall fallback entities to the canonical personal entity.
+        // E.g. if person/user is a legacy alias for user/main, surface facts as user/main/<key>.
+        const canonicalPersonalEntity = getPersonalMemoryEntity();
+        const personalFallbacks = new Set(
+            getPersonalRecallEntities().filter((e) => e !== canonicalPersonalEntity)
+        );
+        const [canonicalPersonalType, canonicalPersonalId] = canonicalPersonalEntity.split('/', 2);
+        const remappedFacts = personalFallbacks.size === 0 ? observed.facts : observed.facts.map((fact) => {
+            const slashIdx2 = fact.entityKey.indexOf('/', fact.entityKey.indexOf('/') + 1);
+            const entityPath = slashIdx2 === -1 ? fact.entityKey : fact.entityKey.slice(0, slashIdx2);
+            if (!personalFallbacks.has(entityPath)) return fact;
+            const remainder = slashIdx2 === -1 ? '' : fact.entityKey.slice(slashIdx2);
+            return { ...fact, entityKey: `${canonicalPersonalType}/${canonicalPersonalId}${remainder}` };
+        });
+        watchedEntitiesChanged = this.updateWatchedEntities(observed.entitiesResolved?.map((entry) => entry.canonicalEntity) ?? []) || watchedEntitiesChanged;
+        this.markSharedStateObserved(observeEntityHints.length > 0 ? observeEntityHints : freshState.entities);
+
         let reason: AttendResult['reason'] = 'memory_needed_injected';
-        const shouldInject = observed.facts.length > 0;
+        const shouldInject = remappedFacts.length > 0;
+        let searchSuggestion: AttendSearchSuggestion | undefined;
 
         if (!shouldInject) {
             const allAlreadyInContext = observed.totalFound > 0 && observed.alreadyPresent >= observed.totalFound;
             reason = allAlreadyInContext ? 'memory_needed_but_in_context' : 'memory_needed_no_facts';
+            if (reason === 'memory_needed_no_facts') {
+                const terms = tokenize(latestMessage).slice(0, 6);
+                const alternativeEntities = (observed.entitiesResolved ?? [])
+                    .map((e) => e.canonicalEntity)
+                    .filter(Boolean);
+                searchSuggestion = {
+                    hint: terms.length > 0
+                        ? `No facts found via attend. Try iranti_search with: ${terms.join(' ')}`
+                        : 'No facts found via attend. Try iranti_search with a different query or entity path.',
+                    suggestedTerms: terms,
+                    alternativeEntities,
+                };
+            }
         } else if (forceInject) {
             reason = 'forced';
         }
 
         const attendResult = {
             ...observed,
+            facts: remappedFacts,
             shouldInject,
             reason,
             decision,
             bootstrap,
+            searchSuggestion,
+            complianceWarning,
+            usageGuidance: buildUsageGuidance('attend'),
         };
         if (input.suppressEvents !== true) {
             getStaffEventEmitter().emit({
@@ -1545,6 +2333,10 @@ export class AttendantInstance {
                     contextCallCount: this.contextCallCount,
                     shouldInject,
                     attendReason: reason,
+                    advisoryDecisionMethod: decision.method,
+                    advisoryScopes: this.advisoryLearningProfile?.scopesUsed ?? [],
+                    freshStateEntities: freshState.entities,
+                    freshStateKeys: freshState.priorityKeys,
                     }),
                 });
             getStaffEventEmitter().emit({
@@ -1561,8 +2353,14 @@ export class AttendantInstance {
                     entitiesResolved: observed.entitiesResolved?.map((entry) => entry.canonicalEntity) ?? [],
                     alreadyPresent: observed.alreadyPresent,
                     totalFound: observed.totalFound,
+                    advisoryPriorityKeys: this.advisoryLearningProfile?.priorityKeys ?? [],
+                    freshStateEntities: freshState.entities,
+                    freshStateKeys: freshState.priorityKeys,
                 }),
             });
+        }
+        if (watchedEntitiesChanged) {
+            await this.persistState();
         }
         timeEnd('attendant.attend_ms', t0);
         return attendResult;
@@ -1575,9 +2373,7 @@ export class AttendantInstance {
         this.setLedgerContext(input.ledgerContext);
         const maxFacts = input.maxFacts ?? 5;
         const currentContext = input.currentContext ?? '';
-        const entityHints = Array.isArray(input.entityHints)
-            ? input.entityHints.filter((hint) => typeof hint === 'string' && hint.trim().length > 0)
-            : [];
+        const entityHints = this.resolveObserveEntityHints(input.entityHints, currentContext);
         const requestedPriorityKeys = Array.isArray(input.priorityKeys)
             ? input.priorityKeys
                 .filter((key: string) => typeof key === 'string' && key.trim().length > 0)
@@ -1602,6 +2398,7 @@ export class AttendantInstance {
                 entitiesDetected: [],
                 alreadyPresent: 0,
                 totalFound: 0,
+                usageGuidance: buildUsageGuidance('observe'),
                 entitiesResolved: [],
                 debug: {
                     skipped: 'empty_context',
@@ -1754,6 +2551,7 @@ ${detectionWindow}`,
                 entitiesDetected: [],
                 alreadyPresent: 0,
                 totalFound: 0,
+                usageGuidance: buildUsageGuidance('observe'),
                 entitiesResolved: [],
                 debug: {
                     contextLength: currentContext.length,
@@ -1890,21 +2688,22 @@ ${detectionWindow}`,
             }
         }
 
-        // Step 3 — filter out facts already present in context
+        // Step 3 — filter out facts already present in context (skipped when forceInject)
         const contextLower = currentContext.toLowerCase();
         let alreadyPresent = 0;
         const newFacts: RetrievedFact[] = [];
 
-        for (const fact of allFacts) {
-            // Check if summary key words appear in context
-            const summaryWords = fact.summary.toLowerCase().split(' ').filter((w) => w.length > 4);
-            const alreadyInContext = summaryWords.length > 0 &&
-                summaryWords.filter((w) => contextLower.includes(w)).length >= Math.ceil(summaryWords.length * 0.6);
+        if (input.skipContextFilter) {
+            newFacts.push(...allFacts);
+        } else {
+            for (const fact of allFacts) {
+                const alreadyInContext = factAlreadyPresentInContext(contextLower, fact);
 
-            if (alreadyInContext) {
-                alreadyPresent++;
-            } else {
-                newFacts.push(fact);
+                if (alreadyInContext) {
+                    alreadyPresent++;
+                } else {
+                    newFacts.push(fact);
+                }
             }
         }
 
@@ -1939,6 +2738,7 @@ ${detectionWindow}`,
             entitiesDetected: Array.from(entitiesDetected),
             alreadyPresent,
             totalFound: allFacts.length,
+            usageGuidance: buildUsageGuidance('observe'),
             entitiesResolved,
             debug: {
                 contextLength: currentContext.length,
@@ -1970,6 +2770,7 @@ ${detectionWindow}`,
         currentContext: string;
         latestMessage: string;
         forceInject: boolean;
+        entityHintCount: number;
     }): Promise<AttendDecision> {
         if (input.forceInject) {
             return {
@@ -2000,6 +2801,11 @@ ${detectionWindow}`,
             };
         }
 
+        const advisoryDecision = this.buildAdvisoryMemoryDecision(input.latestMessage);
+        if (advisoryDecision) {
+            return advisoryDecision;
+        }
+
         const contextWindow = input.currentContext.length <= MEMORY_DECISION_CONTEXT_WINDOW_CHARS
             ? input.currentContext
             : input.currentContext.slice(-MEMORY_DECISION_CONTEXT_WINDOW_CHARS);
@@ -2019,8 +2825,9 @@ Return ONLY valid JSON with this exact shape:
 {"needsMemory":true,"confidence":0.81,"reason":"short_reason"}
 
 Rules:
-- needsMemory=true when the answer likely depends on user-specific or session-specific facts.
-- needsMemory=false for generic chit-chat, open-domain facts, or when no memory lookup is needed.
+- needsMemory=true when the message involves project context, technical decisions, code state, prior work, open tasks, bugs, architecture, preferences, or anything session- or project-specific.
+- needsMemory=true when in doubt — false positives are cheap, false negatives lose context.
+- needsMemory=false ONLY for clear one-word acks, simple greetings, or purely generic factual questions with no project relevance.
 - confidence is a float from 0 to 1.`,
             },
         ], 128);
@@ -2035,6 +2842,71 @@ Rules:
             };
         }
 
+        return this.buildParseFailureFallbackDecision(input);
+    }
+
+    private buildParseFailureFallbackDecision(input: {
+        currentContext: string;
+        latestMessage: string;
+        entityHintCount: number;
+    }): AttendDecision {
+        const normalized = normalizeMessage(input.latestMessage);
+        if (!normalized || MEMORY_NEED_NEGATIVE_PATTERNS.some((pattern) => pattern.test(normalized))) {
+            return {
+                needed: false,
+                confidence: 0.5,
+                method: 'heuristic',
+                explanation: 'classification_parse_failed_default_false',
+            };
+        }
+
+        // Re-run the heuristic against the strengthened positive patterns. Since the heuristic
+        // was already called in decideMemoryNeed() and returned null (ambiguous), we reach here
+        // only for very short messages (≤20 chars) with no prior pattern matches. The updated
+        // MEMORY_NEED_POSITIVE_PATTERNS now catch most imperative and technical cues, so a second
+        // pass here picks up any stragglers added after the initial call.
+        const heuristicResult = heuristicMemoryNeed(input.latestMessage);
+        if (heuristicResult.needed !== null) {
+            return {
+                needed: heuristicResult.needed,
+                confidence: heuristicResult.confidence,
+                method: 'heuristic',
+                explanation: heuristicResult.needed
+                    ? 'classification_parse_failed_heuristic_true'
+                    : 'classification_parse_failed_heuristic_false',
+            };
+        }
+
+        const substantivePrompt =
+            normalized.length >= 12
+            || normalized.split(/\s+/).filter(Boolean).length >= 3
+            || /[?]$/.test(normalized);
+        const hasScopedContext = input.entityHintCount > 0 || input.currentContext.trim().length > 0;
+        const hasProjectStateCue = MEMORY_PARSE_FAILURE_PROJECT_CUE_PATTERNS.some((pattern) => pattern.test(normalized));
+        if (substantivePrompt && (hasScopedContext || hasProjectStateCue)) {
+            return {
+                needed: true,
+                confidence: 0.55,
+                method: 'heuristic',
+                explanation: 'classification_parse_failed_default_true',
+            };
+        }
+
+        // Final safety net: for any non-trivial message (≥5 chars) where the LLM parse failed,
+        // default to injecting memory rather than silently skipping. A false positive (unnecessary
+        // injection) is far cheaper than a false negative (missing context causes wrong output).
+        // Only true single-word acks/greetings — already caught by MEMORY_NEED_NEGATIVE_PATTERNS
+        // above — should reach this point with a truly empty normalized form; everything else
+        // gets injection.
+        if (normalized.length > 0) {
+            return {
+                needed: true,
+                confidence: 0.5,
+                method: 'heuristic',
+                explanation: 'classification_parse_failed_safe_default_true',
+            };
+        }
+
         return {
             needed: false,
             confidence: 0.5,
@@ -2043,11 +2915,40 @@ Rules:
         };
     }
 
+    private buildAdvisoryMemoryDecision(latestMessage: string): AttendDecision | null {
+        const profile = this.advisoryLearningProfile;
+        const normalized = normalizeMessage(latestMessage);
+        if (!profile?.preferMemoryForAmbiguousTurns || !normalized) {
+            return null;
+        }
+        if (MEMORY_NEED_NEGATIVE_PATTERNS.some((pattern) => pattern.test(normalized))) {
+            return null;
+        }
+        if (normalized.length < 5) {
+            return null;
+        }
+        if (!messageHasAdvisoryCue(normalized, profile.matchedTaskType ?? this.brief?.inferredTaskType ?? null)) {
+            return null;
+        }
+
+        return {
+            needed: true,
+            confidence: profile.scopesUsed.includes('task') ? 0.78 : 0.7,
+            method: 'advisory',
+            explanation: `advisory_${profile.scopesUsed[0] ?? 'global'}_learning`,
+        };
+    }
+
     private resolveAttendEntityHints(entityHints: string[] | undefined, latestMessage: string): string[] {
         const explicit = Array.isArray(entityHints)
             ? entityHints.filter((hint) => typeof hint === 'string' && hint.trim().length > 0)
             : [];
+        const explicitFromMessage = extractExactEntityReferences(latestMessage);
         const scope = classifyMemoryScope(latestMessage);
+
+        if (explicitFromMessage.length > 0) {
+            return explicitFromMessage;
+        }
 
         if (explicit.length > 0) {
             return explicit;
@@ -2065,6 +2966,225 @@ Rules:
         }
 
         return [];
+    }
+
+    private resolveObserveEntityHints(entityHints: string[] | undefined, currentContext: string): string[] {
+        const explicit = Array.isArray(entityHints)
+            ? entityHints.filter((hint) => typeof hint === 'string' && hint.trim().length > 0)
+            : [];
+        if (explicit.length > 0) {
+            return explicit;
+        }
+
+        const explicitFromContext = extractExactEntityReferences(currentContext);
+        if (explicitFromContext.length > 0) {
+            return explicitFromContext;
+        }
+
+        const scope = classifyMemoryScope(currentContext);
+        if (scope && this.brief) {
+            const watched = normalizeWatchedEntities([
+                ...(this.brief?.watchedEntities ?? []),
+                ...(this.sessionCheckpoint?.checkpoint.entityTargets ?? []),
+            ]);
+            if (watched.length > 0) {
+                return watched;
+            }
+        }
+
+        if (scope === 'personal') {
+            return getPersonalRecallEntities();
+        }
+
+        if (scope === 'project') {
+            const configured = getProjectMemoryEntity();
+            if (configured) {
+                return [configured];
+            }
+        }
+
+        return [];
+    }
+
+    private async detectRelevantFreshState(entityHints: string[], latestMessage: string): Promise<RelevantFreshState> {
+        const pending = this.consumePendingFreshState(entityHints, latestMessage);
+        if (pending.hasFreshState) {
+            return pending;
+        }
+
+        const sinceRaw = this.sharedStateObservedAt?.trim() || this.brief?.briefGeneratedAt?.trim();
+        if (!sinceRaw) {
+            return { hasFreshState: false, priorityKeys: [], entities: [] };
+        }
+
+        const since = new Date(sinceRaw);
+        if (Number.isNaN(since.getTime())) {
+            return { hasFreshState: false, priorityKeys: [], entities: [] };
+        }
+
+        const targetHints = entityHints.length > 0
+            ? entityHints
+            : shouldUseWatchedEntitiesForPrompt(latestMessage)
+                ? (this.brief?.watchedEntities ?? [])
+                : [];
+        if (targetHints.length === 0) {
+            return { hasFreshState: false, priorityKeys: [], entities: [] };
+        }
+
+        const resolvedEntities = await this.expandRelevantFreshTargets(targetHints.slice(0, 5));
+
+        const entities: string[] = [];
+        const priorityKeys: string[] = [];
+        const seenKeys = new Set<string>();
+
+        for (const [canonicalEntity, resolved] of resolvedEntities) {
+            const entries = await findEntriesByEntity(resolved.entityType, resolved.entityId);
+            const freshEntries = entries
+                .filter((entry) => entry.updatedAt > since)
+                .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+            if (freshEntries.length === 0) continue;
+
+            entities.push(canonicalEntity);
+            for (const entry of freshEntries) {
+                if (seenKeys.has(entry.key)) continue;
+                seenKeys.add(entry.key);
+                priorityKeys.push(entry.key);
+                if (priorityKeys.length >= 8) {
+                    break;
+                }
+            }
+            if (priorityKeys.length >= 8) {
+                break;
+            }
+        }
+
+        return {
+            hasFreshState: entities.length > 0,
+            priorityKeys,
+            entities,
+        };
+    }
+
+    private async expandRelevantFreshTargets(targetHints: string[]): Promise<Map<string, FreshEntityTarget>> {
+        const resolvedEntities = new Map<string, FreshEntityTarget>();
+        for (const hint of targetHints) {
+            const resolved = await this.resolveFreshEntityTarget(hint);
+            if (!resolved) continue;
+            resolvedEntities.set(resolved.canonicalEntity, resolved);
+
+            const related = await getRelated(resolved.entityType, resolved.entityId);
+            for (const neighbor of related.slice(0, 6)) {
+                const relatedEntity = `${neighbor.entityType}/${neighbor.entityId}`;
+                const relatedResolved = await this.resolveFreshEntityTarget(relatedEntity);
+                if (!relatedResolved) continue;
+                resolvedEntities.set(relatedResolved.canonicalEntity, relatedResolved);
+                if (resolvedEntities.size >= 12) {
+                    return resolvedEntities;
+                }
+            }
+        }
+        return resolvedEntities;
+    }
+
+    private async resolveFreshEntityTarget(hint: string): Promise<FreshEntityTarget | null> {
+        try {
+            const parsed = parseEntityString(hint);
+            try {
+                const resolved = await resolveEntity({
+                    entityType: parsed.entityType,
+                    entityId: parsed.entityId,
+                    rawName: hint,
+                    aliases: [hint, parsed.entityId],
+                    source: 'attend_refresh',
+                    confidence: 100,
+                    createIfMissing: false,
+                });
+                return {
+                    canonicalEntity: resolved.canonicalEntity,
+                    entityType: resolved.entityType,
+                    entityId: resolved.entityId,
+                };
+            } catch {
+                return {
+                    canonicalEntity: `${parsed.entityType}/${parsed.entityId}`,
+                    entityType: parsed.entityType,
+                    entityId: parsed.entityId,
+                };
+            }
+        } catch {
+            return null;
+        }
+    }
+
+    private updateWatchedEntities(candidates: string[]): boolean {
+        if (!this.brief) return false;
+        const next = normalizeWatchedEntities([
+            ...(this.brief.watchedEntities ?? []),
+            ...candidates,
+        ]);
+        const changed = JSON.stringify(next) !== JSON.stringify(this.brief.watchedEntities ?? []);
+        this.brief.watchedEntities = next;
+        return changed;
+    }
+
+    isWatchingEntity(entity: string): boolean {
+        const normalized = entity.trim();
+        if (!normalized) return false;
+        if ((this.brief?.watchedEntities ?? []).includes(normalized)) {
+            return true;
+        }
+        return (this.sessionCheckpoint?.checkpoint.entityTargets ?? []).includes(normalized);
+    }
+
+    notifySharedEntityUpdated(entity: string, key: string): void {
+        const normalizedEntity = entity.trim();
+        const normalizedKey = key.trim();
+        if (!normalizedEntity || !normalizedKey) return;
+        if (!this.isWatchingEntity(normalizedEntity)) return;
+        const existing = this.pendingSharedStateInvalidations.get(normalizedEntity) ?? new Set<string>();
+        existing.add(normalizedKey);
+        this.pendingSharedStateInvalidations.set(normalizedEntity, existing);
+    }
+
+    private consumePendingFreshState(entityHints: string[], latestMessage: string): RelevantFreshState {
+        const targetHints = entityHints.length > 0
+            ? entityHints
+            : shouldUseWatchedEntitiesForPrompt(latestMessage)
+                ? (this.brief?.watchedEntities ?? [])
+                : [];
+        if (targetHints.length === 0) {
+            return { hasFreshState: false, priorityKeys: [], entities: [] };
+        }
+
+        const entities: string[] = [];
+        const priorityKeys: string[] = [];
+        const seenKeys = new Set<string>();
+        for (const entity of targetHints) {
+            const keys = this.pendingSharedStateInvalidations.get(entity);
+            if (!keys || keys.size === 0) continue;
+            entities.push(entity);
+            for (const key of keys) {
+                if (seenKeys.has(key)) continue;
+                seenKeys.add(key);
+                priorityKeys.push(key);
+                if (priorityKeys.length >= 8) break;
+            }
+            if (priorityKeys.length >= 8) break;
+        }
+
+        return {
+            hasFreshState: entities.length > 0,
+            priorityKeys,
+            entities,
+        };
+    }
+
+    private markSharedStateObserved(entities: string[]): void {
+        if (entities.length === 0) return;
+        this.sharedStateObservedAt = new Date().toISOString();
+        for (const entity of entities) {
+            this.pendingSharedStateInvalidations.delete(entity);
+        }
     }
 
     private parseMemoryDecision(raw: string): { needsMemory: boolean; confidence: number; reason: string } | null {
@@ -2227,6 +3347,8 @@ If nothing is relevant, return: none`,
         this.sessionStarted = state.sessionStarted;
         this.contextCallCount = state.contextCallCount ?? 0;
         this.sessionCheckpoint = state.sessionCheckpoint ?? null;
+        this.advisoryLearningProfile = null;
+        this.sharedStateObservedAt = state.briefGeneratedAt;
         this.brief = state;
         return state;
     }

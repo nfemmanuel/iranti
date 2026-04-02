@@ -289,8 +289,10 @@ process.exit(1);
 
     const mcpFile = path.join(projectDir, '.mcp.json');
     const vscodeMcpFile = path.join(projectDir, '.vscode', 'mcp.json');
+    const agentsFile = path.join(projectDir, 'AGENTS.md');
     assert.ok(fs.existsSync(mcpFile), 'codex-setup should create .mcp.json in the bound workspace');
     assert.ok(fs.existsSync(vscodeMcpFile), 'codex-setup should create .vscode/mcp.json in the bound workspace');
+    assert.ok(fs.existsSync(agentsFile), 'codex-setup should create or update AGENTS.md in the bound workspace');
     const mcpConfig = JSON.parse(fs.readFileSync(mcpFile, 'utf8')) as {
         mcpServers?: Record<string, { command?: string; args?: string[]; env?: Record<string, string> }>;
     };
@@ -316,6 +318,19 @@ process.exit(1);
     assert.strictEqual(vscodeMcpConfig.servers?.iranti?.env?.IRANTI_MCP_DEFAULT_AGENT, 'codex_code', 'workspace .vscode/mcp.json should carry the default Codex agent');
     assert.strictEqual(vscodeMcpConfig.servers?.iranti?.env?.IRANTI_MCP_DEFAULT_SOURCE, 'Codex', 'workspace .vscode/mcp.json should carry the default Codex source label');
     assert.strictEqual(vscodeMcpConfig.servers?.iranti?.env?.IRANTI_MCP_HOST, 'codex_vscode', 'workspace .vscode/mcp.json should label the Codex VS Code host');
+
+    const agentsText = fs.readFileSync(agentsFile, 'utf8');
+    assert.match(agentsText, /mcp__iranti__iranti_handshake/, 'workspace AGENTS.md should require handshake');
+    assert.match(agentsText, /before each reply and before\/after knowledge discovery/i, 'workspace AGENTS.md should require attend ordering');
+    assert.match(agentsText, /natural pauses, before stepping away from long work, when interrupted/i, 'workspace AGENTS.md should require checkpointing during interrupted work');
+    assert.match(agentsText, /checkpoint `actions` field/i, 'workspace AGENTS.md should tell hosts to record key actions in checkpoint actions.');
+    assert.match(agentsText, /confirmed durable findings/i, 'workspace AGENTS.md should require durable writes after confirmed findings');
+    assert.match(agentsText, /what you found, what worked, what failed, what changed, and what happens next/i, 'workspace AGENTS.md should require structured breadcrumbs instead of only broad summaries');
+    assert.match(stdout, /Required host pattern:/, 'codex-setup output should print the explicit required host pattern');
+    assert.match(stdout, /Run iranti_handshake at session start/i, 'codex-setup output should mention handshake at session start');
+    assert.match(stdout, /Run iranti_checkpoint at natural pauses, during interrupted work/i, 'codex-setup output should mention checkpointing during interrupted work');
+    assert.match(stdout, /Include key commands, tests, validations, and decisions in checkpoint actions/i, 'codex-setup output should mention structured checkpoint actions.');
+    assert.match(stdout, /Shared memory closeout: (written|skipped|failed)/i, 'codex-setup output should report whether a shared-memory closeout was written.');
 }
 
 async function testWindowsCodexResolutionPrefersExe(root: string): Promise<void> {

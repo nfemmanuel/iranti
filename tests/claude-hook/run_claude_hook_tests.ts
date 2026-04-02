@@ -47,6 +47,19 @@ async function main(): Promise<void> {
                 nextStep?: string;
                 openRisks?: string[];
                 recentOutputs?: string[];
+                actions?: Array<{
+                    kind: string;
+                    summary: string;
+                    status?: string;
+                    target?: string;
+                    detail?: string;
+                }>;
+                fileChanges?: Array<{
+                    action: string;
+                    path: string;
+                    toPath?: string;
+                    purpose?: string;
+                }>;
                 entityTargets?: string[];
             };
         }): Promise<void> {
@@ -60,6 +73,12 @@ async function main(): Promise<void> {
                 }
                 if (input.checkpoint.openRisks && input.checkpoint.openRisks.length > 0) {
                     queryValues.set(`${entity}:checkpoint_open_risks`, { items: input.checkpoint.openRisks });
+                }
+                if (input.checkpoint.fileChanges && input.checkpoint.fileChanges.length > 0) {
+                    queryValues.set(`${entity}:recent_file_changes`, { items: input.checkpoint.fileChanges });
+                }
+                if (input.checkpoint.actions && input.checkpoint.actions.length > 0) {
+                    queryValues.set(`${entity}:recent_actions`, { items: input.checkpoint.actions });
                 }
             }
         },
@@ -269,6 +288,53 @@ async function main(): Promise<void> {
         assert.ok(
             calls.some((call) => call.startsWith(`checkpoint:${agentId}:`) && call.includes(`:${memoryEntity}:`) && call.endsWith(':rerun the db validation.')),
             'Expected Stop hook to also persist a shared checkpoint for resumable project progress.'
+        );
+
+        const fileStopContext = await buildHookAdditionalContext({
+            iranti: fakeIranti as never,
+            event: 'Stop',
+            payload: {
+                cwd: process.cwd(),
+                last_assistant_message: 'File created docs/runtime-verification.md for rollout notes.',
+            },
+        });
+        assert.equal(fileStopContext, '', 'Expected Stop hook file-change persistence to emit no additional context.');
+        assert.deepEqual(
+            queryValues.get(`${memoryEntity}:recent_file_changes`),
+            {
+                items: [
+                    {
+                        action: 'created',
+                        path: 'docs/runtime-verification.md',
+                        purpose: 'rollout notes.',
+                    },
+                ],
+            },
+            'Expected Stop hook checkpointing to preserve structured file changes.'
+        );
+
+        const actionStopContext = await buildHookAdditionalContext({
+            iranti: fakeIranti as never,
+            event: 'Stop',
+            payload: {
+                cwd: process.cwd(),
+                last_assistant_message: 'Validation passed runtime lifecycle smoke.',
+            },
+        });
+        assert.equal(actionStopContext, '', 'Expected Stop hook action persistence to emit no additional context.');
+        assert.deepEqual(
+            queryValues.get(`${memoryEntity}:recent_actions`),
+            {
+                items: [
+                    {
+                        kind: 'validation',
+                        summary: 'passed runtime lifecycle smoke.',
+                        status: 'passed',
+                        target: 'runtime lifecycle smoke.',
+                    },
+                ],
+            },
+            'Expected Stop hook checkpointing to preserve structured recent actions.'
         );
 
         const retrievalAnswerContext = await buildHookAdditionalContext({

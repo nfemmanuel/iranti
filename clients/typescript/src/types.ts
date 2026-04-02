@@ -7,7 +7,7 @@ export type ResolutionState = 'not_applicable' | 'pending' | 'resolved';
 export type ResolutionOutcome = 'not_applicable' | 'challenger_won' | 'original_retained';
 export type RelationshipDirection = 'outbound' | 'inbound';
 export type ResolvedEntityMatch = 'exact' | 'alias' | 'created' | 'hint';
-export type AttendDecisionMethod = 'heuristic' | 'llm' | 'forced';
+export type AttendDecisionMethod = 'heuristic' | 'llm' | 'forced' | 'advisory';
 export type AttendReason =
     | 'forced'
     | 'memory_not_needed'
@@ -52,6 +52,30 @@ export interface WriteParams {
     confidence: number;
     source: string;
     agent: string;
+    properties?: Record<string, unknown>;
+    validFrom?: string | Date;
+    requestId?: string;
+}
+
+export type IssueStatus = 'open' | 'resolved';
+export type IssueSeverity = 'low' | 'medium' | 'high' | 'critical';
+
+export interface WriteIssueParams {
+    entity: string;
+    issueId: string;
+    title: string;
+    status: IssueStatus;
+    summary: string;
+    confidence: number;
+    source: string;
+    agent: string;
+    severity?: IssueSeverity;
+    details?: JsonValue | JsonObject | unknown[];
+    discoveredAt?: string;
+    resolvedAt?: string;
+    resolution?: string;
+    tags?: string[];
+    properties?: Record<string, unknown>;
     validFrom?: string | Date;
     requestId?: string;
 }
@@ -200,6 +224,19 @@ export interface SessionCheckpointPayload {
     nextStep?: string;
     openRisks?: string[];
     recentOutputs?: string[];
+    actions?: Array<{
+        kind: string;
+        summary: string;
+        status?: string;
+        target?: string;
+        detail?: string;
+    }>;
+    fileChanges?: Array<{
+        action: string;
+        path: string;
+        toPath?: string;
+        purpose?: string;
+    }>;
     entityTargets?: string[];
     notes?: string;
 }
@@ -268,6 +305,7 @@ export interface SessionCheckpointSummary {
     nextStep: string | null;
     openRiskCount: number;
     entityTargetCount: number;
+    actionCount: number;
 }
 
 export interface ReconveneParams {
@@ -348,6 +386,13 @@ export interface ObserveDebug {
     dropped: ObserveDebugDrop[];
 }
 
+export interface MemoryUsageGuidance {
+    tool: 'observe' | 'attend';
+    reminder: string;
+    expectedCallSequence: string[];
+    note: string;
+}
+
 export interface ObserveParams {
     agentId: string;
     currentContext: string;
@@ -360,6 +405,7 @@ export interface ObserveResult {
     entitiesDetected: string[];
     alreadyPresent: number;
     totalFound: number;
+    usageGuidance: MemoryUsageGuidance;
     entitiesResolved?: ObserveResolvedEntity[];
     debug?: ObserveDebug;
 }

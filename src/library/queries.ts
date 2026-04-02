@@ -44,6 +44,16 @@ type HybridFallbackEntry = Pick<
     'id' | 'entityType' | 'entityId' | 'key' | 'valueRaw' | 'valueSummary' | 'confidence' | 'source' | 'validUntil'
 >;
 
+type SearchEntityRef = {
+    entityType: string;
+    entityId: string;
+};
+
+type BridgedTarget = SearchEntityRef & {
+    score: number;
+    depth: number;
+};
+
 export type ArchiveHistoryEntry = Archive;
 
 export type VectorIndexConsistencyReport = {
@@ -83,6 +93,12 @@ const DEFAULT_LEXICAL_WEIGHT = 0.45;
 const DEFAULT_VECTOR_WEIGHT = 0.55;
 const DEFAULT_MIN_SCORE = 0;
 const DEFAULT_VECTOR_FALLBACK_SCAN_LIMIT = 2000;
+const SEARCH_BRIDGE_MAX_HOPS = 2;
+const SEARCH_BRIDGE_SEED_LIMIT = 24;
+const SEARCH_BRIDGE_MIN_SCORE = 0.25;
+const SEARCH_BRIDGE_HOP_PENALTY = 0.82;
+const SEARCH_BRIDGE_MAX_RESULTS_PER_ENTITY = 3;
+const SEARCH_BRIDGE_PRIORITY_KEYS = ['status', 'summary', 'checkpoint_summary', 'next_step', 'current_step', 'blocker', 'open_risks'];
 
 let vectorBackend: VectorBackend | null = null;
 
@@ -333,6 +349,304 @@ function buildVectorFilter(input: HybridSearchInput): Record<string, unknown> | 
     return Object.keys(filter).length > 0 ? filter : undefined;
 }
 
+function resolveFallbackScanLimit(limit: number): number {
+    const configuredLimit = Number.parseInt(process.env.IRANTI_VECTOR_FALLBACK_SCAN_LIMIT ?? '', 10);
+    if (Number.isFinite(configuredLimit) && configuredLimit > 0) {
+        return Math.max(limit, configuredLimit);
+    }
+    return Math.max(limit, DEFAULT_VECTOR_FALLBACK_SCAN_LIMIT);
+}
+
+async function fetchFallbackEntries(
+    input: Pick<HybridSearchInput, 'entityType' | 'entityId'>,
+    db: DbClient,
+    take: number
+): Promise<HybridFallbackEntry[]> {
+    return db.knowledgeEntry.findMany({
+        where: {
+            isProtected: false,
+            ...(input.entityType ? { entityType: input.entityType } : {}),
+            ...(input.entityId ? { entityId: input.entityId } : {}),
+        },
+        select: {
+            id: true,
+            entityType: true,
+            entityId: true,
+            key: true,
+            valueRaw: true,
+            valueSummary: true,
+            confidence: true,
+            source: true,
+            validUntil: true,
+        },
+        orderBy: { updatedAt: 'desc' },
+        take,
+    });
+}
+
+async function scoreFallbackEntries(
+    input: HybridSearchInput,
+    db: DbClient,
+    take: number,
+    minScore: number,
+    weights: { lexical: number; vector: number }
+): Promise<HybridSearchResult[]> {
+    const entries = await fetchFallbackEntries(input, db, take);
+    if (entries.length === 0) {
+        return [];
+    }
+
+    const lexicalRows = await scoreHybridCandidates(entries.map((entry: HybridFallbackEntry) => entry.id), input, db);
+    const lexicalById = new Map<number, number>();
+    for (const row of lexicalRows) {
+        lexicalById.set(row.id, coerceScore(row.lexicalScore));
+    }
+
+    const queryEmbedding = generateEmbedding(input.query);
+    const scored = entries
+        .map((entry: HybridFallbackEntry) => {
+            const lexicalScore = lexicalById.get(entry.id) ?? 0;
+            const vectorScore = cosineSimilarity(
+                queryEmbedding,
+                generateEmbedding(buildEmbeddingText(entry.key, entry.valueSummary, entry.valueRaw)),
+            );
+            const score = (weights.lexical * lexicalScore) + (weights.vector * vectorScore);
+
+            return {
+                ...entry,
+                lexicalScore,
+                vectorScore,
+                score,
+            };
+        })
+        .filter((entry: HybridSearchResult) => entry.score >= minScore)
+        .filter((entry: HybridSearchResult) => entry.lexicalScore > 0 || entry.vectorScore > 0)
+        .sort((left: HybridSearchResult, right: HybridSearchResult) => right.score - left.score);
+
+    return mapHybridRows(scored);
+}
+
+function matchesTargetEntity(input: HybridSearchInput, entity: SearchEntityRef): boolean {
+    if (!input.entityType) {
+        return false;
+    }
+    if (entity.entityType !== input.entityType) {
+        return false;
+    }
+    if (input.entityId && entity.entityId !== input.entityId) {
+        return false;
+    }
+    return true;
+}
+
+async function getRelatedEntitiesForSearch(
+    entity: SearchEntityRef,
+    db: DbClient,
+    cache: Map<string, SearchEntityRef[]>
+): Promise<SearchEntityRef[]> {
+    const cacheKey = `${entity.entityType}/${entity.entityId}`;
+    const cached = cache.get(cacheKey);
+    if (cached) {
+        return cached;
+    }
+
+    const [outbound, inbound] = await Promise.all([
+        db.entityRelationship.findMany({
+            where: { fromType: entity.entityType, fromId: entity.entityId },
+            select: { toType: true, toId: true },
+            take: 12,
+        }),
+        db.entityRelationship.findMany({
+            where: { toType: entity.entityType, toId: entity.entityId },
+            select: { fromType: true, fromId: true },
+            take: 12,
+        }),
+    ]);
+
+    const related = [
+        ...outbound.map((row) => ({ entityType: row.toType, entityId: row.toId })),
+        ...inbound.map((row) => ({ entityType: row.fromType, entityId: row.fromId })),
+    ];
+    cache.set(cacheKey, related);
+    return related;
+}
+
+function rankBridgeEntry(left: HybridFallbackEntry, right: HybridFallbackEntry): number {
+    const leftPriority = SEARCH_BRIDGE_PRIORITY_KEYS.indexOf(left.key);
+    const rightPriority = SEARCH_BRIDGE_PRIORITY_KEYS.indexOf(right.key);
+    const normalizedLeftPriority = leftPriority === -1 ? SEARCH_BRIDGE_PRIORITY_KEYS.length : leftPriority;
+    const normalizedRightPriority = rightPriority === -1 ? SEARCH_BRIDGE_PRIORITY_KEYS.length : rightPriority;
+    return normalizedLeftPriority - normalizedRightPriority
+        || right.confidence - left.confidence
+        || left.key.localeCompare(right.key);
+}
+
+function mergeHybridResults(
+    resultSets: HybridSearchResult[][],
+    weights: { lexical: number; vector: number },
+    minScore: number,
+    limit: number
+): HybridSearchResult[] {
+    const merged = new Map<number, HybridSearchResult>();
+    for (const resultSet of resultSets) {
+        for (const row of resultSet) {
+            const existing = merged.get(row.id);
+            if (!existing) {
+                merged.set(row.id, { ...row });
+                continue;
+            }
+
+            const lexicalScore = Math.max(existing.lexicalScore, row.lexicalScore);
+            const vectorScore = Math.max(existing.vectorScore, row.vectorScore);
+            const score = (weights.lexical * lexicalScore) + (weights.vector * vectorScore);
+            const preferred = existing.score >= row.score ? existing : row;
+            merged.set(row.id, {
+                ...preferred,
+                lexicalScore,
+                vectorScore,
+                score,
+            });
+        }
+    }
+
+    return Array.from(merged.values())
+        .filter((row) => row.score >= minScore)
+        .sort((left, right) => right.score - left.score)
+        .slice(0, limit);
+}
+
+async function searchEntriesViaRelationshipBridge(
+    input: HybridSearchInput,
+    db: DbClient,
+    limit: number,
+    minScore: number,
+    weights: { lexical: number; vector: number }
+): Promise<HybridSearchResult[]> {
+    if (!input.entityType) {
+        return [];
+    }
+
+    const broadHits = await scoreFallbackEntries(
+        { query: input.query, limit: SEARCH_BRIDGE_SEED_LIMIT * 2 },
+        db,
+        resolveFallbackScanLimit(SEARCH_BRIDGE_SEED_LIMIT * 2),
+        0,
+        weights
+    );
+    const seeds = broadHits
+        .filter((row) => row.score >= SEARCH_BRIDGE_MIN_SCORE)
+        .slice(0, SEARCH_BRIDGE_SEED_LIMIT);
+    if (seeds.length === 0) {
+        return [];
+    }
+
+    const relationCache = new Map<string, SearchEntityRef[]>();
+    const bridgedTargets = new Map<string, BridgedTarget>();
+
+    for (const seed of seeds) {
+        const queue: Array<{ entity: SearchEntityRef; depth: number }> = [{
+            entity: { entityType: seed.entityType, entityId: seed.entityId },
+            depth: 0,
+        }];
+        const visited = new Set<string>([`${seed.entityType}/${seed.entityId}`]);
+
+        while (queue.length > 0) {
+            const current = queue.shift()!;
+            if (current.depth >= SEARCH_BRIDGE_MAX_HOPS) {
+                continue;
+            }
+
+            const related = await getRelatedEntitiesForSearch(current.entity, db, relationCache);
+            for (const neighbor of related) {
+                const neighborKey = `${neighbor.entityType}/${neighbor.entityId}`;
+                if (visited.has(neighborKey)) {
+                    continue;
+                }
+                visited.add(neighborKey);
+
+                const nextDepth = current.depth + 1;
+                if (matchesTargetEntity(input, neighbor)) {
+                    const propagatedScore = seed.score * Math.pow(SEARCH_BRIDGE_HOP_PENALTY, nextDepth);
+                    const existing = bridgedTargets.get(neighborKey);
+                    if (!existing || propagatedScore > existing.score) {
+                        bridgedTargets.set(neighborKey, {
+                            ...neighbor,
+                            score: propagatedScore,
+                            depth: nextDepth,
+                        });
+                    }
+                }
+
+                if (nextDepth < SEARCH_BRIDGE_MAX_HOPS) {
+                    queue.push({ entity: neighbor, depth: nextDepth });
+                }
+            }
+        }
+    }
+
+    const targetEntities = Array.from(bridgedTargets.values());
+    if (targetEntities.length === 0) {
+        return [];
+    }
+
+    const bridgedEntries = await db.knowledgeEntry.findMany({
+        where: {
+            isProtected: false,
+            OR: targetEntities.map((target) => ({
+                entityType: target.entityType,
+                entityId: target.entityId,
+            })),
+        },
+        select: {
+            id: true,
+            entityType: true,
+            entityId: true,
+            key: true,
+            valueRaw: true,
+            valueSummary: true,
+            confidence: true,
+            source: true,
+            validUntil: true,
+        },
+    });
+    if (bridgedEntries.length === 0) {
+        return [];
+    }
+
+    const selectedEntries = Array.from(
+        bridgedEntries.reduce((map, entry) => {
+            const entityKey = `${entry.entityType}/${entry.entityId}`;
+            const current = map.get(entityKey) ?? [];
+            current.push(entry);
+            map.set(entityKey, current);
+            return map;
+        }, new Map<string, HybridFallbackEntry[]>()).entries()
+    ).flatMap(([, entries]) => entries.sort(rankBridgeEntry).slice(0, SEARCH_BRIDGE_MAX_RESULTS_PER_ENTITY));
+
+    const lexicalRows = await scoreHybridCandidates(selectedEntries.map((entry) => entry.id), input, db);
+    const lexicalById = new Map<number, number>();
+    for (const row of lexicalRows) {
+        lexicalById.set(row.id, coerceScore(row.lexicalScore));
+    }
+
+    return mapHybridRows(
+        selectedEntries
+            .map((entry) => {
+                const entityKey = `${entry.entityType}/${entry.entityId}`;
+                const target = bridgedTargets.get(entityKey);
+                const vectorScore = target?.score ?? 0;
+                const lexicalScore = lexicalById.get(entry.id) ?? 0;
+                return {
+                    ...entry,
+                    lexicalScore,
+                    vectorScore,
+                    score: (weights.lexical * lexicalScore) + (weights.vector * vectorScore),
+                };
+            })
+            .filter((row) => row.score >= minScore)
+    );
+}
+
 function mapHybridRows(rows: HybridSearchRow[]): HybridSearchResult[] {
     return rows.map((row) => ({
         id: row.id,
@@ -380,65 +694,9 @@ async function hybridSearchWithoutBackend(
     minScore: number,
     weights: { lexical: number; vector: number }
 ): Promise<HybridSearchResult[]> {
-    const configuredLimit = Number.parseInt(process.env.IRANTI_VECTOR_FALLBACK_SCAN_LIMIT ?? '', 10);
-    const scanLimit = Number.isFinite(configuredLimit) && configuredLimit > 0
-        ? Math.max(limit, configuredLimit)
-        : Math.max(limit, DEFAULT_VECTOR_FALLBACK_SCAN_LIMIT);
-
-    const entries: HybridFallbackEntry[] = await db.knowledgeEntry.findMany({
-        where: {
-            isProtected: false,
-            ...(input.entityType ? { entityType: input.entityType } : {}),
-            ...(input.entityId ? { entityId: input.entityId } : {}),
-        },
-        select: {
-            id: true,
-            entityType: true,
-            entityId: true,
-            key: true,
-            valueRaw: true,
-            valueSummary: true,
-            confidence: true,
-            source: true,
-            validUntil: true,
-        },
-        orderBy: { updatedAt: 'desc' },
-        take: scanLimit,
-    });
-
-    if (entries.length === 0) {
-        return [];
-    }
-
-    const lexicalRows = await scoreHybridCandidates(entries.map((entry: HybridFallbackEntry) => entry.id), input, db);
-    const lexicalById = new Map<number, number>();
-    for (const row of lexicalRows) {
-        lexicalById.set(row.id, coerceScore(row.lexicalScore));
-    }
-
-    const queryEmbedding = generateEmbedding(input.query);
-    const scored = entries
-        .map((entry: HybridFallbackEntry) => {
-            const lexicalScore = lexicalById.get(entry.id) ?? 0;
-            const vectorScore = cosineSimilarity(
-                queryEmbedding,
-                generateEmbedding(buildEmbeddingText(entry.key, entry.valueSummary, entry.valueRaw)),
-            );
-            const score = (weights.lexical * lexicalScore) + (weights.vector * vectorScore);
-
-            return {
-                ...entry,
-                lexicalScore,
-                vectorScore,
-                score,
-            };
-        })
-        .filter((entry: HybridSearchResult) => entry.score >= minScore)
-        .filter((entry: HybridSearchResult) => entry.lexicalScore > 0 || entry.vectorScore > 0)
-        .sort((left: HybridSearchResult, right: HybridSearchResult) => right.score - left.score)
-        .slice(0, limit);
-
-    return mapHybridRows(scored);
+    const directResults = await scoreFallbackEntries(input, db, resolveFallbackScanLimit(limit), minScore, weights);
+    const bridgeResults = await searchEntriesViaRelationshipBridge(input, db, limit, minScore, weights);
+    return mergeHybridResults([directResults, bridgeResults], weights, minScore, limit);
 }
 
 async function scoreHybridCandidates(
@@ -539,6 +797,7 @@ export async function searchEntriesHybrid(input: HybridSearchInput, db?: DbClien
     const weights = normalizeSearchWeights(input);
     const normalizedInput = { ...input, query };
     const backend = getVectorBackendSingleton();
+    const bridgeResults = await searchEntriesViaRelationshipBridge(normalizedInput, client, limit, minScore, weights);
 
     if (!(await backend.ping())) {
         return hybridSearchWithoutBackend(normalizedInput, client, limit, minScore, weights);
@@ -579,7 +838,7 @@ export async function searchEntriesHybrid(input: HybridSearchInput, db?: DbClien
             .sort((a, b) => b.score - a.score)
             .slice(0, limit);
 
-        return mapHybridRows(scored);
+        return mergeHybridResults([mapHybridRows(scored), bridgeResults], weights, minScore, limit);
     } catch (error) {
         console.warn(`[vector] Falling back to lexical-only search: ${error instanceof Error ? error.message : String(error)}`);
         return hybridSearchWithoutBackend(normalizedInput, client, limit, minScore, weights);

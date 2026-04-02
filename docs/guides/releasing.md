@@ -116,11 +116,15 @@ npm --prefix clients/typescript run build
 npm run test:hardening-fast
 npm run test:hardening-db
 npm run release:check -- v0.2.52
-npm pack
-npm pack ./clients/typescript
+npm run pack:release
 python -m build clients/python --outdir clients/python/dist
 python -m twine check clients/python/dist/*
 ```
+
+The npm tarballs now land in `dist/packages/` instead of the repo root:
+
+- `dist/packages/iranti-<version>.tgz`
+- `dist/packages/iranti-sdk-<version>.tgz`
 
 3. Commit and push:
 

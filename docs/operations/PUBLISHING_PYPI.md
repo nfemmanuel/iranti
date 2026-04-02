@@ -1,6 +1,8 @@
-# Publishing the Python Client to PyPI
+# Publishing The Python Client To PyPI
 
-This guide publishes the Python client from `clients/python/`.
+This is the manual fallback path for publishing the Python client from `clients/python/`.
+
+The canonical release flow for this repo lives in [guides/releasing.md](../guides/releasing.md). Use this doc only when you intentionally need a direct Python-package publishing path outside that workflow.
 
 ## Package Metadata
 
@@ -44,13 +46,13 @@ python -m twine upload --repository testpypi dist/*
 python -m pip install --index-url https://test.pypi.org/simple/ iranti
 ```
 
-## Publish to PyPI
+## Publish To PyPI
 
 ```bash
 python -m twine upload dist/*
 ```
 
-Use token auth:
+Use token auth if you are not using Trusted Publishing:
 
 - username: `__token__`
 - password: `pypi-...`
@@ -62,11 +64,11 @@ Before each release, bump both:
 1. `clients/python/pyproject.toml` -> `project.version`
 2. `clients/python/iranti.py` -> `__version__`
 
-Then tag and push:
+Then tag and push through the normal release flow:
 
 ```bash
-git tag v0.1.1
-git push origin v0.1.1
+git tag v<version>
+git push origin v<version>
 ```
 
 ## Troubleshooting

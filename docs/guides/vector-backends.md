@@ -85,6 +85,8 @@ The lexical half of hybrid search always stays in PostgreSQL regardless of the v
 
 If the backend is unreachable, hybrid search falls back to lexical-only scoring instead of blocking the request.
 
+The API runtime also keeps probing the configured backend after startup. `/health` exposes the latest probe result under `checks.vectorBackend`, and `operatorStatus` degrades when the configured backend stops responding.
+
 ## Detecting and Repairing Drift
 
 Iranti now exposes library-level reconciliation helpers for vector drift:
@@ -116,4 +118,4 @@ Notes:
 - pgvector audits compare KB rows against non-null `knowledge_base.embedding` values.
 - Qdrant and Chroma audits enumerate indexed ids through their REST APIs.
 - Repair keeps public read/write behavior backward compatible; it only reconciles backend state.
-- The natural future CLI hook for this is the existing vector backend reachability check in `iranti doctor`, but that wiring is not in place yet.
+- `iranti doctor` covers reachability, while the API `/health` surface covers ongoing post-start monitoring.

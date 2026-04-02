@@ -1,6 +1,7 @@
 import { Prisma } from '../generated/prisma/client';
 import { getDb } from '../library/client';
 import { buildStaffEvent, IStaffEventEmitter, StaffEvent } from './staffEventEmitter';
+import { ensureStaffEventsTable } from './staffEventsTable';
 
 function isMissingStaffEventsTable(error: unknown): boolean {
     const message = error instanceof Error ? error.message : String(error);
@@ -14,6 +15,7 @@ function summarizeError(error: unknown): string {
 export class DbStaffEventEmitter implements IStaffEventEmitter {
     private warnedTableMissing = false;
     private pending = new Set<Promise<void>>();
+    private bootstrapAttempted = false;
 
     emit(input: Parameters<IStaffEventEmitter['emit']>[0]): void {
         const event = buildStaffEvent(input);
@@ -43,6 +45,20 @@ export class DbStaffEventEmitter implements IStaffEventEmitter {
     }
 
     private async insertEvent(event: StaffEvent): Promise<void> {
+        try {
+            await this.executeInsert(event);
+        } catch (error) {
+            if (!isMissingStaffEventsTable(error) || this.bootstrapAttempted) {
+                throw error;
+            }
+
+            this.bootstrapAttempted = true;
+            await ensureStaffEventsTable();
+            await this.executeInsert(event);
+        }
+    }
+
+    private async executeInsert(event: StaffEvent): Promise<void> {
         await getDb().$executeRaw(
             Prisma.sql`
                 INSERT INTO staff_events (

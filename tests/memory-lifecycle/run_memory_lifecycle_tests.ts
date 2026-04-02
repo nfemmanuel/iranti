@@ -85,6 +85,17 @@ async function main(): Promise<void> {
         assert.equal(correctedPromptFact.found, true, 'Expected corrected personal fact to remain queryable.');
         assert.deepEqual(correctedPromptFact.value, { text: 'half of a yellow sun.' });
         assert.equal(correctedPromptFact.source, USER_PROMPT_AUTO_REMEMBER_SOURCE);
+        const correctedPromptEntry = await findEntry({
+            entityType: 'user',
+            entityId: personalEntity.split('/')[1]!,
+            key: 'favorite_book',
+        });
+        assert.ok(correctedPromptEntry, 'Expected corrected personal fact entry to exist in the knowledge base.');
+        const correctedPromptProperties = correctedPromptEntry.properties as Record<string, unknown>;
+        assert.equal(correctedPromptProperties.semanticDomain, 'personal');
+        assert.equal(correctedPromptProperties.semanticIntent, 'preference_capture');
+        assert.equal(correctedPromptProperties.temporalScope, 'long_term');
+        assert.deepEqual(correctedPromptProperties.semanticTags, ['personal_memory', 'preference', 'identity', 'singleton_fact']);
 
         await iranti.write({
             entity: explicitCorrectionEntity,
@@ -194,6 +205,21 @@ async function main(): Promise<void> {
             ],
         });
 
+        const checkpointedBrief = await iranti.checkpoint({
+            agentId,
+            task: 'Validate checkpoint durability without explicit recentMessages.',
+            checkpoint: {
+                currentStep: 'verifying checkpoint fallback when recent messages are omitted',
+                nextStep: 'continue the lifecycle validation suite',
+                openRisks: ['checkpoint helper should not require recentMessages'],
+                entityTargets: [projectEntity],
+            },
+        } as any);
+        assert.equal(checkpointedBrief.sessionCheckpoint?.status, 'active', 'Expected checkpoint() without recentMessages to succeed.');
+
+        const checkpointSummary = await iranti.query(projectEntity, 'checkpoint_summary');
+        assert.equal(checkpointSummary.found, true, 'Expected checkpoint_summary breadcrumb to be persisted even without recentMessages.');
+
         const openRisksEntry = await findEntry({
             entityType: 'project',
             entityId: projectEntity.split('/')[1]!,
@@ -206,6 +232,10 @@ async function main(): Promise<void> {
         assert.equal(openRisksProperties.durableClass, 'open_risks');
         assert.equal(openRisksProperties.canonicalKey, 'open_risks');
         assert.equal(openRisksProperties.mergeStrategy, 'append_dedupe');
+        assert.equal(openRisksProperties.semanticDomain, 'risk');
+        assert.equal(openRisksProperties.semanticIntent, 'risk_tracking');
+        assert.equal(openRisksProperties.temporalScope, 'active_work');
+        assert.deepEqual(openRisksProperties.semanticTags, ['project_memory', 'risk', 'tracking', 'list_fact']);
 
         const fileChangeEntry = await findEntry({
             entityType: 'project',
@@ -219,6 +249,10 @@ async function main(): Promise<void> {
         assert.equal(fileChangeProperties.durableClass, 'file_change');
         assert.equal(fileChangeProperties.canonicalKey, 'recent_file_changes');
         assert.equal(fileChangeProperties.mergeStrategy, 'append_dedupe');
+        assert.equal(fileChangeProperties.semanticDomain, 'artifact');
+        assert.equal(fileChangeProperties.semanticIntent, 'change_tracking');
+        assert.equal(fileChangeProperties.temporalScope, 'active_work');
+        assert.deepEqual(fileChangeProperties.semanticTags, ['project_memory', 'artifact', 'file_change', 'tracking', 'list_fact']);
 
         console.log('memory lifecycle tests passed');
     } finally {

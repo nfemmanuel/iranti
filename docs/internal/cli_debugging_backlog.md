@@ -11,10 +11,9 @@ Current strengths:
 - direct command help and guided onboarding
 
 Current gaps:
-- most failures are still plain `Error` strings without stable codes
-- there was no general `--debug` or `--verbose` mode
-- subprocess and env resolution were hard to inspect
-- remediation quality varies by command family
+- command timing is not surfaced yet in debug mode
+- deeper env-resolution tracing is still thinner outside the main operator flows
+- some lower-frequency commands still rely on generic fallback codes instead of command-specific codes
 
 ## Immediate Hardening Pass
 
@@ -29,25 +28,16 @@ Current gaps:
   - error code
   - possible fixes
   - stack trace in debug mode
+- rewrite common operator failures from remaining command families into stable error codes with remediation hints
+- emit a machine-readable JSON failure envelope for `--json` automation paths
 - instrument subprocess execution and doctor target resolution with debug and trace output
 - convert common binding and instance failures to structured CLI errors
-
-### In Progress
-- expand structured error coverage across the remaining command families
-- standardize remediation quality outside `doctor`, `setup`, and `upgrade`
 
 ## Next Backlog
 
 ### Epic 1 - Structured Failure Model
-- convert all high-frequency operator failures to `CliError`
-- define stable error codes for:
-  - instance not found
-  - binding missing
-  - database placeholder
-  - provider key missing
-  - bad setup config
-  - subprocess and handoff failure
-- add JSON-safe machine-readable error output for automation paths
+- continue replacing generic fallback codes in lower-frequency command paths where the operator benefit is clear
+- extend the published error-code list when new automation-facing commands gain `--json`
 
 ### Epic 2 - Debuggability
 - add command timing in debug mode
@@ -66,7 +56,7 @@ Current gaps:
 ### Epic 4 - Automation Safety
 - add stable non-zero exit-code categories where reasonable
 - add tests for expected error codes on common failure cases
-- document error-code meanings in the operator manual
+- document additional error-code meanings in the operator manual when new codes are added
 
 ## Recommendation
 

@@ -2,6 +2,15 @@
 
 Common issues and solutions for Iranti deployment and usage.
 
+Use the current operator path first:
+
+- `iranti status`
+- `iranti doctor --instance <name>`
+- `iranti instance show <name>`
+- `iranti run --instance <name> --debug`
+
+Some sections below still mention repo-checkout commands like `npm run api` because they remain useful when validating directly from source, but the primary runtime model is the instance-based CLI flow above.
+
 ---
 
 ## Installation Issues

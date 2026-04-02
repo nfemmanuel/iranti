@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSyncResolved } from '../src/lib/commandInvocation';
+import { writeProjectScaffoldCloseout } from '../src/lib/scaffoldCloseout';
 
 type SetupOptions = {
     name: string;
@@ -15,6 +16,12 @@ type SetupOptions = {
 type WorkspaceFileResult = {
     filePath: string;
     status: 'created' | 'updated' | 'unchanged';
+};
+
+type WorkspaceFilesResult = {
+    mcp: WorkspaceFileResult;
+    vscode: WorkspaceFileResult;
+    agents: WorkspaceFileResult;
 };
 
 function parseArgs(argv: string[]): SetupOptions {
@@ -91,7 +98,7 @@ function printHelp(): void {
         '  - Use --no-workspace-file only if you explicitly want global registration without project-local MCP file updates.',
         '  - Does not store DATABASE_URL in Codex config; iranti-mcp loads project/instance env at runtime.',
         '  - Replaces any existing MCP entry with the same name.',
-        '  - Expected host pattern: call iranti_handshake at session start (or on the first user turn if startup hooks are unavailable), then call iranti_attend before each reply.',
+        '  - Expected host pattern: run iranti_handshake at session start, run iranti_attend before each reply and before/after knowledge discovery, checkpoint at natural pauses or interrupted work, and write/checkpoint confirmed findings.',
     ].join('\n'));
 }
 
@@ -218,6 +225,68 @@ function makeVsCodeWorkspaceMcpServer(options: SetupOptions, projectEnv: string)
     };
 }
 
+function buildCodexAgentsBlock(): string {
+    return [
+        '<!-- iranti-rules -->',
+        '# Iranti MCP Protocol',
+        '',
+        'IMPORTANT: These rules override Codex default behavior for this repo.',
+        '',
+        '## Session start',
+        '- Call `mcp__iranti__iranti_handshake` with the active task before responding to the first user message.',
+        '- If startup hooks are unavailable, do this on the first safe user turn instead of skipping it.',
+        '',
+        '## Discovery and reply ordering',
+        '- In short: call `mcp__iranti__iranti_attend` before each reply and before/after knowledge discovery.',
+        '1. Call `mcp__iranti__iranti_attend` before drafting each user-facing reply.',
+        '2. Call `mcp__iranti__iranti_attend` before using memory discovery tools such as search, query, or related reads.',
+        '3. Call `mcp__iranti__iranti_attend` again after discovery when the findings may change what should be injected, written, or checkpointed.',
+        '',
+        '## Confirmed findings',
+        '- Call `mcp__iranti__iranti_write` after confirmed durable findings such as decisions, blockers, next steps, stable constraints, validated environment details, what worked, what failed, and what remains risky.',
+        '- If the work is still in progress, pair those writes with `mcp__iranti__iranti_checkpoint` so another session can resume cleanly.',
+        '',
+        '## Checkpoint discipline',
+        '- Call `mcp__iranti__iranti_checkpoint` at natural pauses, before stepping away from long work, when interrupted, and when completing a useful slice.',
+        '- When useful actions happen, record them in the checkpoint `actions` field so later sessions can see important commands, tests, searches, validations, and decisions without rerunning them blindly.',
+        '- Do not treat durable writes as a substitute for checkpoints. A checkpoint not written means the next session has to reconstruct state.',
+        '- Under-logged runs are non-compliant for this repo. When applicable, leave structured breadcrumbs for what you found, what worked, what failed, what changed, and what happens next instead of only a broad summary.',
+        '',
+        '## Host setup check',
+        '- If this block was missing at session start, rerun `iranti codex-setup` from the bound project root.',
+        '<!-- /iranti-rules -->',
+        '',
+    ].join('\n');
+}
+
+function writeWorkspaceAgentsFile(projectEnv: string): WorkspaceFileResult {
+    const projectPath = path.dirname(projectEnv);
+    const agentsFile = path.join(projectPath, 'AGENTS.md');
+    const irantiBlock = buildCodexAgentsBlock();
+
+    if (!fs.existsSync(agentsFile)) {
+        fs.writeFileSync(agentsFile, irantiBlock, 'utf8');
+        return { filePath: agentsFile, status: 'created' };
+    }
+
+    const existing = fs.readFileSync(agentsFile, 'utf8');
+    if (!existing.includes('<!-- iranti-rules -->')) {
+        fs.writeFileSync(agentsFile, `${existing.trimEnd()}\n\n${irantiBlock}`, 'utf8');
+        return { filePath: agentsFile, status: 'updated' };
+    }
+
+    const replaced = existing.replace(
+        /<!-- iranti-rules -->[\s\S]*?<!-- \/iranti-rules -->/,
+        irantiBlock.trim(),
+    );
+    if (replaced === existing) {
+        return { filePath: agentsFile, status: 'unchanged' };
+    }
+
+    fs.writeFileSync(agentsFile, replaced, 'utf8');
+    return { filePath: agentsFile, status: 'updated' };
+}
+
 function writeWorkspaceMcpFile(projectEnv: string, options: SetupOptions): WorkspaceFileResult {
     const projectPath = path.dirname(projectEnv);
     const mcpFile = path.join(projectPath, '.mcp.json');
@@ -326,7 +395,7 @@ function ensureCodexInstalled(repoRoot: string): void {
     }
 }
 
-function main(): void {
+async function main(): Promise<void> {
     const options = parseArgs(process.argv.slice(2));
     const repoRoot = findPackageRoot(__dirname);
     const mcpScript = path.join(repoRoot, 'dist', 'scripts', 'iranti-mcp.js');
@@ -374,10 +443,11 @@ function main(): void {
     const workspaceProjectEnv = options.writeWorkspaceFile
         ? resolveWorkspaceProjectEnv(options)
         : undefined;
-    const workspaceFilesResult = workspaceProjectEnv
+    const workspaceFilesResult: WorkspaceFilesResult | null = workspaceProjectEnv
         ? {
             mcp: writeWorkspaceMcpFile(workspaceProjectEnv, options),
             vscode: writeWorkspaceVsCodeMcpFile(workspaceProjectEnv, options),
+            agents: writeWorkspaceAgentsFile(workspaceProjectEnv),
         }
         : null;
 
@@ -385,7 +455,12 @@ function main(): void {
     console.log(registered);
     console.log('');
     console.log('Codex is now configured to use Iranti through MCP.');
-    console.log('Recommended MCP host pattern: run iranti_handshake at session start (or on the first user turn if no startup hook exists), then run iranti_attend before each reply.');
+    console.log('Required host pattern:');
+    console.log('  1. Run iranti_handshake at session start (or on the first safe user turn if startup hooks are unavailable).');
+    console.log('  2. Run iranti_attend before each reply and before/after knowledge discovery.');
+    console.log('  3. Run iranti_checkpoint at natural pauses, during interrupted work, and when completing a useful slice.');
+    console.log('  4. Include key commands, tests, validations, and decisions in checkpoint actions when they matter to later recovery.');
+    console.log('  5. Run iranti_write for confirmed durable findings, and pair ongoing work with iranti_checkpoint.');
     if (useInstalled) {
         console.log('Registration target: installed CLI (`iranti mcp`)');
         if (projectEnv) {
@@ -406,12 +481,30 @@ function main(): void {
     }
     if (options.writeWorkspaceFile) {
         if (workspaceFilesResult) {
+            const boundProjectEnv = workspaceProjectEnv!;
             console.log(`Workspace .mcp.json: ${workspaceFilesResult.mcp.status} (${workspaceFilesResult.mcp.filePath})`);
             console.log(`Workspace .vscode/mcp.json: ${workspaceFilesResult.vscode.status} (${workspaceFilesResult.vscode.filePath})`);
+            console.log(`Workspace AGENTS.md: ${workspaceFilesResult.agents.status} (${workspaceFilesResult.agents.filePath})`);
+            const closeout = await writeProjectScaffoldCloseout({
+                tool: 'codex',
+                projectPath: path.dirname(boundProjectEnv),
+                projectEnvFile: boundProjectEnv,
+                files: [
+                    { path: workspaceFilesResult.mcp.filePath, status: workspaceFilesResult.mcp.status },
+                    { path: workspaceFilesResult.vscode.filePath, status: workspaceFilesResult.vscode.status },
+                    { path: workspaceFilesResult.agents.filePath, status: workspaceFilesResult.agents.status },
+                ],
+                agentId: options.agent || 'codex_code',
+            });
+            console.log(`Shared memory closeout: ${closeout.status} (${closeout.detail})`);
         } else {
             console.log('Workspace MCP files: unchanged (no project binding found from the current working directory)');
+            console.log('Shared memory closeout: skipped (no bound workspace project was found)');
         }
     }
 }
 
-main();
+main().catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+});

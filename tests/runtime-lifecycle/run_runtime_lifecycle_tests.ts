@@ -7,6 +7,7 @@ import { ChildProcess, spawn, spawnSync } from 'child_process';
 import net from 'net';
 import { inspectRuntimeState, readInstanceRuntime, resolveRuntimeAuthorityFromEnv } from '../../src/lib/runtimeLifecycle';
 import { parseDockerContainerNames, parsePublishedDockerHostPorts } from '../../src/lib/dockerCliParsing';
+import { resolvePackageRoot } from '../../src/lib/packageRoot';
 import { loadRuntimeEnv } from '../../src/lib/runtimeEnv';
 
 type CliRun = {
@@ -274,6 +275,17 @@ async function main(): Promise<void> {
             requestLogFile: path.join(instanceDir, 'logs', 'api-requests.log'),
             packageRoot: repoRoot,
         });
+        writeJson(path.join(instanceDir, 'projects.json'), {
+            projects: [
+                {
+                    projectPath: path.join(root, 'demo-project'),
+                    agentId: 'status_demo_agent',
+                    memoryEntity: 'project/status_demo',
+                    mode: 'shared',
+                    boundAt: now,
+                },
+            ],
+        });
 
         const statusRun = runCli(['status', '--root', root, '--json'], ambientFreeCwd);
         assert.strictEqual(statusRun.status, 0, `status failed:\n${statusRun.stdout}\n${statusRun.stderr}`);
@@ -305,6 +317,14 @@ async function main(): Promise<void> {
             recommendedActions: string[];
             instances: Array<{
                 name: string;
+                projectCount?: number;
+                boundProjects?: Array<{
+                    projectPath: string;
+                    agentId: string;
+                    memoryEntity: string;
+                    mode: string;
+                    boundAt: string | null;
+                }>;
                 repairHints?: string[];
                 config: {
                     classification: string;
@@ -343,6 +363,9 @@ async function main(): Promise<void> {
         assert.strictEqual(localStatus?.runtime.classification, 'stale');
         assert.strictEqual(localStatus?.runtime.health.checked, false);
         assert.strictEqual(localStatus?.runtime.state?.pid, 999999);
+        assert.strictEqual(localStatus?.projectCount, 1);
+        assert.strictEqual(localStatus?.boundProjects?.[0]?.projectPath, path.join(root, 'demo-project'));
+        assert.strictEqual(localStatus?.boundProjects?.[0]?.agentId, 'status_demo_agent');
 
         const upgradeRun = runCli(['upgrade', '--check', '--json', '--root', root], ambientFreeCwd);
         assert.strictEqual(upgradeRun.status, 0, `upgrade failed:\n${upgradeRun.stdout}\n${upgradeRun.stderr}`);
@@ -741,6 +764,41 @@ async function main(): Promise<void> {
             assert.strictEqual(process.env.IRANTI_URL, 'http://localhost:3050');
         });
 
+        const isolatedCwd = path.join(root, 'unbound_child');
+        fs.mkdirSync(isolatedCwd, { recursive: true });
+        withCleanEnv(() => {
+            process.env.DATABASE_URL = 'postgresql://postgres:postgres@localhost:5432/environment_only_db';
+            const runtimeEnvResult = loadRuntimeEnv({ cwd: isolatedCwd });
+            assert.strictEqual(runtimeEnvResult.projectEnvFile, undefined, 'explicit cwd should not fall back to the ambient repo binding');
+            assert.strictEqual(runtimeEnvResult.authorityMode, 'environment-only');
+            assert.strictEqual(process.env.DATABASE_URL, 'postgresql://postgres:postgres@localhost:5432/environment_only_db');
+        });
+
+        // --project-env fix: explicit path that does not exist must throw, not silently fall back
+        withCleanEnv(() => {
+            const missingPath = path.join(root, 'nonexistent', '.env.iranti');
+            assert.throws(
+                () => loadRuntimeEnv({ projectEnvFile: missingPath }),
+                (err: unknown) => err instanceof Error && err.message.includes('Project env file not found'),
+                'Expected loadRuntimeEnv to throw when projectEnvFile option points to a missing file rather than silently falling back to ancestor discovery.'
+            );
+        });
+        withCleanEnv(() => {
+            process.env.IRANTI_PROJECT_ENV = path.join(root, 'nonexistent', '.env.iranti');
+            assert.throws(
+                () => loadRuntimeEnv({}),
+                (err: unknown) => err instanceof Error && err.message.includes('Project env file not found'),
+                'Expected loadRuntimeEnv to throw when IRANTI_PROJECT_ENV env var points to a missing file.'
+            );
+        });
+        // Regression: no explicit path given → ambient ancestor discovery still proceeds without throwing
+        withCleanEnv(() => {
+            process.env.DATABASE_URL = 'postgresql://postgres:postgres@localhost:5432/no_explicit_env_db';
+            const ambientResult = loadRuntimeEnv({ cwd: isolatedCwd });
+            assert.strictEqual(ambientResult.projectEnvFile, undefined, 'Absent explicit path should still resolve without throwing.');
+            assert.strictEqual(ambientResult.authorityMode, 'environment-only', 'Absent explicit path should still resolve without throwing — ambient discovery is the fallback.');
+        });
+
         const explicitAuthority = resolveRuntimeAuthorityFromEnv({
             IRANTI_INSTANCE_DIR: instanceDir,
             IRANTI_INSTANCE_RUNTIME_FILE: runtimeFile,
@@ -819,6 +877,16 @@ async function main(): Promise<void> {
             boundRuntimeRoot: string | null;
             rootMismatch: boolean;
             otherRuntimeRoots: string[];
+            authority: {
+                activeAuthority: string;
+                activeBindingSource: string | null;
+                activeBoundInstanceEnv: string | null;
+                activeDatabaseUrl: string | null;
+                activeDatabaseTarget: string | null;
+                repoDatabaseUrl: string | null;
+                repoDatabaseTarget: string | null;
+                repoDatabaseDiffers: boolean;
+            };
             discovery: {
                 boundRuntimeRoot: string | null;
                 rootMismatch: boolean;
@@ -827,9 +895,192 @@ async function main(): Promise<void> {
         };
         assert.strictEqual(mismatchStatus.boundRuntimeRoot, isolatedRoot);
         assert.strictEqual(mismatchStatus.rootMismatch, true);
+        assert.strictEqual(mismatchStatus.authority.activeAuthority, 'project binding -> bound instance env');
+        assert.strictEqual(mismatchStatus.authority.activeBindingSource, projectEnvFile);
+        assert.strictEqual(mismatchStatus.authority.activeBoundInstanceEnv, isolatedEnvFile);
+        assert.strictEqual(mismatchStatus.authority.activeDatabaseUrl, 'postgresql://postgres:postgres@localhost:5432/iranti_isolated');
+        assert.strictEqual(mismatchStatus.authority.activeDatabaseTarget, 'localhost:5432/iranti_isolated');
+        assert.strictEqual(mismatchStatus.authority.repoDatabaseDiffers, false);
         assert.ok(mismatchStatus.otherRuntimeRoots.includes(isolatedRoot), 'Expected status JSON to report the alternate bound runtime root.');
         assert.strictEqual(mismatchStatus.discovery.boundRuntimeRoot, isolatedRoot);
         assert.strictEqual(mismatchStatus.discovery.rootMismatch, true);
+
+        const mismatchDoctorRun = runCli(['doctor', '--root', root, '--json'], nestedProjectDir);
+        assert.strictEqual(mismatchDoctorRun.status, 1, `doctor with bound-root mismatch should warn:\n${mismatchDoctorRun.stdout}\n${mismatchDoctorRun.stderr}`);
+        const mismatchDoctor = JSON.parse(mismatchDoctorRun.stdout.trim()) as {
+            selectedRuntimeRoot: string | null;
+            selectedRuntimeRootSource: string | null;
+            boundRuntimeRoot: string | null;
+            boundInstanceEnv: string | null;
+            rootMismatch: boolean;
+            otherRuntimeRoots: string[];
+            remediations: string[];
+            checks: Array<{ name: string; status: string; detail: string }>;
+            authority: {
+                activeAuthority: string;
+                activeBindingSource: string | null;
+                activeBoundInstanceEnv: string | null;
+                activeDatabaseUrl: string | null;
+                activeDatabaseTarget: string | null;
+                repoDatabaseUrl: string | null;
+                repoDatabaseTarget: string | null;
+                repoDatabaseDiffers: boolean;
+            };
+            discovery: {
+                selectedRuntimeRoot: string | null;
+                selectionSource: string | null;
+                boundRuntimeRoot: string | null;
+                projectBindingFile: string | null;
+                projectBindingSource: string | null;
+                rootMismatch: boolean;
+                otherRuntimeRoots: string[];
+            };
+        };
+        assert.strictEqual(mismatchDoctor.selectedRuntimeRoot, root);
+        assert.strictEqual(mismatchDoctor.selectedRuntimeRootSource, 'flag');
+        assert.strictEqual(mismatchDoctor.boundRuntimeRoot, isolatedRoot);
+        assert.strictEqual(mismatchDoctor.boundInstanceEnv, isolatedEnvFile);
+        assert.strictEqual(mismatchDoctor.rootMismatch, true);
+        assert.strictEqual(mismatchDoctor.authority.activeAuthority, 'project binding -> bound instance env');
+        assert.strictEqual(mismatchDoctor.authority.activeBindingSource, projectEnvFile);
+        assert.strictEqual(mismatchDoctor.authority.activeBoundInstanceEnv, isolatedEnvFile);
+        assert.strictEqual(mismatchDoctor.authority.activeDatabaseUrl, 'postgresql://postgres:postgres@localhost:5432/iranti_isolated');
+        assert.strictEqual(mismatchDoctor.authority.activeDatabaseTarget, 'localhost:5432/iranti_isolated');
+        assert.strictEqual(mismatchDoctor.authority.repoDatabaseDiffers, false);
+        assert.ok(mismatchDoctor.otherRuntimeRoots.includes(isolatedRoot), 'Expected doctor JSON to report the alternate bound runtime root.');
+        assert.strictEqual(mismatchDoctor.discovery.selectedRuntimeRoot, root);
+        assert.strictEqual(mismatchDoctor.discovery.selectionSource, 'flag');
+        assert.strictEqual(mismatchDoctor.discovery.boundRuntimeRoot, isolatedRoot);
+        assert.strictEqual(mismatchDoctor.discovery.projectBindingFile, projectEnvFile);
+        assert.strictEqual(mismatchDoctor.discovery.projectBindingSource, 'doctor-target');
+        assert.strictEqual(mismatchDoctor.discovery.rootMismatch, true);
+        const runtimeRootSelectionCheck = mismatchDoctor.checks.find((check) => check.name === 'runtime root selection');
+        assert.ok(runtimeRootSelectionCheck, 'Expected doctor to emit a runtime root selection check for project bindings.');
+        assert.strictEqual(runtimeRootSelectionCheck?.status, 'warn');
+        assert.ok(runtimeRootSelectionCheck?.detail.includes(root), 'Expected doctor mismatch detail to mention the selected runtime root.');
+        assert.ok(runtimeRootSelectionCheck?.detail.includes(isolatedRoot), 'Expected doctor mismatch detail to mention the bound runtime root.');
+        assert.ok(
+            mismatchDoctor.remediations.some((hint) => hint.includes('`iranti doctor` with `--root <runtime-root>`') || hint.includes('`iranti configure project`')),
+            `Expected doctor remediations to explain how to resolve the runtime-root mismatch, got ${JSON.stringify(mismatchDoctor.remediations)}.`
+        );
+
+        const outerRepoEnvFile = path.join(root, '.env');
+        writeText(outerRepoEnvFile, [
+            'DATABASE_URL=postgresql://postgres:postgres@localhost:5432/iranti_outer_repo_should_not_win',
+            'LLM_PROVIDER=mock',
+            'IRANTI_API_KEY=outer_repo_key',
+            '',
+        ].join('\n'));
+        const statusAuthorityRun = runCli(['status', '--root', root, '--json'], nestedProjectDir);
+        assert.strictEqual(statusAuthorityRun.status, 0, `status authority regression failed:\n${statusAuthorityRun.stdout}\n${statusAuthorityRun.stderr}`);
+        const statusAuthority = JSON.parse(statusAuthorityRun.stdout.trim()) as {
+            authority: {
+                activeAuthority: string;
+                activeBindingSource: string | null;
+                activeBoundInstanceEnv: string | null;
+                activeDatabaseUrl: string | null;
+                activeDatabaseTarget: string | null;
+                repoDatabaseUrl: string | null;
+                repoDatabaseTarget: string | null;
+                repoDatabaseDiffers: boolean;
+            };
+        };
+        assert.strictEqual(statusAuthority.authority.activeAuthority, 'project binding -> bound instance env');
+        assert.strictEqual(statusAuthority.authority.activeBindingSource, projectEnvFile);
+        assert.strictEqual(statusAuthority.authority.activeBoundInstanceEnv, isolatedEnvFile);
+        assert.strictEqual(statusAuthority.authority.activeDatabaseUrl, 'postgresql://postgres:postgres@localhost:5432/iranti_isolated');
+        assert.strictEqual(statusAuthority.authority.activeDatabaseTarget, 'localhost:5432/iranti_isolated');
+        assert.strictEqual(statusAuthority.authority.repoDatabaseUrl, 'postgresql://postgres:postgres@localhost:5432/iranti_outer_repo_should_not_win');
+        assert.strictEqual(statusAuthority.authority.repoDatabaseTarget, 'localhost:5432/iranti_outer_repo_should_not_win');
+        assert.strictEqual(statusAuthority.authority.repoDatabaseDiffers, true);
+
+        const statusAuthorityTextRun = runCli(['status', '--root', root], nestedProjectDir);
+        assert.strictEqual(statusAuthorityTextRun.status, 0, `status authority text regression failed:\n${statusAuthorityTextRun.stdout}\n${statusAuthorityTextRun.stderr}`);
+        assert.ok(statusAuthorityTextRun.stdout.includes('authority'), 'Expected status text output to include the authority summary row.');
+        assert.ok(statusAuthorityTextRun.stdout.includes('project binding -> bound instance env'), 'Expected status text output to show the binding authority chain.');
+        assert.ok(statusAuthorityTextRun.stdout.includes('active_db_target'), 'Expected status text output to show the active database target row.');
+        assert.ok(statusAuthorityTextRun.stdout.includes('localhost:5432/iranti_isolated'), 'Expected status text output to show the active bound database target.');
+        assert.ok(statusAuthorityTextRun.stdout.includes('repo_db_target'), 'Expected status text output to show the differing repo database target row.');
+        assert.ok(statusAuthorityTextRun.stdout.includes('localhost:5432/iranti_outer_repo_should_not_win'), 'Expected status text output to show the differing repo database target.');
+
+        const nearestDoctorRun = runCli(['doctor', '--json'], nestedProjectDir);
+        assert.strictEqual(nearestDoctorRun.status, 1, `doctor nearest-target regression failed:\n${nearestDoctorRun.stdout}\n${nearestDoctorRun.stderr}`);
+        const nearestDoctor = JSON.parse(nearestDoctorRun.stdout.trim()) as {
+            envSource: string;
+            envFile: string | null;
+            boundRuntimeRoot: string | null;
+            authority: {
+                activeAuthority: string;
+                activeBindingSource: string | null;
+                activeBoundInstanceEnv: string | null;
+                activeDatabaseUrl: string | null;
+                activeDatabaseTarget: string | null;
+                repoDatabaseUrl: string | null;
+                repoDatabaseTarget: string | null;
+                repoDatabaseDiffers: boolean;
+            };
+            discovery: {
+                projectBindingFile: string | null;
+            };
+        };
+        assert.strictEqual(nearestDoctor.envSource, 'project-binding', 'Expected doctor to prefer the closer project binding over a farther repo env.');
+        assert.strictEqual(nearestDoctor.envFile, projectEnvFile, 'Expected doctor to target the closer .env.iranti file.');
+        assert.strictEqual(nearestDoctor.boundRuntimeRoot, isolatedRoot, 'Expected doctor to keep binding discovery when a farther repo env exists.');
+        assert.strictEqual(nearestDoctor.authority.activeAuthority, 'project binding -> bound instance env');
+        assert.strictEqual(nearestDoctor.authority.activeBindingSource, projectEnvFile);
+        assert.strictEqual(nearestDoctor.authority.activeBoundInstanceEnv, isolatedEnvFile);
+        assert.strictEqual(nearestDoctor.authority.activeDatabaseUrl, 'postgresql://postgres:postgres@localhost:5432/iranti_isolated');
+        assert.strictEqual(nearestDoctor.authority.activeDatabaseTarget, 'localhost:5432/iranti_isolated');
+        assert.strictEqual(nearestDoctor.authority.repoDatabaseUrl, 'postgresql://postgres:postgres@localhost:5432/iranti_outer_repo_should_not_win');
+        assert.strictEqual(nearestDoctor.authority.repoDatabaseTarget, 'localhost:5432/iranti_outer_repo_should_not_win');
+        assert.strictEqual(nearestDoctor.authority.repoDatabaseDiffers, true);
+        assert.strictEqual(nearestDoctor.discovery.projectBindingFile, projectEnvFile);
+
+        const siblingRepoEnvFile = path.join(projectDir, '.env');
+        writeText(siblingRepoEnvFile, [
+            'DATABASE_URL=postgresql://postgres:postgres@localhost:5432/project_repo_doctor_target',
+            'LLM_PROVIDER=mock',
+            'IRANTI_API_KEY=project_repo_doctor_key',
+            '',
+        ].join('\n'));
+        const siblingDoctorRun = runCli(['doctor', '--json', '--root', root], nestedProjectDir);
+        assert.strictEqual(siblingDoctorRun.status, 1, `doctor sibling repo-env authority regression failed:\n${siblingDoctorRun.stdout}\n${siblingDoctorRun.stderr}`);
+        const siblingDoctor = JSON.parse(siblingDoctorRun.stdout.trim()) as {
+            envSource: string;
+            envFile: string | null;
+            authority: {
+                activeAuthority: string;
+                activeDatabaseUrl: string | null;
+                activeDatabaseTarget: string | null;
+                nearbyBindingSource: string | null;
+                nearbyBoundInstanceEnv: string | null;
+                nearbyBindingDatabaseUrl: string | null;
+                nearbyBindingDatabaseTarget: string | null;
+                nearbyBindingDiffers: boolean;
+            };
+            checks: Array<{ name: string; status: string; detail: string }>;
+        };
+        assert.strictEqual(siblingDoctor.envSource, 'repo', 'Expected sibling repo .env to win doctor target selection when both files exist in one directory.');
+        assert.strictEqual(siblingDoctor.envFile, siblingRepoEnvFile);
+        assert.strictEqual(siblingDoctor.authority.activeAuthority, 'repo env');
+        assert.strictEqual(siblingDoctor.authority.activeDatabaseUrl, 'postgresql://postgres:postgres@localhost:5432/project_repo_doctor_target');
+        assert.strictEqual(siblingDoctor.authority.activeDatabaseTarget, 'localhost:5432/project_repo_doctor_target');
+        assert.strictEqual(siblingDoctor.authority.nearbyBindingSource, projectEnvFile);
+        assert.strictEqual(siblingDoctor.authority.nearbyBoundInstanceEnv, isolatedEnvFile);
+        assert.strictEqual(siblingDoctor.authority.nearbyBindingDatabaseUrl, 'postgresql://postgres:postgres@localhost:5432/iranti_isolated');
+        assert.strictEqual(siblingDoctor.authority.nearbyBindingDatabaseTarget, 'localhost:5432/iranti_isolated');
+        assert.strictEqual(siblingDoctor.authority.nearbyBindingDiffers, true);
+        const nearbyBindingCheck = siblingDoctor.checks.find((check) => check.name === 'nearby project binding authority');
+        assert.strictEqual(nearbyBindingCheck?.status, 'warn');
+        assert.match(nearbyBindingCheck?.detail ?? '', /direct DB checks against repo \.env may miss facts stored in the bound instance DB/i);
+
+        const doctorAuthorityTextRun = runCli(['doctor', '--root', root], nestedProjectDir);
+        assert.strictEqual(doctorAuthorityTextRun.status, 1, `doctor authority text regression failed:\n${doctorAuthorityTextRun.stdout}\n${doctorAuthorityTextRun.stderr}`);
+        assert.ok(doctorAuthorityTextRun.stdout.includes('authority : repo env'), 'Expected doctor text output to show repo env as the active authority when sibling .env wins selection.');
+        assert.ok(doctorAuthorityTextRun.stdout.includes('active db : localhost:5432/project_repo_doctor_target'), 'Expected doctor text output to show the active repo database target.');
+        assert.ok(doctorAuthorityTextRun.stdout.includes(`nearby binding : ${projectEnvFile}`), 'Expected doctor text output to surface the nearby project binding path.');
+        assert.ok(doctorAuthorityTextRun.stdout.includes(`nearby bound env: ${isolatedEnvFile}`), 'Expected doctor text output to surface the nearby bound instance env.');
+        assert.ok(doctorAuthorityTextRun.stdout.includes('nearby db : localhost:5432/iranti_isolated (binding differs)'), 'Expected doctor text output to show the nearby bound database target.');
 
         const prodMissingPepper = spawnSync(
             process.execPath,
@@ -899,6 +1150,22 @@ async function main(): Promise<void> {
         assert.match(startupSecurityCheck?.detail ?? '', /refuse to boot/i);
         assert.strictEqual(runtimeAuthorityCheck?.status, 'fail');
         assert.match(runtimeAuthorityCheck?.detail ?? '', /does not match/i);
+        assert.strictEqual(
+            resolvePackageRoot(path.join(repoRoot, 'src', 'api')),
+            repoRoot,
+            'Expected package root helper to resolve the repo root from the server source directory.'
+        );
+        assert.strictEqual(
+            resolvePackageRoot(path.join(root, 'no-package-root', 'nested')),
+            null,
+            'Expected package root helper to return null when no package.json exists in range.'
+        );
+        const serverSource = fs.readFileSync(serverScript, 'utf8');
+        assert.match(
+            serverSource,
+            /packageRoot:\s*resolvePackageRoot\(__dirname\)\s*\?\?\s*process\.cwd\(\)/,
+            'Expected runtime metadata to record the serving package root instead of the detached process cwd.'
+        );
 
         const publishedPorts = parsePublishedDockerHostPorts([
             '0.0.0.0:5435->5432/tcp, [::]:5435->5432/tcp',

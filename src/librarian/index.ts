@@ -32,6 +32,7 @@ import { inc, timeEnd, timeStart } from '../lib/metrics';
 import { ensureEscalationFolders } from '../lib/escalationPaths';
 import { detectContextualConflict } from './contextual-conflicts';
 import { isPersonalMemoryKey, USER_PROMPT_AUTO_REMEMBER_SOURCE } from '../lib/autoRemember';
+import { broadcastSharedEntityUpdated, notifySharedEntityUpdated } from '../lib/sharedStateInvalidation';
 
 function clampConfidence(input: EntryInput): EntryInput {
     return {
@@ -196,6 +197,30 @@ async function refetchCurrentRow(existing: KnowledgeEntry, tx: any): Promise<Kno
     }
 
     return refreshed as KnowledgeEntry;
+}
+
+async function verifyImmediateWriteAvailability(input: EntryInput, writeResult: WriteResultInternal): Promise<void> {
+    if ((writeResult.action !== 'created' && writeResult.action !== 'updated') || !writeResult.entry) {
+        return;
+    }
+
+    const observed = await findEntry({
+        entityType: input.entityType,
+        entityId: input.entityId,
+        key: input.key,
+    });
+
+    if (!observed) {
+        throw new Error(
+            `WRITE_AVAILABILITY_FAILED: ${input.entityType}/${input.entityId}/${input.key} was reported ${writeResult.action} but was not immediately queryable after commit.`
+        );
+    }
+
+    if (observed.id !== writeResult.entry.id) {
+        throw new Error(
+            `WRITE_AVAILABILITY_FAILED: ${input.entityType}/${input.entityId}/${input.key} was reported ${writeResult.action} but immediate read observed entry ${observed.id} instead of ${writeResult.entry.id}.`
+        );
+    }
 }
 
 export async function librarianWrite(input: EntryInput): Promise<{
@@ -391,6 +416,50 @@ export async function librarianWrite(input: EntryInput): Promise<{
 
         if (writeResult.action === 'updated' || writeResult.action === 'rejected' || writeResult.action === 'escalated') {
             await updateStats(input.createdBy, writeResult.action, input.confidence);
+        }
+
+        try {
+            await verifyImmediateWriteAvailability(input, writeResult);
+        } catch (error) {
+            getStaffEventEmitter().emit({
+                staffComponent: 'Librarian',
+                actionType: 'write_availability_failed',
+                agentId: input.createdBy,
+                source: input.source,
+                entityType: input.entityType,
+                entityId: input.entityId,
+                key: input.key,
+                reason: 'post_commit_write_not_immediately_queryable',
+                level: 'audit',
+                metadata: {
+                    action: writeResult.action,
+                    entryId: writeResult.entry?.id ?? null,
+                    error: error instanceof Error ? error.message : String(error),
+                },
+            });
+            throw error;
+        }
+
+        if ((writeResult.action === 'created' || writeResult.action === 'updated') && writeResult.entry) {
+            getStaffEventEmitter().emit({
+                staffComponent: 'Librarian',
+                actionType: 'write_available',
+                agentId: input.createdBy,
+                source: input.source,
+                entityType: input.entityType,
+                entityId: input.entityId,
+                key: input.key,
+                reason: 'post_commit_write_verified',
+                level: 'audit',
+                metadata: {
+                    action: writeResult.action,
+                    entryId: writeResult.entry.id,
+                },
+            });
+            notifySharedEntityUpdated(`${input.entityType}/${input.entityId}`, input.key);
+            void broadcastSharedEntityUpdated(`${input.entityType}/${input.entityId}`, input.key).catch((error) => {
+                console.warn(`[shared-state] failed to broadcast invalidation for ${input.entityType}/${input.entityId}/${input.key}: ${error instanceof Error ? error.message : String(error)}`);
+            });
         }
 
         const { reliabilityUpdate: _ignored, ...publicResult } = writeResult;

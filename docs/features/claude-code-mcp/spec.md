@@ -3,6 +3,8 @@
 ## Overview
 This feature exposes Iranti to Claude Code through the installed CLI surface: `iranti claude-setup` for project-local scaffolding, `iranti mcp` for the stdio MCP server, and `iranti claude-hook` for automatic working-memory injection. All three commands can recover runtime configuration from a project-local `.env.iranti` plus the linked instance env.
 
+This spec is intentionally host-specific. The shared memory contract lives in `docs/features/memory-lifecycle/spec.md`; this file defines only the Claude Code transport, hook, and scaffold behavior that makes Claude comply with that core contract.
+
 ## Inputs
 | Input | Type | Description |
 |---|---|---|
@@ -24,7 +26,7 @@ This feature exposes Iranti to Claude Code through the installed CLI surface: `i
 ## Outputs
 | Output | Type | Description |
 |---|---|---|
-| MCP tools | stdio MCP server | Exposes `iranti_handshake`, `iranti_attend`, `iranti_observe`, `iranti_checkpoint`, `iranti_query`, `iranti_search`, `iranti_write`, `iranti_remember_response`, `iranti_ingest`, `iranti_relate`, and `iranti_who_knows`. |
+| MCP tools | stdio MCP server | Exposes `iranti_handshake`, `iranti_attend`, `iranti_observe`, `iranti_checkpoint`, `iranti_query`, `iranti_search`, `iranti_write`, `iranti_write_issue`, `iranti_remember_response`, `iranti_ingest`, `iranti_relate`, `iranti_related`, `iranti_related_deep`, and `iranti_who_knows`. |
 | Hook context | JSON | Emits `hookSpecificOutput.additionalContext` for Claude Code hook events. |
 | Structured tool results | JSON | Returns tool output as both plain text and `structuredContent` for MCP clients. |
 | Claude scaffold files | filesystem | Writes `.mcp.json`, `.vscode/mcp.json`, and `.claude/settings.local.json` in the target project. |
@@ -58,11 +60,12 @@ This feature exposes Iranti to Claude Code through the installed CLI surface: `i
 21. Prompt-captured personal facts are stored as direct user memory so later explicit user corrections can replace older hook-written values.
 22. On `UserPromptSubmit`, call `attend()` and emit only relevant retrieved facts when injection is needed.
 23. If no handshake has been performed yet for that agent in the current process, `attend()` auto-runs a bootstrap handshake before making the injection decision.
-24. If Claude explicitly calls `iranti_write` for a personal-memory key such as `favorite_book`, the MCP server reroutes that write to the configured canonical personal entity instead of allowing project-local identity forks like `user/nf` vs `user/main`.
-25. Recall-class prompts such as `what is my favorite ...`, `what is the next step`, `what did we decide`, and `what is the blocker` are treated as mandatory memory prompts and bypass the LLM memory-needed classifier.
-26. On `Stop`, if `IRANTI_AUTO_REMEMBER=true`, extract only narrow assistant-response summary patterns from `last_assistant_message` and write project-scoped summaries to `IRANTI_MEMORY_ENTITY`.
-27. If the strict assistant summary contains checkpoint-worthy project progress such as `current_step`, `next_step`, `open_risks`, or important artifacts, the `Stop` hook should also emit a shared checkpoint to `IRANTI_MEMORY_ENTITY` so other sessions can resume work without waiting for an explicit MCP checkpoint call.
-27. Narrow project durability now includes strict patterns for:
+24. The MCP `iranti_attend` tool accepts `message` as a host-compatibility alias for `latestMessage` when a client cannot rename that field cleanly.
+25. If Claude explicitly calls `iranti_write` for a personal-memory key such as `favorite_book`, the MCP server reroutes that write to the configured canonical personal entity instead of allowing project-local identity forks like `user/nf` vs `user/main`.
+26. Recall-class prompts such as `what is my favorite ...`, `what is the next step`, `what did we decide`, and `what is the blocker` are treated as mandatory memory prompts and bypass the LLM memory-needed classifier.
+27. On `Stop`, if `IRANTI_AUTO_REMEMBER=true`, extract only narrow assistant-response summary patterns from `last_assistant_message` and write project-scoped summaries to `IRANTI_MEMORY_ENTITY`.
+28. If the strict assistant summary contains checkpoint-worthy project progress such as `current_step`, `next_step`, `open_risks`, or important artifacts, the `Stop` hook should also emit a shared checkpoint to `IRANTI_MEMORY_ENTITY` so other sessions can resume work without waiting for an explicit MCP checkpoint call.
+29. Narrow project durability now includes strict patterns for:
    - `current_step`
    - `next_step`
    - `blocker`
@@ -106,7 +109,8 @@ This feature exposes Iranti to Claude Code through the installed CLI surface: `i
 - `iranti claude-setup --scan <dir> --recursive` finds nested Claude-enabled projects.
 - `iranti claude-setup` writes both `.mcp.json` and `.vscode/mcp.json` when a bound project is available.
 - `iranti mcp --help` works through the installed CLI handoff path.
-- `npm run test:mcp-smoke` starts the stdio MCP server, lists tools, and successfully calls `iranti_handshake`, `iranti_checkpoint`, `iranti_write`, `iranti_query`, `iranti_search`, `iranti_attend`, and `iranti_remember_response`.
+- `npm run test:mcp-smoke` starts the stdio MCP server, lists tools, and successfully calls `iranti_handshake`, `iranti_checkpoint`, `iranti_write`, `iranti_write_issue`, `iranti_query`, `iranti_search`, `iranti_attend`, `iranti_remember_response`, `iranti_relate`, `iranti_related`, `iranti_related_deep`, and verifies the graceful-shutdown and stdin-close lifecycle.
+- `npm run test:mcp-attend-shutdown-regressions` verifies `iranti_attend` message alias and shutdown checkpoint preservation as focused regressions separate from the broader smoke.
 - `iranti claude-hook --help` works through the installed CLI handoff path.
 - Installed-package Claude Code integration no longer requires hardcoded `DATABASE_URL` in hook commands when `.env.iranti` points to a valid instance env.
 - `npm run test:claude-hook` verifies project prompt durability for `current_step` and `open_risks` in addition to the existing favorite and `next_step` paths.

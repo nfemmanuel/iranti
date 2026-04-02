@@ -18,8 +18,8 @@ It is intentionally narrow:
 
 - [ ] `package.json`, `clients/typescript/package.json`, `clients/python/pyproject.toml`, and `clients/python/iranti.py` all agree
 - [ ] `npm run release:check -- vX.Y.Z` passes
-- [ ] `npm pack` succeeds
-- [ ] `npm pack ./clients/typescript` succeeds
+- [ ] `npm run pack:root` succeeds and writes `dist/packages/iranti-<version>.tgz`
+- [ ] `npm run pack:ts-client` succeeds and writes `dist/packages/iranti-sdk-<version>.tgz`
 - [ ] `python -m build clients/python --outdir clients/python/dist` succeeds
 - [ ] `python -m twine check clients/python/dist/*` succeeds
 
@@ -64,6 +64,7 @@ Use a fresh personal key and one project-scoped key.
 - [ ] write a project fact like `next_step`
 - [ ] confirm it lands on the project entity
 - [ ] verify a different project does not inherit it unless intentionally shared
+- [ ] verify a write from one process invalidates another process on the same primary DB (`npm run test:cross-process-invalidation`)
 
 ---
 

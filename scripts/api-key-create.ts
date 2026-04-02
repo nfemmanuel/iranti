@@ -29,7 +29,7 @@ async function main(): Promise<void> {
         process.exit(1);
     }
 
-    initDb(dbUrl);
+    initDb(dbUrl, { applicationName: 'iranti:script:api_key_create' });
 
     const created = await createOrRotateApiKey({
         keyId,

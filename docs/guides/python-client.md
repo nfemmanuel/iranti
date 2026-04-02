@@ -23,21 +23,20 @@ pip install -e .
 
 ## Setup
 
-### Start the Iranti API Server
+### Start the Iranti API Instance
 
-The Python client connects to the Iranti REST API. Start the server first:
+The Python client talks to the Iranti REST API, so start an instance first.
+
+Preferred operator path:
 
 ```bash
-# In the iranti directory
+iranti run --instance local
+```
+
+If you are validating directly from a source checkout instead of an installed runtime, you can still run the repo-local server path:
+
+```bash
 npm run api
-```
-
-You should see:
-
-```
-Iranti API running on port 3001
-Health: http://localhost:3001/health
-Provider: mock
 ```
 
 ### Configure Environment Variables
@@ -71,7 +70,7 @@ client = IrantiClient()  # Reads IRANTI_URL and IRANTI_API_KEY
 
 # Check server is running
 health = client.health()
-print(health)  # {'status': 'ok', 'version': '0.1.0', 'provider': 'mock'}
+print(health)  # {'status': 'ok', 'version': '...', 'provider': 'mock'}
 ```
 
 ---

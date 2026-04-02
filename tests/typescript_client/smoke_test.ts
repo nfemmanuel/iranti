@@ -1,5 +1,9 @@
 import 'dotenv/config';
+import fs from 'fs';
+import path from 'path';
 import { IrantiClient, IrantiError } from '../../clients/typescript/src';
+import { disconnectDb, initDb } from '../../src/library/client';
+import { findEntry } from '../../src/library/queries';
 
 function expect(condition: unknown, message: string): asserts condition {
     if (!condition) {
@@ -11,41 +15,80 @@ function uniqueId(prefix: string): string {
     return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`;
 }
 
-async function main(): Promise<void> {
-    const apiKey = process.env.IRANTI_API_KEY;
-    if (!apiKey) {
-        throw new Error('IRANTI_API_KEY is required for the TypeScript client smoke test.');
+function readEnvFile(filePath: string): Record<string, string> {
+    const out: Record<string, string> = {};
+    const raw = fs.readFileSync(filePath, 'utf8');
+    for (const line of raw.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const idx = trimmed.indexOf('=');
+        if (idx <= 0) continue;
+        out[trimmed.slice(0, idx)] = trimmed.slice(idx + 1);
     }
+    return out;
+}
 
-    const client = new IrantiClient({
-        baseUrl: process.env.IRANTI_URL ?? 'http://localhost:3001',
-        apiKey,
-        timeout: 30_000,
-    });
+function ensureBoundInstanceEnvLoaded(): void {
+    const bindingPath = path.resolve('.env.iranti');
+    if (!fs.existsSync(bindingPath)) return;
+    const binding = readEnvFile(bindingPath);
+    for (const [key, value] of Object.entries(binding)) {
+        if (key.startsWith('IRANTI_')) {
+            process.env[key] = value;
+        } else if (!process.env[key]) {
+            process.env[key] = value;
+        }
+    }
+    const instanceEnvPath = binding.IRANTI_INSTANCE_ENV?.trim();
+    if (!instanceEnvPath || !fs.existsSync(instanceEnvPath)) return;
+    const instanceEnv = readEnvFile(instanceEnvPath);
+    for (const [key, value] of Object.entries(instanceEnv)) {
+        process.env[key] = value;
+    }
+}
 
-    const agentId = uniqueId('ts_client_agent');
-    const entity = `project/${uniqueId('ts_client_project')}`;
-    const team = `team/${uniqueId('ts_client_team')}`;
-    const searchNeedle = uniqueId('typescript_smoke');
-    const personalEntity = `person/${uniqueId('ts_client_person')}`;
+async function main(): Promise<void> {
+    ensureBoundInstanceEnvLoaded();
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString) {
+        throw new Error('DATABASE_URL is required for the TypeScript client smoke test raw-entry assertions.');
+    }
+    await initDb(connectionString);
+    try {
+        const apiKey = process.env.IRANTI_API_KEY;
+        if (!apiKey) {
+            throw new Error('IRANTI_API_KEY is required for the TypeScript client smoke test.');
+        }
 
-    const health = await client.health();
-    expect(health.status === 'ok', `Expected health status ok, got ${health.status}`);
+        const client = new IrantiClient({
+            baseUrl: process.env.IRANTI_URL ?? 'http://localhost:3001',
+            apiKey,
+            timeout: 30_000,
+        });
 
-    const register = await client.registerAgent({
-        agentId,
-        name: 'TypeScript Smoke Agent',
-        description: 'Agent registered by the external TypeScript client smoke test.',
-        capabilities: ['write', 'query', 'memory'],
-        model: 'smoke-model',
-    });
-    expect(register.success === true, 'Expected registerAgent() success response.');
+        const agentId = uniqueId('ts_client_agent');
+        const entity = `project/${uniqueId('ts_client_project')}`;
+        const team = `team/${uniqueId('ts_client_team')}`;
+        const searchNeedle = uniqueId('typescript_smoke');
+        const personalEntity = `person/${uniqueId('ts_client_person')}`;
 
-    const agent = await client.getAgent(agentId);
-    expect(agent !== null, 'Expected getAgent() to return the registered agent.');
-    expect(agent?.profile.agentId === agentId, 'Expected registered agentId to round-trip.');
+        const health = await client.health();
+        expect(health.status === 'ok', `Expected health status ok, got ${health.status}`);
 
-    const write = await client.write({
+        const register = await client.registerAgent({
+            agentId,
+            name: 'TypeScript Smoke Agent',
+            description: 'Agent registered by the external TypeScript client smoke test.',
+            capabilities: ['write', 'query', 'memory'],
+            model: 'smoke-model',
+        });
+        expect(register.success === true, 'Expected registerAgent() success response.');
+
+        const agent = await client.getAgent(agentId);
+        expect(agent !== null, 'Expected getAgent() to return the registered agent.');
+        expect(agent?.profile.agentId === agentId, 'Expected registered agentId to round-trip.');
+
+        const write = await client.write({
         entity,
         key: 'status',
         value: { phase: 'active', marker: searchNeedle },
@@ -53,15 +96,80 @@ async function main(): Promise<void> {
         confidence: 88,
         source: 'typescript_smoke',
         agent: agentId,
+        properties: {
+            issueStatus: 'open',
+            issueType: 'smoke_test',
+            marker: searchNeedle,
+        },
     });
     expect(['created', 'updated'].includes(write.action), `Expected successful write action, got ${write.action}`);
+
+    const storedStatusEntry = await findEntry({
+        entityType: 'project',
+        entityId: entity.split('/')[1]!,
+        key: 'status',
+    });
+    expect(Boolean(storedStatusEntry), 'Expected the TypeScript client write to persist a raw knowledge entry.');
+    const statusProperties = storedStatusEntry?.properties as Record<string, unknown>;
+    expect(statusProperties.issueStatus === 'open', 'Expected write properties to round-trip through the HTTP write surface.');
+    expect(statusProperties.issueType === 'smoke_test', 'Expected issue metadata to persist through the TypeScript client write.');
 
     const query = await client.query(entity, 'status');
     expect(query.found === true, 'Expected query() to find the written fact.');
     expect(query.summary?.includes(searchNeedle), 'Expected query() summary to include the smoke marker.');
 
+    const issueWrite = await client.writeIssue({
+        entity,
+        issueId: 'open_issue_lifecycle',
+        title: 'Open issue lifecycle missing',
+        status: 'open',
+        summary: 'Open issue lifecycle is not yet first-class.',
+        confidence: 92,
+        source: 'typescript_smoke',
+        agent: agentId,
+        severity: 'high',
+        tags: ['issue-lifecycle', 'tracking'],
+        details: { note: 'Need a stable key that can later resolve.' },
+    });
+    expect(['created', 'updated'].includes(issueWrite.action), `Expected writeIssue() to succeed, got ${issueWrite.action}`);
+
+    const resolvedIssueWrite = await client.writeIssue({
+        entity,
+        issueId: 'open_issue_lifecycle',
+        title: 'Open issue lifecycle missing',
+        status: 'resolved',
+        summary: 'Open issue lifecycle is now first-class.',
+        confidence: 95,
+        source: 'typescript_smoke',
+        agent: agentId,
+        severity: 'high',
+        resolution: 'Added stable issue helpers for the SDK and clients.',
+        resolvedAt: new Date().toISOString(),
+        tags: ['issue-lifecycle', 'tracking'],
+    });
+    expect(['created', 'updated'].includes(resolvedIssueWrite.action), `Expected resolved writeIssue() to succeed, got ${resolvedIssueWrite.action}`);
+
+    const issueQuery = await client.query(entity, 'issue_open_issue_lifecycle');
+    expect(issueQuery.found === true, 'Expected issue fact to be queryable on its stable issue key.');
+    const issueValue = issueQuery.value as Record<string, unknown>;
+    expect(issueValue.status === 'resolved', 'Expected the stable issue key to hold the resolved status after update.');
+
+    const issueHistory = await client.history(entity, 'issue_open_issue_lifecycle');
+    expect(issueHistory.length >= 2, 'Expected issue history to retain both open and resolved states.');
+
+    const storedIssueEntry = await findEntry({
+        entityType: 'project',
+        entityId: entity.split('/')[1]!,
+        key: 'issue_open_issue_lifecycle',
+    });
+    expect(Boolean(storedIssueEntry), 'Expected the TypeScript client writeIssue() helper to persist a raw knowledge entry.');
+    const issueProperties = storedIssueEntry?.properties as Record<string, unknown>;
+    expect(issueProperties.issueStatus === 'resolved', 'Expected issue properties to reflect the latest resolved state.');
+    expect(issueProperties.durableClass === 'issue_status', 'Expected issue helper writes to tag durableClass=issue_status.');
+
     const queryAll = await client.queryAll(entity);
     expect(queryAll.some((fact) => fact.key === 'status'), 'Expected queryAll() to include the status fact.');
+    expect(queryAll.some((fact) => fact.key === 'issue_open_issue_lifecycle'), 'Expected queryAll() to include the stable issue fact.');
 
     const search = await client.search({
         query: searchNeedle,
@@ -230,10 +338,13 @@ async function main(): Promise<void> {
     console.log(`entity: ${entity}`);
     console.log(`write: ${write.action}`);
     console.log(`search matches: ${search.length}`);
-    console.log(`semantic search matches: ${semanticSearch.length}`);
-    console.log(`slash search matches: ${slashSearch.length}`);
-    console.log(`related count: ${related.length}`);
-    console.log(`attend: shouldInject=${attend.shouldInject} reason=${attend.reason}`);
+        console.log(`semantic search matches: ${semanticSearch.length}`);
+        console.log(`slash search matches: ${slashSearch.length}`);
+        console.log(`related count: ${related.length}`);
+        console.log(`attend: shouldInject=${attend.shouldInject} reason=${attend.reason}`);
+    } finally {
+        await disconnectDb();
+    }
 }
 
 main().catch((error: unknown) => {

@@ -3,6 +3,9 @@ import express from 'express';
 import { createServer } from 'http';
 import type { AddressInfo } from 'net';
 import { memoryRoutes } from '../../src/api/routes/memory';
+import { bootstrapHarness } from '../../scripts/harness';
+
+bootstrapHarness();
 
 function expect(condition: unknown, message: string): asserts condition {
     if (!condition) {
@@ -51,18 +54,21 @@ async function main(): Promise<void> {
     attendant.loadOperatingRules = async () => 'Persist checkpoints before expensive work.';
     attendant.inferTask = async () => task;
     attendant.buildWorkingMemory = async () => [];
-    attendant.loadSessionLedgerLearnings = async () => ([
-        {
-            actionType: 'host_failure',
-            summary: 'codex_vscode failure: initialize timed out',
-            timestamp: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
-            source: 'mcp',
-            host: 'codex_vscode',
-            sessionId,
-            entityKey: null,
-            reason: 'initialize_timeout',
-        },
-    ]);
+    attendant.loadSessionLedgerSignals = async () => ({
+        learnings: [
+            {
+                actionType: 'host_failure',
+                summary: 'codex_vscode failure: initialize timed out',
+                timestamp: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
+                source: 'mcp',
+                host: 'codex_vscode',
+                sessionId,
+                entityKey: null,
+                reason: 'initialize_timeout',
+            },
+        ],
+        profile: null,
+    });
     attendant.persistState = async () => {};
 
     const recoveredBrief = await attendant.handshake({
@@ -80,6 +86,251 @@ async function main(): Promise<void> {
         recoveredBrief.workingMemory.some((entry: { entityKey: string }) => entry.entityKey === 'system/session_ledger/recent_learning_1'),
         'Expected handshake to append a synthetic working-memory entry for recent ledger learnings.'
     );
+
+    const advisoryAttendant: any = new AttendantInstance(agentId);
+    advisoryAttendant.loadPersistedState = async () => null;
+    advisoryAttendant.loadOperatingRules = async () => 'Persist checkpoints before expensive work.';
+    advisoryAttendant.inferTask = async () => 'Continue the launch checklist and recover the next step.';
+    advisoryAttendant.buildWorkingMemory = async () => [];
+    advisoryAttendant.loadSessionLedgerSignals = async () => ({
+        learnings: [
+            {
+                actionType: 'persistence_lesson',
+                summary: 'Recent persistence lesson: project/project_atlas/checkpoint_next_step is being handed off through shared checkpoints.',
+                timestamp: new Date(Date.now() - 60 * 1000).toISOString(),
+                source: 'cli',
+                host: 'plain_cli',
+                sessionId,
+                entityKey: 'project/project_atlas/checkpoint_next_step',
+                reason: null,
+                category: 'persistence',
+                evidenceActionTypes: ['checkpoint_written'],
+            },
+        ],
+        profile: {
+            scopesUsed: ['task', 'global'],
+            preferMemoryForAmbiguousTurns: true,
+            priorityKeys: ['checkpoint_next_step', 'checkpoint_open_risks'],
+            summaries: ['Recent persistence lesson: project/project_atlas/checkpoint_next_step is being handed off through shared checkpoints.'],
+            matchedTaskType: 'Continue the launch checklist and recover the next step.',
+            needsCheckpointReminder: true,
+            checkpointReminder: 'Recent compliance lesson: plain_cli left an under-logged run after substantial retrieval work without a checkpoint or durable write. This is non-compliant for Iranti; before the next pause, write what you found, what worked, and what remains risky and what happens next and checkpoint shared progress.',
+            missingWriteCategories: ['findings', 'validated_results', 'risks_and_next_steps'],
+        },
+    });
+    advisoryAttendant.persistState = async () => {};
+
+    let advisoryObservePriorityKeys: string[] = [];
+    advisoryAttendant.observe = async (input: { priorityKeys?: string[] }) => {
+        advisoryObservePriorityKeys = input.priorityKeys ?? [];
+        return {
+            facts: [
+                {
+                    entityKey: 'project/project_atlas/checkpoint_next_step',
+                    summary: 'checkpoint next step is collect approvals',
+                    value: { instruction: 'collect approvals' },
+                    confidence: 95,
+                    source: 'AttendantCheckpoint',
+                },
+            ],
+            entitiesDetected: ['project/project_atlas'],
+            alreadyPresent: 0,
+            totalFound: 1,
+            entitiesResolved: [],
+            debug: {
+                contextLength: 0,
+                detectionWindowChars: 0,
+                detectedCandidates: 0,
+                keptCandidates: 0,
+                hintsProvided: 1,
+                hintsResolved: 1,
+                dropped: [],
+            },
+        };
+    };
+
+    await advisoryAttendant.handshake({
+        task: 'Continue the launch checklist and recover the next step.',
+        recentMessages: ['We need to keep the launch moving.'],
+    });
+    expect(
+        advisoryAttendant.getBrief()?.operatingRules.includes('under-logged run'),
+        'Expected handshake() to append a stricter checkpoint-discipline reminder to the operating rules when the advisory profile calls for it.'
+    );
+    expect(
+        advisoryAttendant.getBrief()?.operatingRules.includes('what you found, what worked, and what remains risky and what happens next'),
+        'Expected handshake() to spell out the missing write categories for the under-logged run.'
+    );
+
+    const advisoryAttend = await advisoryAttendant.attend({
+        latestMessage: 'Checklist?',
+        currentContext: '',
+        entityHints: ['project/project_atlas'],
+        suppressEvents: true,
+    });
+    expect(
+        advisoryAttend.usageGuidance.tool === 'attend',
+        'Expected attend() to return explicit usage guidance.'
+    );
+    expect(
+        advisoryAttend.usageGuidance.expectedCallSequence.some((step: string) => step.includes('before replying to the user')),
+        'Expected attend() usage guidance to reinforce the pre-reply attend loop.'
+    );
+    expect(
+        advisoryAttend.usageGuidance.expectedCallSequence.some((step: string) => step.includes('file changes are always durable')),
+        'Expected attend() usage guidance to require breadcrumbs after knowledge-changing actions.'
+    );
+    expect(
+        advisoryAttend.usageGuidance.expectedCallSequence.some((step: string) => step.includes('change what is loaded next')),
+        'Expected attend() usage guidance to require a follow-up attend when new knowledge changes the next step context.'
+    );
+    expect(advisoryAttend.decision.method === 'advisory', 'Expected advisory learning to trigger the memory decision for an ambiguous prompt.');
+    expect(advisoryAttend.shouldInject === true, 'Expected advisory-guided attend() to inject the learned checkpoint fact.');
+    expect(
+        advisoryObservePriorityKeys.includes('checkpoint_next_step'),
+        'Expected advisory learning to add learned priority keys to observe().'
+    );
+
+    const heuristicAttendant: any = new AttendantInstance(agentId);
+    heuristicAttendant.loadPersistedState = async () => null;
+    heuristicAttendant.loadOperatingRules = async () => 'Use memory before answering project recall questions.';
+    heuristicAttendant.inferTask = async () => 'Review the remaining launch issues and next step.';
+    heuristicAttendant.buildWorkingMemory = async () => [];
+    heuristicAttendant.loadSessionLedgerSignals = async () => ({ learnings: [], profile: null });
+    heuristicAttendant.persistState = async () => {};
+    heuristicAttendant.observe = async () => ({
+        facts: [
+            {
+                entityKey: 'project/project_atlas/checkpoint_next_step',
+                summary: 'checkpoint next step is collect approvals',
+                value: { instruction: 'collect approvals' },
+                confidence: 95,
+                source: 'AttendantCheckpoint',
+            },
+            {
+                entityKey: 'project/project_atlas/open_issues',
+                summary: 'Remaining launch issues are legal review and sign-off tracking',
+                value: ['Legal review pending', 'Sign-off tracking incomplete'],
+                confidence: 93,
+                source: 'AttendantCheckpoint',
+            },
+        ],
+        entitiesDetected: ['project/project_atlas'],
+        alreadyPresent: 0,
+        totalFound: 2,
+        entitiesResolved: [],
+        debug: {
+            contextLength: 0,
+            detectionWindowChars: 0,
+            detectedCandidates: 0,
+            keptCandidates: 0,
+            hintsProvided: 1,
+            hintsResolved: 1,
+            dropped: [],
+        },
+    });
+
+    const shortRecallAttend = await heuristicAttendant.attend({
+        latestMessage: 'What bugs are left?',
+        currentContext: '',
+        entityHints: ['project/project_atlas'],
+        suppressEvents: true,
+    });
+    expect(shortRecallAttend.decision.method === 'heuristic', 'Expected short remaining-issues recall prompts to be handled heuristically.');
+    expect(shortRecallAttend.decision.explanation === 'memory_reference_detected', 'Expected the remaining-issues prompt to trigger the positive memory heuristic.');
+    expect(shortRecallAttend.shouldInject === true, 'Expected the remaining-issues prompt to inject project memory.');
+
+    const nextStepAttend = await heuristicAttendant.attend({
+        latestMessage: 'Next step?',
+        currentContext: '',
+        entityHints: ['project/project_atlas'],
+        suppressEvents: true,
+    });
+    expect(nextStepAttend.decision.method === 'heuristic', 'Expected compact next-step prompts to be handled heuristically.');
+    expect(nextStepAttend.decision.explanation === 'memory_reference_detected', 'Expected the next-step prompt to trigger the positive memory heuristic.');
+    expect(nextStepAttend.shouldInject === true, 'Expected the next-step prompt to inject project memory.');
+
+    const recapAttend = await heuristicAttendant.attend({
+        latestMessage: 'Bring me up to speed.',
+        currentContext: '',
+        entityHints: ['project/project_atlas'],
+        suppressEvents: true,
+    });
+    expect(
+        recapAttend.usageGuidance.reminder.includes('Iranti is a hive mind'),
+        'Expected attend() usage guidance to reinforce the hive-mind reminder.'
+    );
+    expect(recapAttend.decision.method === 'heuristic', 'Expected recap-style prompts to be handled heuristically.');
+    expect(recapAttend.decision.explanation === 'memory_reference_detected', 'Expected the recap-style prompt to trigger the positive memory heuristic.');
+    expect(recapAttend.shouldInject === true, 'Expected the recap-style prompt to inject project memory.');
+
+    const learningsAttend = await heuristicAttendant.attend({
+        latestMessage: 'What did we learn?',
+        currentContext: '',
+        entityHints: ['project/project_atlas'],
+        suppressEvents: true,
+    });
+    expect(learningsAttend.decision.method === 'heuristic', 'Expected learning-recall prompts to be handled heuristically.');
+    expect(learningsAttend.decision.explanation === 'memory_reference_detected', 'Expected the learning-recall prompt to trigger the positive memory heuristic.');
+    expect(learningsAttend.shouldInject === true, 'Expected the learning-recall prompt to inject project memory.');
+
+    const statusAttend = await heuristicAttendant.attend({
+        latestMessage: 'Can you summarize the current status and progress?',
+        currentContext: '',
+        entityHints: ['project/project_atlas'],
+        suppressEvents: true,
+    });
+    expect(statusAttend.decision.method === 'heuristic', 'Expected status/progress prompts to be handled heuristically.');
+    expect(statusAttend.decision.explanation === 'memory_reference_detected', 'Expected the status/progress prompt to trigger the positive memory heuristic.');
+    expect(statusAttend.shouldInject === true, 'Expected the status/progress prompt to inject project memory.');
+
+    const decisionAttend = await heuristicAttendant.attend({
+        latestMessage: 'What did we decide about the rollout?',
+        currentContext: '',
+        entityHints: ['project/project_atlas'],
+        suppressEvents: true,
+    });
+    expect(decisionAttend.decision.method === 'heuristic', 'Expected decision-recall prompts to be handled heuristically.');
+    expect(['memory_reference_detected', 'project_decision_recall'].includes(decisionAttend.decision.explanation), `Expected the decision-recall prompt to stay on a positive memory path, got ${decisionAttend.decision.explanation}.`);
+    expect(decisionAttend.shouldInject === true, 'Expected the decision-recall prompt to inject project memory.');
+
+    const parseFailureScopedFallback = (heuristicAttendant as any).buildParseFailureFallbackDecision({
+        latestMessage: 'Can you recap the open issues?',
+        currentContext: 'User asked to continue the launch checklist.',
+        entityHintCount: 1,
+    });
+    expect(parseFailureScopedFallback.needed === true, 'Expected substantive parse-failure prompts with scope hints to default to memory.');
+    expect(
+        ['classification_parse_failed_default_true', 'classification_parse_failed_heuristic_true'].includes(parseFailureScopedFallback.explanation),
+        'Expected the scoped parse-failure fallback to explain the memory-default behavior.'
+    );
+
+    const parseFailureProjectCueFallback = (heuristicAttendant as any).buildParseFailureFallbackDecision({
+        latestMessage: 'Can you summarize the current status and open blockers?',
+        currentContext: '',
+        entityHintCount: 0,
+    });
+    expect(parseFailureProjectCueFallback.needed === true, 'Expected substantive parse-failure prompts with project-state cues to default to memory even without explicit scope hints.');
+    expect(
+        ['classification_parse_failed_default_true', 'classification_parse_failed_heuristic_true'].includes(parseFailureProjectCueFallback.explanation),
+        'Expected the project-state parse-failure fallback to explain the memory-default behavior.'
+    );
+
+    const parseFailureUnscopedFallback = (heuristicAttendant as any).buildParseFailureFallbackDecision({
+        latestMessage: 'hi',
+        currentContext: '',
+        entityHintCount: 0,
+    });
+    expect(parseFailureUnscopedFallback.needed === false, 'Expected non-substantive parse-failure prompts to remain false.');
+    expect(parseFailureUnscopedFallback.explanation === 'classification_parse_failed_default_false', 'Expected the unscoped parse-failure fallback to remain false.');
+
+    const parseFailureShortWorkFallback = (heuristicAttendant as any).buildParseFailureFallbackDecision({
+        latestMessage: 'help',
+        currentContext: '',
+        entityHintCount: 0,
+    });
+    expect(parseFailureShortWorkFallback.needed === true, 'Expected terse non-greeting work prompts to safe-default to memory after classifier parse failure.');
+    expect(parseFailureShortWorkFallback.explanation === 'classification_parse_failed_safe_default_true', 'Expected terse non-greeting work prompts to use the safe-default memory explanation.');
 
     const inspected = await attendant.inspectSession({
         task,
@@ -192,6 +443,7 @@ async function main(): Promise<void> {
     const liveAttendant: any = new AttendantInstance(agentId);
     liveAttendant.brief = recoveredBrief;
     liveAttendant.persistState = async () => {};
+    liveAttendant.verifyCheckpointAvailability = async () => {};
 
     const checkpointedBrief = await liveAttendant.checkpoint({
         task,
@@ -201,7 +453,6 @@ async function main(): Promise<void> {
             nextStep: 'publish checklist',
             openRisks: ['Waiting on final approval'],
             recentOutputs: ['Updated the checklist draft'],
-            entityTargets: ['project/project_atlas'],
         },
         sessionId,
         heartbeatAt: new Date().toISOString(),

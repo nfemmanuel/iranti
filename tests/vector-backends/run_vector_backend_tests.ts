@@ -4,7 +4,7 @@ import { createVectorBackend } from '../../src/library/backends';
 import { getDb } from '../../src/library/client';
 import { __setVectorBackendSingletonForTests, auditVectorIndexConsistency, createEntry, deleteEntryById, repairVectorIndexConsistency } from '../../src/library/queries';
 import { searchEntriesHybrid } from '../../src/library/queries';
-import { generateEmbedding } from '../../src/library/embeddings';
+import { cosineSimilarity, generateEmbedding } from '../../src/library/embeddings';
 
 type CaseResult = {
     name: string;
@@ -356,6 +356,28 @@ async function testEmbeddingNormalizationAvoidsPrototypeTrap(): Promise<void> {
     expect(vector.every((value) => Number.isFinite(value)), 'Expected embedding values to remain finite.');
 }
 
+async function testEmbeddingSynonymsFavorProjectStatePhrases(): Promise<void> {
+    const relatedStatus = cosineSimilarity(
+        generateEmbedding('current status and progress'),
+        generateEmbedding('project summary and overview'),
+    );
+    const unrelatedStatus = cosineSimilarity(
+        generateEmbedding('current status and progress'),
+        generateEmbedding('favorite snack and movie'),
+    );
+    expect(relatedStatus > unrelatedStatus, `Expected project-state phrases to be closer than unrelated phrases, got related=${relatedStatus} unrelated=${unrelatedStatus}.`);
+
+    const relatedIssue = cosineSimilarity(
+        generateEmbedding('open bugs and blockers'),
+        generateEmbedding('open issues and risks'),
+    );
+    const unrelatedIssue = cosineSimilarity(
+        generateEmbedding('open bugs and blockers'),
+        generateEmbedding('sunset postcard invitation'),
+    );
+    expect(relatedIssue > unrelatedIssue, `Expected issue-language phrases to be closer than unrelated phrases, got related=${relatedIssue} unrelated=${unrelatedIssue}.`);
+}
+
 async function main(): Promise<void> {
     const results = [
         await runCase('pgvector backend returns stored fact from vector search', testPgvectorBackend),
@@ -365,6 +387,7 @@ async function main(): Promise<void> {
         await runCase('chroma backend maps REST responses correctly', testChromaBackend),
         await runCase('hybrid search merges lexical and vector candidates without crashing', testHybridSearchCandidateMerge),
         await runCase('embedding normalization avoids object-prototype synonym traps', testEmbeddingNormalizationAvoidsPrototypeTrap),
+        await runCase('embedding synonyms favor project-state phrasing over unrelated text', testEmbeddingSynonymsFavorProjectStatePhrases),
     ];
 
     console.log('Vector backend tests');

@@ -17,6 +17,7 @@ const schemas = {
     confidence: { type: 'number', required: true, min: 0, max: 100 },
     source: { type: 'string', required: true, maxLength: 200 },
     agent: { type: 'string', required: true, maxLength: 200 },
+    properties: { type: 'object', required: false, maxSize: 10000 },
     validFrom: { type: 'string', required: false, maxLength: 50 },
     requestId: { type: 'string', required: false, maxLength: 100 }
   },

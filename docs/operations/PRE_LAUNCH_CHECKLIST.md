@@ -1,49 +1,48 @@
-# Release Readiness Checklist
+# Pre-Launch Checklist
 
-Current status for maintaining Iranti after the 0.1.0 public release.
+Use this before treating an Iranti instance as a real shared environment rather than local experimentation.
 
-## Published Artifacts
+## Runtime And Database
 
-- [x] npm package published: `iranti@0.1.0`
-- [x] PyPI package published: `iranti==0.1.0`
-- [x] Global CLI install verified: `npm install -g iranti` + `iranti help`
-- [x] Python install/import verified in fresh venv
+- [ ] `iranti status` reports the intended instance and runtime metadata
+- [ ] `iranti doctor --instance <name>` passes or only shows understood warnings
+- [ ] PostgreSQL is stable, reachable, and pgvector-capable
+- [ ] backup and restore procedures are documented
+- [ ] escalation and request-log paths are outside the repo
 
-## Security Baseline
+## Access And Security
 
-- [x] API key authentication enabled
-- [x] Route-level scope enforcement enabled
-- [x] Rate limiting middleware enabled on protected routes
-- [x] Key create/list/revoke scripts available
-- [ ] Add external security review (recommended)
-- [ ] Add secret scanning in CI (recommended)
+- [ ] per-app or per-service API keys exist
+- [ ] scopes are narrowed to the minimum required access
+- [ ] namespace-aware scopes are used where appropriate
+- [ ] the API is behind TLS or an internal network boundary for non-local use
+- [ ] secrets are stored in env or secret managers, not in tracked files
 
-## CI and Quality Gates
+## Host Integrations
 
-- [x] Build and contract checks in CI
-- [x] npm package dry-run and packaging checks
-- [x] Python package build + twine checks
-- [x] Release-quality smoke workflow (`.github/workflows/release-quality.yml`)
-- [ ] Add nightly dependency audit job
+- [ ] every project has a valid `.env.iranti`
+- [ ] Claude Code projects have current `iranti claude-setup` scaffolding
+- [ ] Codex projects have current `iranti codex-setup` registration and workspace files where needed
+- [ ] shared-memory projects intentionally use `--mode shared`
+- [ ] isolated projects intentionally use the default isolated binding model
 
-## Docs and Onboarding
+## Observability And Operations
 
-- [x] README install and integration flow updated
-- [x] API docs reflect current auth and scope model
-- [x] Python client docs updated for `pip install iranti`
-- [x] Security quickstart guide added
-- [x] Changelog added (`CHANGELOG.md`)
-- [ ] Add versioned release notes for each tagged release
+- [ ] `/health` returns the expected instance and provider metadata
+- [ ] operator runbooks exist for restart, key rotation, and broken bindings
+- [ ] rate limiting is configured appropriately for the environment
+- [ ] monitoring or alerts exist for repeated 401, 403, 429, and 5xx patterns
 
-## Operational Readiness
+## Release And Compatibility
 
-- [ ] Define backup/restore runbook for PostgreSQL
-- [ ] Add monitoring/alerting runbook for 401/403/429 and latency spikes
-- [ ] Document production TLS/reverse-proxy reference deployment
+- [ ] package versions are aligned before release
+- [ ] release checks and hardening tests have run
+- [ ] migration or compatibility notes exist for any user-facing surface change
+- [ ] onboarding docs still match the current `setup`, `project init`, and host-integration flow
 
-## Recommended Next Polishing Steps
+## Final Go / No-Go Questions
 
-1. Add `iranti doctor` CLI command for environment and config diagnostics. Completed in repo; keep expanding checks as hosted/runtime surface grows.
-2. Add compatibility aliasing for legacy scope labels where needed.
-3. Add release automation workflows for npm and PyPI (tag-driven).
-4. Add integration tests for multi-agent long-run scenarios.
+- [ ] Can a new project be bound without hand-editing runtime files?
+- [ ] Can a broken instance be diagnosed with `status`, `doctor`, and `instance show`?
+- [ ] Can one compromised client key be rotated without disturbing unrelated clients?
+- [ ] Can another operator understand the deployment without reading internal history docs?

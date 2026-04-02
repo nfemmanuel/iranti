@@ -21,7 +21,7 @@ async function main(): Promise<void> {
         process.exit(1);
     }
 
-    initDb(dbUrl);
+    initDb(dbUrl, { applicationName: 'iranti:script:api_key_revoke' });
     const revoked = await revokeApiKey(keyId);
     if (!revoked) {
         console.error(`API key not found: ${keyId}`);

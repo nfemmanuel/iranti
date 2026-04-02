@@ -7,7 +7,7 @@ This guide covers the minimum security baseline for running Iranti in real envir
 Create one key per app, bot, or service identity:
 
 ```bash
-npm run api-key:create -- --key-id chatbot_prod --owner "Chatbot Production" --scopes "kb:read,kb:write,memory:read,memory:write,agents:read,agents:write,metrics:read"
+iranti auth create-key --instance local --key-id chatbot_prod --owner "Chatbot Production" --scopes "kb:read,kb:write,memory:read,memory:write,agents:read,agents:write,metrics:read" --write-instance
 ```
 
 Why:
@@ -61,7 +61,7 @@ If a token appears in logs, screenshots, terminals, or chat:
 1. rotate with same `key-id`:
 
 ```bash
-npm run api-key:create -- --key-id chatbot_prod --owner "Chatbot Production" --scopes "kb:read,kb:write,memory:read,memory:write"
+iranti auth create-key --instance local --key-id chatbot_prod --owner "Chatbot Production" --scopes "kb:read,kb:write,memory:read,memory:write" --write-instance
 ```
 
 2. update all clients with new token

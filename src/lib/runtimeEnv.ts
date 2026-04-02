@@ -77,12 +77,19 @@ function walkAncestorCandidates(startDir: string | undefined, relativePath: stri
 
 function findProjectEnvFile(options: RuntimeEnvOptions): string | undefined {
     const explicit = options.projectEnvFile?.trim() || process.env.IRANTI_PROJECT_ENV?.trim();
-    if (explicit && fs.existsSync(explicit)) return path.resolve(explicit);
+    if (explicit) {
+        if (fs.existsSync(explicit)) return path.resolve(explicit);
+        throw new Error(
+            `Project env file not found: ${path.resolve(explicit)}\n` +
+            `Check your --project-env path or IRANTI_PROJECT_ENV environment variable.`,
+        );
+    }
+    const ambientProcessCwd = options.payloadCwd || options.cwd ? [] : walkAncestorCandidates(process.cwd(), '.env.iranti');
 
     const candidates = dedupePaths([
         ...walkAncestorCandidates(options.payloadCwd, '.env.iranti'),
         ...walkAncestorCandidates(options.cwd, '.env.iranti'),
-        ...walkAncestorCandidates(process.cwd(), '.env.iranti'),
+        ...ambientProcessCwd,
     ]);
 
     return candidates.find((candidate) => fs.existsSync(candidate));

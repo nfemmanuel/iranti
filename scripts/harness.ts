@@ -1,18 +1,22 @@
 import 'dotenv/config';
 import path from 'path';
-import { initDb } from '../src/library/client';
+import { getDb, initDb } from '../src/library/client';
+import { ensureStaffEventsTable as ensureSharedStaffEventsTable, resetStaffEventsTableBootstrap } from '../src/lib/staffEventsTable';
 
 type HarnessOptions = {
     requireDb?: boolean;
     forceLocalEscalationDir?: boolean;
+    dbApplicationName?: string;
 };
 
 const initialized = new Set<string>();
+const staffEventsEnsured = new Set<string>();
 
 export function bootstrapHarness(options: HarnessOptions = {}): void {
     const {
         requireDb = true,
         forceLocalEscalationDir = true,
+        dbApplicationName,
     } = options;
 
     if (forceLocalEscalationDir && !process.env.IRANTI_ESCALATION_DIR) {
@@ -30,8 +34,28 @@ export function bootstrapHarness(options: HarnessOptions = {}): void {
     }
 
     if (initialized.has(dbUrl)) return;
-    initDb(dbUrl);
+    initDb(dbUrl, { applicationName: dbApplicationName });
     initialized.add(dbUrl);
+}
+
+export async function ensureHarnessStaffEventsTable(): Promise<void> {
+    const dbUrl = process.env.DATABASE_URL?.trim();
+    if (!dbUrl) {
+        throw new Error(
+            'DATABASE_URL is required to ensure the harness staff_events table. ' +
+            'Set it in .env or shell environment.'
+        );
+    }
+
+    if (!initialized.has(dbUrl)) {
+        initDb(dbUrl);
+        initialized.add(dbUrl);
+    }
+    if (staffEventsEnsured.has(dbUrl)) return;
+
+    resetStaffEventsTableBootstrap();
+    await ensureSharedStaffEventsTable();
+    staffEventsEnsured.add(dbUrl);
 }
 
 export function errorMatches(err: unknown, patterns: RegExp[]): boolean {

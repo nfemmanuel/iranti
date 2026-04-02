@@ -52,6 +52,18 @@ async function prepareSuite(): Promise<Iranti> {
     });
 }
 
+function createClient(): Iranti {
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString) {
+        throw new Error('DATABASE_URL is required to run the consistency suite.');
+    }
+
+    return new Iranti({
+        connectionString,
+        llmProvider: 'mock',
+    });
+}
+
 async function runCase(name: string, run: () => Promise<void>): Promise<CaseResult> {
     try {
         await run();
@@ -67,6 +79,7 @@ async function runCase(name: string, run: () => Promise<void>): Promise<CaseResu
 
 async function main() {
     const iranti = await prepareSuite();
+    const reader = createClient();
     const results: CaseResult[] = [];
 
     results.push(await runCase('Concurrent write serialization', async () => {
@@ -120,10 +133,62 @@ async function main() {
             agent: 'agent_writer',
         });
 
-        const read = await iranti.query(entity, 'budget');
+        const read = await reader.query(entity, 'budget');
         expect(read.found, 'Expected immediate read-after-write to find the newly committed fact.');
         expect(JSON.stringify(read.value) === JSON.stringify({ amount: 64000 }), 'Expected immediate read to return the newly written value.');
         expect(read.confidence === 88, `Expected confidence 88, got ${read.confidence}.`);
+    }));
+
+    results.push(await runCase('Checkpoint read-after-write visibility', async () => {
+        const entity = uniqueEntity('consistency_checkpoint');
+        const agentId = `agent_checkpoint_${Date.now()}`;
+        const checkpointed = await iranti.checkpoint({
+            agent: agentId,
+            task: 'Coordinate the release checklist',
+            recentMessages: ['We need a checkpoint that another agent can pick up immediately.'],
+            checkpoint: {
+                currentStep: 'draft the release checklist',
+                nextStep: 'collect final approvals',
+                openRisks: ['Legal sign-off pending'],
+                recentOutputs: ['Release checklist skeleton'],
+                actions: [
+                    {
+                        kind: 'validation',
+                        summary: 'Confirmed the release checklist fields',
+                        status: 'passed',
+                    },
+                ],
+                fileChanges: [
+                    {
+                        action: 'updated',
+                        path: 'docs/release-checklist.md',
+                        purpose: 'Track release readiness',
+                    },
+                ],
+                entityTargets: [entity],
+            },
+        });
+
+        expect(checkpointed.sessionCheckpoint?.status === 'active', 'Expected checkpoint() to return an active session checkpoint.');
+
+        const checkpointSummary = await reader.query(entity, 'checkpoint_summary');
+        expect(checkpointSummary.found, 'Expected checkpoint_summary to be queryable immediately after checkpoint success.');
+
+        const checkpointNextStep = await reader.query(entity, 'checkpoint_next_step');
+        expect(checkpointNextStep.found, 'Expected checkpoint_next_step to be queryable immediately after checkpoint success.');
+        expect(
+            JSON.stringify(checkpointNextStep.value) === JSON.stringify({ instruction: 'collect final approvals' }),
+            `Expected checkpoint_next_step to round-trip immediately, got ${JSON.stringify(checkpointNextStep.value)}.`
+        );
+
+        const checkpointActions = await reader.query(entity, 'recent_actions');
+        expect(checkpointActions.found, 'Expected recent_actions to be queryable immediately after checkpoint success.');
+
+        const checkpointFileChanges = await reader.query(entity, 'recent_file_changes');
+        expect(checkpointFileChanges.found, 'Expected recent_file_changes to be queryable immediately after checkpoint success.');
+
+        const inspected = await iranti.inspectSession({ agent: agentId });
+        expect(inspected.sessionCheckpoint?.status === 'active', 'Expected inspectSession() to observe the persisted checkpoint immediately after checkpoint success.');
     }));
 
     results.push(await runCase('Escalation state integrity', async () => {

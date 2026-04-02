@@ -24,6 +24,7 @@ import { createRelationship, getRelated, getRelatedDeep, RelatedEntity } from '.
 import { registerAgent, getAgent, whoKnows, listAgents, assignToTeam, AgentProfile, AgentRecord } from '../library/agent-registry';
 import { resolveEntity } from '../library/entity-resolution';
 import { getPersonalRecallEntities, isPersonalMemoryKey } from '../lib/autoRemember';
+import { buildIssueFactWrite, IssueFactInput, IssueSeverity, IssueStatus } from '../lib/issueFacts';
 import { configureMock, MockConfig } from '../lib/providers/mock';
 import { EntityType } from '../types';
 import { ArchivedReason, ResolutionOutcome, ResolutionState } from '../generated/prisma/client';
@@ -36,6 +37,9 @@ export interface IrantiConfig {
     llmProvider?: string;
     sessionLedgerSource?: string;
     sessionLedgerHost?: string | null;
+    sessionLedgerAgentId?: string;
+    dbApplicationName?: string;
+    dbPoolMax?: number;
     /**
      * Optional event emitter for observability integrations (e.g., the Iranti
      * Control Plane). Defaults to a no-op emitter if not provided.
@@ -56,6 +60,13 @@ export interface WriteInput {
     validUntil?: Date | null;
     requestId?: string;
     properties?: Record<string, unknown>;
+}
+
+export type { IssueStatus, IssueSeverity };
+
+export interface WriteIssueInput extends Omit<IssueFactInput, 'severity' | 'status'> {
+    status: IssueStatus;
+    severity?: IssueSeverity;
 }
 
 export interface IngestInput {
@@ -80,6 +91,19 @@ export interface SessionCheckpointPayload {
     nextStep?: string;
     openRisks?: string[];
     recentOutputs?: string[];
+    actions?: Array<{
+        kind: string;
+        summary: string;
+        status?: string;
+        target?: string;
+        detail?: string;
+    }>;
+    fileChanges?: Array<{
+        action: string;
+        path: string;
+        toPath?: string;
+        purpose?: string;
+    }>;
     entityTargets?: string[];
     notes?: string;
 }
@@ -260,13 +284,43 @@ export interface AttendInput extends ObserveInput {
     latestMessage?: string;
     forceInject?: boolean;
     suppressEvents?: boolean;
+    phase?: 'pre-response' | 'post-response' | 'mid-turn';
 }
 
 type SessionLedgerContext = {
     source?: string;
     host?: string | null;
+    agentId?: string;
 };
 
+function normalizeDbApplicationToken(value?: string | null): string | undefined {
+    const trimmed = value?.trim();
+    if (!trimmed) return undefined;
+    const normalized = trimmed
+        .toLowerCase()
+        .replace(/[^a-z0-9:_-]+/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_+|_+$/g, '');
+    return normalized || undefined;
+}
+
+function deriveDbApplicationName(config: IrantiConfig): string | undefined {
+    const explicit = normalizeDbApplicationToken(config.dbApplicationName);
+    if (explicit) {
+        return explicit.slice(0, 63);
+    }
+
+    const source = normalizeDbApplicationToken(config.sessionLedgerSource);
+    const host = normalizeDbApplicationToken(config.sessionLedgerHost);
+    const agentId = normalizeDbApplicationToken(config.sessionLedgerAgentId);
+    const parts = ['iranti', source, host ?? agentId].filter((part): part is string => Boolean(part));
+
+    if (parts.length === 1) {
+        return undefined;
+    }
+
+    return parts.join(':').slice(0, 63);
+}
 // ─── Entity Parsing ──────────────────────────────────────────────────────────
 
 function parseEntity(entity: string): { entityType: EntityType; entityId: string } {
@@ -430,6 +484,7 @@ export class Iranti {
             host: typeof config.sessionLedgerHost === 'string'
                 ? (config.sessionLedgerHost.trim() || null)
                 : (config.sessionLedgerHost ?? null),
+            agentId: config.sessionLedgerAgentId?.trim() || undefined,
         };
 
         const connectionString = config.connectionString ?? process.env.DATABASE_URL;
@@ -437,7 +492,10 @@ export class Iranti {
             throw new Error('connectionString is required. Provide it in config or set DATABASE_URL environment variable.');
         }
 
-        initDb(connectionString);
+        initDb(connectionString, {
+            applicationName: deriveDbApplicationName(config),
+            max: config.dbPoolMax,
+        });
 
         if (config.llmProvider) {
             process.env.LLM_PROVIDER = config.llmProvider;
@@ -452,13 +510,36 @@ export class Iranti {
         }
     }
 
+    setSessionLedgerContext(context: {
+        source?: string | null;
+        host?: string | null;
+        agentId?: string | null;
+    }): void {
+        if ('source' in context) {
+            this.sessionLedgerContext.source = typeof context.source === 'string'
+                ? (context.source.trim() || undefined)
+                : undefined;
+        }
+        if ('host' in context) {
+            this.sessionLedgerContext.host = typeof context.host === 'string'
+                ? (context.host.trim() || null)
+                : (context.host ?? null);
+        }
+        if ('agentId' in context) {
+            this.sessionLedgerContext.agentId = typeof context.agentId === 'string'
+                ? (context.agentId.trim() || undefined)
+                : undefined;
+        }
+    }
+
     private buildSessionLedgerContext(): SessionLedgerContext | undefined {
-        if (!this.sessionLedgerContext.source && !this.sessionLedgerContext.host) {
+        if (!this.sessionLedgerContext.source && !this.sessionLedgerContext.host && !this.sessionLedgerContext.agentId) {
             return undefined;
         }
         return {
             source: this.sessionLedgerContext.source,
             host: this.sessionLedgerContext.host ?? null,
+            agentId: this.sessionLedgerContext.agentId,
         };
     }
 
@@ -472,6 +553,9 @@ export class Iranti {
         }
         getStaffEventEmitter().emit({
             ...event,
+            agentId: context?.agentId && (!event.agentId || event.agentId === 'sdk')
+                ? context.agentId
+                : event.agentId,
             source: context?.source ?? event.source,
             metadata,
         });
@@ -509,6 +593,7 @@ export class Iranti {
             properties: input.properties,
         });
 
+        getAttendant(input.agent).notifyWriteOccurred();
         return {
             action: result.action,
             key: input.key,
@@ -516,6 +601,10 @@ export class Iranti {
             resolvedEntity: resolved.canonicalEntity,
             inputEntity: input.entity,
         };
+    }
+
+    async writeIssue(input: WriteIssueInput): Promise<WriteResult> {
+        return this.write(buildIssueFactWrite(input));
     }
 
     // ── Ingest ──────────────────────────────────────────────────────────────
@@ -765,7 +854,8 @@ export class Iranti {
 
             const primaryEntry = await findEntry({ entityType: resolved.entityType, entityId: resolved.entityId, key });
             let entry = primaryEntry;
-            let resolvedEntity = resolved.canonicalEntity;
+            const resolvedEntity = resolved.canonicalEntity;
+            let usedFallback = false;
 
             if ((!entry || entry.isProtected) && personalRecallCandidates.length > 0) {
                 for (const candidate of personalRecallCandidates) {
@@ -773,7 +863,7 @@ export class Iranti {
                     const fallbackEntry = await findEntry({ entityType: fallback.entityType, entityId: fallback.entityId, key });
                     if (fallbackEntry && !fallbackEntry.isProtected) {
                         entry = fallbackEntry;
-                        resolvedEntity = fallback.canonicalEntity;
+                        usedFallback = true;
                         break;
                     }
                 }
@@ -808,7 +898,7 @@ export class Iranti {
                 entityType: entry.entityType,
                 entityId: entry.entityId,
                 key,
-                reason: resolvedEntity === resolved.canonicalEntity ? 'query_exact_match' : 'query_personal_fallback_match',
+                reason: usedFallback ? 'query_personal_fallback_match' : 'query_exact_match',
                 level: 'audit',
                 metadata: {
                     found: true,
@@ -1214,6 +1304,7 @@ export class Iranti {
             latestMessage: input.latestMessage,
             forceInject: input.forceInject,
             suppressEvents: input.suppressEvents,
+            phase: input.phase,
             ledgerContext: this.buildSessionLedgerContext(),
         });
     }
@@ -1240,3 +1331,4 @@ export default Iranti;
 export type { IStaffEventEmitter, StaffEventInput, StaffEvent };
 export { NoopEventEmitter, buildStaffEvent };
 export { setStaffEventEmitter, getStaffEventEmitter, resetStaffEventEmitter };
+

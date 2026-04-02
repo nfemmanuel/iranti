@@ -33,6 +33,7 @@ import type {
     WhoKnowsResult,
     WorkingMemoryBrief,
     WriteParams,
+    WriteIssueParams,
     WriteResult,
     HistoryEntry,
 } from './types';
@@ -58,6 +59,18 @@ function parseEntity(entity: string): { entityType: string; entityId: string } {
 function normalizeDateInput(value?: string | Date): string | undefined {
     if (value === undefined) return undefined;
     return value instanceof Date ? value.toISOString() : value;
+}
+
+function normalizeIssueToken(value: string): string {
+    const normalized = value
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '');
+    if (!normalized) {
+        throw new IrantiValidationError('issueId must contain at least one alphanumeric character.');
+    }
+    return normalized;
 }
 
 function buildQuery(params: Record<string, string | number | boolean | undefined>): string {
@@ -260,11 +273,57 @@ export class IrantiClient {
             confidence: params.confidence,
             source: params.source,
             agent: params.agent,
+            properties: params.properties,
             validFrom: normalizeDateInput(params.validFrom),
             requestId: params.requestId,
         };
 
         return this.request<WriteResult>('POST', '/kb/write', { body: payload });
+    }
+
+    writeIssue(params: WriteIssueParams): Promise<WriteResult> {
+        const issueId = normalizeIssueToken(params.issueId);
+        const key = `issue_${issueId}`;
+        const severity = params.severity ?? 'medium';
+        const tags = Array.from(new Set((params.tags ?? []).map((tag) => tag.trim()).filter(Boolean)));
+        return this.write({
+            entity: params.entity,
+            key,
+            value: {
+                issueId,
+                title: params.title.trim(),
+                status: params.status,
+                severity,
+                summary: params.summary.trim(),
+                details: params.details ?? null,
+                discoveredAt: params.discoveredAt ?? null,
+                resolvedAt: params.status === 'resolved' ? (params.resolvedAt ?? null) : null,
+                resolution: params.status === 'resolved' ? (params.resolution ?? null) : null,
+                tags,
+            },
+            summary: params.summary.trim(),
+            confidence: params.confidence,
+            source: params.source,
+            agent: params.agent,
+            validFrom: normalizeDateInput(params.validFrom),
+            requestId: params.requestId,
+            properties: {
+                memoryScope: 'project',
+                capturePhase: 'manual',
+                durableClass: 'issue_status',
+                canonicalKey: key,
+                mergeStrategy: 'replace',
+                issueId,
+                issueStatus: params.status,
+                issueSeverity: severity,
+                issueTitle: params.title.trim(),
+                semanticDomain: 'issue_tracking',
+                semanticIntent: 'issue_status_tracking',
+                temporalScope: 'project_durable',
+                semanticTags: Array.from(new Set(['project_memory', 'issue', 'status', 'tracking', 'singleton_fact', params.status, severity, ...tags])),
+                ...(params.properties ?? {}),
+            },
+        });
     }
 
     ingest(params: IngestParams): Promise<IngestResult> {

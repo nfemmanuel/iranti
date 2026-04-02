@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -8,10 +9,40 @@ import { createFirstPartyIranti } from '../src/lib/createFirstPartyIranti';
 import { loadRuntimeEnv } from '../src/lib/runtimeEnv';
 import { autoRememberPromptFacts, isAutoRememberEnabled, rememberAssistantResponseFacts, resolvePersonalWriteTarget } from '../src/lib/autoRemember';
 import { flushStaffEventEmitter, getStaffEventEmitter } from '../src/lib/staffEventRegistry';
+import { disconnectDb } from '../src/library/client';
+import { activeAttendants, clearAttendant, getAttendant } from '../src/attendant';
 
 type JsonRecord = Record<string, unknown>;
 
+type AgentProtocolState = {
+    lastHandshakeAt?: number;
+    lastAttendAt?: number;
+};
+
 loadRuntimeEnv();
+
+const agentProtocolState = new Map<string, AgentProtocolState>();
+let runtimeHostOverride: string | null = null;
+let shutdownPromise: Promise<void> | null = null;
+let processIranti: Iranti | null = null;
+
+const HOST_SETUP_CHECKS: Record<string, { file: string; command: string }> = {
+    claude_code: { file: 'CLAUDE.md', command: 'iranti claude-setup .' },
+    codex: { file: 'AGENTS.md', command: 'iranti codex-setup' },
+    codex_cli: { file: 'AGENTS.md', command: 'iranti codex-setup' },
+    codex_vscode: { file: 'AGENTS.md', command: 'iranti codex-setup' },
+};
+
+function checkHostSetup(host: string | undefined, cwd: string): string[] {
+    if (!host) return [];
+    const check = HOST_SETUP_CHECKS[host];
+    if (!check) return [];
+    const filePath = path.join(cwd, check.file);
+    if (!fs.existsSync(filePath)) {
+        return [`⚠ ${check.file} not found in ${cwd}. Run \`${check.command}\` to complete host setup for this project. Until then, operating rules will not be enforced across sessions.`];
+    }
+    return [];
+}
 
 function printHelp(): void {
     console.log([
@@ -47,14 +78,39 @@ function requireConnectionString(): string {
     return connectionString;
 }
 
-function defaultAgentId(): string {
-    return process.env.IRANTI_MCP_DEFAULT_AGENT?.trim()
-        || process.env.IRANTI_AGENT_ID?.trim()
+function currentHost(host?: string): string | undefined {
+    return host?.trim()
+        || runtimeHostOverride?.trim()
+        || process.env.IRANTI_MCP_HOST?.trim();
+}
+
+function defaultAgentId(host?: string): string {
+    const resolvedHost = currentHost(host);
+    if (resolvedHost === 'claude_code') {
+        return process.env.IRANTI_CLAUDE_AGENT_ID?.trim()
+            || process.env.IRANTI_AGENT_ID?.trim()
+            || 'claude_code';
+    }
+    const explicit = process.env.IRANTI_MCP_DEFAULT_AGENT?.trim();
+    if (explicit) return explicit;
+    if (resolvedHost === 'codex' || resolvedHost === 'codex_cli' || resolvedHost === 'codex_vscode') {
+        return 'codex_code';
+    }
+    return process.env.IRANTI_AGENT_ID?.trim()
         || 'claude_code';
 }
 
-function defaultWriteSource(): string {
-    return process.env.IRANTI_MCP_DEFAULT_SOURCE?.trim() || 'ClaudeCode';
+function defaultWriteSource(host?: string): string {
+    const resolvedHost = currentHost(host);
+    if (resolvedHost === 'claude_code') {
+        return 'ClaudeCode';
+    }
+    const explicit = process.env.IRANTI_MCP_DEFAULT_SOURCE?.trim();
+    if (explicit) return explicit;
+    if (resolvedHost === 'codex' || resolvedHost === 'codex_cli' || resolvedHost === 'codex_vscode') {
+        return 'Codex';
+    }
+    return 'MCP';
 }
 
 function safeJsonParse(raw: string): unknown {
@@ -94,19 +150,105 @@ function parseIsoDate(raw?: string): Date | undefined {
     return parsed;
 }
 
-async function ensureDefaultAgent(iranti: Iranti): Promise<void> {
-    const agentId = defaultAgentId();
+async function ensureDefaultAgent(iranti: Iranti, host?: string): Promise<void> {
+    const agentId = defaultAgentId(host);
+    const resolvedHost = currentHost(host);
+    const isCodexHost = resolvedHost === 'codex' || resolvedHost === 'codex_cli' || resolvedHost === 'codex_vscode';
     await iranti.registerAgent({
         agentId,
-        name: process.env.IRANTI_MCP_AGENT_NAME?.trim() || 'Claude Code',
-        description: process.env.IRANTI_MCP_AGENT_DESCRIPTION?.trim() || 'Claude Code MCP client',
+        name: process.env.IRANTI_MCP_AGENT_NAME?.trim() || (isCodexHost ? 'Codex' : 'Claude Code'),
+        description: process.env.IRANTI_MCP_AGENT_DESCRIPTION?.trim() || (isCodexHost ? 'Codex MCP client' : 'Claude Code MCP client'),
         capabilities: ['memory_read', 'memory_write', 'hybrid_search', 'working_memory'],
-        model: process.env.IRANTI_MCP_AGENT_MODEL?.trim() || process.env.ANTHROPIC_MODEL || 'claude-code',
+        model: process.env.IRANTI_MCP_AGENT_MODEL?.trim()
+            || process.env.ANTHROPIC_MODEL
+            || (isCodexHost ? 'codex' : 'claude-code'),
     });
 }
 
-function withDefaultAgent(agent?: string): string {
-    return agent?.trim() || defaultAgentId();
+function syncRuntimeLedgerContext(iranti: Iranti, host?: string, agent?: string): void {
+    iranti.setSessionLedgerContext({
+        source: 'mcp',
+        host: currentHost(host) ?? null,
+        agentId: agent?.trim() || defaultAgentId(host),
+    });
+}
+
+function withDefaultAgent(agent?: string, host?: string): string {
+    return agent?.trim() || defaultAgentId(host);
+}
+
+function resolveToolAgent(agent?: string, agentId?: string, host?: string): string {
+    return withDefaultAgent(agentId ?? agent, host);
+}
+
+function resolveToolHost(host?: string): string | undefined {
+    const trimmed = host?.trim();
+    if (trimmed) {
+        runtimeHostOverride = trimmed;
+        return trimmed;
+    }
+    return currentHost();
+}
+
+function markHandshake(agentId: string): void {
+    const current = agentProtocolState.get(agentId) ?? {};
+    agentProtocolState.set(agentId, {
+        ...current,
+        lastHandshakeAt: Date.now(),
+    });
+}
+
+function markAttend(agentId: string): void {
+    const current = agentProtocolState.get(agentId) ?? {};
+    agentProtocolState.set(agentId, {
+        ...current,
+        lastAttendAt: Date.now(),
+    });
+}
+
+function getReadBeforeAttendWarning(agentId: string, operation: string): string | null {
+    const state = agentProtocolState.get(agentId);
+    if (!state?.lastAttendAt) {
+        return `Protocol warning: ${operation} was called before iranti_attend for agent ${agentId}. Call iranti_attend before discovery tools (query, search, related, who_knows) so retrieval decisions stay truthful.`;
+    }
+    if (state.lastHandshakeAt && state.lastAttendAt < state.lastHandshakeAt) {
+        return `Protocol warning: ${operation} was called after a fresh handshake but before iranti_attend for agent ${agentId}. Call iranti_attend before discovery tools on each new session/task start.`;
+    }
+    return null;
+}
+
+function emitReadBeforeAttendWarning(agentId: string, operation: string, warning: string): void {
+    getStaffEventEmitter().emit({
+        staffComponent: 'Attendant',
+        actionType: 'host_failure',
+        agentId,
+        source: 'mcp',
+        level: 'audit',
+        reason: 'read_before_attend',
+        metadata: {
+            host: currentHost() || 'generic_mcp',
+            operation,
+            warning,
+        },
+    });
+}
+
+function textResultWithProtocolWarning(data: unknown, warning?: string | null): { content: Array<{ type: 'text'; text: string }>; structuredContent: JsonRecord } {
+    const structuredContent = toStructuredContent(data);
+    if (warning) {
+        structuredContent.protocolWarning = warning;
+    }
+    return {
+        content: [
+            {
+                type: 'text',
+                text: warning
+                    ? `${warning}\n\n${JSON.stringify(data, null, 2)}`
+                    : JSON.stringify(data, null, 2),
+            },
+        ],
+        structuredContent,
+    };
 }
 
 function normalizeRecentMessages(messages?: string[]): string[] {
@@ -121,6 +263,101 @@ function isInteractiveTerminalLaunch(): boolean {
     return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
 
+function clearProcessAttendants(): void {
+    for (const agentId of activeAttendants()) {
+        clearAttendant(agentId);
+    }
+    agentProtocolState.clear();
+}
+
+async function checkpointActiveAttendants(iranti: Iranti, reason: string): Promise<void> {
+    const agents = activeAttendants();
+    for (const agentId of agents) {
+        const brief = getAttendant(agentId).getBrief();
+        const existing = brief?.sessionCheckpoint;
+        if (!existing?.task) continue;
+        const existingCheckpoint = existing.checkpoint ?? {};
+        await iranti.checkpoint({
+            agentId,
+            task: existing.task,
+            recentMessages: [],
+            checkpoint: {
+                currentStep: existingCheckpoint.currentStep ?? 'in progress',
+                nextStep: existingCheckpoint.nextStep,
+                openRisks: existingCheckpoint.openRisks,
+                recentOutputs: existingCheckpoint.recentOutputs,
+                actions: existingCheckpoint.actions,
+                fileChanges: existingCheckpoint.fileChanges,
+                entityTargets: existingCheckpoint.entityTargets,
+                notes: `Host exited gracefully (${reason}). Resume from next step if applicable.`,
+            },
+            sessionId: existing.sessionId,
+        }).catch(() => undefined);
+    }
+}
+
+function resolveAttendLatestMessage(input: { latestMessage?: string; message?: string }): string {
+    const latestMessage = input.latestMessage?.trim();
+    if (latestMessage) return latestMessage;
+    const message = input.message?.trim();
+    if (message) return message;
+    throw new Error('iranti_attend requires latestMessage or message.');
+}
+
+async function shutdownProcess(code: number, reason: string): Promise<void> {
+    if (shutdownPromise) {
+        return shutdownPromise;
+    }
+
+    shutdownPromise = (async () => {
+        try {
+            if (processIranti) {
+                await checkpointActiveAttendants(processIranti, reason).catch(() => undefined);
+            }
+            clearProcessAttendants();
+            await flushStaffEventEmitter().catch(() => undefined);
+            await disconnectDb().catch(() => undefined);
+        } finally {
+            if (isInteractiveTerminalLaunch()) {
+                console.error(`[iranti-mcp] shutting down (${reason}).`);
+            }
+            process.exitCode = code;
+        }
+    })();
+
+    return shutdownPromise;
+}
+
+function installShutdownHooks(transport: StdioServerTransport): void {
+    let shutdownRequested = false;
+
+    const requestShutdown = (code: number, reason: string): void => {
+        if (shutdownRequested) return;
+        shutdownRequested = true;
+        void shutdownProcess(code, reason);
+    };
+
+    transport.onclose = () => {
+        requestShutdown(0, 'transport_closed');
+    };
+
+    // When stdin is already ending or closing, asking the SDK transport to close
+    // can re-touch the same handle. On Windows that has been reproducing a
+    // UV_HANDLE_CLOSING assertion during shutdown, so we exit directly here.
+    process.stdin.once('end', () => requestShutdown(0, 'stdin_end'));
+    process.stdin.once('close', () => requestShutdown(0, 'stdin_close'));
+    process.stdin.once('error', () => requestShutdown(1, 'stdin_error'));
+    process.stdout.once('error', (error: NodeJS.ErrnoException) => {
+        requestShutdown(error?.code === 'EPIPE' ? 0 : 1, error?.code === 'EPIPE' ? 'stdout_epipe' : 'stdout_error');
+    });
+    process.once('SIGINT', () => {
+        requestShutdown(130, 'sigint');
+    });
+    process.once('SIGTERM', () => {
+        requestShutdown(143, 'sigterm');
+    });
+}
+
 async function main(): Promise<void> {
     if (process.argv.includes('--help') || process.argv.includes('-h')) {
         printHelp();
@@ -131,14 +368,17 @@ async function main(): Promise<void> {
         connectionString: requireConnectionString(),
         llmProvider: process.env.LLM_PROVIDER,
         sessionLedgerSource: 'mcp',
-        sessionLedgerHost: process.env.IRANTI_MCP_HOST?.trim() || 'generic_mcp',
+        sessionLedgerHost: currentHost() || 'generic_mcp',
+        sessionLedgerAgentId: defaultAgentId(),
+        dbPoolMax: 3,
     });
+    processIranti = iranti;
 
     await ensureDefaultAgent(iranti);
 
     const server = new McpServer({
         name: 'iranti-mcp',
-        version: '0.2.51',
+        version: '0.2.52',
     });
 
     server.registerTool('iranti_handshake', {
@@ -154,13 +394,24 @@ Do not use this as a per-turn retrieval tool; use iranti_attend.`,
             task: z.string().min(1).describe('The current task or objective.'),
             recentMessages: z.array(z.string()).optional().describe('Recent conversation messages.'),
             agent: z.string().optional().describe('Override the default agent id.'),
+            agentId: z.string().optional().describe('Alias for agent. Override the default agent id.'),
+            host: z.string().optional().describe('Host identifier (e.g. claude_code, codex). Used to verify host setup has been run for this project.'),
         },
-    }, async ({ task, recentMessages, agent }) => {
+    }, async ({ task, recentMessages, agent, agentId, host }) => {
+        const resolvedHost = resolveToolHost(host);
+        const resolvedAgent = resolveToolAgent(agent, agentId, resolvedHost);
+        syncRuntimeLedgerContext(iranti, resolvedHost, resolvedAgent);
+        await ensureDefaultAgent(iranti, resolvedHost);
         const result = await iranti.handshake({
-            agent: withDefaultAgent(agent),
+            agent: resolvedAgent,
             task,
             recentMessages: normalizeRecentMessages(recentMessages),
         });
+        markHandshake(resolvedAgent);
+        const setupWarnings = checkHostSetup(resolvedHost, process.cwd());
+        if (setupWarnings.length > 0) {
+            return textResult({ ...result, setupWarnings });
+        }
         return textResult(result);
     });
 
@@ -175,41 +426,49 @@ be added to context if relevant memory is missing. If no handshake has been
 performed yet for this agent in the current process, attend will auto-bootstrap
 the session first and report that in the result metadata.
 This is the minimum safe pre-reply call even when the host skipped handshake.
-Omitting currentContext falls back to latestMessage only; pass the
-full visible context when available.`,
+Omitting currentContext falls back to the latest message only; pass the
+full visible context when available. For host compatibility, message is
+accepted as an alias for latestMessage.`,
         inputSchema: {
-            latestMessage: z.string().min(1).describe('The latest user or assistant message.'),
+            latestMessage: z.string().min(1).optional().describe('The latest user or assistant message.'),
+            message: z.string().min(1).optional().describe('Alias for latestMessage, accepted for host compatibility.'),
             currentContext: z.string().optional().describe('Current visible context window.'),
             entityHints: z.array(z.string()).optional().describe('Optional entity hints in entityType/entityId format.'),
             maxFacts: z.number().int().min(1).max(20).optional().describe('Maximum facts to inject.'),
             forceInject: z.boolean().optional().describe('Force a memory injection decision.'),
+            phase: z.enum(['pre-response', 'post-response', 'mid-turn']).optional().describe("Call phase: 'pre-response' before replying, 'post-response' after replying. Enables precise compliance tracking."),
             agent: z.string().optional().describe('Override the default agent id.'),
+            agentId: z.string().optional().describe('Alias for agent. Override the default agent id.'),
         },
-    }, async ({ latestMessage, currentContext, entityHints, maxFacts, forceInject, agent }) => {
-        const resolvedAgent = withDefaultAgent(agent);
+    }, async ({ latestMessage, message, currentContext, entityHints, maxFacts, forceInject, phase, agent, agentId }) => {
+        const resolvedAgent = resolveToolAgent(agent, agentId);
+        syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
+        const resolvedLatestMessage = resolveAttendLatestMessage({ latestMessage, message });
         if (isAutoRememberEnabled()) {
             await autoRememberPromptFacts({
                 iranti,
-                prompt: latestMessage,
+                prompt: resolvedLatestMessage,
                 agent: resolvedAgent,
                 source: defaultWriteSource(),
             });
         }
         const result = await iranti.attend({
             agent: resolvedAgent,
-            latestMessage,
-            currentContext: currentContext ?? latestMessage,
+            latestMessage: resolvedLatestMessage,
+            currentContext: currentContext ?? resolvedLatestMessage,
             entityHints,
             maxFacts,
             forceInject,
+            phase,
         });
+        markAttend(resolvedAgent);
         return textResult(result);
     });
 
     server.registerTool('iranti_checkpoint', {
         description: `Persist a shared progress checkpoint while you work.
 Use this at meaningful milestones so current step, next step, open risks,
-recent outputs, and shared entity breadcrumbs survive across turns,
+recent outputs, structured actions, and shared entity breadcrumbs survive across turns,
 sessions, and agents. This is the strongest shared-RAM tool for active work:
 prefer it over ad-hoc prose when you need another session or another agent
 to pick up where you left off. If entityTargets are supplied, Iranti also
@@ -221,14 +480,30 @@ writes compact shared checkpoint_* breadcrumbs to those entities for handoff.`,
             nextStep: z.string().optional().describe('The next step another session or agent should take.'),
             openRisks: z.array(z.string()).optional().describe('Open risks or blockers that still matter.'),
             recentOutputs: z.array(z.string()).optional().describe('Important outputs or artifacts produced so far.'),
+            actions: z.array(z.object({
+                kind: z.string().min(1).describe('Action kind such as command, test, edit, search, validation, or decision.'),
+                summary: z.string().min(1).describe('Compact description of what action happened.'),
+                status: z.string().optional().describe('Optional outcome such as passed, failed, succeeded, or skipped.'),
+                target: z.string().optional().describe('Optional command, file, test, or subsystem the action touched.'),
+                detail: z.string().optional().describe('Optional compact supporting detail for later recovery.'),
+            })).optional().describe('Structured actions completed so far, such as commands, tests, searches, or validations.'),
+            fileChanges: z.array(z.object({
+                action: z.string().min(1).describe('Change action such as created, updated, moved, renamed, or deleted.'),
+                path: z.string().min(1).describe('Primary file path affected by the action.'),
+                toPath: z.string().optional().describe('Destination path for move/rename actions.'),
+                purpose: z.string().optional().describe('Why the file changed or what role it now serves.'),
+            })).optional().describe('Structured file actions produced so far.'),
             entityTargets: z.array(z.string()).optional().describe('Shared entities that should receive checkpoint breadcrumbs, in entityType/entityId format.'),
             notes: z.string().optional().describe('Compact extra checkpoint notes that aid handoff.'),
             sessionId: z.string().optional().describe('Optional existing session id to refresh.'),
             agent: z.string().optional().describe('Override the default agent id.'),
+            agentId: z.string().optional().describe('Alias for agent. Override the default agent id.'),
         },
-    }, async ({ task, recentMessages, currentStep, nextStep, openRisks, recentOutputs, entityTargets, notes, sessionId, agent }) => {
+    }, async ({ task, recentMessages, currentStep, nextStep, openRisks, recentOutputs, actions, fileChanges, entityTargets, notes, sessionId, agent, agentId }) => {
+        const resolvedAgent = resolveToolAgent(agent, agentId);
+        syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
         const result = await iranti.checkpoint({
-            agent: withDefaultAgent(agent),
+            agent: resolvedAgent,
             task,
             recentMessages: normalizeRecentMessages(recentMessages),
             sessionId,
@@ -237,6 +512,8 @@ writes compact shared checkpoint_* breadcrumbs to those entities for handoff.`,
                 nextStep,
                 openRisks,
                 recentOutputs,
+                actions,
+                fileChanges,
                 entityTargets,
                 notes,
             },
@@ -251,10 +528,13 @@ writes compact shared checkpoint_* breadcrumbs to those entities for handoff.`,
             entityHints: z.array(z.string()).optional().describe('Optional entity hints in entityType/entityId format.'),
             maxFacts: z.number().int().min(1).max(20).optional().describe('Maximum facts to recover.'),
             agent: z.string().optional().describe('Override the default agent id.'),
+            agentId: z.string().optional().describe('Alias for agent. Override the default agent id.'),
         },
-    }, async ({ currentContext, entityHints, maxFacts, agent }) => {
+    }, async ({ currentContext, entityHints, maxFacts, agent, agentId }) => {
+        const resolvedAgent = resolveToolAgent(agent, agentId);
+        syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
         const result = await iranti.observe({
-            agent: withDefaultAgent(agent),
+            agent: resolvedAgent,
             currentContext,
             entityHints,
             maxFacts,
@@ -264,6 +544,8 @@ writes compact shared checkpoint_* breadcrumbs to those entities for handoff.`,
 
     server.registerTool('iranti_query', {
         description: `Retrieve the current fact for an exact entity+key lookup.
+REQUIRED: call iranti_attend before this discovery tool so Iranti can decide
+whether memory should be injected before exact lookup.
 Use this when you already know both the entity and the key.
 Returns the current value, summary, confidence, source, and
 temporal metadata when available. Prefer this over iranti_search
@@ -272,16 +554,24 @@ memory alone before checking Iranti.`,
         inputSchema: {
             entity: z.string().min(1).describe('Entity in entityType/entityId format.'),
             key: z.string().min(1).describe('Fact key to retrieve.'),
+            agent: z.string().optional().describe('Override the default agent id for protocol tracking.'),
+            agentId: z.string().optional().describe('Alias for agent. Override the default agent id for protocol tracking.'),
         },
-    }, async ({ entity, key }) => {
+    }, async ({ entity, key, agent, agentId }) => {
+        const resolvedAgent = resolveToolAgent(agent, agentId);
+        syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
+        const warning = getReadBeforeAttendWarning(resolvedAgent, 'iranti_query');
+        if (warning) emitReadBeforeAttendWarning(resolvedAgent, 'iranti_query', warning);
         const result = await iranti.query(entity, key);
-        return textResult(result);
+        return textResultWithProtocolWarning(result, warning);
     });
 
     server.registerTool('iranti_search', {
         description: `Search shared memory with natural language when the exact entity
 or key is unknown. Uses hybrid lexical and vector search across
 stored facts. Use this for discovery and recall, not exact lookup.
+REQUIRED: call iranti_attend before this discovery tool so Iranti can decide
+whether memory should be injected before search.
 If the user asks what they previously told you and you do not know
 the exact key, use this before saying you do not know.`,
         inputSchema: {
@@ -292,8 +582,14 @@ the exact key, use this before saying you do not know.`,
             lexicalWeight: z.number().min(0).max(1).optional().describe('Lexical ranking weight.'),
             vectorWeight: z.number().min(0).max(1).optional().describe('Vector similarity weight.'),
             minScore: z.number().min(0).max(1).optional().describe('Minimum final score threshold.'),
+            agent: z.string().optional().describe('Override the default agent id for protocol tracking.'),
+            agentId: z.string().optional().describe('Alias for agent. Override the default agent id for protocol tracking.'),
         },
-    }, async ({ query, entityType, entityId, limit, lexicalWeight, vectorWeight, minScore }) => {
+    }, async ({ query, entityType, entityId, limit, lexicalWeight, vectorWeight, minScore, agent, agentId }) => {
+        const resolvedAgent = resolveToolAgent(agent, agentId);
+        syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
+        const warning = getReadBeforeAttendWarning(resolvedAgent, 'iranti_search');
+        if (warning) emitReadBeforeAttendWarning(resolvedAgent, 'iranti_search', warning);
         const result = await iranti.search({
             query,
             entityType,
@@ -303,7 +599,7 @@ the exact key, use this before saying you do not know.`,
             vectorWeight,
             minScore,
         });
-        return textResult(result);
+        return textResultWithProtocolWarning(result, warning);
     });
 
     server.registerTool('iranti_write', {
@@ -313,7 +609,9 @@ agents, or sessions should retain. Requires: entity ("type/id"),
 key, value JSON, and summary. Confidence is optional and defaults
 to 85. Conflicts on the same entity+key are detected automatically
 and may be resolved or escalated. Personal-memory keys honor the
-configured canonical personal entity for this project/session.`,
+configured canonical personal entity for this project/session.
+Use properties JSON when you need structured issue or workflow metadata
+such as issueStatus=open|resolved, severity, or resolution notes.`,
         inputSchema: {
             entity: z.string().min(1).describe('Entity in entityType/entityId format.'),
             key: z.string().min(1).describe('Fact key.'),
@@ -321,12 +619,16 @@ configured canonical personal entity for this project/session.`,
             summary: z.string().min(1).describe('Short retrieval-safe summary.'),
             confidence: z.number().int().min(0).max(100).optional().describe('Raw confidence score.'),
             source: z.string().optional().describe('Source label for provenance.'),
+            propertiesJson: z.string().optional().describe('Optional JSON-serialized fact properties for metadata such as issueStatus or severity.'),
             validFrom: z.string().optional().describe('Optional ISO timestamp for when the fact became true/current.'),
             requestId: z.string().optional().describe('Optional idempotency key.'),
             agent: z.string().optional().describe('Override the default agent id.'),
+            agentId: z.string().optional().describe('Alias for agent. Override the default agent id.'),
         },
-    }, async ({ entity, key, valueJson, summary, confidence, source, validFrom, requestId, agent }) => {
+    }, async ({ entity, key, valueJson, summary, confidence, source, propertiesJson, validFrom, requestId, agent, agentId }) => {
         const target = resolvePersonalWriteTarget({ entity, key });
+        const resolvedAgent = resolveToolAgent(agent, agentId);
+        syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
         const result = await iranti.write({
             entity: target.entity,
             key,
@@ -334,7 +636,8 @@ configured canonical personal entity for this project/session.`,
             summary,
             confidence: confidence ?? 85,
             source: source?.trim() || defaultWriteSource(),
-            agent: withDefaultAgent(agent),
+            agent: resolvedAgent,
+            properties: propertiesJson ? safeJsonParse(propertiesJson) as Record<string, unknown> : undefined,
             validFrom: parseIsoDate(validFrom),
             requestId,
         });
@@ -343,6 +646,55 @@ configured canonical personal entity for this project/session.`,
             resolvedEntity: target.entity,
             ...(target.rerouted ? { originalEntity: target.originalEntity, canonicalizedPersonalEntity: true } : {}),
         });
+    });
+
+    server.registerTool('iranti_write_issue', {
+        description: `Write a canonical open or resolved issue fact on a stable key.
+Use this when you want defects, bugs, or chores to remain first-class shared
+memory instead of loose prose. The same issueId always maps to the same
+issue_<id> key, so changing status from open to resolved archives the prior
+state automatically while preserving history. Prefer this over hand-rolling
+issueStatus properties through iranti_write when the fact is specifically a
+trackable issue lifecycle entry.`,
+        inputSchema: {
+            entity: z.string().min(1).describe('Owner entity in entityType/entityId format, usually a project entity.'),
+            issueId: z.string().min(1).describe('Stable issue identifier that becomes issue_<normalized_id>.'),
+            title: z.string().min(1).describe('Short human-readable issue title.'),
+            status: z.enum(['open', 'resolved']).describe('Issue lifecycle status.'),
+            summary: z.string().min(1).describe('Short retrieval-safe summary of the issue state.'),
+            confidence: z.number().int().min(0).max(100).optional().describe('Raw confidence score.'),
+            source: z.string().optional().describe('Source label for provenance.'),
+            severity: z.enum(['low', 'medium', 'high', 'critical']).optional().describe('Optional issue severity.'),
+            detailsJson: z.string().optional().describe('Optional JSON-serialized structured issue details.'),
+            discoveredAt: z.string().optional().describe('Optional ISO timestamp for when the issue was first observed.'),
+            resolvedAt: z.string().optional().describe('Optional ISO timestamp for when the issue was resolved.'),
+            resolution: z.string().optional().describe('Optional resolution note for resolved issues.'),
+            tags: z.array(z.string()).optional().describe('Optional issue tags.'),
+            requestId: z.string().optional().describe('Optional idempotency key.'),
+            agent: z.string().optional().describe('Override the default agent id.'),
+            agentId: z.string().optional().describe('Alias for agent. Override the default agent id.'),
+        },
+    }, async ({ entity, issueId, title, status, summary, confidence, source, severity, detailsJson, discoveredAt, resolvedAt, resolution, tags, requestId, agent, agentId }) => {
+        const resolvedAgent = resolveToolAgent(agent, agentId);
+        syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
+        const result = await iranti.writeIssue({
+            entity,
+            issueId,
+            title,
+            status,
+            summary,
+            confidence: confidence ?? 85,
+            source: source?.trim() || defaultWriteSource(),
+            agent: resolvedAgent,
+            severity,
+            details: detailsJson ? safeJsonParse(detailsJson) : undefined,
+            discoveredAt,
+            resolvedAt,
+            resolution,
+            tags,
+            requestId,
+        });
+        return textResult(result);
     });
 
     server.registerTool('iranti_remember_response', {
@@ -359,19 +711,22 @@ this for arbitrary prose or every turn.`,
             source: z.string().optional().describe('Optional provenance label override.'),
             confidence: z.number().int().min(0).max(100).optional().describe('Raw confidence score for remembered summaries.'),
             agent: z.string().optional().describe('Override the default agent id.'),
+            agentId: z.string().optional().describe('Alias for agent. Override the default agent id.'),
         },
-    }, async ({ response, projectEntity, personalEntity, source, confidence, agent }) => {
+    }, async ({ response, projectEntity, personalEntity, source, confidence, agent, agentId }) => {
+        const resolvedAgent = resolveToolAgent(agent, agentId);
+        syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
         const result = await rememberAssistantResponseFacts({
             iranti,
             response,
-            agent: withDefaultAgent(agent),
+            agent: resolvedAgent,
             source: source?.trim() || defaultWriteSource(),
             projectEntity,
             personalEntity,
             confidence: confidence ?? 90,
             ledgerContext: {
                 source: 'mcp',
-                host: process.env.IRANTI_MCP_HOST?.trim() || 'generic_mcp',
+                host: currentHost() || 'generic_mcp',
             },
         });
         return textResult(result);
@@ -385,14 +740,17 @@ this for arbitrary prose or every turn.`,
             confidence: z.number().int().min(0).max(100).optional().describe('Raw confidence score.'),
             source: z.string().optional().describe('Source label for provenance.'),
             agent: z.string().optional().describe('Override the default agent id.'),
+            agentId: z.string().optional().describe('Alias for agent. Override the default agent id.'),
         },
-    }, async ({ entity, content, confidence, source, agent }) => {
+    }, async ({ entity, content, confidence, source, agent, agentId }) => {
+        const resolvedAgent = resolveToolAgent(agent, agentId);
+        syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
         const result = await iranti.ingest({
             entity,
             content,
             confidence: confidence ?? 80,
             source: source?.trim() || defaultWriteSource(),
-            agent: withDefaultAgent(agent),
+            agent: resolvedAgent,
         });
         return textResult(result);
     });
@@ -408,42 +766,68 @@ this for arbitrary prose or every turn.`,
         },
     }, async ({ fromEntity, relationshipType, toEntity, propertiesJson, createdBy }) => {
         const properties = propertiesJson ? safeJsonParse(propertiesJson) : undefined;
+        const resolvedAgent = withDefaultAgent(createdBy);
+        syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
         const result = await iranti.relate(fromEntity, relationshipType, toEntity, {
-            createdBy: withDefaultAgent(createdBy),
+            createdBy: resolvedAgent,
             properties: (properties ?? {}) as JsonRecord,
         });
         return textResult({ ok: true, result });
     });
 
     server.registerTool('iranti_related', {
-        description: 'Read directly related entities (1 hop) for a given entity.',
+        description: `Read directly related entities (1 hop) for a given entity.
+REQUIRED: call iranti_attend before this discovery tool so Iranti can decide
+whether memory should be injected before graph traversal.`,
         inputSchema: {
             entity: z.string().min(1).describe('Entity in entityType/entityId format.'),
+            agent: z.string().optional().describe('Override the default agent id for protocol tracking.'),
+            agentId: z.string().optional().describe('Alias for agent. Override the default agent id for protocol tracking.'),
         },
-    }, async ({ entity }) => {
+    }, async ({ entity, agent, agentId }) => {
+        const resolvedAgent = resolveToolAgent(agent, agentId);
+        syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
+        const warning = getReadBeforeAttendWarning(resolvedAgent, 'iranti_related');
+        if (warning) emitReadBeforeAttendWarning(resolvedAgent, 'iranti_related', warning);
         const result = await iranti.getRelated(entity);
-        return textResult(result);
+        return textResultWithProtocolWarning(result, warning);
     });
 
     server.registerTool('iranti_related_deep', {
-        description: 'Read related entities up to N hops deep for a given entity.',
+        description: `Read related entities up to N hops deep for a given entity.
+REQUIRED: call iranti_attend before this discovery tool so Iranti can decide
+whether memory should be injected before graph traversal.`,
         inputSchema: {
             entity: z.string().min(1).describe('Entity in entityType/entityId format.'),
             depth: z.number().int().min(1).max(5).optional().describe('Traversal depth.'),
+            agent: z.string().optional().describe('Override the default agent id for protocol tracking.'),
+            agentId: z.string().optional().describe('Alias for agent. Override the default agent id for protocol tracking.'),
         },
-    }, async ({ entity, depth }) => {
+    }, async ({ entity, depth, agent, agentId }) => {
+        const resolvedAgent = resolveToolAgent(agent, agentId);
+        syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
+        const warning = getReadBeforeAttendWarning(resolvedAgent, 'iranti_related_deep');
+        if (warning) emitReadBeforeAttendWarning(resolvedAgent, 'iranti_related_deep', warning);
         const result = await iranti.getRelatedDeep(entity, depth ?? 2);
-        return textResult(result);
+        return textResultWithProtocolWarning(result, warning);
     });
 
     server.registerTool('iranti_who_knows', {
-        description: 'List which agents have written facts about an entity.',
+        description: `List which agents have written facts about an entity.
+REQUIRED: call iranti_attend before this discovery tool so Iranti can decide
+whether memory should be injected before provenance discovery.`,
         inputSchema: {
             entity: z.string().min(1).describe('Entity in entityType/entityId format.'),
+            agent: z.string().optional().describe('Override the default agent id for protocol tracking.'),
+            agentId: z.string().optional().describe('Alias for agent. Override the default agent id for protocol tracking.'),
         },
-    }, async ({ entity }) => {
+    }, async ({ entity, agent, agentId }) => {
+        const resolvedAgent = resolveToolAgent(agent, agentId);
+        syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
+        const warning = getReadBeforeAttendWarning(resolvedAgent, 'iranti_who_knows');
+        if (warning) emitReadBeforeAttendWarning(resolvedAgent, 'iranti_who_knows', warning);
         const result = await iranti.whoKnows(entity);
-        return textResult(result);
+        return textResultWithProtocolWarning(result, warning);
     });
 
     if (isInteractiveTerminalLaunch()) {
@@ -451,6 +835,7 @@ this for arbitrary prose or every turn.`,
     }
 
     const transport = new StdioServerTransport();
+    installShutdownHooks(transport);
     await server.connect(transport);
 }
 
@@ -464,13 +849,11 @@ main().catch((error) => {
         level: 'audit',
         reason: formatted.message,
         metadata: {
-            host: process.env.IRANTI_MCP_HOST?.trim() || 'generic_mcp',
+            host: currentHost() || 'generic_mcp',
             operation: 'mcp_startup',
         },
     });
     console.error('[iranti-mcp] fatal:', formatted.message);
-    void flushStaffEventEmitter().finally(() => {
-        process.exit(1);
-    });
+    void shutdownProcess(1, 'fatal_error');
 });
 

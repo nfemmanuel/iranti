@@ -31,9 +31,10 @@ Hybrid search adds ranked fact discovery when exact keys are unknown by combinin
 2. Compute deterministic embedding for the query text.
 3. If vector support is unavailable, compute a deterministic in-process semantic fallback by embedding the query and candidate fact text at read time.
 4. If vector support is available, build lexical and vector candidate sets.
-5. Score candidates with weighted lexical + vector formula.
-6. Filter by `minScore`, drop zero-signal lexical rows, sort descending, and return top `limit`.
-7. If a vector backend is present but returns a malformed payload, fall back to lexical-only scoring instead of crashing.
+5. When the caller applies an `entityType` filter, run a relationship bridge that can carry a strong semantic hit across up to two relationship hops back onto entries owned by the filtered entity type.
+6. Score candidates with weighted lexical + vector formula.
+7. Filter by `minScore`, drop zero-signal lexical rows, sort descending, and return top `limit`.
+8. If a vector backend is present but returns a malformed payload, fall back to lexical-only scoring instead of crashing.
 
 ## Edge Cases
 - Empty query: request is rejected.
@@ -43,10 +44,12 @@ Hybrid search adds ranked fact discovery when exact keys are unknown by combinin
 - Protected entries: always excluded from results.
 - External vector backends must store entity metadata (`entityType`, `entityId`, `key`) so filtered search can work correctly.
 - Malformed vector backend responses are treated as a backend failure and trigger the lexical-only fallback path.
+- Relationship bridge expansion is only used when an `entityType` filter is present; the bridge walks up to two hops and applies a hop penalty before merging the propagated result back into the filtered target entry set.
 
 ## Test Results
 - TypeScript build passes with schema generation (`npm.cmd run build`).
 - Hybrid route, SDK method, and query-layer compile successfully.
+- `tests/search/run_hybrid_multihop_search_tests.ts` verifies a filtered project search can surface the owning project from incident terms that live two relationship hops away (`project -> issue -> incident`).
 
 ## Related
 - `src/library/queries.ts`

@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import { Prisma } from '../../src/generated/prisma/client';
 import * as client from '../../src/library/client';
 import { DbStaffEventEmitter } from '../../src/lib/dbStaffEventEmitter';
+import { resetStaffEventsTableBootstrap } from '../../src/lib/staffEventsTable';
 import { getStaffEventEmitter, resetStaffEventEmitter } from '../../src/lib/staffEventRegistry';
 import { Iranti } from '../../src/sdk';
 
@@ -50,14 +51,25 @@ async function testEmitterWritesStaffEvents(): Promise<void> {
     }
 }
 
-async function testMissingTableWarnsOnce(): Promise<void> {
+async function testMissingTableSelfHeals(): Promise<void> {
     const originalGetDb = client.getDb;
     const originalWarn = console.warn;
     const warnings: string[] = [];
+    const steps: string[] = [];
+    let tableReady = false;
 
     const fakeDb = {
         $executeRaw: async () => {
-            throw new Error('relation "staff_events" does not exist');
+            steps.push('insert');
+            if (!tableReady) {
+                throw new Error('relation "staff_events" does not exist');
+            }
+            return 1;
+        },
+        $executeRawUnsafe: async (sql: string) => {
+            steps.push(sql.includes('CREATE TABLE') ? 'bootstrap_table' : 'bootstrap_index');
+            tableReady = true;
+            return 1;
         },
     };
 
@@ -65,6 +77,7 @@ async function testMissingTableWarnsOnce(): Promise<void> {
     console.warn = (message?: unknown) => {
         warnings.push(String(message ?? ''));
     };
+    resetStaffEventsTableBootstrap();
 
     try {
         const emitter = new DbStaffEventEmitter();
@@ -75,21 +88,16 @@ async function testMissingTableWarnsOnce(): Promise<void> {
             source: 'api',
             level: 'audit',
         });
-        emitter.emit({
-            staffComponent: 'Librarian',
-            actionType: 'write_updated',
-            agentId: 'tester',
-            source: 'api',
-            level: 'audit',
-        });
 
         await flushAsync();
         await flushAsync();
 
-        assert.equal(warnings.length, 1, 'expected a single missing-table warning');
-        assert.match(warnings[0]!, /staff_events table is missing/i);
+        assert.equal(warnings.length, 0, `expected self-healing bootstrap to avoid warnings, got ${warnings.join('\n')}`);
+        assert.equal(steps.filter((step) => step === 'insert').length, 2, `expected one failed insert and one retry, got ${JSON.stringify(steps)}`);
+        assert.ok(steps.includes('bootstrap_table'), `expected bootstrap to create staff_events, got ${JSON.stringify(steps)}`);
     } finally {
         console.warn = originalWarn;
+        resetStaffEventsTableBootstrap();
         (client as typeof client & { getDb: typeof client.getDb }).getDb = originalGetDb;
     }
 }
@@ -168,13 +176,26 @@ async function testSdkDoesNotDowngradeConcreteEmitter(): Promise<void> {
     }
 }
 
+async function testStaffEventsSchemaAndMigrationExist(): Promise<void> {
+    const schema = await fs.readFile('prisma/schema.prisma', 'utf8');
+    assert.match(schema, /model StaffEvent\s*\{/, 'expected prisma/schema.prisma to declare StaffEvent');
+    assert.match(schema, /@@map\("staff_events"\)/, 'expected StaffEvent model to map to staff_events');
+
+    const migration = await fs.readFile('prisma/migrations/20260331101500_add_staff_events_ledger/migration.sql', 'utf8');
+    assert.match(migration, /CREATE TABLE IF NOT EXISTS "staff_events"/i, 'expected staff_events migration to create the table idempotently');
+    assert.match(migration, /staff_events_session_id_idx/i, 'expected staff_events migration to index metadata sessionId');
+    assert.match(migration, /staff_events_host_idx/i, 'expected staff_events migration to index metadata host');
+    assert.match(migration, /CREATE INDEX IF NOT EXISTS "staff_events_timestamp_idx"/i, 'expected staff_events migration indexes to be idempotent for preexisting tables');
+}
+
 async function main(): Promise<void> {
     await testEmitterWritesStaffEvents();
-    await testMissingTableWarnsOnce();
+    await testMissingTableSelfHeals();
     await testEmitterFlushWaitsForPendingWrites();
     await testServerRegistersDbEmitter();
     await testFirstPartyHostsUseConcreteEmitterHelper();
     await testSdkDoesNotDowngradeConcreteEmitter();
+    await testStaffEventsSchemaAndMigrationExist();
     console.log('db staff event emitter tests passed');
 }
 

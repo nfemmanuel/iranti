@@ -31,6 +31,14 @@ from dataclasses import dataclass, field
 __version__ = "0.2.51"
 
 
+def _normalize_issue_token(value: str) -> str:
+    normalized = ''.join(ch if ch.isalnum() else '_' for ch in value.strip().lower())
+    normalized = '_'.join(part for part in normalized.split('_') if part)
+    if not normalized:
+        raise IrantiValidationError('issue_id must contain at least one alphanumeric character.')
+    return normalized
+
+
 def _default_entity_hints(entity_hints: Optional[list[str]]) -> Optional[list[str]]:
     if entity_hints:
         return entity_hints
@@ -115,6 +123,7 @@ class SessionCheckpointPayload:
     next_step: Optional[str] = None
     open_risks: list[str] = field(default_factory=list)
     recent_outputs: list[str] = field(default_factory=list)
+    file_changes: list[dict[str, Any]] = field(default_factory=list)
     entity_targets: list[str] = field(default_factory=list)
     notes: Optional[str] = None
 
@@ -179,6 +188,7 @@ class SessionCheckpointSummary:
     next_step: Optional[str] = None
     open_risk_count: int = 0
     entity_target_count: int = 0
+    action_count: int = 0
 
 
 @dataclass
@@ -359,6 +369,7 @@ class IrantiClient:
         confidence: int,
         source: str,
         agent: str,
+        properties: Optional[dict] = None,
         valid_from: Optional[str] = None,
         valid_until: Optional[str] = None,
         request_id: Optional[str] = None,
@@ -386,6 +397,7 @@ class IrantiClient:
             'confidence': confidence,
             'source': source,
             'agent': agent,
+            'properties': properties or {},
         }
         if valid_from:
             payload['validFrom'] = valid_from
@@ -404,6 +416,72 @@ class IrantiClient:
             'input_entity': data.get('inputEntity'),
             'http_status': self.last_http_status,
         })
+
+    def write_issue(
+        self,
+        entity: str,
+        issue_id: str,
+        title: str,
+        status: str,
+        summary: str,
+        confidence: int,
+        source: str,
+        agent: str,
+        severity: Optional[str] = None,
+        details: Any = None,
+        discovered_at: Optional[str] = None,
+        resolved_at: Optional[str] = None,
+        resolution: Optional[str] = None,
+        tags: Optional[list[str]] = None,
+        properties: Optional[dict] = None,
+        valid_from: Optional[str] = None,
+        request_id: Optional[str] = None,
+    ) -> WriteResult:
+        issue_token = _normalize_issue_token(issue_id)
+        severity_value = severity or 'medium'
+        issue_tags = []
+        for tag in tags or []:
+            trimmed = tag.strip()
+            if trimmed and trimmed not in issue_tags:
+                issue_tags.append(trimmed)
+        return self.write(
+            entity=entity,
+            key=f'issue_{issue_token}',
+            value={
+                'issueId': issue_token,
+                'title': title.strip(),
+                'status': status,
+                'severity': severity_value,
+                'summary': summary.strip(),
+                'details': details,
+                'discoveredAt': discovered_at,
+                'resolvedAt': resolved_at if status == 'resolved' else None,
+                'resolution': resolution if status == 'resolved' else None,
+                'tags': issue_tags,
+            },
+            summary=summary.strip(),
+            confidence=confidence,
+            source=source,
+            agent=agent,
+            properties={
+                'memoryScope': 'project',
+                'capturePhase': 'manual',
+                'durableClass': 'issue_status',
+                'canonicalKey': f'issue_{issue_token}',
+                'mergeStrategy': 'replace',
+                'issueId': issue_token,
+                'issueStatus': status,
+                'issueSeverity': severity_value,
+                'issueTitle': title.strip(),
+                'semanticDomain': 'issue_tracking',
+                'semanticIntent': 'issue_status_tracking',
+                'temporalScope': 'project_durable',
+                'semanticTags': list(dict.fromkeys(['project_memory', 'issue', 'status', 'tracking', 'singleton_fact', status, severity_value, *issue_tags])),
+                **(properties or {}),
+            },
+            valid_from=valid_from,
+            request_id=request_id,
+        )
 
     # ── Ingest ────────────────────────────────────────────────────────────────
 
@@ -903,6 +981,7 @@ class IrantiClient:
             next_step=data.get('nextStep'),
             open_risks=list(data.get('openRisks', [])) if isinstance(data.get('openRisks', []), list) else [],
             recent_outputs=list(data.get('recentOutputs', [])) if isinstance(data.get('recentOutputs', []), list) else [],
+            file_changes=list(data.get('fileChanges', [])) if isinstance(data.get('fileChanges', []), list) else [],
             entity_targets=list(data.get('entityTargets', [])) if isinstance(data.get('entityTargets', []), list) else [],
             notes=data.get('notes'),
         )
@@ -916,6 +995,7 @@ class IrantiClient:
                 next_step=checkpoint_summary_data.get('nextStep'),
                 open_risk_count=int(checkpoint_summary_data.get('openRiskCount', 0) or 0),
                 entity_target_count=int(checkpoint_summary_data.get('entityTargetCount', 0) or 0),
+                action_count=int(checkpoint_summary_data.get('actionCount', 0) or 0),
             )
 
         return SessionSummary(

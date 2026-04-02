@@ -65,12 +65,14 @@ Iranti has now been rerun against a broader benchmark program covering 11 active
 - **Observe with hints**: `iranti_observe` recovers facts reliably when given the right entity hint, with higher-confidence facts returned first.
 - **Session recovery**: Interrupted-session recovery now performs substantially better than baseline.
 
+Recent fixes since the last rerun:
+- **Search now bridges semantic hits across relationships for filtered retrieval.** A strong incident or issue hit can now propagate back onto the owning filtered entity over up to two hops, so filtered project search no longer depends on direct lexical overlap alone.
+- **`iranti_attend` now safe-defaults parse failures toward memory on non-greeting turns.** Terse prompts such as `help`, `why?`, or `how?` no longer silently fall through to `classification_parse_failed_default_false`.
+- **Observe can now recover scoped project facts without explicit entity hints after handshake.** Scoped tasks seed watched entities, so hintless prompts like `What is the next step?` can retrieve the relevant fact.
+
 ### Current Limits
 
-- **Search is lexical-first today, not semantic multi-hop retrieval.** In the current rerun, hop-value discovery was `0/4`; bare entity-token lookup worked, but `vectorScore` stayed `0` across results.
-- **`iranti_attend` is not yet a reliable autonomous classifier.** Natural-language attend classification still falls back to `classification_parse_failed_default_false`; `forceInject` works as an operator bypass, not as proof of autonomous injection.
-- **Observe performs better with explicit entity hints than with cold-start discovery.**
-- **Upgrade durability should be scoped carefully.** The `v0.2.21` upgrade procedure reinitialized the instance under test; do not assume KB data survives upgrades without an explicit preservation or migration path.
+- **Upgrade durability is now test-covered.** The `v0.2.21` upgrade reinitialized the instance under test — a one-time operator incident, not a systemic design flaw. All Prisma migrations are additive (no DROP or TRUNCATE); Staff Namespace seeding is guarded by `isSeeded()`; `seed-codebase.ts` upserts to `codebase/*` entities only. A KB preservation test in `tests/runtime-lifecycle/run_setup_upgrade_tests.ts` now confirms user KB data written before a `setup` re-run survives intact.
 - **Relationship and provenance reflection surfaces remain partially permission-gated in benchmark sessions.** The rerun did not prove `iranti_relate`, `iranti_related`, `iranti_related_deep`, or `iranti_who_knows` end-to-end under the benchmark session policy.
 
 ### Practical Position

@@ -8,6 +8,7 @@ import https from 'https';
 import readline from 'readline/promises';
 import { Writable } from 'stream';
 import net from 'net';
+import { randomBytes } from 'crypto';
 import { disconnectDb, initDb } from '../src/library/client';
 import { createOrRotateApiKey, formatApiKeyToken, generateApiKeySecret, listApiKeys, revokeApiKey } from '../src/security/apiKeys';
 import {
@@ -26,6 +27,7 @@ import {
     printHandoffHelp as renderHandoffHelp,
     printInstallHelp as renderInstallHelp,
     printInstanceHelp as renderInstanceHelp,
+    printIssuesHelp as renderIssuesHelp,
     printIntegrateHelp as renderIntegrateHelp,
     printMainHelp as renderMainHelp,
     printProjectInitHelp as renderProjectInitHelp,
@@ -41,7 +43,7 @@ import {
 } from '../src/lib/cliHelpRenderer';
 import { getEscalationPaths } from '../src/lib/escalationPaths';
 import { parseDockerContainerNames, parsePublishedDockerHostPorts } from '../src/lib/dockerCliParsing';
-import { rewriteCommandError } from '../src/lib/commandErrors';
+import { rewriteCommandError, type RewrittenCommandError } from '../src/lib/commandErrors';
 import { resolveCommandInvocation, spawnResolved, spawnSyncResolved } from '../src/lib/commandInvocation';
 import { loadRuntimeEnv } from '../src/lib/runtimeEnv';
 import { ensureFileContainsLinesLocked, writeTextFileLocked } from '../src/lib/fileMutation';
@@ -54,7 +56,9 @@ import { InstanceRuntimeState, RuntimeInspection, inspectRuntimeState, isPidRunn
 import type { Iranti } from '../src/sdk';
 import { auditVectorIndexConsistency } from '../src/library/queries';
 import { backfillChatHistory, parseBackfillChatTranscript } from '../src/lib/autoRemember';
+import { buildSemanticFactTags } from '../src/lib/semanticFactTags';
 import { flushStaffEventEmitter } from '../src/lib/staffEventRegistry';
+import { writeProjectScaffoldCloseout, type ScaffoldCloseoutStatus } from '../src/lib/scaffoldCloseout';
 
 type Scope = 'user' | 'system';
 
@@ -93,6 +97,14 @@ type InstanceMeta = {
     instanceDir: string;
     databaseIntent?: InstanceDatabaseIntent;
     dependencies?: InstanceDependency[];
+};
+
+type InstanceProjectBindingSummary = {
+    projectPath: string;
+    agentId: string;
+    memoryEntity: string;
+    mode: string;
+    boundAt: string | null;
 };
 
 type InstanceRuntimeSummary = RuntimeInspection;
@@ -144,6 +156,34 @@ type StatusRow = {
 type DoctorEnvTarget = {
     envFile: string | null;
     envSource: string;
+};
+
+type OperatorAuthoritySummary = {
+    activeAuthority: string;
+    activeBindingSource: string | null;
+    activeBoundInstanceEnv: string | null;
+    activeDatabaseUrl: string | null;
+    activeDatabaseTarget: string | null;
+    repoDatabaseUrl: string | null;
+    repoDatabaseTarget: string | null;
+    repoDatabaseDiffers: boolean;
+    nearbyBindingSource: string | null;
+    nearbyBoundInstanceEnv: string | null;
+    nearbyBindingDatabaseUrl: string | null;
+    nearbyBindingDatabaseTarget: string | null;
+    nearbyBindingDiffers: boolean;
+};
+
+type DoctorDiscovery = {
+    selectedRuntimeRoot: string | null;
+    selectionSource: RuntimeRootSource | null;
+    selectionReason: string | null;
+    boundRuntimeRoot: string | null;
+    boundInstanceEnv: string | null;
+    projectBindingFile: string | null;
+    projectBindingSource: 'doctor-target' | null;
+    rootMismatch: boolean;
+    otherRuntimeRoots: string[];
 };
 
 type UpgradeTarget = 'auto' | 'npm-global' | 'npm-repo' | 'python';
@@ -220,6 +260,43 @@ type ClaudeProjectScaffoldResult = {
     mcp: ClaudeScaffoldStatus;
     vscodeMcp: ClaudeScaffoldStatus;
     settings: ClaudeScaffoldStatus;
+    claudeMd: ClaudeScaffoldStatus;
+    closeout: ScaffoldCloseoutStatus;
+};
+
+type ProcessSnapshotRow = {
+    pid: number;
+    parentPid: number | null;
+    name: string;
+    commandLine: string;
+};
+
+type McpCleanupCandidateStatus =
+    | 'stale_no_host_ancestor'
+    | 'stale_shell_no_host'
+    | 'stale_child_parent_missing'
+    | 'stale_launcher_only'
+    | 'attached_claude'
+    | 'attached_codex'
+    | 'attached_or_uncertain';
+
+type McpCleanupCandidate = {
+    status: McpCleanupCandidateStatus;
+    launcherPid?: number;
+    childPid?: number;
+    host?: 'claude' | 'codex';
+    reason: string;
+};
+
+type McpCleanupReport = {
+    platform: string;
+    supported: boolean;
+    dryRun: boolean;
+    counts: Record<McpCleanupCandidateStatus, number>;
+    safeCandidates: McpCleanupCandidate[];
+    skippedCandidates: McpCleanupCandidate[];
+    cleaned: Array<{ pid: number; role: 'launcher' | 'child' }>;
+    warnings: string[];
 };
 
 type AttendantCliTarget = {
@@ -272,6 +349,7 @@ const ANSI = {
 
 let CLI_DEBUG = process.argv.includes('--debug') || process.env.IRANTI_DEBUG === '1';
 let CLI_VERBOSE = CLI_DEBUG || process.argv.includes('--verbose') || process.env.IRANTI_VERBOSE === '1';
+let ACTIVE_PARSED_ARGS: ParsedArgs | null = null;
 
 // H-7: Cleanup/rollback stack — LIFO handlers run on SIGINT/SIGTERM to undo partial multi-step operations
 const _cleanupStack: Array<() => void | Promise<void>> = [];
@@ -363,6 +441,17 @@ function verboseLog(message: string, details?: CliErrorDetails): void {
 
 function cliError(code: string, message: string, hints: string[] = [], details?: CliErrorDetails): CliError {
     return new CliError(code, message, hints, details);
+}
+
+function wantsJsonErrorEnvelope(args: ParsedArgs | null): boolean {
+    return Boolean(args && hasFlag(args, 'json'));
+}
+
+function normalizeCliFailure(err: unknown): CliError | RewrittenCommandError {
+    if (err instanceof CliError) {
+        return err;
+    }
+    return rewriteCommandError('iranti', err);
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -503,6 +592,26 @@ function findClosestAncestorRuntimeRoot(startDir: string): string | null {
         }
     }
     return null;
+}
+
+function findClosestDoctorEnvTarget(startDir: string): DoctorEnvTarget {
+    for (const dir of walkAncestorPaths(startDir)) {
+        const repoEnv = path.join(dir, '.env');
+        if (fs.existsSync(repoEnv) && fs.statSync(repoEnv).isFile()) {
+            return {
+                envFile: repoEnv,
+                envSource: 'repo',
+            };
+        }
+        const projectEnv = path.join(dir, '.env.iranti');
+        if (fs.existsSync(projectEnv) && fs.statSync(projectEnv).isFile()) {
+            return {
+                envFile: projectEnv,
+                envSource: 'project-binding',
+            };
+        }
+    }
+    return { envFile: null, envSource: 'repo' };
 }
 
 function resolveInstallRootDetails(args: ParsedArgs, scope: Scope): RuntimeRootResolution {
@@ -873,6 +982,15 @@ async function readEnvFile(filePath: string): Promise<Record<string, string>> {
     return out;
 }
 
+async function readEnvFileIfExists(filePath: string | null | undefined): Promise<Record<string, string> | null> {
+    if (!filePath || !fs.existsSync(filePath)) return null;
+    try {
+        return await readEnvFile(filePath);
+    } catch {
+        return null;
+    }
+}
+
 async function readInstanceMetaFile(metaFile: string): Promise<Partial<InstanceMeta> | null> {
     if (!fs.existsSync(metaFile)) return null;
     try {
@@ -883,7 +1001,19 @@ async function readInstanceMetaFile(metaFile: string): Promise<Partial<InstanceM
     }
 }
 
-function makeInstanceEnv(name: string, port: number, dbUrl: string, apiKey: string | undefined, instanceDir: string): string {
+function resolveInstanceApiKeyPepper(existingPepper?: string): string {
+    const trimmed = existingPepper?.trim() ?? '';
+    return trimmed || randomBytes(32).toString('hex');
+}
+
+function makeInstanceEnv(
+    name: string,
+    port: number,
+    dbUrl: string,
+    apiKey: string | undefined,
+    instanceDir: string,
+    apiKeyPepper: string,
+): string {
     const lines = [
         '# Iranti instance env',
         `IRANTI_INSTANCE_NAME=${name}`,
@@ -896,6 +1026,7 @@ function makeInstanceEnv(name: string, port: number, dbUrl: string, apiKey: stri
         'IRANTI_ARCHIVIST_DEBOUNCE_MS=60000',
         'IRANTI_ARCHIVIST_INTERVAL_MS=0',
         `IRANTI_API_KEY=${apiKey ?? 'replace_me_with_api_key'}`,
+        `IRANTI_API_KEY_PEPPER=${apiKeyPepper}`,
         '',
     ];
     return lines.join('\n');
@@ -1375,11 +1506,16 @@ async function ensureProjectGitignore(projectPath: string): Promise<void> {
 async function writeProjectBinding(projectPath: string, updates: Record<string, string | undefined>): Promise<string> {
     await ensureDir(projectPath);
     const outFile = path.join(projectPath, '.env.iranti');
+    const previousBinding = fs.existsSync(outFile)
+        ? await readEnvFile(outFile).catch(() => ({} as Record<string, string>))
+        : {};
     if (!fs.existsSync(outFile)) {
         await writeText(outFile, '# Iranti project binding\n');
     }
     await upsertEnvFile(outFile, updates);
     await ensureProjectGitignore(projectPath);
+    const writtenBinding = await readEnvFile(outFile).catch(() => ({} as Record<string, string>));
+    await syncProjectBindingRegistry(projectPath, writtenBinding, previousBinding);
     return outFile;
 }
 
@@ -1397,6 +1533,49 @@ async function removeProjectPathFromRegistry(runtimeRoot: string, instanceName: 
     return true;
 }
 
+async function syncProjectBindingRegistry(
+    projectPath: string,
+    binding: Record<string, string>,
+    previousBinding: Record<string, string> = {},
+): Promise<void> {
+    const nextRuntimeRoot = runtimeRootFromInstanceEnv(binding.IRANTI_INSTANCE_ENV ?? '');
+    const nextInstanceName = binding.IRANTI_INSTANCE?.trim() || null;
+    const previousRuntimeRoot = runtimeRootFromInstanceEnv(previousBinding.IRANTI_INSTANCE_ENV ?? '');
+    const previousInstanceName = previousBinding.IRANTI_INSTANCE?.trim() || null;
+
+    if (previousRuntimeRoot && previousInstanceName && (
+        previousRuntimeRoot !== nextRuntimeRoot
+        || previousInstanceName !== nextInstanceName
+    )) {
+        await removeProjectPathFromRegistry(previousRuntimeRoot, previousInstanceName, projectPath);
+    }
+
+    if (!nextRuntimeRoot || !nextInstanceName) return;
+
+    const registryPath = path.join(nextRuntimeRoot, 'instances', nextInstanceName, 'projects.json');
+    const existingRegistry = fs.existsSync(registryPath)
+        ? readJsonFile<{ projects?: Array<Record<string, unknown>> } | null>(registryPath)
+        : null;
+    const existingProjects = Array.isArray(existingRegistry?.projects) ? existingRegistry.projects : [];
+    const previousEntry = existingProjects.find((entry) => entry && typeof entry === 'object' && String(entry.projectPath ?? '') === projectPath);
+    const boundAt = typeof previousEntry?.boundAt === 'string' && previousEntry.boundAt.trim().length > 0
+        ? previousEntry.boundAt
+        : new Date().toISOString();
+
+    const nextProjects = existingProjects
+        .filter((entry) => !entry || typeof entry !== 'object' || String(entry.projectPath ?? '') !== projectPath)
+        .concat({
+            projectPath,
+            agentId: binding.IRANTI_AGENT_ID?.trim() || 'project_main',
+            memoryEntity: binding.IRANTI_MEMORY_ENTITY?.trim() || 'user/main',
+            mode: binding.IRANTI_PROJECT_MODE?.trim() || 'isolated',
+            boundAt,
+        })
+        .sort((a, b) => String(a.projectPath ?? '').localeCompare(String(b.projectPath ?? '')));
+
+    await writeText(registryPath, `${JSON.stringify({ projects: nextProjects }, null, 2)}\n`);
+}
+
 async function cleanupProjectBindingRegistry(projectPath: string, binding: Record<string, string>): Promise<string[]> {
     const removedFrom: string[] = [];
     const runtimeRoot = runtimeRootFromInstanceEnv(binding.IRANTI_INSTANCE_ENV ?? '');
@@ -1407,6 +1586,23 @@ async function cleanupProjectBindingRegistry(projectPath: string, binding: Recor
         }
     }
     return removedFrom;
+}
+
+function readInstanceProjectRegistry(root: string, instanceName: string): InstanceProjectBindingSummary[] {
+    const registryPath = path.join(root, 'instances', instanceName, 'projects.json');
+    if (!fs.existsSync(registryPath)) return [];
+    const parsed = readJsonFile<{ projects?: Array<Record<string, unknown>> } | null>(registryPath);
+    if (!parsed || !Array.isArray(parsed.projects)) return [];
+    return parsed.projects
+        .filter((entry) => entry && typeof entry === 'object' && typeof entry.projectPath === 'string' && entry.projectPath.trim().length > 0)
+        .map((entry) => ({
+            projectPath: String(entry.projectPath),
+            agentId: typeof entry.agentId === 'string' && entry.agentId.trim().length > 0 ? entry.agentId : 'project_main',
+            memoryEntity: typeof entry.memoryEntity === 'string' && entry.memoryEntity.trim().length > 0 ? entry.memoryEntity : 'user/main',
+            mode: typeof entry.mode === 'string' && entry.mode.trim().length > 0 ? entry.mode : 'isolated',
+            boundAt: typeof entry.boundAt === 'string' && entry.boundAt.trim().length > 0 ? entry.boundAt : null,
+        }))
+        .sort((a, b) => a.projectPath.localeCompare(b.projectPath));
 }
 
 type PromptSession = {
@@ -1582,6 +1778,69 @@ function postgresDatabaseName(databaseUrl: string): string {
         throw new Error('DATABASE_URL must include a database name.');
     }
     return database;
+}
+
+function summarizeDatabaseTarget(databaseUrl: string | null | undefined): string | null {
+    const trimmed = databaseUrl?.trim() ?? '';
+    if (!trimmed || detectPlaceholder(trimmed)) return null;
+    try {
+        const parsed = parsePostgresConnectionString(trimmed);
+        const database = decodeURIComponent(parsed.pathname.replace(/^\/+/, ''));
+        if (!database) return parsed.host || trimmed;
+        return `${parsed.host}/${database}`;
+    } catch {
+        return trimmed;
+    }
+}
+
+function summarizeActiveAuthority(envSource: string, bindingFile: string | null, boundInstanceEnvFile: string | null): string {
+    if (bindingFile && boundInstanceEnvFile) return 'project binding -> bound instance env';
+    if (bindingFile) return 'project binding';
+    if (envSource.startsWith('instance:')) return 'named instance env';
+    if (envSource === 'explicit-env') return 'explicit env';
+    if (envSource === 'repo') return 'repo env';
+    if (envSource === 'environment') return 'environment';
+    return envSource;
+}
+
+async function buildOperatorAuthoritySummary(options: {
+    envSource: string;
+    envFile: string | null;
+    env: Record<string, string> | null;
+    bindingFile?: string | null;
+    boundInstanceEnvFile?: string | null;
+    boundInstanceEnv?: Record<string, string> | null;
+    repoEnvFile?: string | null;
+    nearbyBindingFile?: string | null;
+    nearbyBoundInstanceEnvFile?: string | null;
+    nearbyBoundInstanceEnv?: Record<string, string> | null;
+}): Promise<OperatorAuthoritySummary> {
+    const repoEnv = await readEnvFileIfExists(options.repoEnvFile ?? null);
+    const boundDatabaseUrl = options.boundInstanceEnv?.DATABASE_URL?.trim() || null;
+    const nearbyBoundDatabaseUrl = options.nearbyBoundInstanceEnv?.DATABASE_URL?.trim() || null;
+    const selectedDatabaseUrl = options.env?.DATABASE_URL?.trim() || null;
+    const activeDatabaseUrl = boundDatabaseUrl || selectedDatabaseUrl;
+    const repoDatabaseUrl = repoEnv?.DATABASE_URL?.trim() || null;
+
+    return {
+        activeAuthority: summarizeActiveAuthority(
+            options.envSource,
+            options.bindingFile ?? null,
+            options.boundInstanceEnvFile ?? null,
+        ),
+        activeBindingSource: options.bindingFile ?? null,
+        activeBoundInstanceEnv: options.boundInstanceEnvFile ?? null,
+        activeDatabaseUrl,
+        activeDatabaseTarget: summarizeDatabaseTarget(activeDatabaseUrl),
+        repoDatabaseUrl,
+        repoDatabaseTarget: summarizeDatabaseTarget(repoDatabaseUrl),
+        repoDatabaseDiffers: Boolean(repoDatabaseUrl && activeDatabaseUrl && repoDatabaseUrl !== activeDatabaseUrl),
+        nearbyBindingSource: options.nearbyBindingFile ?? null,
+        nearbyBoundInstanceEnv: options.nearbyBoundInstanceEnvFile ?? null,
+        nearbyBindingDatabaseUrl: nearbyBoundDatabaseUrl,
+        nearbyBindingDatabaseTarget: summarizeDatabaseTarget(nearbyBoundDatabaseUrl),
+        nearbyBindingDiffers: Boolean(nearbyBoundDatabaseUrl && activeDatabaseUrl && nearbyBoundDatabaseUrl !== activeDatabaseUrl),
+    };
 }
 
 function isLocalPostgresHost(hostname: string): boolean {
@@ -1944,6 +2203,10 @@ async function ensureInstanceConfigured(
 ): Promise<{ envFile: string; instanceDir: string; created: boolean }> {
     const { instanceDir, envFile, metaFile } = instancePaths(root, name);
     const created = !fs.existsSync(envFile);
+    const existingEnv = fs.existsSync(envFile)
+        ? await readEnvFile(envFile).catch(() => ({} as Record<string, string>))
+        : {};
+    const apiKeyPepper = resolveInstanceApiKeyPepper(existingEnv.IRANTI_API_KEY_PEPPER);
 
     if (created) {
         await ensureDir(instanceDir);
@@ -1951,7 +2214,7 @@ async function ensureInstanceConfigured(
         await ensureDir(path.join(instanceDir, 'escalation', 'active'));
         await ensureDir(path.join(instanceDir, 'escalation', 'resolved'));
         await ensureDir(path.join(instanceDir, 'escalation', 'archived'));
-        await writeText(envFile, makeInstanceEnv(name, config.port, config.dbUrl, config.apiKey, instanceDir));
+        await writeText(envFile, makeInstanceEnv(name, config.port, config.dbUrl, config.apiKey, instanceDir, apiKeyPepper));
         const meta: InstanceMeta = {
             name,
             createdAt: new Date().toISOString(),
@@ -1968,6 +2231,7 @@ async function ensureInstanceConfigured(
         IRANTI_PORT: String(config.port),
         DATABASE_URL: config.dbUrl,
         IRANTI_API_KEY: config.apiKey,
+        IRANTI_API_KEY_PEPPER: apiKeyPepper,
         LLM_PROVIDER: config.provider,
         ...config.providerKeys,
     });
@@ -1983,6 +2247,20 @@ async function ensureInstanceConfigured(
 function makeIrantiMcpServerConfig(projectEnvPath?: string): { command: string; args: string[]; env?: Record<string, string> } {
     const env: Record<string, string> = {
         IRANTI_MCP_HOST: 'codex_cli',
+    };
+    if (projectEnvPath) {
+        env.IRANTI_PROJECT_ENV = projectEnvPath;
+    }
+    return {
+        command: 'iranti',
+        args: ['mcp'],
+        env,
+    };
+}
+
+function makeClaudeLocalMcpServerConfig(projectEnvPath?: string): { command: string; args: string[]; env?: Record<string, string> } {
+    const env: Record<string, string> = {
+        IRANTI_MCP_HOST: 'claude_code',
     };
     if (projectEnvPath) {
         env.IRANTI_PROJECT_ENV = projectEnvPath;
@@ -2068,6 +2346,13 @@ async function resolveAttendantCliTarget(args: ParsedArgs): Promise<AttendantCli
         const loaded = loadRuntimeEnv({
             cwd,
             projectEnvFile: explicitProjectEnv ? path.resolve(explicitProjectEnv) : undefined,
+        });
+        debugLog('Attendant CLI runtime env resolved.', {
+            cwd,
+            authorityMode: loaded.authorityMode,
+            projectEnvFile: loaded.projectEnvFile ?? null,
+            instanceEnvFile: loaded.instanceEnvFile ?? null,
+            loadedFiles: loaded.loadedFiles.join(' | ') || '(none)',
         });
         envSource = loaded.projectEnvFile ? 'project-binding' : 'environment';
         envFile = loaded.projectEnvFile ?? loaded.instanceEnvFile ?? null;
@@ -2172,6 +2457,172 @@ function resolveTaskEntity(args: ParsedArgs): string {
         throw new Error('task entity must use entityType/entityId format.');
     }
     return entity;
+}
+
+type IssueListStatus = 'open' | 'resolved';
+
+type IssueListItem = {
+    key: string;
+    issueId: string;
+    title: string;
+    status: IssueListStatus;
+    severity: string;
+    summary: string;
+    confidence: number;
+    source: string;
+    discoveredAt: string | null;
+    resolvedAt: string | null;
+    resolution: string | null;
+    tags: string[];
+};
+
+type InvalidIssueFact = {
+    key: string;
+    summary: string;
+    confidence: number;
+    source: string;
+    reason: string;
+};
+
+function resolveIssueEntity(args: ParsedArgs): string {
+    const explicit = getFlag(args, 'entity')?.trim();
+    if (explicit) {
+        if (!explicit.includes('/')) {
+            throw new Error('issue entity must use entityType/entityId format.');
+        }
+        return explicit;
+    }
+
+    const fromEnv = process.env.IRANTI_MEMORY_ENTITY?.trim();
+    if (fromEnv?.includes('/')) {
+        return fromEnv;
+    }
+
+    throw new Error('Missing issue entity. Pass --entity <entityType/entityId> or run from a bound project with IRANTI_MEMORY_ENTITY.');
+}
+
+function resolveIssueStatusFilter(args: ParsedArgs): IssueListStatus | null {
+    const raw = getFlag(args, 'status')?.trim().toLowerCase();
+    if (!raw) return null;
+    if (raw === 'open' || raw === 'resolved') {
+        return raw;
+    }
+    throw new Error(`Invalid --status '${raw}'. Use open or resolved.`);
+}
+
+function parseIssueListFact(entry: { key: string; value: unknown; summary: string; confidence: number; source: string; }): { item: IssueListItem | null; invalid: InvalidIssueFact | null } {
+    if (!entry.key.startsWith('issue_')) {
+        return { item: null, invalid: null };
+    }
+    const value = typeof entry.value === 'object' && entry.value ? entry.value as Record<string, unknown> : null;
+    if (!value) {
+        return {
+            item: null,
+            invalid: {
+                key: entry.key,
+                summary: entry.summary,
+                confidence: entry.confidence,
+                source: entry.source,
+                reason: 'issue_* fact value is not an object',
+            },
+        };
+    }
+    const rawStatus = typeof value?.status === 'string' ? value.status.toLowerCase() : '';
+    if (rawStatus !== 'open' && rawStatus !== 'resolved') {
+        return {
+            item: null,
+            invalid: {
+                key: entry.key,
+                summary: entry.summary,
+                confidence: entry.confidence,
+                source: entry.source,
+                reason: 'issue_* fact is missing canonical open/resolved status',
+            },
+        };
+    }
+    return {
+        item: {
+            key: entry.key,
+            issueId: typeof value?.issueId === 'string' && value.issueId.trim() ? value.issueId.trim() : entry.key.replace(/^issue_/, ''),
+            title: typeof value?.title === 'string' && value.title.trim() ? value.title.trim() : entry.summary,
+            status: rawStatus,
+            severity: typeof value?.severity === 'string' && value.severity.trim() ? value.severity.trim() : 'medium',
+            summary: entry.summary,
+            confidence: entry.confidence,
+            source: entry.source,
+            discoveredAt: typeof value?.discoveredAt === 'string' && value.discoveredAt.trim() ? value.discoveredAt.trim() : null,
+            resolvedAt: typeof value?.resolvedAt === 'string' && value.resolvedAt.trim() ? value.resolvedAt.trim() : null,
+            resolution: typeof value?.resolution === 'string' && value.resolution.trim() ? value.resolution.trim() : null,
+            tags: Array.isArray(value?.tags)
+                ? value.tags.map((tag) => String(tag).trim()).filter(Boolean)
+                : [],
+        },
+        invalid: null,
+    };
+}
+
+function compareIssueListItems(a: IssueListItem, b: IssueListItem): number {
+    if (a.status !== b.status) {
+        return a.status === 'open' ? -1 : 1;
+    }
+    const severityRank = new Map<string, number>([
+        ['critical', 0],
+        ['high', 1],
+        ['medium', 2],
+        ['low', 3],
+    ]);
+    const severityDelta = (severityRank.get(a.severity) ?? 99) - (severityRank.get(b.severity) ?? 99);
+    if (severityDelta !== 0) return severityDelta;
+    return a.issueId.localeCompare(b.issueId);
+}
+
+function printIssuesResult(
+    entity: string,
+    items: IssueListItem[],
+    statusFilter: IssueListStatus | null,
+    inventoryCounts: { open: number; resolved: number; invalid: number; canonicalTotal: number; issueLikeTotal: number; },
+    invalidFacts: InvalidIssueFact[],
+): void {
+    console.log(sectionTitle('Issues Command'));
+    console.log(`Entity: ${entity}`);
+    console.log(`Filter: ${statusFilter ?? 'all'}`);
+    console.log(`Total: ${items.length}`);
+    console.log(`Canonical inventory: ${inventoryCounts.canonicalTotal} (${inventoryCounts.open} open, ${inventoryCounts.resolved} resolved)`);
+    console.log(`Invalid issue_* facts: ${inventoryCounts.invalid}`);
+    console.log('');
+    if (invalidFacts.length > 0) {
+        console.log('Warnings:');
+        for (const invalid of invalidFacts) {
+            console.log(`  - ${invalid.key}: ${invalid.reason} [source=${invalid.source}, confidence=${invalid.confidence}]`);
+        }
+        console.log('');
+    }
+    if (items.length === 0) {
+        console.log('No issue facts found.');
+        return;
+    }
+
+    for (const item of items) {
+        const header = `[${item.status.toUpperCase()}] ${item.issueId} (${item.severity})`;
+        console.log(header);
+        console.log(`  Title: ${item.title}`);
+        console.log(`  Summary: ${item.summary}`);
+        console.log(`  Source: ${item.source}`);
+        console.log(`  Confidence: ${item.confidence}`);
+        if (item.discoveredAt) {
+            console.log(`  Discovered: ${item.discoveredAt}`);
+        }
+        if (item.resolvedAt) {
+            console.log(`  Resolved: ${item.resolvedAt}`);
+        }
+        if (item.resolution) {
+            console.log(`  Resolution: ${item.resolution}`);
+        }
+        if (item.tags.length > 0) {
+            console.log(`  Tags: ${item.tags.join(', ')}`);
+        }
+        console.log('');
+    }
 }
 
 function buildHandoffSummary(key: string, value: unknown): string {
@@ -2388,10 +2839,27 @@ function makeClaudeHookSettings(projectEnvPath?: string, existing?: Record<strin
     const existingHooks = existing && isClaudeHooksObject(existing.hooks)
         ? existing.hooks
         : {};
+    const existingMcpServers =
+        existing && existing.mcpServers && typeof existing.mcpServers === 'object' && !Array.isArray(existing.mcpServers)
+            ? existing.mcpServers as Record<string, unknown>
+            : {};
+    const existingEnabledMcpjsonServers = Array.isArray(existing?.enabledMcpjsonServers)
+        ? existing.enabledMcpjsonServers
+            .map((value) => String(value))
+            .filter((value) => value !== 'iranti')
+        : undefined;
 
     return {
         ...(existing ?? {}),
+        enableAllProjectMcpServers: false,
         permissions: mergeClaudePermissionAllowList(existing),
+        mcpServers: {
+            ...existingMcpServers,
+            iranti: makeClaudeLocalMcpServerConfig(projectEnvPath),
+        },
+        ...(existingEnabledMcpjsonServers
+            ? { enabledMcpjsonServers: existingEnabledMcpjsonServers }
+            : {}),
         hooks: {
             ...existingHooks,
             SessionStart: [makeClaudeHookEntry('SessionStart', projectEnvPath)],
@@ -2509,11 +2977,90 @@ async function writeClaudeCodeProjectFiles(projectPath: string, projectEnvPath?:
         }
     }
 
+    const claudeMdFile = path.join(projectPath, 'CLAUDE.md');
+    let claudeMdStatus: ClaudeScaffoldStatus = 'unchanged';
+    const irantiMdBlock = buildIrantiClaudeMdBlock();
+    if (!fs.existsSync(claudeMdFile)) {
+        await writeText(claudeMdFile, irantiMdBlock);
+        claudeMdStatus = 'created';
+    } else {
+        const existing = fs.readFileSync(claudeMdFile, 'utf8');
+        if (!existing.includes('<!-- iranti-rules -->')) {
+            await writeText(claudeMdFile, `${existing.trimEnd()}\n\n${irantiMdBlock}`);
+            claudeMdStatus = 'updated';
+        } else {
+            const replaced = existing.replace(
+                /<!-- iranti-rules -->[\s\S]*?<!-- \/iranti-rules -->/,
+                irantiMdBlock.trim()
+            );
+            if (replaced !== existing) {
+                await writeText(claudeMdFile, replaced);
+                claudeMdStatus = 'updated';
+            }
+        }
+    }
+
+    const closeout = await writeProjectScaffoldCloseout({
+        tool: 'claude',
+        projectPath,
+        projectEnvFile: resolvedProjectEnvPath ?? projectEnvPath ?? null,
+        files: [
+            { path: mcpFile, status: mcpStatus },
+            { path: vscodeMcpFile, status: vscodeMcpStatus },
+            { path: settingsFile, status: settingsStatus },
+            { path: claudeMdFile, status: claudeMdStatus },
+        ],
+        agentId: 'iranti_cli_scaffold',
+    });
+
     return {
         mcp: mcpStatus,
         vscodeMcp: vscodeMcpStatus,
         settings: settingsStatus,
+        claudeMd: claudeMdStatus,
+        closeout,
     };
+}
+
+function buildIrantiClaudeMdBlock(): string {
+    return [
+        '<!-- iranti-rules -->',
+        '# Iranti Memory Protocol',
+        '',
+        'IMPORTANT: These rules OVERRIDE any default behavior and MUST be followed exactly. No work should begin until the session-start acknowledgment is stated.',
+        '',
+        '## Every turn',
+        '1. Call `mcp__iranti__iranti_attend` before responding to the user message.',
+        '2. Call `mcp__iranti__iranti_attend` before using any knowledge discovery tool — Read, Grep, Glob, WebSearch, WebFetch, and Bash commands used as factual basis for a decision.',
+        '3. Call `mcp__iranti__iranti_attend` after knowledge discovery to check new findings against stored memory and decide what to inject, write, or checkpoint.',
+        '4. Call `mcp__iranti__iranti_attend` after delivering any substantive response — plans, decisions, analysis, or structured recommendations are durable findings that must be assessed before the next turn.',
+        '5. Call `mcp__iranti__iranti_write` after confirmed durable findings — decisions, blockers, next steps, validated environment details, what worked, what failed, what changed, and what happens next.',
+        '6. Call `mcp__iranti__iranti_write` after every Edit or Write tool call — file changes are always durable. Record what changed, why, and what the file now does.',
+        '7. Call `mcp__iranti__iranti_write` after any Bash command that reveals system state — build results, test outcomes, container state, environment facts, errors.',
+        '8. Call `mcp__iranti__iranti_write` after any WebSearch or WebFetch that surfaces confirmed external facts.',
+        '9. Call `mcp__iranti__iranti_write` after any Agent (subagent) tool completes — subagent findings are invisible to the hive mind otherwise.',
+        '10. If a recall-style lookup returns no facts, try at least one alternative retrieval angle before concluding the fact is not stored.',
+        '11. Call `mcp__iranti__iranti_attend` again when new knowledge should change what is loaded for the next step.',
+        '',
+        '## Session start',
+        '- Call `mcp__iranti__iranti_handshake` with the current task before responding to the first user message.',
+        '- After the handshake completes, you MUST explicitly state: "I acknowledge that Iranti is a hive mind. I have read the Iranti operating rules and the protocols for iranti_handshake, iranti_attend, iranti_write, iranti_checkpoint, and iranti_remember_response, and I pledge to use them to persist what I find, what works, what fails, what changes, and what happens next so later sessions do not have to rediscover it."',
+        '- This acknowledgment is strictly mandatory. No work should begin until it is stated.',
+        '',
+        '## After context compaction',
+        '- Call `mcp__iranti__iranti_handshake` before responding to the next user message.',
+        '',
+        '## Checkpointing',
+        '- Call `mcp__iranti__iranti_checkpoint` when completing a task, when shifting to a new task mid-session, at any natural pause point, and before stepping away from long or interrupted work.',
+        '- Record key actions in the checkpoint `actions` field so later sessions can see important commands, tests, searches, validations, and decisions without rerunning them blindly.',
+        '- Do not rely on `mcp__iranti__iranti_write` alone — facts and checkpoints are separate stores. A checkpoint not written means the next handshake recovers from stale data.',
+        '- Under-logged runs are non-compliant. Leave structured breadcrumbs for what you found, what worked, what failed, what changed, and what happens next instead of only a broad summary.',
+        '',
+        '## Host setup check',
+        '- If this file was not present at session start, run `iranti claude-setup .` to complete integration.',
+        '<!-- /iranti-rules -->',
+        '',
+    ].join('\n');
 }
 
 function hasCodexInstalled(): boolean {
@@ -3176,6 +3723,35 @@ function summarizeStatus(checks: DoctorCheck[]): DoctorStatus {
     return 'pass';
 }
 
+type DatabaseAuthorityInfo = {
+    repoEnvFile: string | null;
+    repoEnvDatabaseUrl: string | null;
+    boundInstanceDatabaseUrl: string | null;
+    mismatch: boolean;
+};
+
+async function resolveDatabaseAuthorityInfo(
+    repoEnvFile: string | null | undefined,
+    boundInstanceEnvFile: string | null | undefined,
+): Promise<DatabaseAuthorityInfo> {
+    const normalizedRepoEnvFile = repoEnvFile && fs.existsSync(repoEnvFile) ? repoEnvFile : null;
+    const normalizedBoundEnvFile = boundInstanceEnvFile && fs.existsSync(boundInstanceEnvFile) ? boundInstanceEnvFile : null;
+    const repoEnv = normalizedRepoEnvFile ? await readEnvFile(normalizedRepoEnvFile) : null;
+    const boundEnv = normalizedBoundEnvFile ? await readEnvFile(normalizedBoundEnvFile) : null;
+    const repoEnvDatabaseUrl = repoEnv?.DATABASE_URL?.trim() || null;
+    const boundInstanceDatabaseUrl = boundEnv?.DATABASE_URL?.trim() || null;
+    return {
+        repoEnvFile: normalizedRepoEnvFile,
+        repoEnvDatabaseUrl,
+        boundInstanceDatabaseUrl,
+        mismatch: Boolean(
+            repoEnvDatabaseUrl
+            && boundInstanceDatabaseUrl
+            && repoEnvDatabaseUrl !== boundInstanceDatabaseUrl
+        ),
+    };
+}
+
 function detectVsCodeMcpWorkspaceCheck(projectEnvPath: string): DoctorCheck {
     const vscodeMcpPath = path.join(path.dirname(projectEnvPath), '.vscode', 'mcp.json');
     if (!fs.existsSync(vscodeMcpPath)) {
@@ -3254,6 +3830,9 @@ function collectDoctorRemediations(
         if (check.name === 'bound instance env' && check.status !== 'pass') {
             add('Run `iranti configure project` to refresh the project binding, or set IRANTI_INSTANCE_ENV in `.env.iranti` so doctor can inspect the bound local instance.');
         }
+        if (check.name === 'runtime root selection' && check.status !== 'pass') {
+            add('Rerun `iranti doctor` with `--root <runtime-root>` that matches the bound project instance, or refresh `.env.iranti` with `iranti configure project` if the binding is stale.');
+        }
         if (check.name === 'vscode mcp workspace' && check.status !== 'pass') {
             add('Run `iranti codex-setup` from the project root to scaffold `.vscode/mcp.json`, or add an `iranti` server entry there manually for VS Code MCP clients.');
         }
@@ -3303,15 +3882,14 @@ function resolveDoctorEnvTarget(args: ParsedArgs): DoctorEnvTarget {
         };
     }
 
-    const repoEnv = path.join(cwd, '.env');
-    const projectEnv = path.join(cwd, '.env.iranti');
-    if (fs.existsSync(repoEnv)) {
-        debugLog('Doctor target resolved from repo env.', { envFile: repoEnv });
-        return { envFile: repoEnv, envSource: 'repo' };
+    const discovered = findClosestDoctorEnvTarget(cwd);
+    if (discovered.envFile && discovered.envSource === 'repo') {
+        debugLog('Doctor target resolved from repo env.', { envFile: discovered.envFile });
+        return discovered;
     }
-    if (fs.existsSync(projectEnv)) {
-        debugLog('Doctor target resolved from project binding.', { envFile: projectEnv });
-        return { envFile: projectEnv, envSource: 'project-binding' };
+    if (discovered.envFile && discovered.envSource === 'project-binding') {
+        debugLog('Doctor target resolved from project binding.', { envFile: discovered.envFile });
+        return discovered;
     }
 
     debugLog('Doctor target resolution found no env file.', { cwd });
@@ -5674,9 +6252,38 @@ async function setupCommand(args: ParsedArgs): Promise<void> {
 
 async function doctorCommand(args: ParsedArgs): Promise<void> {
     const json = hasFlag(args, 'json');
+    const scope = normalizeScope(getFlag(args, 'scope'));
     const { envFile, envSource } = resolveDoctorEnvTarget(args);
+    const repoEnvFile = findClosestAncestorFile(process.cwd(), '.env');
+    const resolution = resolveInstallRootDetails(args, scope);
+    const discovery: DoctorDiscovery = {
+        selectedRuntimeRoot: resolution.root,
+        selectionSource: resolution.source,
+        selectionReason: describeRuntimeRootSource(resolution.source),
+        boundRuntimeRoot: null,
+        boundInstanceEnv: null,
+        projectBindingFile: null,
+        projectBindingSource: null,
+        rootMismatch: false,
+        otherRuntimeRoots: [],
+    };
 
     const checks: DoctorCheck[] = [];
+    let authority: OperatorAuthoritySummary = {
+        activeAuthority: summarizeActiveAuthority(envSource, null, null),
+        activeBindingSource: null,
+        activeBoundInstanceEnv: null,
+        activeDatabaseUrl: null,
+        activeDatabaseTarget: null,
+        repoDatabaseUrl: null,
+        repoDatabaseTarget: null,
+        repoDatabaseDiffers: false,
+        nearbyBindingSource: null,
+        nearbyBoundInstanceEnv: null,
+        nearbyBindingDatabaseUrl: null,
+        nearbyBindingDatabaseTarget: null,
+        nearbyBindingDiffers: false,
+    };
     const version = getPackageVersion();
     const pushEnvironmentChecks = async (env: Record<string, string>, prefix = ''): Promise<void> => {
         const databaseUrl = env.DATABASE_URL;
@@ -5711,7 +6318,7 @@ async function doctorCommand(args: ParsedArgs): Promise<void> {
 
         try {
             if (!detectPlaceholder(databaseUrl)) {
-                initDb(databaseUrl);
+                initDb(databaseUrl, { applicationName: 'iranti:cli:doctor' });
                 databaseInitializedForDoctor = true;
             }
             const backendName = resolveVectorBackendName({
@@ -5800,6 +6407,8 @@ async function doctorCommand(args: ParsedArgs): Promise<void> {
         const treatAsProjectBinding = envSource === 'project-binding'
             || path.basename(envFile).toLowerCase() === '.env.iranti'
             || (Boolean(env.IRANTI_URL?.trim()) && detectPlaceholder(env.DATABASE_URL));
+        let linkedInstanceEnvFile: string | null = null;
+        let linkedEnv: Record<string, string> | null = null;
         checks.push({
             name: 'environment file',
             status: 'pass',
@@ -5807,6 +6416,27 @@ async function doctorCommand(args: ParsedArgs): Promise<void> {
         });
 
         if (treatAsProjectBinding) {
+            const binding = await inspectProjectBinding(envFile);
+            const boundRuntimeRoot = binding.runtimeRoot ? path.resolve(binding.runtimeRoot) : null;
+            const selectedRuntimeRoot = path.resolve(resolution.root);
+            const otherRuntimeRoots = Array.from(new Set(
+                [boundRuntimeRoot]
+                    .filter((candidate): candidate is string => Boolean(candidate))
+                    .filter((candidate) => candidate !== selectedRuntimeRoot && fs.existsSync(candidate))
+            ));
+            discovery.boundRuntimeRoot = boundRuntimeRoot;
+            discovery.boundInstanceEnv = binding.instanceEnvFile;
+            discovery.projectBindingFile = binding.bindingFile;
+            discovery.projectBindingSource = 'doctor-target';
+            discovery.rootMismatch = Boolean(boundRuntimeRoot && boundRuntimeRoot !== selectedRuntimeRoot);
+            discovery.otherRuntimeRoots = otherRuntimeRoots;
+            checks.push({
+                name: 'runtime root selection',
+                status: discovery.rootMismatch ? 'warn' : 'pass',
+                detail: discovery.rootMismatch
+                    ? `Doctor selected runtime root ${selectedRuntimeRoot} (${describeRuntimeRootSource(resolution.source)}), but the project binding points at ${boundRuntimeRoot}.`
+                    : `Doctor selected runtime root ${selectedRuntimeRoot} (${describeRuntimeRootSource(resolution.source)}).`,
+            });
             checks.push(detectPlaceholder(env.IRANTI_URL)
                 ? {
                     name: 'project binding url',
@@ -5833,26 +6463,26 @@ async function doctorCommand(args: ParsedArgs): Promise<void> {
                     status: 'pass',
                     detail: 'IRANTI_API_KEY is present in .env.iranti.',
                 });
-            const linkedInstanceEnv = env.IRANTI_INSTANCE_ENV?.trim();
-            if (!linkedInstanceEnv) {
+            linkedInstanceEnvFile = env.IRANTI_INSTANCE_ENV?.trim() || null;
+            if (!linkedInstanceEnvFile) {
                 checks.push({
                     name: 'bound instance env',
                     status: 'warn',
                     detail: 'IRANTI_INSTANCE_ENV is not set in .env.iranti. Skipping database and provider checks for the bound instance.',
                 });
-            } else if (!fs.existsSync(linkedInstanceEnv)) {
+            } else if (!fs.existsSync(linkedInstanceEnvFile)) {
                 checks.push({
                     name: 'bound instance env',
                     status: 'warn',
-                    detail: `Linked instance env not found: ${linkedInstanceEnv}. Skipping database and provider checks for the bound instance.`,
+                    detail: `Linked instance env not found: ${linkedInstanceEnvFile}. Skipping database and provider checks for the bound instance.`,
                 });
             } else {
                 checks.push({
                     name: 'bound instance env',
                     status: 'pass',
-                    detail: `Using ${linkedInstanceEnv} for bound instance diagnostics.`,
+                    detail: `Using ${linkedInstanceEnvFile} for bound instance diagnostics.`,
                 });
-                const linkedEnv = await readEnvFile(linkedInstanceEnv);
+                linkedEnv = await readEnvFile(linkedInstanceEnvFile);
                 await pushEnvironmentChecks(linkedEnv, 'bound instance ');
             }
         } else {
@@ -5869,12 +6499,59 @@ async function doctorCommand(args: ParsedArgs): Promise<void> {
                     detail: 'IRANTI_API_KEY is present.',
                 });
         }
+
+        const nearbyProjectBindingFile = treatAsProjectBinding
+            ? null
+            : findClosestAncestorFile(path.dirname(envFile), '.env.iranti');
+        const nearbyBindingEnv = await readEnvFileIfExists(nearbyProjectBindingFile);
+        const nearbyBoundInstanceEnvFile = nearbyBindingEnv?.IRANTI_INSTANCE_ENV?.trim() || null;
+        const nearbyBoundInstanceEnv = await readEnvFileIfExists(nearbyBoundInstanceEnvFile);
+
+        authority = await buildOperatorAuthoritySummary({
+            envSource,
+            envFile,
+            env,
+            bindingFile: treatAsProjectBinding ? envFile : null,
+            boundInstanceEnvFile: linkedInstanceEnvFile,
+            boundInstanceEnv: linkedEnv,
+            repoEnvFile,
+            nearbyBindingFile: nearbyProjectBindingFile,
+            nearbyBoundInstanceEnvFile,
+            nearbyBoundInstanceEnv,
+        });
+        if (!treatAsProjectBinding && authority.nearbyBindingSource && authority.nearbyBindingDiffers) {
+            checks.push({
+                name: 'nearby project binding authority',
+                status: 'warn',
+                detail: `Repo env is the active doctor target, but nearby project binding ${authority.nearbyBindingSource} points at ${authority.nearbyBindingDatabaseTarget ?? 'an unknown database target'} via ${authority.nearbyBoundInstanceEnv ?? 'an unknown bound env'}. Direct DB checks against repo .env may miss facts stored in the bound instance DB.`,
+            });
+        }
     }
+
+    debugLog('Doctor authority summary resolved.', {
+        activeAuthority: authority.activeAuthority,
+        activeBindingSource: authority.activeBindingSource ?? null,
+        activeBoundInstanceEnv: authority.activeBoundInstanceEnv ?? null,
+        activeDatabaseTarget: authority.activeDatabaseTarget ?? null,
+        repoDatabaseTarget: authority.repoDatabaseTarget ?? null,
+        repoDatabaseDiffers: authority.repoDatabaseDiffers,
+        nearbyBindingSource: authority.nearbyBindingSource ?? null,
+        nearbyBindingDatabaseTarget: authority.nearbyBindingDatabaseTarget ?? null,
+        nearbyBindingDiffers: authority.nearbyBindingDiffers,
+    });
 
     const result = {
         version,
         envSource,
         envFile,
+        authority,
+        selectedRuntimeRoot: discovery.selectedRuntimeRoot,
+        selectedRuntimeRootSource: discovery.selectionSource,
+        boundRuntimeRoot: discovery.boundRuntimeRoot,
+        boundInstanceEnv: discovery.boundInstanceEnv,
+        rootMismatch: discovery.rootMismatch,
+        otherRuntimeRoots: discovery.otherRuntimeRoots,
+        discovery,
         status: summarizeStatus(checks),
         checks,
         remediations: collectDoctorRemediations(checks, envSource, envFile),
@@ -5896,6 +6573,19 @@ async function doctorCommand(args: ParsedArgs): Promise<void> {
             ? paint(result.status.toUpperCase(), 'yellow')
             : paint(result.status.toUpperCase(), 'red')}`);
     if (envFile) console.log(`  env     : ${envFile}`);
+    console.log(`  authority : ${authority.activeAuthority}`);
+    if (authority.activeBindingSource) console.log(`  binding   : ${authority.activeBindingSource}`);
+    if (authority.activeBoundInstanceEnv) console.log(`  bound env : ${authority.activeBoundInstanceEnv}`);
+    if (authority.activeDatabaseTarget) console.log(`  active db : ${authority.activeDatabaseTarget}`);
+    if (authority.activeDatabaseUrl) console.log(`  active url: ${authority.activeDatabaseUrl}`);
+    if (authority.repoDatabaseDiffers && authority.repoDatabaseTarget) {
+        console.log(`  repo db   : ${authority.repoDatabaseTarget} (repo .env differs)`);
+    }
+    if (authority.nearbyBindingDiffers) {
+        if (authority.nearbyBindingSource) console.log(`  nearby binding : ${authority.nearbyBindingSource}`);
+        if (authority.nearbyBoundInstanceEnv) console.log(`  nearby bound env: ${authority.nearbyBoundInstanceEnv}`);
+        if (authority.nearbyBindingDatabaseTarget) console.log(`  nearby db : ${authority.nearbyBindingDatabaseTarget} (binding differs)`);
+    }
     console.log('');
     for (const check of checks) {
         const marker = check.status === 'pass'
@@ -5932,6 +6622,24 @@ async function statusCommand(args: ParsedArgs): Promise<void> {
     const binding = projectEnv && fs.existsSync(projectEnv) ? await inspectProjectBinding(projectEnv) : null;
     const boundRuntimeRoot = binding?.runtimeRoot ?? null;
     const boundInstanceEnv = binding?.instanceEnvFile ?? null;
+    const projectBindingEnv = await readEnvFileIfExists(projectEnv);
+    const boundInstanceEnvMap = await readEnvFileIfExists(boundInstanceEnv);
+    const activeStatusEnv = projectEnv && fs.existsSync(projectEnv)
+        ? projectBindingEnv
+        : await readEnvFileIfExists(repoEnv);
+    const authority = await buildOperatorAuthoritySummary({
+        envSource: projectEnv && fs.existsSync(projectEnv) ? 'project-binding' : repoEnv && fs.existsSync(repoEnv) ? 'repo' : 'environment',
+        envFile: projectEnv && fs.existsSync(projectEnv)
+            ? projectEnv
+            : repoEnv && fs.existsSync(repoEnv)
+                ? repoEnv
+                : null,
+        env: activeStatusEnv,
+        bindingFile: projectEnv && fs.existsSync(projectEnv) ? projectEnv : null,
+        boundInstanceEnvFile: boundInstanceEnv,
+        boundInstanceEnv: boundInstanceEnvMap,
+        repoEnvFile: repoEnv,
+    });
     const rootMismatch = Boolean(boundRuntimeRoot && path.resolve(boundRuntimeRoot) !== path.resolve(root));
     const userInstallRuntimeRoot = fs.existsSync(path.join(resolution.userRoot, 'install.json')) ? resolution.userRoot : null;
     const systemInstallRuntimeRoot = fs.existsSync(path.join(resolution.systemRoot, 'install.json')) ? resolution.systemRoot : null;
@@ -5947,6 +6655,14 @@ async function statusCommand(args: ParsedArgs): Promise<void> {
     rows.push({ label: 'scope', value: scope });
     rows.push({ label: 'runtime_root', value: root });
     rows.push({ label: 'root_source', value: describeRuntimeRootSource(resolution.source) });
+    rows.push({ label: 'authority', value: authority.activeAuthority });
+    if (authority.activeBindingSource) rows.push({ label: 'binding_source', value: authority.activeBindingSource });
+    if (authority.activeBoundInstanceEnv) rows.push({ label: 'bound_instance_env', value: authority.activeBoundInstanceEnv });
+    if (authority.activeDatabaseTarget) rows.push({ label: 'active_db_target', value: authority.activeDatabaseTarget });
+    if (authority.activeDatabaseUrl) rows.push({ label: 'active_db_url', value: authority.activeDatabaseUrl });
+    if (authority.repoDatabaseDiffers && authority.repoDatabaseTarget) {
+        rows.push({ label: 'repo_db_target', value: `${authority.repoDatabaseTarget} (repo .env differs)` });
+    }
     if (boundRuntimeRoot) rows.push({ label: 'bound_root', value: boundRuntimeRoot });
     rows.push({ label: 'repo_env', value: repoEnv && fs.existsSync(repoEnv) ? repoEnv : '(missing)' });
     rows.push({ label: 'project_binding', value: projectEnv && fs.existsSync(projectEnv) ? projectEnv : '(missing)' });
@@ -5956,12 +6672,22 @@ async function statusCommand(args: ParsedArgs): Promise<void> {
     const instances = await collectRuntimeInstanceSummaries(root);
     const recommendedActions = Array.from(new Set(instances.flatMap((instance) => instance.repairHints)));
 
+    debugLog('Status authority summary resolved.', {
+        activeAuthority: authority.activeAuthority,
+        activeBindingSource: authority.activeBindingSource ?? null,
+        activeBoundInstanceEnv: authority.activeBoundInstanceEnv ?? null,
+        activeDatabaseTarget: authority.activeDatabaseTarget ?? null,
+        repoDatabaseTarget: authority.repoDatabaseTarget ?? null,
+        repoDatabaseDiffers: authority.repoDatabaseDiffers,
+    });
+
     if (json) {
         console.log(JSON.stringify({
             version: getPackageVersion(),
             scope,
             runtimeRoot: root,
             runtimeRootSource: resolution.source,
+            authority,
             discovery: {
                 selectedRuntimeRoot: root,
                 selectionSource: resolution.source,
@@ -6009,28 +6735,139 @@ async function statusCommand(args: ParsedArgs): Promise<void> {
         for (const instance of instances) {
             console.log(`  - ${instance.name} (port ${instance.port})`);
             console.log(`    env: ${instance.envFile}`);
-        console.log(`    meta: ${instance.metaFile}`);
-        console.log(`    config: ${describeInstanceConfig(instance.config)}`);
-        console.log(`    runtime: ${describeInstanceRuntime(instance.runtime)}`);
-        if (instance.repairHints.length > 0) {
-            console.log('    hints:');
-            for (const hint of instance.repairHints) {
-                console.log(`      - ${hint}`);
+            console.log(`    meta: ${instance.metaFile}`);
+            console.log(`    config: ${describeInstanceConfig(instance.config)}`);
+            console.log(`    runtime: ${describeInstanceRuntime(instance.runtime)}`);
+            if (instance.projectCount === 0) {
+                console.log('    projects: none bound');
+            } else {
+                console.log(`    projects: ${instance.projectCount}`);
+                for (const project of instance.boundProjects) {
+                    console.log(`      - ${project.projectPath} (${project.agentId}, ${project.mode})`);
+                }
+            }
+            if (instance.repairHints.length > 0) {
+                console.log('    hints:');
+                for (const hint of instance.repairHints) {
+                    console.log(`      - ${hint}`);
+                }
+            }
+            if (instance.runtime.state?.healthUrl) {
+                console.log(`    health: ${instance.runtime.state.healthUrl}`);
             }
         }
-        if (instance.runtime.state?.healthUrl) {
-            console.log(`    health: ${instance.runtime.state.healthUrl}`);
-        }
-    }
 
-    if (recommendedActions.length > 0) {
-        console.log('');
-        console.log('Suggested fixes:');
-        for (const action of recommendedActions) {
-            console.log(`  - ${action}`);
+        if (recommendedActions.length > 0) {
+            console.log('');
+            console.log('Suggested fixes:');
+            for (const action of recommendedActions) {
+                console.log(`  - ${action}`);
+            }
         }
     }
 }
+
+function handoffWriteProperties(key: string): Record<string, unknown> {
+    switch (key) {
+        case 'status':
+            return {
+                memoryScope: 'project',
+                capturePhase: 'manual',
+                durableClass: 'handoff_status',
+                canonicalKey: 'status',
+                mergeStrategy: 'replace',
+                ...buildSemanticFactTags({
+                    memoryScope: 'project',
+                    durableClass: 'handoff_status',
+                    mergeStrategy: 'replace',
+                    extraTags: ['handoff', 'task_memory'],
+                }),
+            };
+        case 'next_step':
+            return {
+                memoryScope: 'project',
+                capturePhase: 'manual',
+                durableClass: 'next_step',
+                canonicalKey: 'next_step',
+                mergeStrategy: 'replace',
+                ...buildSemanticFactTags({
+                    memoryScope: 'project',
+                    durableClass: 'next_step',
+                    mergeStrategy: 'replace',
+                    extraTags: ['handoff', 'task_memory'],
+                }),
+            };
+        case 'current_owner':
+            return {
+                memoryScope: 'project',
+                capturePhase: 'manual',
+                durableClass: 'owner',
+                canonicalKey: 'current_owner',
+                mergeStrategy: 'replace',
+                ...buildSemanticFactTags({
+                    memoryScope: 'project',
+                    durableClass: 'owner',
+                    mergeStrategy: 'replace',
+                    extraTags: ['handoff', 'task_memory'],
+                }),
+            };
+        case 'blockers':
+            return {
+                memoryScope: 'project',
+                capturePhase: 'manual',
+                durableClass: 'open_risks',
+                canonicalKey: 'blockers',
+                mergeStrategy: 'replace',
+                ...buildSemanticFactTags({
+                    memoryScope: 'project',
+                    durableClass: 'open_risks',
+                    mergeStrategy: 'replace',
+                    extraTags: ['handoff', 'task_memory', 'blockers'],
+                }),
+            };
+        case 'artifacts':
+            return {
+                memoryScope: 'project',
+                capturePhase: 'manual',
+                durableClass: 'artifact',
+                canonicalKey: 'artifacts',
+                mergeStrategy: 'replace',
+                ...buildSemanticFactTags({
+                    memoryScope: 'project',
+                    durableClass: 'artifact',
+                    mergeStrategy: 'replace',
+                    extraTags: ['handoff', 'task_memory'],
+                }),
+            };
+        case 'active_handoff_task':
+            return {
+                memoryScope: 'project',
+                capturePhase: 'manual',
+                durableClass: 'handoff_task',
+                canonicalKey: 'active_handoff_task',
+                mergeStrategy: 'replace',
+                ...buildSemanticFactTags({
+                    memoryScope: 'project',
+                    durableClass: 'handoff_task',
+                    mergeStrategy: 'replace',
+                    extraTags: ['handoff', 'project_memory'],
+                }),
+            };
+        default:
+            return {
+                memoryScope: 'project',
+                capturePhase: 'manual',
+                durableClass: 'decision',
+                canonicalKey: key,
+                mergeStrategy: 'replace',
+                ...buildSemanticFactTags({
+                    memoryScope: 'project',
+                    durableClass: 'decision',
+                    mergeStrategy: 'replace',
+                    extraTags: ['handoff', 'task_memory'],
+                }),
+            };
+    }
 }
 
 async function collectRuntimeInstanceSummaries(root: string): Promise<Array<{
@@ -6038,6 +6875,8 @@ async function collectRuntimeInstanceSummaries(root: string): Promise<Array<{
     port: string;
     envFile: string;
     metaFile: string;
+    boundProjects: InstanceProjectBindingSummary[];
+    projectCount: number;
     config: InstanceConfigSummary;
     runtime: InstanceRuntimeSummary;
     repairHints: string[];
@@ -6048,6 +6887,8 @@ async function collectRuntimeInstanceSummaries(root: string): Promise<Array<{
         port: string;
         envFile: string;
         metaFile: string;
+        boundProjects: InstanceProjectBindingSummary[];
+        projectCount: number;
         config: InstanceConfigSummary;
         runtime: InstanceRuntimeSummary;
         repairHints: string[];
@@ -6060,6 +6901,7 @@ async function collectRuntimeInstanceSummaries(root: string): Promise<Array<{
     for (const entry of entries.filter((value) => value.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
         const { envFile, metaFile } = instancePaths(root, entry.name);
         const config = await inspectInstanceConfig(root, entry.name);
+        const boundProjects = readInstanceProjectRegistry(root, entry.name);
         let port = '(unknown)';
         if (config.state.envPresent && config.state.envReadable) {
             try {
@@ -6075,6 +6917,8 @@ async function collectRuntimeInstanceSummaries(root: string): Promise<Array<{
               port,
               envFile: config.state.envPresent ? envFile : '(missing)',
               metaFile: config.state.metaPresent ? metaFile : '(missing)',
+              boundProjects,
+              projectCount: boundProjects.length,
               config,
               runtime,
               repairHints: buildInstanceRepairHints(entry.name, config, runtime),
@@ -6360,6 +7204,10 @@ async function createInstanceCommand(args: ParsedArgs): Promise<void> {
 
     const { instanceDir, envFile, metaFile } = instancePaths(root, name);
     const instanceAlreadyExisted = fs.existsSync(instanceDir);
+    const existingEnv = fs.existsSync(envFile)
+        ? await readEnvFile(envFile).catch(() => ({} as Record<string, string>))
+        : {};
+    const apiKeyPepper = resolveInstanceApiKeyPepper(existingEnv.IRANTI_API_KEY_PEPPER);
     if (instanceAlreadyExisted && !hasFlag(args, 'force')) {
         throw new Error(`Instance '${name}' already exists at ${instanceDir}. Use --force to overwrite.`);
     }
@@ -6386,17 +7234,25 @@ async function createInstanceCommand(args: ParsedArgs): Promise<void> {
     await ensureDir(path.join(instanceDir, 'escalation', 'resolved'));
     await ensureDir(path.join(instanceDir, 'escalation', 'archived'));
 
-    await writeText(envFile, makeInstanceEnv(name, port, dbUrl, apiKey, instanceDir));
+    await writeText(envFile, makeInstanceEnv(name, port, dbUrl, apiKey, instanceDir, apiKeyPepper));
     await upsertEnvFile(envFile, {
+        IRANTI_API_KEY_PEPPER: apiKeyPepper,
         LLM_PROVIDER: provider,
         ...(providerKey && providerKeyName ? { [providerKeyName]: providerKey } : {}),
     });
+    const resolvedDatabaseIntent = resolveInstanceDatabaseIntent({
+        instanceName: name,
+        env: { DATABASE_URL: dbUrl },
+        meta: null,
+        dependencies: [],
+    }).intent;
     const meta: InstanceMeta = {
         name,
         createdAt: new Date().toISOString(),
         port,
         envFile,
         instanceDir,
+        ...(resolvedDatabaseIntent ? { databaseIntent: resolvedDatabaseIntent } : {}),
     };
     await writeJson(metaFile, meta);
 
@@ -6466,6 +7322,7 @@ async function showInstanceCommand(args: ParsedArgs): Promise<void> {
         : {};
     const meta = await readInstanceMetaFile(instancePaths(root, name).metaFile);
     const dependencies = parseInstanceDependencies(meta?.dependencies).dependencies;
+    const boundProjects = readInstanceProjectRegistry(root, name);
     const databaseIntent = resolveInstanceDatabaseIntent({
         instanceName: name,
         env,
@@ -6485,6 +7342,12 @@ async function showInstanceCommand(args: ParsedArgs): Promise<void> {
     console.log(`  esc : ${env.IRANTI_ESCALATION_DIR ?? '(missing)'}`);
     if (dependencies.length > 0) {
         console.log(`  deps: ${dependencies.map((dependency) => describeInstanceDependency(dependency)).join(', ')}`);
+    }
+    if (boundProjects.length > 0) {
+        console.log('  projects:');
+        for (const project of boundProjects) {
+            console.log(`    - ${project.projectPath} (${project.agentId}, ${project.mode})`);
+        }
     }
     console.log(`  runtime: ${describeInstanceRuntime(runtime)}`);
     if (runtime.state?.healthUrl) {
@@ -6796,6 +7659,10 @@ async function configureInstanceCommand(args: ParsedArgs): Promise<void> {
         updates[envKey] = undefined;
     }
 
+    if (!env.IRANTI_API_KEY_PEPPER?.trim()) {
+        updates.IRANTI_API_KEY_PEPPER = resolveInstanceApiKeyPepper();
+    }
+
     let nextDependencies = currentDependencies;
     if (clearDockerContainer) {
         nextDependencies = currentDependencies.filter((dependency) => dependency.kind !== 'docker-container');
@@ -7043,7 +7910,7 @@ async function authCreateKeyCommand(args: ParsedArgs): Promise<void> {
 
     const scopes = scopesRaw.split(',').map((value) => value.trim()).filter(Boolean);
 
-    initDb(env.DATABASE_URL);
+    initDb(env.DATABASE_URL, { applicationName: 'iranti:cli:auth_create' });
     const created = await createOrRotateApiKey({
         keyId,
         owner,
@@ -7113,7 +7980,7 @@ async function authListKeysCommand(args: ParsedArgs): Promise<void> {
         throw new Error(`Instance '${instanceName}' still has a placeholder DATABASE_URL. Update ${envFile} first.`);
     }
 
-    initDb(env.DATABASE_URL);
+    initDb(env.DATABASE_URL, { applicationName: 'iranti:cli:auth_list' });
     const keys = await listApiKeys();
     if (hasFlag(args, 'json')) {
         console.log(JSON.stringify({ instance: instanceName, keys }, null, 2));
@@ -7146,7 +8013,7 @@ async function authRevokeKeyCommand(args: ParsedArgs): Promise<void> {
         throw new Error(`Instance '${instanceName}' still has a placeholder DATABASE_URL. Update ${envFile} first.`);
     }
 
-    initDb(env.DATABASE_URL);
+    initDb(env.DATABASE_URL, { applicationName: 'iranti:cli:auth_revoke' });
     const revoked = await revokeApiKey(keyId);
     if (!revoked) {
         throw new Error(`API key not found: ${keyId}`);
@@ -7290,6 +8157,54 @@ async function attendCommand(args: ParsedArgs): Promise<void> {
     }
 }
 
+async function issuesCommand(args: ParsedArgs): Promise<void> {
+    try {
+        const json = hasFlag(args, 'json');
+        const target = await resolveAttendantCliTarget(args);
+        const entity = resolveIssueEntity(args);
+        const statusFilter = resolveIssueStatusFilter(args);
+        const allFacts = await target.iranti.queryAll(entity);
+        const parsedIssueFacts = allFacts
+            .map(parseIssueListFact)
+            .filter((result) => result.item || result.invalid);
+        const canonicalItems = parsedIssueFacts
+            .map((result) => result.item)
+            .filter((item): item is IssueListItem => Boolean(item));
+        const invalidIssueLikeFacts = parsedIssueFacts
+            .map((result) => result.invalid)
+            .filter((item): item is InvalidIssueFact => Boolean(item))
+            .sort((a, b) => a.key.localeCompare(b.key));
+        const inventoryCounts = {
+            open: canonicalItems.filter((item) => item.status === 'open').length,
+            resolved: canonicalItems.filter((item) => item.status === 'resolved').length,
+            invalid: invalidIssueLikeFacts.length,
+            canonicalTotal: canonicalItems.length,
+            issueLikeTotal: canonicalItems.length + invalidIssueLikeFacts.length,
+        };
+        const items = canonicalItems
+            .filter((item) => !statusFilter || item.status === statusFilter)
+            .sort(compareIssueListItems);
+        await flushStaffEventEmitter().catch(() => undefined);
+
+        if (json) {
+            console.log(JSON.stringify({
+                entity,
+                status: statusFilter,
+                total: items.length,
+                counts: inventoryCounts,
+                invalidIssueLikeFacts,
+                items,
+            }, null, 2));
+            return;
+        }
+
+        printIssuesResult(entity, items, statusFilter, inventoryCounts, invalidIssueLikeFacts);
+    } finally {
+        await flushStaffEventEmitter().catch(() => undefined);
+        await disconnectDb().catch(() => undefined);
+    }
+}
+
 async function handoffCommand(args: ParsedArgs): Promise<void> {
     try {
         const json = hasFlag(args, 'json');
@@ -7384,6 +8299,7 @@ async function handoffCommand(args: ParsedArgs): Promise<void> {
                 confidence,
                 source,
                 agent: target.agentId,
+                properties: handoffWriteProperties(write.key),
             });
         }
         await flushStaffEventEmitter().catch(() => undefined);
@@ -7412,7 +8328,7 @@ async function handoffCommand(args: ParsedArgs): Promise<void> {
 function printClaudeSetupHelp(): void {
     console.log([
         'Scaffold Claude Code MCP and hook files for the current project.',
-        'Use this when a bound repo should be ready for Claude Code without hand-editing `.mcp.json`, `.vscode/mcp.json`, or `.claude/settings.local.json`.',
+        'Use this when a bound repo should be ready for Claude Code without hand-editing `.mcp.json`, `.vscode/mcp.json`, `.claude/settings.local.json`, or `CLAUDE.md`.',
         '',
         'Usage:',
         '  iranti claude-setup [path] [--project-env <path>] [--force]',
@@ -7426,9 +8342,10 @@ function printClaudeSetupHelp(): void {
         '',
         'Notes:',
         '  - Expects a project binding at .env.iranti unless --project-env is supplied.',
-        '  - Writes .mcp.json, .vscode/mcp.json, and .claude/settings.local.json.',
+        '  - Writes .mcp.json, .vscode/mcp.json, .claude/settings.local.json, and a local `CLAUDE.md` Iranti protocol block.',
         '  - Adds the Iranti MCP server to existing .mcp.json / .vscode/mcp.json files without removing other servers.',
         '  - Leaves existing Claude hook files untouched unless --force is supplied.',
+        '  - The generated protocol block explicitly requires handshake at session start, attend before reply and before/after discovery, checkpointing at natural pauses/interrupted work, and durable writes after confirmed findings.',
         '',
         'Scan mode (--scan):',
         '  - Scans immediate subdirectories of the given dir by default.',
@@ -7659,9 +8576,12 @@ async function claudeSetupCommand(args: ParsedArgs): Promise<void> {
     console.log(`  mcp       ${path.join(projectPath, '.mcp.json')}`);
     console.log(`  vscode    ${path.join(projectPath, '.vscode', 'mcp.json')}`);
     console.log(`  settings  ${path.join(projectPath, '.claude', 'settings.local.json')}`);
-    console.log(`  mcp status      ${result.mcp}`);
-    console.log(`  vscode status   ${result.vscodeMcp}`);
-    console.log(`  settings status ${result.settings}`);
+    console.log(`  claude.md ${path.join(projectPath, 'CLAUDE.md')}`);
+    console.log(`  mcp status        ${result.mcp}`);
+    console.log(`  vscode status     ${result.vscodeMcp}`);
+    console.log(`  settings status   ${result.settings}`);
+    console.log(`  claude.md status  ${result.claudeMd}`);
+    console.log(`  memory closeout   ${result.closeout.status} (${result.closeout.detail})`);
     console.log(`${infoLabel()} Next: open Claude Code in this project and verify Iranti tools are available.`);
 }
 
@@ -7771,6 +8691,10 @@ function printAttendHelp(): void {
     renderAttendHelp({ sectionTitle, commandText });
 }
 
+function printIssuesHelp(): void {
+    renderIssuesHelp({ sectionTitle, commandText });
+}
+
 function printHandoffHelp(): void {
     renderHandoffHelp({ sectionTitle, commandText });
 }
@@ -7787,8 +8711,335 @@ function printProviderKeyHelp(): void {
     renderProviderKeyHelp({ sectionTitle, commandText });
 }
 
+function printMcpHelp(): void {
+    console.log([
+        'MCP server and maintenance commands.',
+        'Use this when the stdio MCP server should be started directly, or when you need to inspect and clean stale MCP wrapper/server pairs.',
+        '',
+        'Usage:',
+        '  iranti mcp',
+        '  iranti mcp cleanup [--dry-run] [--json]',
+        '',
+        'Notes:',
+        '  - `iranti mcp` starts the stdio MCP server for Claude, Codex, or another MCP client.',
+        '  - `iranti mcp cleanup` only removes stale launcher/server pairs that no longer have a live host ancestor.',
+        '  - Active chains still rooted in `claude.exe` or `codex.exe` are reported but not killed.',
+        '  - Current implementation is tuned for Windows process trees.',
+    ].join('\n'));
+}
+
+function isMcpLauncherCommand(commandLine: string | undefined): boolean {
+    if (!commandLine) return false;
+    const lower = commandLine.toLowerCase();
+    return lower.includes('\\node_modules\\iranti\\bin\\iranti.js')
+        && /\bmcp\b/.test(lower);
+}
+
+function isMcpChildCommand(commandLine: string | undefined): boolean {
+    if (!commandLine) return false;
+    return commandLine.toLowerCase().includes('\\dist\\scripts\\iranti-mcp.js');
+}
+
+function collectWindowsProcessSnapshot(): ProcessSnapshotRow[] {
+    const probe = runCommandCapture('powershell', [
+        '-NoProfile',
+        '-Command',
+        'Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine | ConvertTo-Json -Compress',
+    ]);
+    if (probe.status !== 0) {
+        throw cliError(
+            'IRANTI_MCP_CLEANUP_PROBE_FAILED',
+            'Failed to inspect Windows process state for MCP cleanup.',
+            ['Retry with `--debug` to inspect the PowerShell probe output.'],
+            { stderr: probe.stderr.trim() || null }
+        );
+    }
+
+    const payload = JSON.parse(probe.stdout) as Array<Record<string, unknown>> | Record<string, unknown>;
+    const rows = Array.isArray(payload) ? payload : [payload];
+    return rows.map((row) => ({
+        pid: Number(row.ProcessId ?? 0),
+        parentPid: row.ParentProcessId === null || row.ParentProcessId === undefined
+            ? null
+            : Number(row.ParentProcessId),
+        name: String(row.Name ?? ''),
+        commandLine: String(row.CommandLine ?? ''),
+    })).filter((row) => Number.isFinite(row.pid) && row.pid > 0);
+}
+
+function summarizeMcpCleanupCounts(candidates: McpCleanupCandidate[]): Record<McpCleanupCandidateStatus, number> {
+    return {
+        stale_no_host_ancestor: candidates.filter((candidate) => candidate.status === 'stale_no_host_ancestor').length,
+        stale_shell_no_host: candidates.filter((candidate) => candidate.status === 'stale_shell_no_host').length,
+        stale_child_parent_missing: candidates.filter((candidate) => candidate.status === 'stale_child_parent_missing').length,
+        stale_launcher_only: candidates.filter((candidate) => candidate.status === 'stale_launcher_only').length,
+        attached_claude: candidates.filter((candidate) => candidate.status === 'attached_claude').length,
+        attached_codex: candidates.filter((candidate) => candidate.status === 'attached_codex').length,
+        attached_or_uncertain: candidates.filter((candidate) => candidate.status === 'attached_or_uncertain').length,
+    };
+}
+
+function buildMcpCleanupReport(rows: ProcessSnapshotRow[]): McpCleanupReport {
+    const protectedPids = currentProcessFamilyPids();
+    const index = new Map<number, ProcessSnapshotRow>();
+    for (const row of rows) {
+        index.set(row.pid, row);
+    }
+
+    const warnings: string[] = [];
+    const candidates: McpCleanupCandidate[] = [];
+    const matchedLaunchers = new Set<number>();
+    const childByLauncher = new Map<number, ProcessSnapshotRow>();
+
+    for (const row of rows) {
+        if (row.name.toLowerCase() !== 'node.exe') continue;
+        if (!isMcpChildCommand(row.commandLine)) continue;
+        if (protectedPids.has(row.pid)) continue;
+
+        const parent = row.parentPid ? index.get(row.parentPid) : undefined;
+        if (!parent) {
+            candidates.push({
+                status: 'stale_child_parent_missing',
+                childPid: row.pid,
+                reason: 'MCP child process has no live launcher parent.',
+            });
+            continue;
+        }
+
+        if (!isMcpLauncherCommand(parent.commandLine)) {
+            candidates.push({
+                status: 'attached_or_uncertain',
+                childPid: row.pid,
+                reason: 'MCP child process is attached to a parent that is not a recognized Iranti MCP launcher.',
+            });
+            continue;
+        }
+
+        matchedLaunchers.add(parent.pid);
+        childByLauncher.set(parent.pid, row);
+        if (protectedPids.has(parent.pid)) {
+            candidates.push({
+                status: 'attached_or_uncertain',
+                launcherPid: parent.pid,
+                childPid: row.pid,
+                reason: 'Skipping the current CLI process family.',
+            });
+            continue;
+        }
+
+        const grand = parent.parentPid ? index.get(parent.parentPid) : undefined;
+        const great = grand?.parentPid ? index.get(grand.parentPid) : undefined;
+        const grandName = grand?.name.toLowerCase() ?? '';
+        const greatName = great?.name.toLowerCase() ?? '';
+
+        if (!grand) {
+            candidates.push({
+                status: 'stale_no_host_ancestor',
+                launcherPid: parent.pid,
+                childPid: row.pid,
+                reason: 'Launcher parent exists, but no live host ancestor remains.',
+            });
+            continue;
+        }
+
+        if (grandName === 'cmd.exe' && !great) {
+            candidates.push({
+                status: 'stale_shell_no_host',
+                launcherPid: parent.pid,
+                childPid: row.pid,
+                reason: 'Launcher is still wrapped by cmd.exe, but the host process above cmd.exe is gone.',
+            });
+            continue;
+        }
+
+        if (grandName === 'cmd.exe' && greatName === 'claude.exe') {
+            candidates.push({
+                status: 'attached_claude',
+                launcherPid: parent.pid,
+                childPid: row.pid,
+                host: 'claude',
+                reason: 'Chain is still rooted in claude.exe.',
+            });
+            continue;
+        }
+
+        if (grandName === 'cmd.exe' && greatName === 'codex.exe') {
+            candidates.push({
+                status: 'attached_codex',
+                launcherPid: parent.pid,
+                childPid: row.pid,
+                host: 'codex',
+                reason: 'Chain is still rooted in codex.exe.',
+            });
+            continue;
+        }
+
+        candidates.push({
+            status: 'attached_or_uncertain',
+            launcherPid: parent.pid,
+            childPid: row.pid,
+            reason: 'Launcher/server pair still has a live ancestor that is not a known stale shape.',
+        });
+    }
+
+    for (const row of rows) {
+        if (row.name.toLowerCase() !== 'node.exe') continue;
+        if (!isMcpLauncherCommand(row.commandLine)) continue;
+        if (matchedLaunchers.has(row.pid) || protectedPids.has(row.pid)) continue;
+
+        const grand = row.parentPid ? index.get(row.parentPid) : undefined;
+        const great = grand?.parentPid ? index.get(grand.parentPid) : undefined;
+        const grandName = grand?.name.toLowerCase() ?? '';
+        const greatName = great?.name.toLowerCase() ?? '';
+        if (!grand) {
+            candidates.push({
+                status: 'stale_launcher_only',
+                launcherPid: row.pid,
+                reason: 'Launcher remains alive without a child or live host ancestor.',
+            });
+        } else if (grandName === 'cmd.exe' && !great) {
+            candidates.push({
+                status: 'stale_launcher_only',
+                launcherPid: row.pid,
+                reason: 'Launcher is still wrapped by cmd.exe, but the host process above cmd.exe is gone.',
+            });
+        }
+    }
+
+    const safeStatuses = new Set<McpCleanupCandidateStatus>([
+        'stale_no_host_ancestor',
+        'stale_shell_no_host',
+        'stale_child_parent_missing',
+        'stale_launcher_only',
+    ]);
+
+    const safeCandidates = candidates.filter((candidate) => safeStatuses.has(candidate.status));
+    const skippedCandidates = candidates.filter((candidate) => !safeStatuses.has(candidate.status));
+
+    if (safeCandidates.length === 0) {
+        warnings.push('No stale MCP launcher/server pairs were found with the current safe cleanup rule.');
+    }
+
+    return {
+        platform: process.platform,
+        supported: process.platform === 'win32',
+        dryRun: true,
+        counts: summarizeMcpCleanupCounts(candidates),
+        safeCandidates,
+        skippedCandidates,
+        cleaned: [],
+        warnings,
+    };
+}
+
+function printMcpCleanupReport(report: McpCleanupReport): void {
+    console.log(sectionTitle('MCP Cleanup'));
+    if (!report.supported) {
+        console.log(`${warnLabel()} MCP cleanup is currently supported on Windows only.`);
+        return;
+    }
+
+    console.log(`  safe stale candidates   ${report.safeCandidates.length}`);
+    console.log(`  attached claude         ${report.counts.attached_claude}`);
+    console.log(`  attached codex          ${report.counts.attached_codex}`);
+    console.log(`  other live / uncertain  ${report.counts.attached_or_uncertain}`);
+    console.log(`  cleaned entries         ${report.cleaned.length}`);
+    console.log(`  mode                    ${report.dryRun ? 'dry-run' : 'execute'}`);
+    console.log('');
+
+    if (report.safeCandidates.length > 0) {
+        console.log(sectionTitle('Safe Targets'));
+        for (const candidate of report.safeCandidates) {
+            const ids = [
+                candidate.launcherPid ? `launcher=${candidate.launcherPid}` : null,
+                candidate.childPid ? `child=${candidate.childPid}` : null,
+            ].filter((value): value is string => Boolean(value));
+            console.log(`  ${commandText(candidate.status)} ${ids.join(' ')} - ${candidate.reason}`);
+        }
+        console.log('');
+    }
+
+    if (report.skippedCandidates.length > 0) {
+        console.log(sectionTitle('Skipped Targets'));
+        for (const candidate of report.skippedCandidates) {
+            const ids = [
+                candidate.launcherPid ? `launcher=${candidate.launcherPid}` : null,
+                candidate.childPid ? `child=${candidate.childPid}` : null,
+            ].filter((value): value is string => Boolean(value));
+            console.log(`  ${commandText(candidate.status)} ${ids.join(' ')} - ${candidate.reason}`);
+        }
+        console.log('');
+    }
+
+    for (const warning of report.warnings) {
+        console.log(`${warnLabel()} ${warning}`);
+    }
+}
+
+async function mcpCleanupCommand(args: ParsedArgs): Promise<void> {
+    const json = hasFlag(args, 'json');
+    const dryRun = hasFlag(args, 'dry-run');
+
+    if (process.platform !== 'win32') {
+        const report: McpCleanupReport = {
+            platform: process.platform,
+            supported: false,
+            dryRun,
+            counts: {
+                stale_no_host_ancestor: 0,
+                stale_shell_no_host: 0,
+                stale_child_parent_missing: 0,
+                stale_launcher_only: 0,
+                attached_claude: 0,
+                attached_codex: 0,
+                attached_or_uncertain: 0,
+            },
+            safeCandidates: [],
+            skippedCandidates: [],
+            cleaned: [],
+            warnings: ['MCP cleanup is currently implemented for Windows process trees only.'],
+        };
+        if (json) {
+            console.log(JSON.stringify(report, null, 2));
+            return;
+        }
+        printMcpCleanupReport(report);
+        return;
+    }
+
+    const report = buildMcpCleanupReport(collectWindowsProcessSnapshot());
+    report.dryRun = dryRun;
+
+    if (!dryRun) {
+        const cleaned = new Set<string>();
+        for (const candidate of report.safeCandidates) {
+            if (candidate.childPid && !cleaned.has(`child:${candidate.childPid}`)) {
+                const proc = runCommandCapture('powershell', ['-NoProfile', '-Command', `Stop-Process -Id ${candidate.childPid} -Force -ErrorAction SilentlyContinue`]);
+                if (proc.status === 0) {
+                    report.cleaned.push({ pid: candidate.childPid, role: 'child' });
+                    cleaned.add(`child:${candidate.childPid}`);
+                }
+            }
+            if (candidate.launcherPid && !cleaned.has(`launcher:${candidate.launcherPid}`)) {
+                const proc = runCommandCapture('powershell', ['-NoProfile', '-Command', `Stop-Process -Id ${candidate.launcherPid} -Force -ErrorAction SilentlyContinue`]);
+                if (proc.status === 0) {
+                    report.cleaned.push({ pid: candidate.launcherPid, role: 'launcher' });
+                    cleaned.add(`launcher:${candidate.launcherPid}`);
+                }
+            }
+        }
+    }
+
+    if (json) {
+        console.log(JSON.stringify(report, null, 2));
+        return;
+    }
+    printMcpCleanupReport(report);
+}
+
 async function main(): Promise<void> {
     const args = parseArgs(process.argv.slice(2));
+    ACTIVE_PARSED_ARGS = args;
     setCliDebugFlags(args);
     debugLog('CLI invocation started.', {
         command: args.command,
@@ -8036,6 +9287,15 @@ async function main(): Promise<void> {
         return;
     }
 
+    if (args.command === 'issues') {
+        if (hasFlag(args, 'help')) {
+            printIssuesHelp();
+            return;
+        }
+        await issuesCommand(args);
+        return;
+    }
+
     if (args.command === 'handoff') {
         if (hasFlag(args, 'help')) {
             printHandoffHelp();
@@ -8064,6 +9324,26 @@ async function main(): Promise<void> {
     }
 
     if (args.command === 'mcp') {
+        if (!args.subcommand || args.subcommand === 'server') {
+            if (hasFlag(args, 'help')) {
+                printMcpHelp();
+                return;
+            }
+            await handoffToScript('iranti-mcp', args.subcommand === 'server' ? process.argv.slice(4) : process.argv.slice(3));
+            return;
+        }
+        if (args.subcommand === 'cleanup') {
+            if (hasFlag(args, 'help')) {
+                printMcpHelp();
+                return;
+            }
+            await mcpCleanupCommand(args);
+            return;
+        }
+        if (args.subcommand === 'help' || args.subcommand === '--help') {
+            printMcpHelp();
+            return;
+        }
         await handoffToScript('iranti-mcp', process.argv.slice(3));
         return;
     }
@@ -8113,24 +9393,42 @@ main().then(async () => {
     try {
         await flushStaffEventEmitter();
     } catch {}
-    const formattedError = rewriteCommandError('iranti', err);
-    const message = formattedError.message;
-    const code = err instanceof CliError ? err.code : null;
+    const failure = normalizeCliFailure(err);
+    const code = failure.code ?? 'IRANTI_COMMAND_FAILED';
+    const message = failure.message;
+    const hints = failure instanceof CliError ? failure.hints : (failure.hints ?? []);
+    const details = failure instanceof CliError ? failure.details : undefined;
+
+    if (wantsJsonErrorEnvelope(ACTIVE_PARSED_ARGS)) {
+        const payload: Record<string, unknown> = {
+            ok: false,
+            error: {
+                code,
+                message,
+                hints,
+                ...(details && Object.keys(details).length > 0 ? { details } : {}),
+                ...(CLI_DEBUG && failure.stack ? { stack: failure.stack } : {}),
+            },
+        };
+        process.stderr.write(`${JSON.stringify(payload, null, 2)}\n`);
+        process.exit(1);
+    }
+
     console.error(`${failLabel('ERROR')}${code ? ` [${code}]` : ''} ${message}`);
-    if (err instanceof CliError && err.hints.length > 0) {
+    if (hints.length > 0) {
         console.error('');
         console.error('Possible fixes:');
-        for (const hint of err.hints) {
+        for (const hint of hints) {
             console.error(`  - ${hint}`);
         }
     }
-    if (CLI_DEBUG && err instanceof CliError && err.details && Object.keys(err.details).length > 0) {
+    if (CLI_DEBUG && details && Object.keys(details).length > 0) {
         console.error('');
-        console.error(`${paint('[DEBUG]', 'gray')} ${JSON.stringify(err.details, null, 2)}`);
+        console.error(`${paint('[DEBUG]', 'gray')} ${JSON.stringify(details, null, 2)}`);
     }
-    if (CLI_DEBUG && formattedError.stack) {
+    if (CLI_DEBUG && failure.stack) {
         console.error('');
-        console.error(formattedError.stack);
+        console.error(failure.stack);
     }
     process.exit(1);
 });

@@ -6,7 +6,7 @@ const DATABASE_URL = process.env.DATABASE_URL || 'postgresql://postgres:postgres
 async function seedPolicy() {
     console.log('📋 Seeding conflict policy...\n');
     
-    initDb(DATABASE_URL);
+    initDb(DATABASE_URL, { applicationName: 'iranti:script:seed_policy' });
     
     const policy = {
         minConfidenceToOverwrite: 10,

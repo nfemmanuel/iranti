@@ -42,7 +42,9 @@ Turn compatibility from an informal expectation into a tested release gate.
 - Standard release-note wording for deprecated API or config surfaces.
 
 9. Benchmark and site alignment checks
-- Ensure benchmark/site/control-plane repos do not depend on stale product-contract assumptions.
+- Add a repo-local downstream drift audit for sibling repos.
+- Current 2026-04-02 blocker: `iranti-control-plane` still documents retired CLI commands (`iranti bind`, `iranti init`, `iranti config`, `iranti setup --mcp`) in active workflow/reference docs.
+- Current 2026-04-02 evidence: `npm run test:contracts-downstream` passes for `iranti-site` and `iranti-benchmarking`, but fails for `iranti-control-plane/WORKFLOW_MATRIX.md` and `iranti-control-plane/docs/reference/api.md`.
 
 ## Priority 2
 

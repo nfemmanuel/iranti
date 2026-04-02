@@ -75,7 +75,7 @@ async function setup() {
     const dbUrl = process.env.DATABASE_URL;
     if (dbUrl) {
         process.env.DATABASE_URL = dbUrl;
-        initDb(dbUrl);
+        initDb(dbUrl, { applicationName: 'iranti:script:setup' });
     }
     const runtimeEnv = dbUrl
         ? {

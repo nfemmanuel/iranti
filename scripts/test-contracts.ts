@@ -176,6 +176,7 @@ function assertPythonClientContract(): void {
 
     expectIncludes(filePath, content, "'http://localhost:3001'", 'Python client default URL is localhost:3001');
     expectIncludes(filePath, content, "self._post('/kb/write'", 'Python client writes to /kb/write');
+    expectIncludes(filePath, content, 'def write_issue(', 'Python client exposes write_issue helper');
     expectIncludes(filePath, content, "self._post('/kb/ingest'", 'Python client ingests to /kb/ingest');
     expectIncludes(filePath, content, "f'/kb/query/{entity_type}/{entity_id}/{key}'", 'Python client queries /kb/query/:type/:id/:key');
     expectIncludes(filePath, content, "f'/kb/history/{entity_type}/{entity_id}/{key}'", 'Python client queries /kb/history/:type/:id/:key');
@@ -208,6 +209,7 @@ function assertTypeScriptSdkSurface(): void {
 
     const requiredMethods = [
         'async write(',
+        'async writeIssue(',
         'async ingest(',
         'async handshake(',
         'async reconvene(',
@@ -243,6 +245,7 @@ function assertTypeScriptHttpClientContract(): void {
     const content = readFile(filePath);
 
     expectIncludes(filePath, content, "'/kb/write'", 'TypeScript client writes to /kb/write');
+    expectIncludes(filePath, content, 'writeIssue(params: WriteIssueParams)', 'TypeScript client exposes writeIssue helper');
     expectIncludes(filePath, content, "'/kb/ingest'", 'TypeScript client ingests to /kb/ingest');
     expectIncludes(filePath, content, '`/kb/query/${entityType}/${entityId}/${key}${query}`', 'TypeScript client queries /kb/query/:type/:id/:key');
     expectIncludes(filePath, content, '`/kb/query/${entityType}/${entityId}`', 'TypeScript client queries /kb/query/:type/:id');
@@ -306,6 +309,7 @@ function assertCliGuideContracts(): void {
     expectIncludes(cliFilePath, cliContent, 'Project Binding', 'Setup wizard source includes project binding guidance');
     expectIncludes(cliFilePath, cliContent, 'Interactive Instance Configuration', 'Configure instance source includes interactive guidance');
     expectIncludes(cliFilePath, cliContent, 'Interactive Project Configuration', 'Configure project source includes interactive guidance');
+    expectIncludes(cliFilePath, cliContent, 'iranti mcp cleanup [--dry-run] [--json]', 'CLI source includes MCP cleanup help');
 
     const helpOutput = execFileSync('node', ['bin/iranti.js', '--help'], {
         cwd: process.cwd(),
@@ -316,6 +320,11 @@ function assertCliGuideContracts(): void {
     } else {
         fail('CLI help output includes use-case guidance', 'Expected `node bin/iranti.js --help` to include "Use this when:" and "Typical scenario:".');
     }
+    if (helpOutput.includes('iranti mcp cleanup [--dry-run] [--json]')) {
+        pass('CLI help output includes MCP cleanup command');
+    } else {
+        fail('CLI help output includes MCP cleanup command', 'Expected `node bin/iranti.js --help` to include the MCP cleanup command.');
+    }
 
     const setupHelpOutput = execFileSync('node', ['bin/iranti.js', 'setup', '--help'], {
         cwd: process.cwd(),
@@ -325,6 +334,16 @@ function assertCliGuideContracts(): void {
         pass('Setup help output includes option guidance');
     } else {
         fail('Setup help output includes option guidance', 'Expected `node bin/iranti.js setup --help` to include the setup option guide.');
+    }
+
+    const mcpHelpOutput = execFileSync('node', ['bin/iranti.js', 'mcp', '--help'], {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+    });
+    if (mcpHelpOutput.includes('iranti mcp cleanup [--dry-run] [--json]')) {
+        pass('MCP help output includes cleanup subcommand');
+    } else {
+        fail('MCP help output includes cleanup subcommand', 'Expected `node bin/iranti.js mcp --help` to include the cleanup subcommand.');
     }
 
     const versionOutput = execFileSync('node', ['bin/iranti.js', '--version'], {
@@ -343,8 +362,9 @@ function assertCliGuideContracts(): void {
 
     const quickstartPath = 'docs/guides/quickstart.md';
     const quickstartContent = readFile(quickstartPath);
-    expectIncludes(quickstartPath, quickstartContent, 'iranti handoff task/runtime_verification_pass', 'Quickstart documents iranti handoff');
-    expectIncludes(quickstartPath, quickstartContent, 'what it does and when to use it', 'Quickstart points users to richer CLI help');
+    expectIncludes(quickstartPath, quickstartContent, '[Operator Manual](./manual.md)', 'Quickstart links to the operator manual');
+    expectIncludes(quickstartPath, quickstartContent, 'iranti claude-setup', 'Quickstart documents Claude Code host setup');
+    expectIncludes(quickstartPath, quickstartContent, 'iranti codex-setup', 'Quickstart documents Codex host setup');
 
     const manualPath = 'docs/guides/manual.md';
     const manualContent = readFile(manualPath);

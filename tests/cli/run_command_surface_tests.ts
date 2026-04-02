@@ -6,7 +6,7 @@ import { spawnSync } from 'child_process';
 import { rewriteCommandError } from '../../src/lib/commandErrors';
 
 const repoRoot = path.resolve(__dirname, '..', '..');
-const cliPath = path.join(repoRoot, 'bin', 'iranti.js');
+const cliSourcePath = path.join(repoRoot, 'scripts', 'iranti-cli.ts');
 
 type CommandResult = {
     status: number | null;
@@ -15,7 +15,7 @@ type CommandResult = {
 };
 
 function runCli(args: string[], options?: { cwd?: string; env?: NodeJS.ProcessEnv }): CommandResult {
-    const proc = spawnSync(process.execPath, [cliPath, ...args], {
+    const proc = spawnSync(process.execPath, ['-r', 'ts-node/register/transpile-only', cliSourcePath, ...args], {
         cwd: options?.cwd ?? repoRoot,
         env: options?.env ?? process.env,
         encoding: 'utf8',
@@ -38,6 +38,14 @@ function assertFailure(result: CommandResult, label: string): void {
 
 function assertContains(text: string, token: string, label: string): void {
     assert.ok(text.includes(token), `${label} missing token "${token}". Received:\n${text}`);
+}
+
+function parseJson(text: string, label: string): any {
+    try {
+        return JSON.parse(text);
+    } catch (error) {
+        assert.fail(`${label} did not contain valid JSON.\nReceived:\n${text}\nError:\n${String(error)}`);
+    }
 }
 
 function testHelpMatrix(): void {
@@ -70,11 +78,12 @@ function testHelpMatrix(): void {
         { args: ['uninstall', '--help'], token: 'Uninstall Command' },
         { args: ['handshake', '--help'], token: 'Handshake Command' },
         { args: ['attend', '--help'], token: 'Attend Command' },
+        { args: ['issues', '--help'], token: 'Issues Command' },
         { args: ['handoff', '--help'], token: 'Handoff Command' },
         { args: ['chat', '--help'], token: 'Chat Command' },
         { args: ['resolve', '--help'], token: 'Resolve Command' },
         { args: ['integrate', '--help'], token: 'Integrations' },
-        { args: ['mcp', '--help'], token: 'Iranti MCP Server' },
+        { args: ['mcp', '--help'], token: 'MCP server and maintenance commands.' },
         { args: ['claude-setup', '--help'], token: 'Scaffold Claude Code MCP and hook files for the current project.' },
         { args: ['claude-hook', '--help'], token: 'Claude Code -> Iranti hook helper' },
         { args: ['codex-setup', '--help'], token: 'Configure Codex to use the local Iranti MCP server.' },
@@ -115,6 +124,40 @@ function testUnknownCommandFailsClearly(): void {
     assertContains(result.stderr, 'IRANTI_UNKNOWN_COMMAND', 'unknown command error code');
 }
 
+function testMissingInstanceNameGetsStableCode(): void {
+    const result = runCli(['instance', 'create']);
+    assertFailure(result, 'instance create without a name');
+    assertContains(result.stderr, 'IRANTI_INSTANCE_NAME_REQUIRED', 'missing instance name code');
+    assertContains(result.stderr, 'iranti instance list', 'missing instance name hint');
+}
+
+function testJsonErrorEnvelopeForAuthArguments(): void {
+    const result = runCli(['auth', 'create-key', '--instance', 'local', '--json']);
+    assertFailure(result, 'auth create-key missing metadata');
+    assert.strictEqual(result.stdout.trim(), '', 'json error envelopes should not write success payloads to stdout');
+    const payload = parseJson(result.stderr, 'auth create-key json error');
+    assert.strictEqual(payload.ok, false, 'json error payload should mark failure');
+    assert.strictEqual(payload.error.code, 'IRANTI_AUTH_ARGUMENTS_REQUIRED', 'json error payload should expose stable auth code');
+    assert.ok(Array.isArray(payload.error.hints), 'json error payload should include hints');
+}
+
+function testJsonErrorEnvelopeForProjectModeValidation(): void {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'iranti-cli-config-project-'));
+    try {
+        const result = runCli(
+            ['configure', 'project', '.', '--mode', 'banana', '--url', 'http://localhost:3001', '--api-key', 'token', '--json'],
+            { cwd: tempDir },
+        );
+        assertFailure(result, 'configure project with invalid mode');
+        assert.strictEqual(result.stdout.trim(), '', 'project mode failure should not emit stdout JSON success');
+        const payload = parseJson(result.stderr, 'configure project json error');
+        assert.strictEqual(payload.error.code, 'IRANTI_PROJECT_MODE_INVALID', 'json error payload should expose stable project mode code');
+        assertContains(payload.error.message, 'Invalid project mode', 'project mode validation message');
+    } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+}
+
 function testSchemaMismatchRewrite(): void {
     const formatted = rewriteCommandError(
         'iranti mcp',
@@ -142,6 +185,9 @@ function main(): void {
     testHelpMatrix();
     testHelpDoesNotMutate();
     testUnknownCommandFailsClearly();
+    testMissingInstanceNameGetsStableCode();
+    testJsonErrorEnvelopeForAuthArguments();
+    testJsonErrorEnvelopeForProjectModeValidation();
     testSchemaMismatchRewrite();
     testDatabaseUnreachableRewrite();
     console.log('command surface tests passed');

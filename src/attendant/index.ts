@@ -36,7 +36,7 @@ function ensureDbInitialized(): void {
     if (!connectionString) {
         throw new Error('DATABASE_URL is required for legacy attendant API.');
     }
-    initDb(connectionString);
+    initDb(connectionString, { applicationName: 'iranti:attendant:legacy_api' });
 }
 
 export async function handshake(context: LegacyAgentContext): Promise<WorkingMemoryBrief> {

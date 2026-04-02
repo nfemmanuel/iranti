@@ -386,7 +386,7 @@ Response:
 }
 ```
 
-If the target instance has not run the `staff_events` migration yet, this route returns:
+If the target instance is missing `staff_events`, first-party hosts now attempt an idempotent bootstrap before retrying the read. The route returns `SESSION_LEDGER_UNAVAILABLE` only if that bootstrap still fails:
 
 ```json
 {
@@ -514,7 +514,19 @@ Observe response:
   "facts": [],
   "entitiesDetected": [],
   "alreadyPresent": 0,
-  "totalFound": 0
+  "totalFound": 0,
+  "usageGuidance": {
+    "tool": "observe",
+    "reminder": "Iranti is a hive mind. iranti_attend is mandatory before each reply and around knowledge discovery; if you skip that loop, later sessions will have to rediscover context.",
+    "expectedCallSequence": [
+      "Call iranti_handshake at session start and again after context compaction.",
+      "Call iranti_attend before replying to the user.",
+      "Call iranti_attend before knowledge discovery tools such as search, query, or read.",
+      "Call iranti_attend again after knowledge discovery when new findings may affect retrieval.",
+      "Use iranti_write for durable findings and iranti_checkpoint at meaningful pauses."
+    ],
+    "note": "observe() is retrieval-only. It surfaces candidate facts for context and warm-up, but it does not persist memory, replace iranti_attend, or count as a checkpoint/write."
+  }
 }
 ```
 
@@ -553,7 +565,19 @@ Attend response:
   ],
   "entitiesDetected": ["user/main"],
   "alreadyPresent": 0,
-  "totalFound": 1
+  "totalFound": 1,
+  "usageGuidance": {
+    "tool": "attend",
+    "reminder": "Iranti is a hive mind. iranti_attend is mandatory before each reply and around knowledge discovery; if you skip that loop, later sessions will have to rediscover context.",
+    "expectedCallSequence": [
+      "Call iranti_handshake at session start and again after context compaction.",
+      "Call iranti_attend before replying to the user.",
+      "Call iranti_attend before knowledge discovery tools such as search, query, or read.",
+      "Call iranti_attend again after knowledge discovery when new findings may affect retrieval.",
+      "Use iranti_write for durable findings and iranti_checkpoint at meaningful pauses."
+    ],
+    "note": "After using attend() and any retrieved facts, persist durable learnings with iranti_write and shared progress with iranti_checkpoint when applicable."
+  }
 }
 ```
 

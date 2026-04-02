@@ -8,6 +8,7 @@ import { getAllProfiles } from '../lib/router';
 import { loadRuntimeEnv } from '../lib/runtimeEnv';
 import { flushStaffEventEmitter, setStaffEventEmitter } from '../lib/staffEventRegistry';
 import { resolveInteractive } from '../resolutionist';
+import { disconnectDb, initDb } from '../library/client';
 
 type ChatRole = 'user' | 'assistant';
 
@@ -43,6 +44,14 @@ type AttendResult = {
 
 type ObserveResult = {
     facts: FactInjection[];
+};
+
+type ShutdownCheckpointPayload = {
+    currentStep?: string;
+    nextStep?: string;
+    openRisks?: string[];
+    recentOutputs?: string[];
+    notes?: string;
 };
 
 type QueryResult = {
@@ -182,6 +191,15 @@ class ApiClient {
         });
     }
 
+    checkpoint(agentId: string, task: string, checkpointPayload: Record<string, unknown>): Promise<unknown> {
+        return this.request('POST', '/memory/checkpoint', {
+            agent: agentId,
+            task,
+            recentMessages: [],
+            checkpoint: checkpointPayload,
+        });
+    }
+
     relate(params: {
         fromEntity: string;
         relationshipType: string;
@@ -244,6 +262,34 @@ function buildMemoryBlock(fact: FactInjection): string {
 
 function formatConversation(history: ChatTurn[]): string {
     return history.map((turn) => `${turn.role.toUpperCase()}: ${turn.content}`).join('\n');
+}
+
+function summarizeTurnForCheckpoint(turn: ChatTurn): string {
+    const prefix = turn.role === 'user' ? 'User' : 'Assistant';
+    const compact = turn.content.replace(/\s+/g, ' ').trim();
+    return `${prefix}: ${compact.length > 180 ? `${compact.slice(0, 177)}...` : compact}`;
+}
+
+export function buildGracefulShutdownCheckpoint(
+    history: ChatTurn[],
+    manualInjections: FactInjection[],
+): ShutdownCheckpointPayload | null {
+    if (history.length === 0) return null;
+    const recentOutputs = history.slice(-4).map(summarizeTurnForCheckpoint);
+    const lastUserTurn = [...history].reverse().find((turn) => turn.role === 'user');
+    const openRisks = manualInjections.length > 0
+        ? [`${manualInjections.length} queued memory injection(s) were still pending for the next turn.`]
+        : [];
+
+    return {
+        currentStep: lastUserTurn
+            ? `Resume the chat from the latest user request: ${lastUserTurn.content.replace(/\s+/g, ' ').trim().slice(0, 160)}`
+            : 'Resume the chat from the latest conversation exchange.',
+        nextStep: 'Review the recent conversation outputs and continue the chat if applicable.',
+        ...(openRisks.length > 0 ? { openRisks } : {}),
+        recentOutputs,
+        notes: 'Chat session exited gracefully. Resume from the recent conversation state if applicable.',
+    };
 }
 
 function buildPreamble(agentId: string, brief: WorkingMemoryBrief): string {
@@ -337,6 +383,7 @@ export async function startChatSession(options: ChatSessionOptions = {}): Promis
 
     const baseUrl = (process.env.IRANTI_URL ?? '').trim();
     const apiKey = (process.env.IRANTI_API_KEY ?? '').trim();
+    const connectionString = (process.env.DATABASE_URL ?? '').trim();
     if (!baseUrl) {
         throw new Error('IRANTI_URL is required. Load .env.iranti or set IRANTI_URL before running iranti chat.');
     }
@@ -351,6 +398,9 @@ export async function startChatSession(options: ChatSessionOptions = {}): Promis
     }
 
     process.env.LLM_PROVIDER = initialProvider;
+    if (connectionString) {
+        initDb(connectionString, { applicationName: 'iranti:chat:plain_chat' });
+    }
     setStaffEventEmitter(new DbStaffEventEmitter());
 
     const agentId = options.agentId?.trim() || 'iranti_chat';
@@ -719,6 +769,14 @@ export async function startChatSession(options: ChatSessionOptions = {}): Promis
     } finally {
         process.off('SIGINT', closeHandler);
         rl.close();
+        // Best-effort checkpoint: persist active progress on graceful shutdown if any turns occurred.
+        const shutdownCheckpoint = buildGracefulShutdownCheckpoint(history, manualInjections);
+        if (shutdownCheckpoint) {
+            await client.checkpoint(agentId, brief.inferredTaskType, shutdownCheckpoint).catch(() => undefined);
+        }
         await flushStaffEventEmitter();
+        if (connectionString) {
+            await disconnectDb().catch(() => undefined);
+        }
     }
 }

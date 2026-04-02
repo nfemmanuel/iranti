@@ -3,6 +3,7 @@ import { bootstrapHarness } from '../../scripts/harness';
 import { configureMock } from '../../src/lib/providers/mock';
 import { Iranti } from '../../src/sdk';
 import { disconnectDb } from '../../src/library/client';
+import { findEntry } from '../../src/library/queries';
 import { Pool } from 'pg';
 
 const DEFAULT_VALIDATION_DATABASE_URL = 'postgresql://postgres:053435@localhost:5433/iranti_temporal';
@@ -176,6 +177,33 @@ async function main(): Promise<void> {
             nextStep: 'hand task to Codex via shared memory',
             openRisks: ['Receiver must use shared task facts rather than assume Claude session ownership.'],
             recentOutputs: ['Persisted status, next_step, blockers, and artifacts to the shared task entity.'],
+            actions: [
+                {
+                    kind: 'validation',
+                    summary: 'Ran runtime verification smoke for the handoff slice',
+                    status: 'passed',
+                    target: 'tests/runtime-lifecycle/run_runtime_lifecycle_tests.ts',
+                },
+                {
+                    kind: 'decision',
+                    summary: 'Chose shared task facts over private checkpoint inheritance for cross-tool handoff',
+                    status: 'applied',
+                    target: taskEntity,
+                },
+            ],
+            fileChanges: [
+                {
+                    action: 'created',
+                    path: 'src/runtime/check.ts',
+                    purpose: 'runtime verification helper',
+                },
+                {
+                    action: 'renamed',
+                    path: 'docs/runtime-old.md',
+                    toPath: 'docs/runtime-verification.md',
+                    purpose: 'align the operator guide',
+                },
+            ],
             entityTargets: [taskEntity, projectEntity],
             notes: 'Cross-tool handoff uses shared task facts plus explicit entity hints. Session recovery remains agent-scoped.',
         },
@@ -207,6 +235,56 @@ async function main(): Promise<void> {
         JSON.stringify(checkpointSummary.value).includes('Cross-tool handoff uses shared task facts'),
         'Expected checkpoint_summary breadcrumb to preserve checkpoint notes for later handoff recovery.'
     );
+
+    const checkpointFileChanges = await iranti.query(taskEntity, 'recent_file_changes');
+    expect(checkpointFileChanges.found === true, 'Expected checkpoint file changes to be persisted as shared durable memory.');
+    expect(
+        JSON.stringify(checkpointFileChanges.value).includes('src/runtime/check.ts')
+        && JSON.stringify(checkpointFileChanges.value).includes('docs/runtime-verification.md'),
+        'Expected checkpoint file changes to preserve each structured file action.'
+    );
+
+    const checkpointActions = await iranti.query(taskEntity, 'recent_actions');
+    expect(checkpointActions.found === true, 'Expected checkpoint actions to be persisted as shared durable memory.');
+    expect(
+        JSON.stringify(checkpointActions.value).includes('Ran runtime verification smoke for the handoff slice')
+        && JSON.stringify(checkpointActions.value).includes('shared task facts over private checkpoint inheritance'),
+        'Expected checkpoint actions to preserve each structured activity breadcrumb.'
+    );
+
+    const checkpointCurrentStepEntry = await findEntry({
+        entityType: 'task',
+        entityId: taskEntity.split('/')[1]!,
+        key: 'checkpoint_current_step',
+    });
+    expect(Boolean(checkpointCurrentStepEntry), 'Expected raw checkpoint_current_step entry to exist.');
+    const checkpointCurrentStepProperties = checkpointCurrentStepEntry?.properties as Record<string, unknown>;
+    expect(checkpointCurrentStepProperties.capturePhase === 'checkpoint', 'Expected checkpoint_current_step to be tagged as checkpoint capture.');
+    expect(checkpointCurrentStepProperties.canonicalKey === 'checkpoint_current_step', 'Expected checkpoint_current_step canonical key metadata.');
+    expect(checkpointCurrentStepProperties.semanticIntent === 'task_state_tracking', 'Expected checkpoint current step semantic intent.');
+    expect(JSON.stringify(checkpointCurrentStepProperties.semanticTags ?? []).includes('checkpoint'), 'Expected checkpoint current step semantic tags to include checkpoint.');
+
+    const checkpointSummaryEntry = await findEntry({
+        entityType: 'project',
+        entityId: projectEntity.split('/')[1]!,
+        key: 'checkpoint_summary',
+    });
+    expect(Boolean(checkpointSummaryEntry), 'Expected raw checkpoint_summary entry to exist.');
+    const checkpointSummaryProperties = checkpointSummaryEntry?.properties as Record<string, unknown>;
+    expect(checkpointSummaryProperties.durableClass === 'checkpoint_summary', 'Expected checkpoint_summary durable class metadata.');
+    expect(checkpointSummaryProperties.semanticIntent === 'checkpoint_handoff', 'Expected checkpoint_summary semantic intent.');
+    expect(JSON.stringify(checkpointSummaryProperties.semanticTags ?? []).includes('breadcrumb'), 'Expected checkpoint_summary semantic tags to include breadcrumb.');
+
+    const checkpointActionsEntry = await findEntry({
+        entityType: 'task',
+        entityId: taskEntity.split('/')[1]!,
+        key: 'recent_actions',
+    });
+    expect(Boolean(checkpointActionsEntry), 'Expected raw recent_actions entry to exist.');
+    const checkpointActionsProperties = checkpointActionsEntry?.properties as Record<string, unknown>;
+    expect(checkpointActionsProperties.durableClass === 'action_log', 'Expected recent_actions durable class metadata.');
+    expect(checkpointActionsProperties.semanticIntent === 'activity_tracking', 'Expected recent_actions semantic intent.');
+    expect(JSON.stringify(checkpointActionsProperties.semanticTags ?? []).includes('activity'), 'Expected recent_actions semantic tags to include activity.');
 
     const codexHandshake = await iranti.handshake({
         agentId: codexAgent,

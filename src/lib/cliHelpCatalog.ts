@@ -27,7 +27,7 @@ export const START_HERE_HELP: HelpEntry[] = [
     {
         command: 'iranti doctor',
         description: 'Validate environment, database, provider keys, and runtime health before or after launch.',
-        useWhen: 'something feels off, or before you trust a setup enough to hand it to Claude, Codex, or another client.',
+        useWhen: 'something feels off, or before you trust a setup enough to hand it to another host, MCP client, or automation path.',
         scenario: 'You changed provider keys, switched databases, or want a fast pass/fail diagnostic before debugging deeper.',
     },
     {
@@ -93,7 +93,7 @@ export const CONFIGURATION_HELP: HelpEntry[] = [
     {
         command: 'iranti project init [path] --instance <name> [--api-key <token>] [--agent-id <id>] [--mode isolated|shared] [--personal-memory-entity <entity>] [--auto-remember [true|false]] [--force]',
         description: 'Create a new `.env.iranti` binding for one project.',
-        useWhen: 'a repo should point at an Iranti instance for Claude, Codex, MCP, or direct SDK/API use.',
+        useWhen: 'a repo should point at an Iranti instance for first-party host integrations, MCP, or direct SDK/API use.',
         scenario: 'Binding `iranti-control-plane` or another repo root to `local` so it can use shared memory.',
     },
     {
@@ -199,10 +199,16 @@ export const DIAGNOSTICS_HELP: HelpEntry[] = [
         scenario: 'Investigating an agent turn where relevant facts were missing or too many facts were pulled in.',
     },
     {
+        command: 'iranti issues [--entity <entityType/entityId>] [--status open|resolved] [--instance <name> | --project-env <file>] [--json]',
+        description: 'List canonical open/resolved issue facts for one shared-memory entity.',
+        useWhen: 'you want a quick operator view of the known issue inventory without manually querying raw facts.',
+        scenario: 'Checking which project bugs are still open before deciding the next overnight slice.',
+    },
+    {
         command: 'iranti handoff task/<task_id> [--instance <name> | --project-env <file>] [--agent <id>] --next-step <text> [--status <state>] [--owner <agent-id>] [--blockers <a||b>] [--artifacts <path1||path2>] [--project-entity <entity>] [--notes <text>] [--source <label>] [--confidence <n>] [--json]',
-        description: 'Write a standardized shared-memory handoff for Claude/Codex collaboration.',
+        description: 'Write a standardized shared-memory handoff for cross-host collaboration.',
         useWhen: 'one tool or agent should leave structured next-step context for another tool or agent.',
-        scenario: 'Claude finishes analysis and Codex needs a durable task handoff with blockers and artifacts.',
+        scenario: 'One host finishes analysis and another host needs a durable task handoff with blockers and artifacts.',
     },
     {
         command: 'iranti chat [--agent <agent-id>] [--provider <provider>] [--model <model>]',
@@ -216,6 +222,12 @@ export const DIAGNOSTICS_HELP: HelpEntry[] = [
         useWhen: 'human review is required for unresolved conflicts in the escalation folder.',
         scenario: 'Cleaning up contradictions that the Librarian could not settle deterministically or with LLM reasoning.',
     },
+    {
+        command: 'iranti mcp cleanup [--dry-run] [--json]',
+        description: 'Inspect and safely remove stale MCP launcher/server pairs that no longer have a live host ancestor.',
+        useWhen: 'Windows MCP residue has accumulated and you want a first-party cleanup path that leaves active host-attached chains alone.',
+        scenario: 'Trimming orphaned `iranti mcp` processes after debugging sessions or host crashes without killing active attached sessions.',
+    },
 ];
 
 export const INTEGRATIONS_HELP: HelpEntry[] = [
@@ -223,12 +235,12 @@ export const INTEGRATIONS_HELP: HelpEntry[] = [
         command: 'iranti mcp [--help]',
         description: 'Start the stdio MCP server.',
         useWhen: 'Claude Code, Codex, or another MCP client should talk to Iranti over MCP instead of raw HTTP.',
-        scenario: 'Registering Iranti as a tool source for Claude Code or Codex.',
+        scenario: 'Registering Iranti as a tool source for MCP-capable hosts such as Claude Code or Codex.',
     },
     {
         command: 'iranti claude-setup [path] [--project-env <path>] [--force]',
-        description: 'Scaffold Claude Code files for one project.',
-        useWhen: 'one bound repo should get `.mcp.json`, `.vscode/mcp.json`, and Claude hook files without hand-editing them.',
+        description: 'Scaffold Claude Code files plus a local protocol block for one project.',
+        useWhen: 'one bound repo should get `.mcp.json`, `.vscode/mcp.json`, Claude hook files, and explicit handshake/attend/checkpoint/write guidance without hand-editing them.',
         scenario: 'Setting up `iranti-control-plane` so Claude Code can use the same Iranti instance.',
     },
     {
@@ -245,8 +257,8 @@ export const INTEGRATIONS_HELP: HelpEntry[] = [
     },
     {
         command: 'iranti codex-setup [--name iranti] [--agent codex_code] [--source Codex] [--provider openai] [--project-env <path>] [--local-script] [--no-workspace-file]',
-        description: 'Register Iranti with the Codex CLI and, by default, write project-local `.mcp.json` and `.vscode/mcp.json` files when a binding is available.',
-        useWhen: 'Codex should see Iranti through its global MCP configuration and the current bound workspace should get deterministic MCP files for both Codex CLI and VS Code.',
+        description: 'Register Iranti with the Codex CLI and scaffold workspace MCP plus local Codex protocol guidance when a binding is available.',
+        useWhen: 'Codex should see Iranti through its global MCP configuration and the bound workspace should get deterministic MCP files plus explicit handshake/attend/checkpoint/write guidance.',
         scenario: 'Making the `codex` CLI able to call Iranti tools from bound repos.',
     },
     {

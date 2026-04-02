@@ -146,3 +146,25 @@ model EntityAlias {
     @@index([canonicalEntityType, canonicalEntityId])
     @@map("entity_aliases")
 }
+
+model StaffEvent {
+    eventId        String   @id @map("event_id") @db.Uuid
+    timestamp      DateTime @default(now()) @db.Timestamptz(6)
+    staffComponent String   @map("staff_component")
+    actionType     String   @map("action_type")
+    agentId        String   @map("agent_id")
+    source         String
+    entityType     String?  @map("entity_type")
+    entityId       String?  @map("entity_id")
+    key            String?
+    reason         String?
+    level          String
+    metadata       Json     @default("{}")
+
+    @@index([timestamp])
+    @@index([agentId, timestamp])
+    @@index([source, timestamp])
+    @@index([level, timestamp])
+    @@index([entityType, entityId, key, timestamp])
+    @@map("staff_events")
+}

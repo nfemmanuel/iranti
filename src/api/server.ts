@@ -26,6 +26,8 @@ import {
     writeRuntimeState,
 } from '../lib/runtimeLifecycle';
 import { createFirstPartyIranti } from '../lib/createFirstPartyIranti';
+import { resolvePackageRoot } from '../lib/packageRoot';
+import { createHealthCheckState, createVectorBackendMonitor, deriveOperatorStatus, HealthCheckState } from './healthChecks';
 
 const app = express();
 
@@ -44,35 +46,24 @@ const RUNTIME_AUTHORITY = resolveRuntimeAuthorityFromEnv(process.env);
 const INSTANCE_DIR = RUNTIME_AUTHORITY.instanceDir;
 const INSTANCE_RUNTIME_FILE = RUNTIME_AUTHORITY.runtimeFile;
 const INSTANCE_NAME = process.env.IRANTI_INSTANCE_NAME?.trim() || (INSTANCE_DIR ? path.basename(INSTANCE_DIR) : 'adhoc');
-const VERSION = '0.2.51';
+const VERSION = '0.2.52';
 const PORT_RAW = (process.env.IRANTI_PORT ?? '3001').trim();
 const PORT = Number.parseInt(PORT_RAW, 10);
 
-type HealthCheckState = {
-    checked: boolean;
-    ok: boolean;
-    detail: string;
-};
-
-const runtimeMetadataHealth: HealthCheckState = {
+const runtimeMetadataHealth: HealthCheckState = createHealthCheckState({
     checked: RUNTIME_AUTHORITY.managed,
     ok: !RUNTIME_AUTHORITY.managed,
     detail: RUNTIME_AUTHORITY.managed
         ? 'waiting for initial runtime metadata write'
         : 'runtime is not running under managed instance authority',
-};
-
-const vectorBackendHealth: HealthCheckState = {
-    checked: false,
-    ok: true,
-    detail: 'vector backend has not been probed yet',
-};
+});
 
 function operatorStatus(): 'ok' | 'degraded' {
-    if (RUNTIME_AUTHORITY.source === 'invalid') return 'degraded';
-    if (runtimeMetadataHealth.checked && !runtimeMetadataHealth.ok) return 'degraded';
-    if (vectorBackendHealth.checked && !vectorBackendHealth.ok) return 'degraded';
-    return 'ok';
+    return deriveOperatorStatus({
+        runtimeAuthoritySource: RUNTIME_AUTHORITY.source,
+        runtimeMetadataHealth,
+        vectorBackendHealth: vectorBackendMonitor.state,
+    });
 }
 
 function assertStartupSecurity(): void {
@@ -137,6 +128,19 @@ let runtimeHeartbeat: NodeJS.Timeout | null = null;
 let vectorHealthInterval: NodeJS.Timeout | null = null;
 let server: ReturnType<typeof app.listen> | null = null;
 
+function packageRoot(): string {
+    let dir = __dirname;
+    for (let i = 0; i < 6; i += 1) {
+        if (fs.existsSync(path.join(dir, 'package.json'))) {
+            return dir;
+        }
+        const parent = path.dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
+    }
+    return process.cwd();
+}
+
 function runtimeHealthPayload(): InstanceRuntimeState | null {
     return runtimeState
         ? {
@@ -166,7 +170,7 @@ async function persistRuntimeState(status: InstanceRuntimeState['status'], signa
         healthUrl: `http://localhost:${PORT}/health`,
         exitSignal: signal ?? runtimeState?.exitSignal ?? undefined,
         requestLogFile: REQUEST_LOG_FILE,
-        packageRoot: process.cwd(),
+        packageRoot: resolvePackageRoot(__dirname) ?? process.cwd(),
         exitCode: signal ? null : runtimeState?.exitCode ?? 0,
     };
     await writeRuntimeState(INSTANCE_RUNTIME_FILE, runtimeState);
@@ -178,27 +182,10 @@ function markRuntimeMetadataHealth(ok: boolean, detail: string): void {
     runtimeMetadataHealth.detail = detail;
 }
 
-function markVectorBackendHealth(ok: boolean, detail: string): void {
-    vectorBackendHealth.checked = true;
-    vectorBackendHealth.ok = ok;
-    vectorBackendHealth.detail = detail;
-}
-
-async function probeVectorBackendHealth(context: 'startup' | 'interval'): Promise<void> {
-    try {
-        const ok = await getVectorBackendSingleton().ping();
-        if (!ok) {
-            markVectorBackendHealth(false, 'vector backend did not respond to ping');
-            console.error(`[vector] ${context} health check failed: vector backend is not responding.`);
-            return;
-        }
-        markVectorBackendHealth(true, 'vector backend responded to ping');
-    } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        markVectorBackendHealth(false, message);
-        console.error(`[vector] ${context} health check error: ${message}`);
-    }
-}
+const vectorBackendMonitor = createVectorBackendMonitor({
+    ping: () => getVectorBackendSingleton().ping(),
+    logError: (message) => console.error(message),
+});
 
 function logApiRequest(line: string): void {
     console.log(line);
@@ -243,7 +230,7 @@ app.get(ROUTES.health, (_req, res) => {
         },
         checks: {
             runtimeMetadata: runtimeMetadataHealth,
-            vectorBackend: vectorBackendHealth,
+            vectorBackend: vectorBackendMonitor.state,
         },
     });
 });
@@ -375,11 +362,8 @@ server = app.listen(PORT, () => {
         });
     }
 
-    void probeVectorBackendHealth('startup');
-    vectorHealthInterval = setInterval(() => {
-        void probeVectorBackendHealth('interval');
-    }, 60_000);
-    vectorHealthInterval.unref();
+    void vectorBackendMonitor.probe('startup');
+    vectorHealthInterval = vectorBackendMonitor.start();
 });
 
 server.on('error', (err) => {

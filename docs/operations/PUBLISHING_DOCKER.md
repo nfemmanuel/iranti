@@ -1,6 +1,8 @@
-# Publishing to Docker Hub
+# Publishing To Docker Hub
 
-Guide for publishing Iranti Docker image.
+This is an optional manual path for publishing a Docker image.
+
+Docker publishing is not the primary release contract for this repo. The active automated package release flow is documented in [guides/releasing.md](../guides/releasing.md), and the repo currently does not ship a dedicated Docker publishing workflow by default.
 
 ## Prerequisites
 
@@ -151,64 +153,9 @@ docker run -d \
 curl http://localhost:3001/health
 ```
 
-## Automation with GitHub Actions
+## Optional CI Automation
 
-Create `.github/workflows/docker.yml`:
-
-```yaml
-name: Build and Push Docker Image
-
-on:
-  push:
-    tags:
-      - 'v*'
-  workflow_dispatch:
-
-jobs:
-  docker:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v4
-        with:
-          images: nfemmanuel/iranti
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest
-
-      - name: Build and push
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-```
-
-Add secrets to GitHub repository:
-- `DOCKERHUB_USERNAME`
-- `DOCKERHUB_TOKEN`
+If you decide to add Docker automation later, treat that as new repo work rather than current documented behavior. Any future workflow should be documented alongside the actual checked-in workflow file instead of living here as a speculative template.
 
 ## Image Size Optimization
 

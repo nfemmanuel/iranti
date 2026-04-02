@@ -260,6 +260,14 @@ export function printAttendHelp(style: CliHelpStyle): void {
     );
 }
 
+export function printIssuesHelp(style: CliHelpStyle): void {
+    printSingleHelpEntry(
+        style,
+        'Issues Command',
+        requireHelpEntry(DIAGNOSTICS_HELP, 'iranti issues ')
+    );
+}
+
 export function printHandoffHelp(style: CliHelpStyle): void {
     printSingleHelpEntry(
         style,

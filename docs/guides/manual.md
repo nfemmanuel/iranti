@@ -111,6 +111,11 @@ Debugging flags:
 - `--debug` prints extra CLI diagnostics, structured error details, and stack traces
 - `--verbose` prints subprocess trace output
 
+Automation note:
+- commands that support `--json` now return a machine-readable failure envelope on stderr when they exit non-zero
+- the envelope shape is `{ "ok": false, "error": { "code": "...", "message": "...", "hints": [...] } }`
+- common operator failures now carry stable error codes such as `IRANTI_INSTANCE_NAME_REQUIRED`, `IRANTI_AUTH_ARGUMENTS_REQUIRED`, and `IRANTI_PROJECT_MODE_INVALID`
+
 ---
 
 ## Runtime Lifecycle

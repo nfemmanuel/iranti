@@ -37,6 +37,7 @@ Compatibility contracts define which Iranti surfaces are considered stable withi
      - New commands should be additive, documented in the guides, and covered by at least one contract or drift check.
      - Human-readable output may improve.
      - `--json` output is automation-facing and should remain stable within the same major version.
+     - When a command supports `--json`, non-zero exits must preserve a machine-readable failure envelope instead of falling back to prose-only stderr.
    - REST API:
      - Existing routes and existing required response fields are compatibility surfaces.
      - Additive fields are allowed if old clients still parse successfully.
@@ -79,6 +80,7 @@ Compatibility contracts define which Iranti surfaces are considered stable withi
 - A route may add new optional fields, but old clients must not fail parsing because of the addition.
 - Runtime metadata readers must tolerate older `runtime.json` shapes with missing fields.
 - `iranti status --json` is an automation-facing CLI surface; additive fields are allowed, but existing fields and meanings should remain stable within the major version.
+- CLI `--json` failure payloads are automation-facing too; additive fields are allowed, but the top-level `{ ok: false, error: { code, message, hints } }` contract and stable error-code meanings should remain stable within the major version.
 - `GET /memory/sessions` and client session-list helpers are automation-facing operator surfaces; additive query options are allowed, but existing summary fields and operator-state semantics should remain stable within the major version.
 - Upgrade commands must distinguish between install version and running instance version so mixed-version state is visible and recoverable.
 
@@ -87,6 +89,7 @@ Compatibility contracts define which Iranti surfaces are considered stable withi
 - Policy-level documentation feature; no runtime behavior changed in this spec-only pass.
 - Existing supporting checks already in the repo include:
   - `scripts/test-contracts.ts` for API and client contract drift
+  - `scripts/test-downstream-contracts.ts` for sibling-repo drift detection when `iranti-control-plane`, `iranti-site`, or `iranti-benchmarking` are present next to this repo
   - `tests/runtime-lifecycle/run_runtime_lifecycle_tests.ts` for runtime metadata and restart behavior
   - `tests/session-recovery/run_session_recovery_tests.ts` for durable recovery behavior
 - Follow-on implementation work is tracked in [docs/internal/compatibility_backlog.md](../../internal/compatibility_backlog.md).

@@ -13,6 +13,7 @@ type IrantiQueryClient = {
 };
 
 import { getStaffEventEmitter } from './staffEventRegistry';
+import { buildSemanticFactTags } from './semanticFactTags';
 
 type DurableMemoryClass =
     | 'preference'
@@ -25,6 +26,7 @@ type DurableMemoryClass =
     | 'open_risks'
     | 'artifact'
     | 'file_change'
+    | 'action_log'
     | 'failed_path'
     | 'alternative_route';
 
@@ -182,6 +184,13 @@ function readFileChangeItems(value: unknown): Array<Record<string, unknown>> {
     return items.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null);
 }
 
+function readActionItems(value: unknown): Array<Record<string, unknown>> {
+    if (typeof value !== 'object' || value === null) return [];
+    const record = value as Record<string, unknown>;
+    const items = Array.isArray(record.items) ? record.items : [];
+    return items.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null);
+}
+
 function mergeFactValue(key: string, existing: unknown, incoming: unknown): unknown {
     if (key === 'open_risks') {
         return { items: dedupeStrings([...readStringArray(existing, 'items'), ...readStringArray(incoming, 'items')]) };
@@ -194,6 +203,9 @@ function mergeFactValue(key: string, existing: unknown, incoming: unknown): unkn
     }
     if (key === 'recent_file_changes') {
         return { items: dedupeObjects([...readFileChangeItems(existing), ...readFileChangeItems(incoming)]) };
+    }
+    if (key === 'recent_actions') {
+        return { items: dedupeObjects([...readActionItems(existing), ...readActionItems(incoming)]) };
     }
     return incoming;
 }
@@ -227,18 +239,34 @@ function summarizeMergedFact(key: string, value: unknown, fallback: string): str
         }).filter(Boolean);
         return items.length > 0 ? trimSummary(`recent file changes include ${items.join('; ')}`) : fallback;
     }
+    if (key === 'recent_actions') {
+        const items = readActionItems(value).map((item) => {
+            const kind = String(item.kind ?? 'action').trim();
+            const summary = String(item.summary ?? '').trim();
+            const status = String(item.status ?? '').trim();
+            if (!summary) return '';
+            return status ? `[${status}] ${kind}: ${summary}` : `${kind}: ${summary}`;
+        }).filter(Boolean);
+        return items.length > 0 ? trimSummary(`recent actions include ${items.join('; ')}`) : fallback;
+    }
     return fallback;
 }
 
 function buildFactProperties(fact: ExtractedMemoryFact, phase: 'user_prompt' | 'assistant_response' | 'backfill'): Record<string, unknown> {
+    const mergeStrategy = ['open_risks', 'important_artifacts', 'recent_file_changes', 'recent_actions', 'failed_paths', 'alternative_routes'].includes(fact.key)
+        ? 'append_dedupe'
+        : 'replace';
     return {
         memoryScope: fact.scope,
         capturePhase: phase,
         durableClass: fact.durableClass,
         canonicalKey: fact.key,
-        mergeStrategy: ['open_risks', 'important_artifacts', 'recent_file_changes', 'failed_paths', 'alternative_routes'].includes(fact.key)
-            ? 'append_dedupe'
-            : 'replace',
+        mergeStrategy,
+        ...buildSemanticFactTags({
+            memoryScope: fact.scope,
+            durableClass: fact.durableClass,
+            mergeStrategy,
+        }),
     };
 }
 
@@ -397,6 +425,90 @@ function extractProjectOperationalFacts(text: string): ExtractedMemoryFact[] {
             value: { items: [{ action: 'deleted', path: deletedFileMatch[1].trim(), purpose: deletedFileMatch[2]?.trim() || undefined }] },
             summary: trimSummary(`recent file changes include deleted ${deletedFileMatch[1].trim()}${deletedFileMatch[2]?.trim() ? ` (${deletedFileMatch[2].trim()})` : ''}`),
             durableClass: 'file_change',
+        });
+    }
+
+    const commandRanMatch = text.match(/^command ran (.+)$/i);
+    if (commandRanMatch) {
+        const target = commandRanMatch[1].trim();
+        facts.push({
+            scope: 'project',
+            key: 'recent_actions',
+            value: { items: [{ kind: 'command', summary: `ran ${target}`, status: 'completed', target }] },
+            summary: trimSummary(`recent actions include [completed] command: ran ${target}`),
+            durableClass: 'action_log',
+        });
+    }
+
+    const commandFailedMatch = text.match(/^command failed (.+)$/i);
+    if (commandFailedMatch) {
+        const target = commandFailedMatch[1].trim();
+        facts.push({
+            scope: 'project',
+            key: 'recent_actions',
+            value: { items: [{ kind: 'command', summary: `failed ${target}`, status: 'failed', target }] },
+            summary: trimSummary(`recent actions include [failed] command: failed ${target}`),
+            durableClass: 'action_log',
+        });
+    }
+
+    const testPassedMatch = text.match(/^test passed (.+)$/i);
+    if (testPassedMatch) {
+        const target = testPassedMatch[1].trim();
+        facts.push({
+            scope: 'project',
+            key: 'recent_actions',
+            value: { items: [{ kind: 'test', summary: `passed ${target}`, status: 'passed', target }] },
+            summary: trimSummary(`recent actions include [passed] test: passed ${target}`),
+            durableClass: 'action_log',
+        });
+    }
+
+    const testFailedMatch = text.match(/^test failed (.+)$/i);
+    if (testFailedMatch) {
+        const target = testFailedMatch[1].trim();
+        facts.push({
+            scope: 'project',
+            key: 'recent_actions',
+            value: { items: [{ kind: 'test', summary: `failed ${target}`, status: 'failed', target }] },
+            summary: trimSummary(`recent actions include [failed] test: failed ${target}`),
+            durableClass: 'action_log',
+        });
+    }
+
+    const validationPassedMatch = text.match(/^validation passed (.+)$/i);
+    if (validationPassedMatch) {
+        const target = validationPassedMatch[1].trim();
+        facts.push({
+            scope: 'project',
+            key: 'recent_actions',
+            value: { items: [{ kind: 'validation', summary: `passed ${target}`, status: 'passed', target }] },
+            summary: trimSummary(`recent actions include [passed] validation: passed ${target}`),
+            durableClass: 'action_log',
+        });
+    }
+
+    const validationFailedMatch = text.match(/^validation failed (.+)$/i);
+    if (validationFailedMatch) {
+        const target = validationFailedMatch[1].trim();
+        facts.push({
+            scope: 'project',
+            key: 'recent_actions',
+            value: { items: [{ kind: 'validation', summary: `failed ${target}`, status: 'failed', target }] },
+            summary: trimSummary(`recent actions include [failed] validation: failed ${target}`),
+            durableClass: 'action_log',
+        });
+    }
+
+    const searchRanMatch = text.match(/^search ran (.+)$/i);
+    if (searchRanMatch) {
+        const target = searchRanMatch[1].trim();
+        facts.push({
+            scope: 'project',
+            key: 'recent_actions',
+            value: { items: [{ kind: 'search', summary: `ran ${target}`, status: 'completed', target }] },
+            summary: trimSummary(`recent actions include [completed] search: ran ${target}`),
+            durableClass: 'action_log',
         });
     }
 

@@ -9,7 +9,7 @@ async function main(): Promise<void> {
         process.exit(1);
     }
 
-    initDb(dbUrl);
+    initDb(dbUrl, { applicationName: 'iranti:script:api_key_list' });
     const keys = await listApiKeys();
 
     if (keys.length === 0) {

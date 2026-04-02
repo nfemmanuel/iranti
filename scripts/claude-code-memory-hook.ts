@@ -4,18 +4,20 @@ import type { Iranti } from '../src/sdk';
 import { createFirstPartyIranti } from '../src/lib/createFirstPartyIranti';
 import { loadRuntimeEnv } from '../src/lib/runtimeEnv';
 import { flushStaffEventEmitter, getStaffEventEmitter } from '../src/lib/staffEventRegistry';
+import { disconnectDb } from '../src/library/client';
 import {
     autoRememberAssistantFacts,
     autoRememberPromptFacts,
     canonicalizeMemoryKey,
     classifyMemoryScope,
     extractExplicitAssistantMemory,
+    extractExplicitPromptMemory,
     getPersonalMemoryEntity,
     getProjectMemoryEntity,
     isAutoRememberEnabled,
 } from '../src/lib/autoRemember';
 
-type HookEventName = 'SessionStart' | 'UserPromptSubmit' | 'Stop';
+type HookEventName = 'SessionStart' | 'UserPromptSubmit' | 'Stop' | 'PreCompact';
 type HookPayload = Record<string, unknown>;
 type HookFact = {
     entity: string;
@@ -37,6 +39,19 @@ type HookCheckpointPayload = {
     nextStep?: string;
     openRisks?: string[];
     recentOutputs?: string[];
+    actions?: Array<{
+        kind: string;
+        summary: string;
+        status?: string;
+        target?: string;
+        detail?: string;
+    }>;
+    fileChanges?: Array<{
+        action: string;
+        path: string;
+        toPath?: string;
+        purpose?: string;
+    }>;
 };
 
 const MEMORY_NEED_POSITIVE_PATTERNS: RegExp[] = [
@@ -279,6 +294,8 @@ function formatSessionContext(facts: HookFact[], cwd: string): string {
     const lines = [
         '[Iranti Session Memory]',
         `Project: ${path.basename(cwd)}`,
+        'REQUIRED: Call mcp__iranti__iranti_handshake before responding to the first user message.',
+        'REQUIRED: Call mcp__iranti__iranti_attend before every subsequent turn.',
     ];
 
     if (limited.length > 0) {
@@ -289,6 +306,16 @@ function formatSessionContext(facts: HookFact[], cwd: string): string {
     }
 
     return lines.join('\n');
+}
+
+function formatPreCompactContext(): string {
+    return [
+        '[Iranti Post-Compaction Recovery]',
+        'Context was just compacted. BEFORE responding to the next user message:',
+        '1. Call mcp__iranti__iranti_handshake with the current task to restore working memory.',
+        '2. Do not respond until the handshake completes.',
+        'REQUIRED: Call mcp__iranti__iranti_attend before every subsequent turn after that.',
+    ].join('\n');
 }
 
 function extractSelfMemoryQueryKey(prompt: string): string | null {
@@ -355,6 +382,55 @@ function readFileChangeOutputs(value: unknown): string[] {
     }).filter(Boolean);
 }
 
+function readCheckpointActions(value: unknown): Array<{
+    kind: string;
+    summary: string;
+    status?: string;
+    target?: string;
+    detail?: string;
+}> {
+    if (typeof value !== 'object' || value === null) return [];
+    const record = value as Record<string, unknown>;
+    const items = Array.isArray(record.items) ? record.items : [];
+    return items
+        .map((item) => {
+            if (typeof item !== 'object' || item === null) return null;
+            const action = item as Record<string, unknown>;
+            const summary = String(action.summary ?? '').trim();
+            if (!summary) return null;
+            const kind = String(action.kind ?? 'action').trim() || 'action';
+            return {
+                kind,
+                summary,
+                ...(typeof action.status === 'string' && action.status.trim() ? { status: action.status.trim() } : {}),
+                ...(typeof action.target === 'string' && action.target.trim() ? { target: action.target.trim() } : {}),
+                ...(typeof action.detail === 'string' && action.detail.trim() ? { detail: action.detail.trim() } : {}),
+            };
+        })
+        .filter((item): item is {
+            kind: string;
+            summary: string;
+            status?: string;
+            target?: string;
+            detail?: string;
+        } => Boolean(item));
+}
+
+function readActionOutputs(value: unknown): string[] {
+    if (typeof value !== 'object' || value === null) return [];
+    const record = value as Record<string, unknown>;
+    const items = Array.isArray(record.items) ? record.items : [];
+    return items.map((item) => {
+        if (typeof item !== 'object' || item === null) return '';
+        const action = item as Record<string, unknown>;
+        const kind = String(action.kind ?? 'action').trim() || 'action';
+        const summary = String(action.summary ?? '').trim();
+        const status = String(action.status ?? '').trim();
+        if (!summary) return '';
+        return status ? `[${status}] ${kind}: ${summary}` : `${kind}: ${summary}`;
+    }).filter(Boolean);
+}
+
 function extractHookCheckpointPayload(response: string): HookCheckpointPayload | null {
     const facts = extractExplicitAssistantMemory(response).filter((fact) => fact.scope === 'project');
     if (facts.length === 0) {
@@ -381,7 +457,29 @@ function extractHookCheckpointPayload(response: string): HookCheckpointPayload |
             continue;
         }
         if (fact.key === 'recent_file_changes') {
+            const fileChanges = typeof fact.value === 'object' && fact.value !== null && Array.isArray((fact.value as Record<string, unknown>).items)
+                ? ((fact.value as Record<string, unknown>).items as Array<Record<string, unknown>>)
+                    .filter((item) => item && typeof item === 'object')
+                    .map((item) => ({
+                        action: String(item.action ?? 'updated').trim() || 'updated',
+                        path: String(item.path ?? '').trim(),
+                        ...(typeof item.toPath === 'string' && item.toPath.trim() ? { toPath: String(item.toPath).trim() } : {}),
+                        ...(typeof item.purpose === 'string' && item.purpose.trim() ? { purpose: String(item.purpose).trim() } : {}),
+                    }))
+                    .filter((item) => item.path)
+                : [];
+            if (fileChanges.length > 0) {
+                checkpoint.fileChanges = [...(checkpoint.fileChanges ?? []), ...fileChanges];
+            }
             outputs.push(...readFileChangeOutputs(fact.value));
+            continue;
+        }
+        if (fact.key === 'recent_actions') {
+            const actions = readCheckpointActions(fact.value);
+            if (actions.length > 0) {
+                checkpoint.actions = [...(checkpoint.actions ?? []), ...actions];
+            }
+            outputs.push(...readActionOutputs(fact.value));
         }
     }
 
@@ -389,7 +487,12 @@ function extractHookCheckpointPayload(response: string): HookCheckpointPayload |
         checkpoint.recentOutputs = outputs;
     }
 
-    return checkpoint.currentStep || checkpoint.nextStep || (checkpoint.openRisks && checkpoint.openRisks.length > 0) || (checkpoint.recentOutputs && checkpoint.recentOutputs.length > 0)
+    return checkpoint.currentStep
+        || checkpoint.nextStep
+        || (checkpoint.openRisks && checkpoint.openRisks.length > 0)
+        || (checkpoint.recentOutputs && checkpoint.recentOutputs.length > 0)
+        || (checkpoint.actions && checkpoint.actions.length > 0)
+        || (checkpoint.fileChanges && checkpoint.fileChanges.length > 0)
         ? checkpoint
         : null;
 }
@@ -407,6 +510,10 @@ function emitHookContext(event: HookEventName, additionalContext: string): void 
 function shouldFetchMemory(prompt: string): boolean {
     const normalized = prompt.trim();
     if (!normalized) return false;
+    const explicitFacts = extractExplicitPromptMemory(normalized);
+    if (explicitFacts.some((fact) => fact.scope === 'project')) {
+        return false;
+    }
     if (MEMORY_NEED_NEGATIVE_PATTERNS.some((pattern) => pattern.test(normalized))) {
         return false;
     }
@@ -416,7 +523,12 @@ function shouldFetchMemory(prompt: string): boolean {
     if (/\b(my|our|we)\b/i.test(normalized)) {
         return true;
     }
-    return normalized.includes('/');
+    if (normalized.includes('/')) {
+        return true;
+    }
+    // Any substantive prompt in a project context should trigger memory fetch.
+    // Short acks and filler are already caught by MEMORY_NEED_NEGATIVE_PATTERNS.
+    return normalized.length > 20;
 }
 
 function dedupeFacts(facts: HookFact[]): HookFact[] {
@@ -480,6 +592,10 @@ export async function buildHookAdditionalContext(options: {
     const cwd = getCwd(payload);
     const agent = await ensureHookAgent(iranti, payload);
     const entityHints = getEntityHints(payload);
+
+    if (event === 'PreCompact') {
+        return formatPreCompactContext();
+    }
 
     if (event === 'SessionStart') {
         const brief = await iranti.handshake({
@@ -578,8 +694,8 @@ async function main(): Promise<void> {
 
     const args = parseArgs(process.argv.slice(2));
     const event = args.event as HookEventName | undefined;
-    if (event !== 'SessionStart' && event !== 'UserPromptSubmit' && event !== 'Stop') {
-        throw new Error('--event must be SessionStart, UserPromptSubmit, or Stop');
+    if (event !== 'SessionStart' && event !== 'UserPromptSubmit' && event !== 'Stop' && event !== 'PreCompact') {
+        throw new Error('--event must be SessionStart, UserPromptSubmit, Stop, or PreCompact');
     }
 
     const payload = parsePayload(await readStdin());
@@ -595,17 +711,21 @@ async function main(): Promise<void> {
         sessionLedgerSource: 'claude_hook',
         sessionLedgerHost: 'claude_code',
     });
-    const context = await buildHookAdditionalContext({
-        iranti,
-        event,
-        payload,
-    });
-    if (!context) {
-        await flushStaffEventEmitter();
-        process.exit(0);
+    let context = '';
+    try {
+        context = await buildHookAdditionalContext({
+            iranti,
+            event,
+            payload,
+        });
+        if (context) {
+            emitHookContext(event, context);
+        }
+    } finally {
+        await flushStaffEventEmitter().catch(() => undefined);
+        await disconnectDb().catch(() => undefined);
     }
-    emitHookContext(event, context);
-    await flushStaffEventEmitter();
+
     process.exit(0);
 }
 
@@ -625,6 +745,7 @@ if (require.main === module) {
                 },
             });
             await flushStaffEventEmitter();
+            await disconnectDb().catch(() => undefined);
         } catch {}
         console.error('[claude-code-memory-hook] fatal:', error instanceof Error ? error.message : String(error));
         process.exit(1);

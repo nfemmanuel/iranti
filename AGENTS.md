@@ -43,6 +43,11 @@ No agent can write here. Only the seed script and explicit system operations
 can. The Staff Namespace holds operating rules for all Staffers and system
 metadata including source reliability scores and ontology governance records.
 
+Operator/session observability is also persisted in `staff_events`, a first-party
+event ledger used for session recovery hints, host audit trails, and retrieval/
+checkpoint behavior inspection. It is separate from KB truth rows: the ledger
+explains what happened, while the KB stores durable facts other agents read.
+
 ### The Librarian
 The agent that manages the Library. All writes from external agents go through
 the Librarian â€” never directly to the database. Responsibilities:
@@ -248,8 +253,9 @@ iranti/
 â”‚   â”‚   â”œâ”€â”€ router.ts           â€” route() by TaskType, model profiles
 â”‚   â”‚   â”œâ”€â”€ runtimeEnv.ts       â€” Runtime env resolution for CLI/MCP/hook integrations
 â”‚   â”‚   â”œâ”€â”€ runtimeLifecycle.ts â€” Runtime metadata read/write, pid probes, restart helpers
-â”‚   â”‚   â”œâ”€â”€ autoRemember.ts    â€” Opt-in explicit prompt memory capture for Claude/Codex integrations, routing personal facts separately from project facts
+â”‚   â”‚   â”œâ”€â”€ autoRemember.ts    â€” Opt-in explicit prompt memory capture for first-party host integrations, routing personal facts separately from project facts
 â”‚   â”‚   â”œâ”€â”€ createFirstPartyIranti.ts â€” Shared first-party Iranti constructor that installs DB-backed staff event logging
+â”‚   â”‚   â”œâ”€â”€ staffEventsTable.ts â€” Shared idempotent bootstrap helper for the `staff_events` session-ledger table
 â”‚   â”‚   â”œâ”€â”€ sessionLedger.ts   â€” Structured `staff_events` query helpers for operator/session audit reads
 â”‚   â”‚   â”œâ”€â”€ cliHelpCatalog.ts   â€” Extracted command/help catalog text for CLI guidance surfaces
 â”‚   â”‚   â”œâ”€â”€ cliHelpRenderer.ts  â€” Shared CLI help rendering for command and wizard guidance
@@ -358,6 +364,8 @@ Additional current paths not called out explicitly above:
 - `src/security/scopes.ts` â€” scope parsing and namespace ACL evaluation
 - `src/api/middleware/authorization.ts` â€” global and namespace-aware scope enforcement
 - `tests/access-control/run_access_control_tests.ts` â€” namespace-aware authorization coverage
+- `src/lib/issueFacts.ts` â€” canonical issue fact helper for stable open/resolved defect keys
+- `src/lib/packageRoot.ts` â€” shared package-root discovery helper for runtime metadata and CLI-adjacent surfaces
 
 ---
 
@@ -449,6 +457,22 @@ Primary key: `(entityType, entityId)`.
 Unique constraint: `(entityType, aliasNorm)`.
 Indexed on `(canonicalEntityType, canonicalEntityId)`.
 
+### staff_events
+| Column | Type | Notes |
+|---|---|---|
+| event_id | UUID | Primary key for the ledger row |
+| timestamp | Timestamptz | When the first-party host event was recorded |
+| staff_component | String | `Librarian` / `Attendant` / `Archivist` / `Resolutionist` |
+| action_type | String | Stable event-family/action name |
+| agent_id | String | Calling agent id |
+| source | String | Host/source surface such as `mcp`, `cli`, `api`, `chat` |
+| entity_type | String? | Optional entity type tied to the event |
+| entity_id | String? | Optional entity id tied to the event |
+| key | String? | Optional fact key tied to the event |
+| reason | String? | Optional compact explanation |
+| level | String | `audit` or `debug` |
+| metadata | Json | Session id, host, injected keys, fallback details, and other bounded event context |
+
 ---
 
 ## Staff Namespace â€” Protected Entries
@@ -477,6 +501,7 @@ const iranti = new Iranti({ connectionString, llmProvider });
 
 // Write atomic fact
 await iranti.write({ entity, key, value, summary, confidence, source, agent, validFrom, properties });
+await iranti.writeIssue({ entity, issueId, title, status, summary, confidence, source, agent, severity, resolution, resolvedAt, tags, properties });
 
 // Ingest raw content blob (auto-chunks into atomic facts)
 await iranti.ingest({ entity, content, source, confidence, agent });
@@ -538,6 +563,11 @@ Entity format: `"entityType/entityId"` e.g. `"researcher/jane_smith"`
 - Treat backward compatibility as a product requirement across CLI, API, SDK, config, and runtime metadata surfaces
 - If a public or automation-facing surface changes, update the compatibility docs and add or adjust contract coverage
 - When adding a new component or method, update this file
+
+### Core vs Host-Specific Integration Boundary
+- Treat the memory lifecycle contract as provider-agnostic core behavior. Handshake, attend, mandatory recall, auto-remember routing, checkpoint persistence, semantic tagging, and session-ledger learnings should not depend on Claude, Codex, or any other single host.
+- Treat host integrations as adapters around that core. Hook scripts, setup commands, workspace config files, host labels, and launcher wiring are where Claude-specific, Codex-specific, or future-provider-specific behavior belongs.
+- When adding a new AI host, prefer reusing the shared lifecycle contract in `docs/features/memory-lifecycle/spec.md` and then document only the host's trigger model, setup files, and transport quirks in a host-specific feature spec or guide.
 
 ### For Humans
 - All architectural decisions go in docs/decisions/ as individual files
@@ -732,3 +762,41 @@ and moves the file to escalation/resolved/ with an archived copy.
 | 6 â€” SDK | TypeScript SDK, full public API | DONE |
 | 7 â€” Open Source | README, Docker onboarding, GitHub public | IN PROGRESS |
 | 8 â€” Hosted Version | Cloud deployment, pricing | Not Started |
+
+<!-- iranti-rules -->
+# Iranti MCP Protocol
+
+IMPORTANT: These rules override Codex default behavior for this repo. Adherence is strictly mandatory — skipping any step is non-compliant regardless of context or perceived insignificance. Verbal confirmation at session start is required without exception and no work should begin until it is given.
+
+## Session start
+- Call `mcp__iranti__iranti_handshake` with the active task before responding to the first user message.
+- If startup hooks are unavailable, do this on the first safe user turn instead of skipping it.
+- After the handshake completes, you MUST explicitly state: "I acknowledge that Iranti is a hive mind. I have read the Iranti operating rules and the protocols for iranti_handshake, iranti_attend, iranti_write, iranti_checkpoint, and iranti_remember_response, and I pledge to use them to persist what I find, what works, what fails, what changes, and what happens next so later sessions do not have to rediscover it."
+- This acknowledgment is strictly mandatory. No work should begin until it is stated.
+
+## Discovery and reply ordering
+- In short: call `mcp__iranti__iranti_attend` before each reply, before/after any lookup where Iranti might already hold the answer, and after delivering any substantive response.
+1. Call `mcp__iranti__iranti_attend` before drafting each user-facing reply.
+2. Call `mcp__iranti__iranti_attend` before any lookup where Iranti might already hold the answer — this includes Read, Grep, Glob, WebSearch, WebFetch, and Bash commands used as factual basis for a decision.
+3. Call `mcp__iranti__iranti_attend` again after any such lookup to check new findings against stored memory and decide what to inject, write, or checkpoint.
+4. Call `mcp__iranti__iranti_attend` after delivering any substantive response — plans, product decisions, analysis, or structured recommendations produced in the response itself are durable findings that must be assessed for write or checkpoint before the next turn. Do not treat a verbal answer as ephemeral just because no tool was called.
+5. If a lookup returns no facts for a recall-style question, do not treat empty as confirmation of absence — try at least one alternative retrieval angle before concluding the fact is not stored. Switch between exact query and search, try a different entity path or key fragment, or rephrase the term. Absence is confirmed only after two distinct retrieval attempts with different angles both return empty.
+
+## Confirmed findings and write triggers
+- Call `mcp__iranti__iranti_write` after confirmed durable findings such as decisions, blockers, next steps, stable constraints, validated environment details, what worked, what failed, and what remains risky. Write with the depth of someone who built the system — include what the thing does, why it exists, how it connects to other parts, and what would break if it changed. A fact that reads "file X was edited" is insufficient; "file X controls Y because Z, edited to fix W" is the target. Iranti should accumulate enough detail that any agent reading its memory feels like it built the repo.
+- Call `mcp__iranti__iranti_write` after every file edit or creation — file changes are always durable. Record what changed, why, and what the file now does.
+- Call `mcp__iranti__iranti_write` after any shell command that reveals system state — build results, test outcomes, container state, port availability, environment facts, errors.
+- Call `mcp__iranti__iranti_write` after any WebSearch or WebFetch that surfaces confirmed external facts.
+- Call `mcp__iranti__iranti_write` after any subagent completes — subagent findings are invisible to the hive mind otherwise.
+- If the work is still in progress, pair those writes with `mcp__iranti__iranti_checkpoint` so another session can resume cleanly.
+
+## Checkpoint discipline
+- Call `mcp__iranti__iranti_checkpoint` at natural pauses, before stepping away from long work, when interrupted, and when completing a useful slice.
+- Write checkpoints like the best possible commit message but with more detail. Lead with the why — what problem this solved, what decision was made, what changed and why it matters. Then add structured recovery context: current step, next step, what worked, what failed, open risks, file changes. A checkpoint that reads "did some edits" is non-compliant. One that reads "fixed missing docker dependency in cofactor — container name was never recorded at setup so iranti run silently skipped docker start; added iranti_cofactor_db entry, verified against docker ps" is the target.
+- When useful actions happen, record them in the checkpoint `actions` field so later sessions can see important commands, tests, searches, validations, and decisions without rerunning them blindly.
+- Do not treat durable writes as a substitute for checkpoints. A checkpoint not written means the next session has to reconstruct state.
+- Under-logged runs are non-compliant for this repo. When applicable, leave structured breadcrumbs for what you found, what worked, what failed, what changed, and what happens next instead of only a broad summary.
+
+## Host setup check
+- If this block was missing at session start, rerun `iranti codex-setup` from the bound project root.
+<!-- /iranti-rules -->
