@@ -366,6 +366,10 @@ Additional current paths not called out explicitly above:
 - `tests/access-control/run_access_control_tests.ts` â€” namespace-aware authorization coverage
 - `src/lib/issueFacts.ts` â€” canonical issue fact helper for stable open/resolved defect keys
 - `src/lib/packageRoot.ts` â€” shared package-root discovery helper for runtime metadata and CLI-adjacent surfaces
+- `src/lib/protocolEnforcement.ts` â€” `AgentProtocolTracker` class and `ProtocolViolationError`; tracks per-agent handshake/attend state and enforces the turn cycle; supports `off`, `warn`, and `strict` modes configured via `IrantiConfig.protocolEnforcement`
+- `src/lib/projectLearning.ts` â€” `writeProjectLearningSnapshot()` runs at `iranti bind` time; writes a bounded snapshot of project structure, language/framework detection, package scripts, and binding metadata to `codebase/<name>_<hash>` in the KB
+- `tests/api-surfaces/run_protocol_enforcement_route_tests.ts` â€” focused regression that validates the full handshake â†' attend â†' discover â†' post-response turn cycle under strict enforcement at the HTTP route layer; run with `npm run test:api-surfaces-protocol-enforcement`
+- `tests/mcp/run_protocol_enforcement_regressions.ts` â€” same turn-cycle enforcement validation for the MCP host adapter via the stdio MCP client; run with `npm run test:mcp-protocol-enforcement`
 
 ---
 
@@ -497,7 +501,10 @@ Indexed on `(canonicalEntityType, canonicalEntityId)`.
 ## SDK â€” Public API
 
 ```typescript
-const iranti = new Iranti({ connectionString, llmProvider });
+// protocolEnforcement: 'off' (default) | 'warn' | 'strict'
+// 'strict' — KB discovery routes return 428 ProtocolViolationError before an agent that
+//   skipped handshake or attend can read; use in production to enforce turn discipline
+const iranti = new Iranti({ connectionString, llmProvider, protocolEnforcement: 'strict' });
 
 // Write atomic fact
 await iranti.write({ entity, key, value, summary, confidence, source, agent, validFrom, properties });
@@ -766,33 +773,24 @@ and moves the file to escalation/resolved/ with an archived copy.
 <!-- iranti-rules -->
 # Iranti MCP Protocol
 
-IMPORTANT: These rules override Codex default behavior for this repo. Adherence is strictly mandatory — skipping any step is non-compliant regardless of context or perceived insignificance. Verbal confirmation at session start is required without exception and no work should begin until it is given.
+IMPORTANT: These rules override Codex default behavior for this repo.
 
 ## Session start
 - Call `mcp__iranti__iranti_handshake` with the active task before responding to the first user message.
 - If startup hooks are unavailable, do this on the first safe user turn instead of skipping it.
-- After the handshake completes, you MUST explicitly state: "I acknowledge that Iranti is a hive mind. I have read the Iranti operating rules and the protocols for iranti_handshake, iranti_attend, iranti_write, iranti_checkpoint, and iranti_remember_response, and I pledge to use them to persist what I find, what works, what fails, what changes, and what happens next so later sessions do not have to rediscover it."
-- This acknowledgment is strictly mandatory. No work should begin until it is stated.
 
 ## Discovery and reply ordering
-- In short: call `mcp__iranti__iranti_attend` before each reply, before/after any lookup where Iranti might already hold the answer, and after delivering any substantive response.
+- In short: call `mcp__iranti__iranti_attend` before each reply and before/after knowledge discovery.
 1. Call `mcp__iranti__iranti_attend` before drafting each user-facing reply.
-2. Call `mcp__iranti__iranti_attend` before any lookup where Iranti might already hold the answer — this includes Read, Grep, Glob, WebSearch, WebFetch, and Bash commands used as factual basis for a decision.
-3. Call `mcp__iranti__iranti_attend` again after any such lookup to check new findings against stored memory and decide what to inject, write, or checkpoint.
-4. Call `mcp__iranti__iranti_attend` after delivering any substantive response — plans, product decisions, analysis, or structured recommendations produced in the response itself are durable findings that must be assessed for write or checkpoint before the next turn. Do not treat a verbal answer as ephemeral just because no tool was called.
-5. If a lookup returns no facts for a recall-style question, do not treat empty as confirmation of absence — try at least one alternative retrieval angle before concluding the fact is not stored. Switch between exact query and search, try a different entity path or key fragment, or rephrase the term. Absence is confirmed only after two distinct retrieval attempts with different angles both return empty.
+2. Call `mcp__iranti__iranti_attend` before using memory discovery tools such as search, query, or related reads.
+3. Call `mcp__iranti__iranti_attend` again after discovery when the findings may change what should be injected, written, or checkpointed.
 
-## Confirmed findings and write triggers
-- Call `mcp__iranti__iranti_write` after confirmed durable findings such as decisions, blockers, next steps, stable constraints, validated environment details, what worked, what failed, and what remains risky. Write with the depth of someone who built the system — include what the thing does, why it exists, how it connects to other parts, and what would break if it changed. A fact that reads "file X was edited" is insufficient; "file X controls Y because Z, edited to fix W" is the target. Iranti should accumulate enough detail that any agent reading its memory feels like it built the repo.
-- Call `mcp__iranti__iranti_write` after every file edit or creation — file changes are always durable. Record what changed, why, and what the file now does.
-- Call `mcp__iranti__iranti_write` after any shell command that reveals system state — build results, test outcomes, container state, port availability, environment facts, errors.
-- Call `mcp__iranti__iranti_write` after any WebSearch or WebFetch that surfaces confirmed external facts.
-- Call `mcp__iranti__iranti_write` after any subagent completes — subagent findings are invisible to the hive mind otherwise.
+## Confirmed findings
+- Call `mcp__iranti__iranti_write` after confirmed durable findings such as decisions, blockers, next steps, stable constraints, validated environment details, what worked, what failed, and what remains risky.
 - If the work is still in progress, pair those writes with `mcp__iranti__iranti_checkpoint` so another session can resume cleanly.
 
 ## Checkpoint discipline
 - Call `mcp__iranti__iranti_checkpoint` at natural pauses, before stepping away from long work, when interrupted, and when completing a useful slice.
-- Write checkpoints like the best possible commit message but with more detail. Lead with the why — what problem this solved, what decision was made, what changed and why it matters. Then add structured recovery context: current step, next step, what worked, what failed, open risks, file changes. A checkpoint that reads "did some edits" is non-compliant. One that reads "fixed missing docker dependency in cofactor — container name was never recorded at setup so iranti run silently skipped docker start; added iranti_cofactor_db entry, verified against docker ps" is the target.
 - When useful actions happen, record them in the checkpoint `actions` field so later sessions can see important commands, tests, searches, validations, and decisions without rerunning them blindly.
 - Do not treat durable writes as a substitute for checkpoints. A checkpoint not written means the next session has to reconstruct state.
 - Under-logged runs are non-compliant for this repo. When applicable, leave structured breadcrumbs for what you found, what worked, what failed, what changed, and what happens next instead of only a broad summary.

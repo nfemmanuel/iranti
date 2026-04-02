@@ -537,10 +537,13 @@ Attend request body:
   "agentId": "research_agent_001",
   "latestMessage": "What is my favorite snack?",
   "currentContext": "User: Hi\nAssistant: Hello",
+  "phase": "pre-response",
   "maxFacts": 5,
   "entityHints": ["user/main"]
 }
 ```
+
+`phase` is one of `"pre-response"`, `"post-response"`, or `"mid-turn"`. Pass `"pre-response"` before replying and `"post-response"` after. When `protocolEnforcement` is `strict`, starting a new `"pre-response"` turn before closing the previous one with `"post-response"` returns a 428 protocol violation.
 
 Attend response:
 
@@ -560,7 +563,8 @@ Attend response:
       "summary": "favorite_snack: popcorn",
       "value": {"text": "popcorn"},
       "confidence": 90,
-      "source": "chatbot_user"
+      "source": "chatbot_user",
+      "lastUpdated": "2026-03-21T09:10:00.000Z"
     }
   ],
   "entitiesDetected": ["user/main"],
@@ -571,15 +575,94 @@ Attend response:
     "reminder": "Iranti is a hive mind. iranti_attend is mandatory before each reply and around knowledge discovery; if you skip that loop, later sessions will have to rediscover context.",
     "expectedCallSequence": [
       "Call iranti_handshake at session start and again after context compaction.",
-      "Call iranti_attend before replying to the user.",
+      "Call iranti_attend(phase='pre-response') before replying to the user.",
       "Call iranti_attend before knowledge discovery tools such as search, query, or read.",
       "Call iranti_attend again after knowledge discovery when new findings may affect retrieval.",
+      "Call iranti_attend(phase='post-response') after every response.",
       "Use iranti_write for durable findings and iranti_checkpoint at meaningful pauses."
     ],
     "note": "After using attend() and any retrieved facts, persist durable learnings with iranti_write and shared progress with iranti_checkpoint when applicable."
+  },
+  "compliance": {
+    "status": "healthy",
+    "summary": "Session compliance is healthy.",
+    "issues": [],
+    "lastUpdated": "2026-03-21T09:10:00.000Z",
+    "counters": {
+      "attendsWithoutPersist": 0,
+      "consecutivePreResponseWithoutPost": 0,
+      "pendingPostResponse": true,
+      "lastAttendPhase": "pre-response"
+    }
   }
 }
 ```
+
+Each injected fact includes:
+- `entityKey` — `entityType/entityId/key` path that identifies the fact
+- `summary` — human-readable summary of the fact value
+- `value` — the stored fact value
+- `confidence` — confidence score (0–100) at write time
+- `source` — what wrote this fact (agent or source identifier)
+- `lastUpdated` — ISO timestamp of when the fact was last written; use this to judge freshness
+
+Top-level injection decision fields:
+- `shouldInject` — whether facts were injected into this response
+- `reason` — one of `memory_needed_injected`, `memory_needed_no_facts`, `memory_needed_but_in_context`, `memory_not_needed`, `forced`
+- `decision.method` — how the decision was made: `heuristic`, `llm`, `forced`, or `advisory`
+- `alreadyPresent` — how many facts were skipped because they were already in visible context
+- `totalFound` — total facts retrieved before the `alreadyPresent` filter
+- `compliance` — per-session protocol compliance state (see Session Compliance below)
+
+#### Session Compliance
+
+The `compliance` object returned by attend shows the per-session protocol health:
+
+```json
+{
+  "status": "healthy",
+  "summary": "Session compliance is healthy.",
+  "issues": [],
+  "lastUpdated": "2026-03-21T09:10:00.000Z",
+  "counters": {
+    "attendsWithoutPersist": 0,
+    "consecutivePreResponseWithoutPost": 0,
+    "pendingPostResponse": true,
+    "lastAttendPhase": "pre-response"
+  }
+}
+```
+
+`status` is one of `healthy`, `degraded`, or `non_compliant`. Issues have a `code` (`missing_post_response_attend` or `missing_durable_persistence`), `severity` (`warn` or `error`), and `requiredAction`.
+
+### Protocol Enforcement
+
+When the Iranti SDK or API server is initialized with `protocolEnforcement: 'strict'`, knowledge-base discovery routes enforce the handshake → attend → discover turn cycle. Violations return HTTP 428 with a structured body:
+
+```json
+{
+  "error": "Protocol violation: iranti_query is blocked for agent research_agent_001 until iranti_handshake runs for the current session.",
+  "code": "handshake_required",
+  "protocolViolation": {
+    "code": "handshake_required",
+    "agentId": "research_agent_001",
+    "operation": "query",
+    "message": "Protocol violation: iranti_query is blocked for agent research_agent_001 until iranti_handshake runs for the current session.",
+    "requiredAction": "Call iranti_handshake for this agent, then call iranti_attend before discovery if the operation is a read/search traversal tool."
+  }
+}
+```
+
+Violation codes:
+- `handshake_required` — agent has not called `/memory/handshake` for this session
+- `attend_required` — agent called handshake but has not called `/memory/attend` for this turn, or the per-turn discovery budget (1 read per attend) has been exhausted
+- `post_response_required` — agent is starting a new `pre-response` turn without having closed the previous turn via `attend(phase='post-response')`
+
+Affected routes under strict enforcement: `GET /kb/query/:entityType/:entityId/:key`, `GET /kb/history/:entityType/:entityId/:key`, `GET /kb/query/:entityType/:entityId`, `GET /kb/search`, `GET /kb/related/:entityType/:entityId`, `GET /kb/related/:entityType/:entityId/deep`.
+
+Default enforcement mode is `off`. Set `protocolEnforcement: 'warn'` in SDK config to log violations without blocking; set `'strict'` to block.
+
+MCP tools under strict enforcement return a structured `protocolViolation` payload instead of an error result so the calling agent can read and act on the code.
 
 ### Agents (`/agents/*`)
 
@@ -615,8 +698,11 @@ Typical status codes:
 - `400`: validation/request errors
 - `401`: missing/invalid API key
 - `404`: missing resource (for agent lookup)
+- `428`: protocol precondition failed because the host skipped `handshake` or the current-turn `attend`
 - `429`: rate-limited
 - `500`: server-side error
+
+Protocol-gated discovery endpoints now fail closed. `GET /kb/query/*`, `GET /kb/search`, `GET /kb/related/*`, `GET /memory/whoknows/*`, and `POST /memory/observe` return `428 Precondition Required` until the agent has completed `POST /memory/handshake`, and read/search traversal routes require a fresh `POST /memory/attend` for the current turn. Starting a new `POST /memory/attend` call with `phase="pre-response"` before the previous turn has been closed by `phase="post-response"` now returns a protocol violation as well. Session inspection/listing responses also expose structured lifecycle compliance state so hosts can distinguish healthy runs from degraded breadcrumb discipline or repeated missed post-response closes.
 
 ## Notes
 

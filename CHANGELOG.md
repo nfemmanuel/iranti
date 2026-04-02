@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.0 - 2026-04-02
+
+### Added
+
+- **Protocol enforcement turn-gate.** The SDK now ships an `AgentProtocolTracker` that enforces the handshake → attend → discover → post-response turn cycle. Configure via `protocolEnforcement: 'off' | 'warn' | 'strict'` in `IrantiConfig`. In `strict` mode, KB discovery routes (`/kb/query`, `/kb/search`, `/kb/related`, etc.) return HTTP 428 with a structured `protocolViolation` body (`code`, `agentId`, `operation`, `message`, `requiredAction`) when an agent skips handshake, skips attend, or opens a new turn without closing the prior one with `attend(phase='post-response')`. MCP tools under strict enforcement return a structured `protocolViolation` payload rather than an error so agents can inspect and recover.
+- **Attend phase tracking.** `iranti_attend` now accepts a `phase` field (`pre-response`, `post-response`, `mid-turn`). Passing the phase enables per-session turn-lifecycle tracking in the `SessionComplianceState` returned by every attend call. The compliance state surfaces `pendingPostResponse`, `consecutivePreResponseWithoutPost`, and `attendsWithoutPersist` counters alongside a `status` of `healthy`, `degraded`, or `non_compliant`.
+- **Injected fact freshness.** Each fact in the `facts[]` array returned by `iranti_attend` and `iranti_observe` now includes a `lastUpdated` ISO timestamp so the calling agent can judge how fresh the retrieved memory is.
+- **Bounded project learning snapshot.** `iranti bind` now writes a small snapshot from authoritative project files (`package.json`, `README.md`, `tsconfig.json`, `pyproject.toml`, `prisma/schema.prisma`, and common source directories) to a stable `codebase/<name>_<hash>` entity. The snapshot records project name, language/framework detection, package scripts, source layout, and binding metadata. This is a bounded bind-time capture, not a continuous crawler.
+- **Protocol enforcement test coverage.** Two focused test scripts — `npm run test:api-surfaces-protocol-enforcement` and `npm run test:mcp-protocol-enforcement` — validate the full handshake → attend → discover → post-response turn cycle under strict enforcement for the HTTP route layer and the MCP host adapter respectively.
+
 ## 0.2.51 - Unreleased
 
 ### Changed

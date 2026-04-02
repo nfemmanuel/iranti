@@ -43,8 +43,8 @@ Turn compatibility from an informal expectation into a tested release gate.
 
 9. Benchmark and site alignment checks
 - Add a repo-local downstream drift audit for sibling repos.
-- Current 2026-04-02 blocker: `iranti-control-plane` still documents retired CLI commands (`iranti bind`, `iranti init`, `iranti config`, `iranti setup --mcp`) in active workflow/reference docs.
-- Current 2026-04-02 evidence: `npm run test:contracts-downstream` passes for `iranti-site` and `iranti-benchmarking`, but fails for `iranti-control-plane/WORKFLOW_MATRIX.md` and `iranti-control-plane/docs/reference/api.md`.
+- Current 2026-04-02 status: the downstream drift audit now passes for `iranti-control-plane`, `iranti-site`, and `iranti-benchmarking`.
+- Keep `npm run test:contracts-downstream` as the regression gate so sibling repos do not drift back onto retired CLI or MCP setup language.
 
 ## Priority 2
 

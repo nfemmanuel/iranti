@@ -9,10 +9,11 @@
 
 Iranti gives agents persistent, identity-based memory. Facts written by one agent are retrievable by any other agent through exact entity+key lookup. Iranti also supports hybrid search (lexical + vector) when exact keys are unknown. Memory persists across sessions and survives context window limits.
 
-**Latest release:** [`v0.2.49`](https://github.com/nfemmanuel/iranti/releases/tag/v0.2.49)  
+**Repo version:** `0.3.0`  
 Published packages:
-- `iranti@0.2.49`
-- `@iranti/sdk@0.2.49`
+- npm `iranti@0.3.0`
+- npm `@iranti/sdk@0.3.0`
+- PyPI `iranti==0.3.0`
 
 ---
 
@@ -52,27 +53,29 @@ Vector databases answer "what's similar to X?" Iranti answers "what do we know a
 
 ## Benchmark Summary
 
-Iranti has now been rerun against a broader benchmark program covering 11 active capability tracks in `v0.2.21`. The current picture is stronger and narrower than the early validation story: exact, durable, shared memory is benchmark-backed; broad semantic-memory and autonomous-memory claims still need tighter boundaries.
+Iranti now has current rerun evidence across exact retrieval, process continuity, upgrade durability, relationships, bounded conflict handling, and bounded recovery behavior. The current picture is stronger and narrower than the early validation story: exact, durable, shared memory is validated; broad semantic-memory and autonomous-recovery claims still need explicit limits.
 
 ### Confirmed Strengths
 
-- **Exact lookup (`iranti_query`)**: Retrieval remains exact and durable across genuine session and process breaks. At tested scale (`N=1938`, about `107k` tokens), the measured advantage is efficiency, not accuracy: Iranti answered `10/10` with zero haystack tokens while the baseline also answered `10/10` after reading the full document.
-- **Persistence across sessions**: Facts survive context-window loss and genuine process boundaries. `iranti_query` remained `8/8` across isolated session breaks in the rerun.
+- **Exact lookup (`iranti_query`)**: The prepublish candidate for the current `0.3.0` line still scored `10/10` on the canonical B1 exact-retrieval arm.
+- **Persistence across sessions and processes**: Facts survive context-window loss and genuine process boundaries, with current reruns and validation passes covering process-isolated reads plus cross-process invalidation.
+- **Upgrade durability**: A fresh continuity chain now passes across public npm `0.2.49 -> 0.2.50 -> 0.2.51` plus a final prepublish candidate hop on the `0.3.0` line.
 - **Conflict handling**: Reliable when confidence differentials are large and explicit.
-- **Multi-agent coordination**: Agents can share memory across genuine subprocess boundaries with zero shared conversational context.
+- **Relationship traversal and multi-agent coordination**: Relationship writes plus one-hop/deep traversal work, and agents can share memory across genuine subprocess boundaries with zero shared conversational context.
 - **Provenance on writes**: Write-side attribution through stored source metadata is working and benchmark-confirmed.
-- **Ingest**: Prose extraction is accurate on clean entities in `v0.2.21`. Reliability under conflict-heavy transactional conditions should still be treated as a separate, narrower claim.
-- **Observe with hints**: `iranti_observe` recovers facts reliably when given the right entity hint, with higher-confidence facts returned first.
-- **Session recovery**: Interrupted-session recovery now performs substantially better than baseline.
+- **Ingest**: Prose extraction is accurate on clean entities in the bounded rerun surfaces already documented.
+- **Observe with hints / explicit recovery**: `iranti_observe` with hints and explicit query-based recovery are meaningfully useful today.
+- **Protocol enforcement turn-gate**: Strict turn-cycle enforcement (handshake → attend → discover → post-response) is validated by focused route and MCP regression tests. In `strict` mode, KB discovery routes return HTTP 428 with a structured violation payload before an agent that skipped attend can silently read stale memory. Injected facts now include a `lastUpdated` timestamp so the calling agent can judge freshness at the point of injection.
 
 Recent fixes since the last rerun:
 - **Search now bridges semantic hits across relationships for filtered retrieval.** A strong incident or issue hit can now propagate back onto the owning filtered entity over up to two hops, so filtered project search no longer depends on direct lexical overlap alone.
 - **`iranti_attend` now safe-defaults parse failures toward memory on non-greeting turns.** Terse prompts such as `help`, `why?`, or `how?` no longer silently fall through to `classification_parse_failed_default_false`.
-- **Observe can now recover scoped project facts without explicit entity hints after handshake.** Scoped tasks seed watched entities, so hintless prompts like `What is the next step?` can retrieve the relevant fact.
+- **Hybrid search now indexes entity addresses directly.** Addressed queries such as `project/<id> status` no longer rely on value-summary overlap alone.
 
 ### Current Limits
 
 - **Upgrade durability is now test-covered.** The `v0.2.21` upgrade reinitialized the instance under test — a one-time operator incident, not a systemic design flaw. All Prisma migrations are additive (no DROP or TRUNCATE); Staff Namespace seeding is guarded by `isSeeded()`; `seed-codebase.ts` upserts to `codebase/*` entities only. A KB preservation test in `tests/runtime-lifecycle/run_setup_upgrade_tests.ts` now confirms user KB data written before a `setup` re-run survives intact.
+- **Project learning is now only a bounded bind-time snapshot.** When you bind a project, Iranti derives a stable `IRANTI_CODEBASE_ENTITY` and writes a small snapshot from authoritative files such as `package.json`, `README.md`, `tsconfig.json`, `pyproject.toml`, `prisma/schema.prisma`, and common source directories. It does not yet crawl the repo continuously or build autonomous whole-project understanding.
 - **Relationship and provenance reflection surfaces remain partially permission-gated in benchmark sessions.** The rerun did not prove `iranti_relate`, `iranti_related`, `iranti_related_deep`, or `iranti_who_knows` end-to-end under the benchmark session policy.
 
 ### Practical Position
@@ -80,9 +83,10 @@ Recent fixes since the last rerun:
 Iranti is strongest today as **structured memory infrastructure for multi-agent systems**:
 - exact entity/key lookup
 - durable shared memory
-- provenance-aware writes
+- provenance-aware writes with source attribution and freshness timestamps
 - conflict-aware storage
 - session-aware recovery
+- protocol-enforced turn discipline for trustworthy injection (opt-in strict mode)
 
 It should not yet be described as a fully general semantic-memory, semantic-search, or autonomous-memory-injection system.
 
@@ -467,6 +471,7 @@ iranti project init . --instance local --agent-id chatbot_main
 ```
 
 This writes `.env.iranti` in the project with the correct `IRANTI_URL`, `IRANTI_API_KEY`, and default agent identity.
+It also writes a derived `IRANTI_CODEBASE_ENTITY` and a bounded initial project snapshot for that bound repo.
 
 Later changes use the same surface:
 
@@ -609,13 +614,16 @@ for item in matches:
 
 ### Context Persistence (attend)
 
+`handshake()` establishes the session contract. Discovery surfaces such as `query`, `search`, `get_related`, and `who_knows` are now fail-closed until the host has run `handshake()` for the session and `attend()` for the current turn. Starting a new `attend(phase="pre-response")` turn without first closing the previous one with `attend(phase="post-response")` is now blocked as a protocol violation, and `inspectSession()` / `listSessions()` expose structured lifecycle compliance state (`healthy`, `degraded`, `non_compliant`) so hosts and operators can see when breadcrumb discipline is slipping.
+
 ```python
 # Before each LLM call, let Attendant decide if memory is needed
 result = client.attend(
     agent_id="research_agent_001",
     latest_message="What's Jane Smith's current affiliation?",
     current_context="User: What's Jane Smith's current affiliation?\nAssistant: Let me check...",
-    max_facts=5
+    max_facts=5,
+    phase="pre-response"
 )
 
 if result["shouldInject"]:
@@ -731,6 +739,7 @@ middleware.after_receive(
 1. `before_send()` calls `attend()` with conversation context
 2. Forgotten facts are prepended as `[MEMORY: ...]`
 3. `after_receive()` extracts new facts and saves them (best-effort)
+4. If the host skips `handshake()` or `attend()`, discovery calls block instead of returning warn-only metadata
 
 **Note**: Browser extensions are blocked by ChatGPT and Claude's Content Security Policy. Use API-based middleware instead.
 
@@ -759,7 +768,7 @@ Express server on port 3001 with endpoints:
 - `GET /kb/query/:entityType/:entityId/:key` - Query specific fact
 - `GET /kb/query/:entityType/:entityId` - Query all facts for entity
 - `GET /kb/search` - Hybrid search across facts
-- `POST /memory/attend` - Decide whether to inject memory for this turn
+- `POST /memory/attend` - Decide whether to inject memory for this turn and unlock one discovery step for the current turn
 - `POST /memory/observe` - Context persistence (inject missing facts)
 - `POST /memory/handshake` - Working memory brief for agent session
 - `GET /memory/ledger` - Read structured session ledger events from `staff_events`
@@ -770,6 +779,7 @@ Express server on port 3001 with endpoints:
 - `POST /agents/register` - Register agent in registry
 
 All endpoints require `X-Iranti-Key` header for authentication.
+Discovery endpoints return `428 Precondition Required` when a host skips the required session `handshake` or current-turn `attend`.
 
 ---
 

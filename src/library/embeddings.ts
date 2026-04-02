@@ -115,9 +115,26 @@ export function cosineSimilarity(left: number[], right: number[]): number {
     return dot / (Math.sqrt(leftMagnitude) * Math.sqrt(rightMagnitude));
 }
 
-export function buildEmbeddingText(key: string, summary: string, valueRaw: unknown): string {
-    const valueText = typeof valueRaw === 'string' ? valueRaw : JSON.stringify(valueRaw);
-    return `${key} ${summary} ${valueText}`;
+type EmbeddingTextInput = {
+    entityType?: string;
+    entityId?: string;
+    key: string;
+    summary: string;
+    valueRaw: unknown;
+};
+
+function buildEntityAddressText(entityType?: string, entityId?: string): string {
+    const normalizedType = entityType?.trim() ?? '';
+    const normalizedId = entityId?.trim() ?? '';
+    const spacedId = normalizedId.replace(/[-_/]+/g, ' ').trim();
+    const address = normalizedType && normalizedId ? `${normalizedType}/${normalizedId}` : '';
+    return [normalizedType, normalizedId, spacedId, address].filter(Boolean).join(' ');
+}
+
+export function buildEmbeddingText(input: EmbeddingTextInput): string {
+    const valueText = typeof input.valueRaw === 'string' ? input.valueRaw : JSON.stringify(input.valueRaw);
+    const entityText = buildEntityAddressText(input.entityType, input.entityId);
+    return [entityText, input.key, input.summary, valueText].filter(Boolean).join(' ');
 }
 
 export function generateEmbedding(text: string, dimensions: number = EMBEDDING_DIMENSIONS): number[] {

@@ -112,6 +112,20 @@ function coerceScore(value: number | string | null | undefined): number {
     return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function buildHybridLexicalDocumentSql(): Prisma.Sql {
+    return Prisma.sql`
+        coalesce(kb."entityType", '')
+        || ' '
+        || coalesce(kb."entityId", '')
+        || ' '
+        || regexp_replace(coalesce(kb."entityId", ''), '[-_/]+', ' ', 'g')
+        || ' '
+        || coalesce(kb."key", '')
+        || ' '
+        || coalesce(kb."valueSummary", '')
+    `;
+}
+
 export function getVectorBackendSingleton(): VectorBackend {
     if (!vectorBackend) {
         vectorBackend = createVectorBackend();
@@ -123,7 +137,13 @@ async function saveEmbedding(
     entry: Pick<KnowledgeEntry, 'id' | 'entityType' | 'entityId' | 'key' | 'valueSummary' | 'valueRaw' | 'source'>,
     db?: DbClient
 ): Promise<void> {
-    const text = buildEmbeddingText(entry.key, entry.valueSummary, entry.valueRaw);
+    const text = buildEmbeddingText({
+        entityType: entry.entityType,
+        entityId: entry.entityId,
+        key: entry.key,
+        summary: entry.valueSummary,
+        valueRaw: entry.valueRaw,
+    });
     await getVectorBackendSingleton().upsert({
         id: String(entry.id),
         vector: generateEmbedding(text),
@@ -408,7 +428,13 @@ async function scoreFallbackEntries(
             const lexicalScore = lexicalById.get(entry.id) ?? 0;
             const vectorScore = cosineSimilarity(
                 queryEmbedding,
-                generateEmbedding(buildEmbeddingText(entry.key, entry.valueSummary, entry.valueRaw)),
+                generateEmbedding(buildEmbeddingText({
+                    entityType: entry.entityType,
+                    entityId: entry.entityId,
+                    key: entry.key,
+                    summary: entry.valueSummary,
+                    valueRaw: entry.valueRaw,
+                })),
             );
             const score = (weights.lexical * lexicalScore) + (weights.vector * vectorScore);
 
@@ -675,11 +701,11 @@ async function fetchLexicalCandidateIds(
         FROM "knowledge_base" kb
         WHERE ${Prisma.join(filters, ' AND ')}
           AND ts_rank_cd(
-                to_tsvector('english', coalesce(kb."key", '') || ' ' || coalesce(kb."valueSummary", '')),
+                to_tsvector('english', ${buildHybridLexicalDocumentSql()}),
                 websearch_to_tsquery('english', ${input.query})
               ) > 0
         ORDER BY ts_rank_cd(
-            to_tsvector('english', coalesce(kb."key", '') || ' ' || coalesce(kb."valueSummary", '')),
+            to_tsvector('english', ${buildHybridLexicalDocumentSql()}),
             websearch_to_tsquery('english', ${input.query})
         ) DESC
         LIMIT ${limit}
@@ -724,7 +750,7 @@ async function scoreHybridCandidates(
             kb."source",
             kb."validUntil",
             ts_rank_cd(
-                to_tsvector('english', coalesce(kb."key", '') || ' ' || coalesce(kb."valueSummary", '')),
+                to_tsvector('english', ${buildHybridLexicalDocumentSql()}),
                 websearch_to_tsquery('english', ${input.query})
             ) AS "lexicalScore",
             0::float8 AS "vectorScore",
@@ -756,7 +782,7 @@ async function lexicalSearch(
                 kb."source",
                 kb."validUntil",
                 ts_rank_cd(
-                    to_tsvector('english', coalesce(kb."key", '') || ' ' || coalesce(kb."valueSummary", '')),
+                    to_tsvector('english', ${buildHybridLexicalDocumentSql()}),
                     websearch_to_tsquery('english', ${input.query})
                 ) AS "lexicalScore"
             FROM "knowledge_base" kb

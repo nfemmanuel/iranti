@@ -108,6 +108,33 @@ function shouldPreferDirectUserPersonalCorrection(existing: KnowledgeEntry, cand
     return JSON.stringify(existing.valueRaw) !== JSON.stringify(candidate.valueRaw);
 }
 
+const CHECKPOINT_CONTINUITY_KEYS = new Set([
+    'current_step',
+    'next_step',
+    'open_risks',
+    'recent_file_changes',
+    'recent_actions',
+    'checkpoint_summary',
+]);
+
+function shouldPreferCheckpointContinuityUpdate(existing: KnowledgeEntry, candidate: EntryInput): boolean {
+    const properties = candidate.properties && typeof candidate.properties === 'object'
+        ? candidate.properties as Record<string, unknown>
+        : null;
+    const capturePhase = typeof properties?.capturePhase === 'string' ? properties.capturePhase : null;
+    const canonicalKey = typeof properties?.canonicalKey === 'string' ? properties.canonicalKey : candidate.key;
+
+    if (candidate.source !== 'AttendantCheckpoint' || capturePhase !== 'checkpoint') {
+        return false;
+    }
+
+    if (!CHECKPOINT_CONTINUITY_KEYS.has(canonicalKey)) {
+        return false;
+    }
+
+    return JSON.stringify(existing.valueRaw) !== JSON.stringify(candidate.valueRaw);
+}
+
 function compareValidFrom(existing: KnowledgeEntry, incoming: EntryInput): 'existing' | 'incoming' | null {
     if (!existing.validFrom || !incoming.validFrom) {
         return null;
@@ -522,6 +549,45 @@ async function resolveConflict(
             action: 'updated',
             entry,
             reason: 'Direct user personal-memory correction overrides prior value.',
+            reliabilityUpdate: buildReliabilityUpdate(candidate.source, existing.source),
+        };
+    }
+
+    if (shouldPreferCheckpointContinuityUpdate(existing, candidate)) {
+        const entry = await replaceEntry(existing, candidate, tx);
+        await logDecision(
+            entry.id,
+            'CONFLICT_REPLACED',
+            candidate,
+            existing.confidence,
+            candidate.confidence,
+            'Checkpoint continuity update replaced prior shared recovery state.',
+            false,
+            tx
+        );
+        await saveReceipt(candidate, 'updated', entry.id, tx);
+        inc('librarian.updated');
+        getStaffEventEmitter().emit({
+            staffComponent: 'Librarian',
+            actionType: 'write_replaced',
+            agentId: candidate.createdBy,
+            source: candidate.source,
+            entityType: candidate.entityType,
+            entityId: candidate.entityId,
+            key: candidate.key,
+            reason: 'Checkpoint continuity update replaced prior shared recovery state.',
+            level: 'audit',
+            metadata: {
+                confidence: candidate.confidence,
+                priorConfidence: existing.confidence,
+                priorSource: existing.source,
+                valuePreview: JSON.stringify(candidate.valueRaw).slice(0, 200),
+            },
+        });
+        return {
+            action: 'updated',
+            entry,
+            reason: 'Checkpoint continuity update replaced prior shared recovery state.',
             reliabilityUpdate: buildReliabilityUpdate(candidate.source, existing.source),
         };
     }

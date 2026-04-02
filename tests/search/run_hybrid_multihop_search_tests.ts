@@ -73,6 +73,26 @@ async function main(): Promise<void> {
   assert.equal(results[0]?.key, 'status', 'Expected graph bridge search to surface the project status entry first.');
   assert.ok((results[0]?.vectorScore ?? 0) > 0, 'Expected bridged project result to carry a positive vector score.');
 
+  const addressedProject = `project/${uniqueId('search_addressed_project')}`;
+  await iranti.write({
+    entity: addressedProject,
+    key: 'status',
+    value: { phase: 'smoke_test' },
+    summary: `Search addressed project ${addressedProject} status is smoke_test.`,
+    confidence: 93,
+    source: 'hybrid_multihop_search',
+    agent: agentId,
+  });
+
+  const addressedResults = await iranti.search({
+    query: `${addressedProject} smoke_test`,
+    limit: 5,
+  });
+
+  assert.ok(addressedResults.length > 0, 'Expected addressed hybrid search to return at least one result.');
+  assert.equal(addressedResults[0]?.entity, addressedProject, 'Expected addressed search to surface the exact written project entity first.');
+  assert.equal(addressedResults[0]?.key, 'status', 'Expected addressed search to surface the written status fact.');
+
   console.log('hybrid multihop search tests passed');
 }
 
