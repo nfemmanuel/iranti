@@ -7,6 +7,7 @@ Use feature specs when you need the contract for behavior, edge cases, or valida
 - [Memory Lifecycle](./memory-lifecycle/spec.md)
 - [Interrupted Session Recovery](./interrupted-session-recovery/spec.md)
 - [Cross-Tool Handoffs](./cross-tool-handoffs/spec.md)
+- [Collaboration Memory](./collaboration-memory/spec.md)
 - [Hybrid Search](./hybrid-search/spec.md)
 - [Vector Backends](./vector-backends/spec.md)
 - [Memory Decay](./memory-decay/spec.md)
