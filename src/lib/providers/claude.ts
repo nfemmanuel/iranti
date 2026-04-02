@@ -11,7 +11,7 @@ class ClaudeProvider implements LLMProvider {
             throw new Error('ANTHROPIC_API_KEY is not set');
         }
 
-        this.model = process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4';
+        this.model = process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-6';
         const baseURL = process.env.ANTHROPIC_BASE_URL?.trim();
         this.client = new Anthropic({
             apiKey,
