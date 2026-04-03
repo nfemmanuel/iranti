@@ -29,7 +29,6 @@ export function initDb(connectionString: string, options: InitDbOptions = {}): P
         max: options.max ?? 10,
         idleTimeoutMillis: 30000,
         connectionTimeoutMillis: 5000,
-        allowExitOnIdle: true,
     });
 
     pool.on('error', (err) => {

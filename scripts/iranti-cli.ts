@@ -3672,9 +3672,22 @@ async function defaultsSetupPlan(args: ParsedArgs): Promise<SetupExecutionPlan> 
         }
     }
 
-    const apiKeyRaw = (getFlag(args, 'api-key') ?? process.env.IRANTI_API_KEY ?? '').trim();
-    const apiKey = apiKeyRaw && !detectPlaceholder(apiKeyRaw)
-        ? apiKeyRaw
+    const explicitProviderKey = (getFlag(args, 'provider-key') ?? '').trim();
+    const apiKeyFlag = (getFlag(args, 'api-key') ?? '').trim();
+    const providerEnvKey = providerKeyEnv(provider);
+    const isRemoteProvider = Boolean(providerEnvKey);
+
+    if (explicitProviderKey && !detectPlaceholder(explicitProviderKey) && providerEnvKey) {
+        providerKeys[providerEnvKey] = explicitProviderKey;
+    } else if (apiKeyFlag && !detectPlaceholder(apiKeyFlag) && isRemoteProvider && providerEnvKey && !providerKeys[providerEnvKey]) {
+        providerKeys[providerEnvKey] = apiKeyFlag;
+    }
+
+    const irantiKeyRaw = isRemoteProvider
+        ? (process.env.IRANTI_API_KEY ?? '').trim()
+        : apiKeyFlag || (process.env.IRANTI_API_KEY ?? '').trim();
+    const apiKey = irantiKeyRaw && !detectPlaceholder(irantiKeyRaw)
+        ? irantiKeyRaw
         : makeLegacyInstanceApiKey(instanceName);
 
     const projectsFlag = (getFlag(args, 'projects') ?? '').trim();

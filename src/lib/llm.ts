@@ -240,7 +240,9 @@ export async function completeWithFallback(
             }
             
             if (providerName !== chain[0]) {
-                console.warn(`  [router] Primary provider failed. Used fallback: ${providerName}`);
+                if (process.env.DEBUG_LLM) {
+                    console.warn(`  [router] Primary provider failed. Used fallback: ${providerName}`);
+                }
                 if (options?.ledgerContext?.source) {
                     getStaffEventEmitter().emit({
                         staffComponent: 'Attendant',

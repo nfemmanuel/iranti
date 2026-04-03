@@ -43,7 +43,7 @@ const KNOWN_FRAMEWORKS = ['next', 'react', 'vite', 'astro', 'express', 'fastify'
 const HIGHLIGHT_PACKAGES = ['next', 'react', 'typescript', '@types/node', 'vite', 'astro', 'express', 'fastify', 'prisma', '@prisma/client'];
 
 function sanitizeIdentifier(input: string, fallback: string): string {
-    const value = input.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
+    const value = input.trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
     return value || fallback;
 }
 
