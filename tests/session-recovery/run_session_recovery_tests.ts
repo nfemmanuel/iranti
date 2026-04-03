@@ -192,6 +192,44 @@ async function main(): Promise<void> {
         'Expected advisory learning to add learned priority keys to observe().'
     );
 
+    const policyAttendant: any = new AttendantInstance(agentId);
+    policyAttendant.loadPersistedState = async () => null;
+    policyAttendant.loadOperatingRules = async () => 'Persist checkpoints before expensive work.';
+    policyAttendant.inferTask = async () => 'Implement project cleanup policy support.';
+    policyAttendant.buildWorkingMemory = async () => [];
+    policyAttendant.loadSessionLedgerSignals = async () => ({ learnings: [], profile: null });
+    policyAttendant.loadProjectPolicies = async () => ([
+        {
+            entityKey: 'project/iranti/agent_worktree_cleanup_rule',
+            key: 'agent_worktree_cleanup_rule',
+            summary: 'Agents working on iranti should clean up the worktree when they are finished working.',
+            source: 'user_direct',
+            lastUpdated: new Date().toISOString(),
+            rules: ['Agents working on iranti should clean up the worktree when they are finished working.'],
+        },
+    ]);
+    policyAttendant.persistState = async () => {};
+
+    const policyBrief = await policyAttendant.handshake({
+        task: 'Implement project cleanup policy support.',
+        recentMessages: ['Need to make the cleanup rule a real project-scoped policy.'],
+    });
+    expect(
+        policyBrief.projectPolicies?.length === 1,
+        'Expected handshake() to surface configured project policies on the brief.'
+    );
+    expect(
+        policyBrief.operatingRules.includes('PROJECT POLICY (agent_worktree_cleanup_rule): Agents working on iranti should clean up the worktree when they are finished working.'),
+        'Expected handshake() to append configured project policies into the operating rules.'
+    );
+    expect(
+        policyBrief.workingMemory.some((entry: { entityKey: string; summary: string }) =>
+            entry.entityKey === 'project/iranti/agent_worktree_cleanup_rule'
+            && entry.summary.includes('Project policy:')
+        ),
+        'Expected handshake() to surface project policies as working-memory entries.'
+    );
+
     const heuristicAttendant: any = new AttendantInstance(agentId);
     heuristicAttendant.loadPersistedState = async () => null;
     heuristicAttendant.loadOperatingRules = async () => 'Use memory before answering project recall questions.';
@@ -446,6 +484,7 @@ async function main(): Promise<void> {
                 counters: {
                     attendsWithoutPersist: 0,
                     consecutivePreResponseWithoutPost: 0,
+                    consecutiveUnusedMemoryInjections: 0,
                     pendingPostResponse: false,
                     lastAttendPhase: null,
                 },

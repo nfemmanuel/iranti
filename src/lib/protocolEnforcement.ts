@@ -14,7 +14,8 @@ export type ProtocolOperation =
 export type ProtocolViolationCode =
     | 'handshake_required'
     | 'attend_required'
-    | 'post_response_required';
+    | 'post_response_required'
+    | 'memory_use_required';
 
 export type ProtocolViolation = {
     code: ProtocolViolationCode;
@@ -30,6 +31,7 @@ type AgentProtocolState = {
     lastAttendPhase?: 'pre-response' | 'post-response' | 'mid-turn';
     discoveryBudget: number;
     pendingPostResponse: boolean;
+    pendingMemoryUseAck: boolean;
 };
 
 export class ProtocolViolationError extends Error {
@@ -46,7 +48,7 @@ export class AgentProtocolTracker {
     private readonly state = new Map<string, AgentProtocolState>();
 
     markHandshake(agentId: string): void {
-        const current = this.state.get(agentId) ?? { discoveryBudget: 0, pendingPostResponse: false };
+        const current = this.state.get(agentId) ?? { discoveryBudget: 0, pendingPostResponse: false, pendingMemoryUseAck: false };
         this.state.set(agentId, {
             ...current,
             lastHandshakeAt: Date.now(),
@@ -56,7 +58,7 @@ export class AgentProtocolTracker {
     }
 
     markAttend(agentId: string, phase?: 'pre-response' | 'post-response' | 'mid-turn'): void {
-        const current = this.state.get(agentId) ?? { discoveryBudget: 0, pendingPostResponse: false };
+        const current = this.state.get(agentId) ?? { discoveryBudget: 0, pendingPostResponse: false, pendingMemoryUseAck: false };
         const lastAttendAt = Date.now();
         let discoveryBudget = current.discoveryBudget;
         let pendingPostResponse = current.pendingPostResponse;
@@ -77,6 +79,24 @@ export class AgentProtocolTracker {
             lastAttendPhase: phase,
             discoveryBudget,
             pendingPostResponse,
+        });
+    }
+
+    markMemoryUseAcknowledgementRequired(agentId: string): void {
+        const current = this.state.get(agentId) ?? { discoveryBudget: 0, pendingPostResponse: false, pendingMemoryUseAck: false };
+        this.state.set(agentId, {
+            ...current,
+            discoveryBudget: 0,
+            pendingMemoryUseAck: true,
+        });
+    }
+
+    clearMemoryUseAcknowledgementRequired(agentId: string): void {
+        const current = this.state.get(agentId);
+        if (!current) return;
+        this.state.set(agentId, {
+            ...current,
+            pendingMemoryUseAck: false,
         });
     }
 
@@ -116,6 +136,16 @@ export class AgentProtocolTracker {
                 operation,
                 message: `Protocol violation: ${operation} is blocked for agent ${agentId} until the previous turn is closed with iranti_attend(phase='post-response').`,
                 requiredAction: 'Call iranti_attend(phase=\'post-response\') to close the previous turn, persist any durable findings with iranti_write or iranti_checkpoint, then begin the next turn with iranti_attend(phase=\'pre-response\').',
+            };
+        }
+
+        if (current?.pendingMemoryUseAck && operation !== 'attend') {
+            return {
+                code: 'memory_use_required',
+                agentId,
+                operation,
+                message: `Protocol violation: ${operation} is blocked for agent ${agentId} until the host explains why previously injected memory was insufficient via iranti_write or iranti_checkpoint.`,
+                requiredAction: 'Persist why the injected memory was insufficient with iranti_write or iranti_checkpoint before performing more rediscovery on this task.',
             };
         }
 

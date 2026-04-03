@@ -28,6 +28,7 @@ async function listen(app: express.Express): Promise<{ server: ReturnType<typeof
 
 async function main(): Promise<void> {
     process.env.LLM_PROVIDER = process.env.LLM_PROVIDER || 'mock';
+    const priorProjectMemoryEntity = process.env.IRANTI_MEMORY_ENTITY;
     const connectionString = await resolveValidationDatabaseUrl('protocol enforcement route tests');
     bootstrapHarness({
         requireDb: true,
@@ -62,6 +63,8 @@ async function main(): Promise<void> {
     const entity = `project/${uniqueId('protocol_route_project')}`;
     const agentId = uniqueId('protocol_route_agent');
     const [, entityId] = entity.split('/');
+    const projectPolicyEntity = `project/${uniqueId('protocol_policy_project')}`;
+    process.env.IRANTI_MEMORY_ENTITY = projectPolicyEntity;
 
     try {
         await iranti.write({
@@ -70,6 +73,15 @@ async function main(): Promise<void> {
             value: { phase: 'route_test' },
             summary: 'Protocol enforcement route test project status is route_test.',
             confidence: 91,
+            source: 'protocol_route_test',
+            agent: agentId,
+        });
+        await iranti.write({
+            entity: projectPolicyEntity,
+            key: 'agent_worktree_cleanup_rule',
+            value: { rule: 'Leave a clean worktree or emit an explicit residue report before ending the run.' },
+            summary: 'Leave a clean worktree or emit an explicit residue report before ending the run.',
+            confidence: 95,
             source: 'protocol_route_test',
             agent: agentId,
         });
@@ -91,6 +103,17 @@ async function main(): Promise<void> {
             }),
         });
         assert.equal(handshake.status, 200, `Expected /memory/handshake to succeed, got ${handshake.status}.`);
+        const handshakeBody = await handshake.json() as { operatingRules?: string; projectPolicies?: Array<{ key?: string }> };
+        assert.equal(
+            handshakeBody.projectPolicies?.some((entry) => entry.key === 'agent_worktree_cleanup_rule'),
+            true,
+            'Expected handshake to surface project-scoped policies on the route response.',
+        );
+        assert.equal(
+            handshakeBody.operatingRules?.includes('Leave a clean worktree or emit an explicit residue report before ending the run.'),
+            true,
+            'Expected handshake to append the project-scoped policy into the operating rules.',
+        );
 
         const queryBeforeAttend = await fetch(`${baseUrl}/kb/query/project/${entityId}/status?agentId=${encodeURIComponent(agentId)}`);
         assert.equal(queryBeforeAttend.status, 428, `Expected /kb/query before attend to return 428, got ${queryBeforeAttend.status}.`);
@@ -251,10 +274,153 @@ async function main(): Promise<void> {
         assert.equal(apiFallbackQueryBody.found, true, 'Expected api fallback query to return the fact.');
         assert.equal(apiFallbackQueryBody.value?.phase, 'api_fallback', 'Expected api fallback query to return the written value.');
 
+        const ignoredMemoryEntity = `project/${uniqueId('protocol_route_memory_enforced_project')}`;
+        const [, ignoredMemoryEntityId] = ignoredMemoryEntity.split('/');
+        const ignoredMemoryAgentId = uniqueId('protocol_route_memory_enforced_agent');
+
+        await iranti.write({
+            entity: ignoredMemoryEntity,
+            key: 'next_step',
+            value: { instruction: 'rerun the runtime validation and capture the result.' },
+            summary: 'Next step is rerun the runtime validation and capture the result.',
+            confidence: 94,
+            source: 'protocol_route_test',
+            agent: ignoredMemoryAgentId,
+        });
+
+        const ignoredMemoryHandshake = await fetch(`${baseUrl}/memory/handshake`, {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+                agentId: ignoredMemoryAgentId,
+                task: 'Validate strict enforcement when injected memory is ignored repeatedly.',
+                recentMessages: ['Start ignored injected memory enforcement coverage.'],
+            }),
+        });
+        assert.equal(ignoredMemoryHandshake.status, 200, `Expected handshake for ignored-memory scenario to succeed, got ${ignoredMemoryHandshake.status}.`);
+
+        for (let turn = 0; turn < 2; turn++) {
+            const ignoredPreAttend = await fetch(`${baseUrl}/memory/attend`, {
+                method: 'POST',
+                headers: {
+                    'content-type': 'application/json',
+                },
+                body: JSON.stringify({
+                    agentId: ignoredMemoryAgentId,
+                    latestMessage: 'What should I do next on this runtime validation task?',
+                    currentContext: 'We surfaced memory but will ignore it instead of answering from it.',
+                    entityHints: [ignoredMemoryEntity],
+                    phase: 'pre-response',
+                }),
+            });
+            assert.equal(ignoredPreAttend.status, 200, `Expected ignored-memory pre-response attend ${turn + 1} to succeed, got ${ignoredPreAttend.status}.`);
+
+            const ignoredPostAttend = await fetch(`${baseUrl}/memory/attend`, {
+                method: 'POST',
+                headers: {
+                    'content-type': 'application/json',
+                },
+                body: JSON.stringify({
+                    agentId: ignoredMemoryAgentId,
+                    latestMessage: 'I will investigate manually and respond later.',
+                    currentContext: 'Closing a turn where injected memory was surfaced but not used.',
+                    entityHints: [ignoredMemoryEntity],
+                    phase: 'post-response',
+                }),
+            });
+            assert.equal(ignoredPostAttend.status, 200, `Expected ignored-memory post-response attend ${turn + 1} to succeed, got ${ignoredPostAttend.status}.`);
+            const ignoredPostAttendBody = await ignoredPostAttend.json() as { compliance?: { status?: string; issues?: Array<{ code?: string; severity?: string }> } };
+            if (turn === 0) {
+                assert.equal(ignoredPostAttendBody.compliance?.status, 'degraded', 'Expected first ignored injection to degrade compliance.');
+            } else {
+                assert.equal(ignoredPostAttendBody.compliance?.status, 'non_compliant', 'Expected repeated ignored injections to become non-compliant.');
+                assert.equal(
+                    ignoredPostAttendBody.compliance?.issues?.some((issue) => issue.code === 'ignored_injected_memory' && issue.severity === 'error'),
+                    true,
+                    'Expected repeated ignored injections to produce an error-level ignored_injected_memory issue.',
+                );
+            }
+        }
+
+        const ignoredMemoryNewTurn = await fetch(`${baseUrl}/memory/attend`, {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+                agentId: ignoredMemoryAgentId,
+                latestMessage: 'Start another turn after repeatedly ignoring injected memory.',
+                currentContext: 'We are beginning another turn after repeated ignored injections.',
+                entityHints: [ignoredMemoryEntity],
+                phase: 'pre-response',
+            }),
+        });
+        assert.equal(ignoredMemoryNewTurn.status, 200, `Expected attend to start a new turn after ignored injections, got ${ignoredMemoryNewTurn.status}.`);
+
+        const blockedIgnoredMemoryQuery = await fetch(`${baseUrl}/kb/query/project/${ignoredMemoryEntityId}/next_step?agentId=${encodeURIComponent(ignoredMemoryAgentId)}`);
+        assert.equal(blockedIgnoredMemoryQuery.status, 428, `Expected /kb/query after repeated ignored injections to return 428, got ${blockedIgnoredMemoryQuery.status}.`);
+        const blockedIgnoredMemoryQueryBody = await blockedIgnoredMemoryQuery.json() as { code?: string };
+        assert.equal(
+            blockedIgnoredMemoryQueryBody.code,
+            'memory_use_required',
+            `Expected memory_use_required after repeated ignored injections, got ${JSON.stringify(blockedIgnoredMemoryQueryBody)}.`,
+        );
+
+        const ignoredMemoryCheckpoint = await fetch(`${baseUrl}/memory/checkpoint`, {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+                agentId: ignoredMemoryAgentId,
+                task: 'Explain why injected memory was insufficient before rediscovery.',
+                recentMessages: ['Injected memory was insufficient because the response needed a fresh external validation step.'],
+                checkpoint: {
+                    currentStep: 'documented why injected memory was insufficient',
+                    nextStep: 'perform a fresh validation after acknowledging the limitation',
+                    openRisks: ['Avoid redoing rediscovery without first recording why memory was insufficient.'],
+                    entityTargets: [ignoredMemoryEntity],
+                },
+            }),
+        });
+        assert.equal(ignoredMemoryCheckpoint.status, 200, `Expected checkpoint to clear ignored-memory enforcement, got ${ignoredMemoryCheckpoint.status}.`);
+
+        const ignoredMemoryClearedAttend = await fetch(`${baseUrl}/memory/attend`, {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+                agentId: ignoredMemoryAgentId,
+                latestMessage: 'Start a compliant turn after acknowledging the memory gap.',
+                currentContext: 'We are resuming after checkpointing why the injected memory was insufficient.',
+                entityHints: [ignoredMemoryEntity],
+                phase: 'pre-response',
+            }),
+        });
+        assert.equal(ignoredMemoryClearedAttend.status, 200, `Expected pre-response attend after checkpoint to succeed, got ${ignoredMemoryClearedAttend.status}.`);
+
+        const ignoredMemoryRecoveredQuery = await fetch(`${baseUrl}/kb/query/project/${ignoredMemoryEntityId}/next_step?agentId=${encodeURIComponent(ignoredMemoryAgentId)}`);
+        assert.equal(ignoredMemoryRecoveredQuery.status, 200, `Expected /kb/query after checkpoint acknowledgement to succeed, got ${ignoredMemoryRecoveredQuery.status}.`);
+        const ignoredMemoryRecoveredQueryBody = await ignoredMemoryRecoveredQuery.json() as { found?: boolean; value?: { instruction?: string } };
+        assert.equal(ignoredMemoryRecoveredQueryBody.found, true, 'Expected recovery query after checkpoint acknowledgement to return the fact.');
+        assert.equal(
+            ignoredMemoryRecoveredQueryBody.value?.instruction,
+            'rerun the runtime validation and capture the result.',
+            'Expected recovery query after checkpoint acknowledgement to return the stored next step.',
+        );
+
         console.log('protocol enforcement route tests passed');
     } finally {
         await new Promise<void>((resolve) => server.close(() => resolve()));
         await disconnectDb().catch(() => undefined);
+        if (priorProjectMemoryEntity === undefined) {
+            delete process.env.IRANTI_MEMORY_ENTITY;
+        } else {
+            process.env.IRANTI_MEMORY_ENTITY = priorProjectMemoryEntity;
+        }
     }
 }
 

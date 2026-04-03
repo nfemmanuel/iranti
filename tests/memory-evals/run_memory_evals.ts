@@ -23,6 +23,8 @@ type ScenarioMetrics = {
     injectionCount: number;
     scoredUsedCount: number;
     scoredHelpfulCount: number;
+    complianceStatus: 'healthy' | 'degraded' | 'non_compliant';
+    complianceIssueCodes: string[];
     response: string;
 };
 
@@ -101,14 +103,22 @@ function buildRecoveryResponse(options: { nextStep: string; blocker: string; fil
     return `Next step: ${options.nextStep} Blocker: ${options.blocker} File state: ${options.filePath}.`;
 }
 
-async function finalizeAttribution(iranti: ReturnType<typeof createFirstPartyIranti>, agentId: string, response: string): Promise<void> {
-    await iranti.attend({
+async function finalizeAttribution(
+    iranti: ReturnType<typeof createFirstPartyIranti>,
+    agentId: string,
+    response: string,
+): Promise<{ complianceStatus: ScenarioMetrics['complianceStatus']; complianceIssueCodes: string[] }> {
+    const result = await iranti.attend({
         agentId,
         latestMessage: response,
         currentContext: response,
         phase: 'post-response',
     });
     await flushStaffEventEmitter();
+    return {
+        complianceStatus: result.compliance.status,
+        complianceIssueCodes: result.compliance.issues.map((issue) => issue.code),
+    };
 }
 
 async function readAttributionCounts(agentId: string): Promise<{ injectionCount: number; scoredUsedCount: number; scoredHelpfulCount: number }> {
@@ -148,6 +158,8 @@ async function scenarioNoMemory(iranti: ReturnType<typeof createFirstPartyIranti
         injectionCount: 0,
         scoredUsedCount: 0,
         scoredHelpfulCount: 0,
+        complianceStatus: 'healthy',
+        complianceIssueCodes: [],
         response,
     };
 }
@@ -173,7 +185,7 @@ async function scenarioSurfacedNotEnforced(iranti: ReturnType<typeof createFirst
     const rediscoveryMs = Date.now() - startedAt;
 
     const response = 'I still need to inspect the state manually before I can answer.';
-    await finalizeAttribution(iranti, agentId, response);
+    const compliance = await finalizeAttribution(iranti, agentId, response);
     const attribution = await readAttributionCounts(agentId);
 
     return {
@@ -186,6 +198,8 @@ async function scenarioSurfacedNotEnforced(iranti: ReturnType<typeof createFirst
         recoveredFileState: false,
         handoffSuccess: false,
         correctnessAfterInterruption: false,
+        complianceStatus: compliance.complianceStatus,
+        complianceIssueCodes: compliance.complianceIssueCodes,
         ...attribution,
         response,
     };
@@ -223,7 +237,7 @@ async function scenarioSurfacedEnforced(iranti: ReturnType<typeof createFirstPar
             entityTargets: [entity],
         },
     });
-    await finalizeAttribution(iranti, agentId, response);
+    const compliance = await finalizeAttribution(iranti, agentId, response);
     const attribution = await readAttributionCounts(agentId);
 
     return {
@@ -236,6 +250,8 @@ async function scenarioSurfacedEnforced(iranti: ReturnType<typeof createFirstPar
         recoveredFileState: response.includes('recent_file_changes') || response.includes('docs/runtime-verification.md'),
         handoffSuccess: false,
         correctnessAfterInterruption: false,
+        complianceStatus: compliance.complianceStatus,
+        complianceIssueCodes: compliance.complianceIssueCodes,
         ...attribution,
         response,
     };
@@ -287,7 +303,7 @@ async function scenarioCrossSessionInterruption(iranti: ReturnType<typeof create
             entityTargets: [entity],
         },
     });
-    await finalizeAttribution(iranti, agentId, response);
+    const compliance = await finalizeAttribution(iranti, agentId, response);
     const attribution = await readAttributionCounts(agentId);
 
     return {
@@ -300,6 +316,8 @@ async function scenarioCrossSessionInterruption(iranti: ReturnType<typeof create
         recoveredFileState: response.includes('recent_file_changes') || response.includes('docs/runtime-verification.md'),
         handoffSuccess: false,
         correctnessAfterInterruption: true,
+        complianceStatus: compliance.complianceStatus,
+        complianceIssueCodes: compliance.complianceIssueCodes,
         ...attribution,
         response,
     };
@@ -355,7 +373,7 @@ async function scenarioCrossHostHandoff(iranti: ReturnType<typeof createFirstPar
         source: 'memory_eval_receiver',
         agent: receiverAgent,
     });
-    await finalizeAttribution(iranti, receiverAgent, response);
+    const compliance = await finalizeAttribution(iranti, receiverAgent, response);
     const attribution = await readAttributionCounts(receiverAgent);
 
     return {
@@ -368,6 +386,8 @@ async function scenarioCrossHostHandoff(iranti: ReturnType<typeof createFirstPar
         recoveredFileState: response.includes('recent_file_changes') || response.includes('docs/runtime-verification.md'),
         handoffSuccess: true,
         correctnessAfterInterruption: true,
+        complianceStatus: compliance.complianceStatus,
+        complianceIssueCodes: compliance.complianceIssueCodes,
         ...attribution,
         response,
     };
@@ -424,12 +444,26 @@ async function main(): Promise<void> {
             0,
             'Expected surfaced-but-not-enforced scenario to score injected memory as unused.',
         );
+        assert.equal(
+            surfacedNotEnforced.complianceStatus,
+            'degraded',
+            'Expected surfaced-but-not-enforced scenario to degrade compliance.',
+        );
+        assert.ok(
+            surfacedNotEnforced.complianceIssueCodes.includes('ignored_injected_memory'),
+            'Expected surfaced-but-not-enforced scenario to record ignored injected memory.',
+        );
         assert.ok(
             surfacedEnforced.scoredHelpfulCount >= 1
             && surfacedEnforced.recoveredNextStep
             && surfacedEnforced.recoveredBlocker
             && surfacedEnforced.recoveredFileState,
             'Expected enforced memory to score helpful and recover the required state.',
+        );
+        assert.equal(
+            surfacedEnforced.complianceStatus,
+            'healthy',
+            'Expected enforced memory use to keep compliance healthy.',
         );
         assert.equal(crossSession.correctnessAfterInterruption, true, 'Expected interrupted session recovery to stay correct.');
         assert.equal(crossHost.handoffSuccess, true, 'Expected cross-host handoff to succeed.');

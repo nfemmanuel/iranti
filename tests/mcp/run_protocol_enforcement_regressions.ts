@@ -84,6 +84,19 @@ async function main(): Promise<void> {
         });
         expect(!write.isError, 'Expected focused MCP protocol write to succeed.');
 
+        const policyWrite = await client.callTool({
+            name: 'iranti_write',
+            arguments: {
+                entity: 'project/mcp_protocol_project_memory',
+                key: 'agent_worktree_cleanup_rule',
+                valueJson: JSON.stringify({ rule: 'Leave a clean worktree or emit an explicit residue report before ending the run.' }),
+                summary: 'Leave a clean worktree or emit an explicit residue report before ending the run.',
+                confidence: 95,
+                agent: agentId,
+            },
+        });
+        expect(!policyWrite.isError, 'Expected focused MCP protocol policy write to succeed.');
+
         const queryBeforeHandshake = await client.callTool({
             name: 'iranti_query',
             arguments: {
@@ -107,6 +120,15 @@ async function main(): Promise<void> {
             },
         });
         expect(!handshake.isError, 'Expected focused MCP handshake to succeed.');
+        const handshakePayload = JSON.stringify(handshake.structuredContent);
+        expect(
+            handshakePayload.includes('"projectPolicies"') && handshakePayload.includes('agent_worktree_cleanup_rule'),
+            'Expected focused MCP handshake to surface project-scoped policies.',
+        );
+        expect(
+            handshakePayload.includes('Leave a clean worktree or emit an explicit residue report before ending the run.'),
+            'Expected focused MCP handshake to append the project-scoped policy into the operating rules.',
+        );
 
         const queryBeforeAttend = await client.callTool({
             name: 'iranti_query',
@@ -201,6 +223,157 @@ async function main(): Promise<void> {
         expect(
             JSON.stringify(searchAfterConsumedBudget.structuredContent).includes('"code":"attend_required"'),
             'Expected search after the first discovery read to require a fresh attend.',
+        );
+
+        const historyAfterConsumedBudget = await client.callTool({
+            name: 'iranti_history',
+            arguments: {
+                agent: agentId,
+                entity,
+                key: 'status',
+            },
+        });
+        expect(!historyAfterConsumedBudget.isError, 'Expected history after the query to return a structured protocol violation.');
+        expect(
+            JSON.stringify(historyAfterConsumedBudget.structuredContent).includes('"code":"attend_required"'),
+            'Expected history after the first discovery read to require a fresh attend.',
+        );
+
+        const ignoredMemoryAgentId = `mcp_protocol_memory_enforced_${Date.now()}`;
+        const ignoredMemoryEntity = `project/mcp_protocol_memory_enforced_${Date.now()}`;
+
+        const ignoredMemoryWrite = await client.callTool({
+            name: 'iranti_write',
+            arguments: {
+                entity: ignoredMemoryEntity,
+                key: 'next_step',
+                valueJson: JSON.stringify({ instruction: 'rerun the runtime validation and capture the result.' }),
+                summary: 'Next step is rerun the runtime validation and capture the result.',
+                confidence: 94,
+                agent: ignoredMemoryAgentId,
+            },
+        });
+        expect(!ignoredMemoryWrite.isError, 'Expected ignored-memory seed write to succeed.');
+
+        const ignoredMemoryHandshake = await client.callTool({
+            name: 'iranti_handshake',
+            arguments: {
+                task: 'Validate strict blocking after repeated ignored injected memory.',
+                recentMessages: ['Start ignored injected memory MCP coverage.'],
+                agent: ignoredMemoryAgentId,
+            },
+        });
+        expect(!ignoredMemoryHandshake.isError, 'Expected ignored-memory MCP handshake to succeed.');
+
+        for (let turn = 0; turn < 2; turn++) {
+            const ignoredPreAttend = await client.callTool({
+                name: 'iranti_attend',
+                arguments: {
+                    agent: ignoredMemoryAgentId,
+                    latestMessage: 'What should I do next on this runtime validation task?',
+                    currentContext: 'The host surfaced memory but will ignore it.',
+                    entityHints: [ignoredMemoryEntity],
+                    maxFacts: 3,
+                    phase: 'pre-response',
+                },
+            });
+            expect(!ignoredPreAttend.isError, `Expected ignored-memory pre-response attend ${turn + 1} to succeed.`);
+
+            const ignoredPostAttend = await client.callTool({
+                name: 'iranti_attend',
+                arguments: {
+                    agent: ignoredMemoryAgentId,
+                    latestMessage: 'I will investigate manually and respond later.',
+                    currentContext: 'Closing a turn where injected memory was surfaced but not used.',
+                    entityHints: [ignoredMemoryEntity],
+                    phase: 'post-response',
+                },
+            });
+            expect(!ignoredPostAttend.isError, `Expected ignored-memory post-response attend ${turn + 1} to succeed.`);
+            const ignoredPostPayload = JSON.stringify(ignoredPostAttend.structuredContent);
+            if (turn === 0) {
+                expect(
+                    ignoredPostPayload.includes('"status":"degraded"'),
+                    'Expected the first ignored-memory closeout to degrade compliance.',
+                );
+            } else {
+                expect(
+                    ignoredPostPayload.includes('"status":"non_compliant"'),
+                    'Expected repeated ignored-memory closeouts to become non-compliant.',
+                );
+                expect(
+                    ignoredPostPayload.includes('"code":"ignored_injected_memory"') && ignoredPostPayload.includes('"severity":"error"'),
+                    'Expected repeated ignored-memory closeouts to include an error-level ignored_injected_memory issue.',
+                );
+            }
+        }
+
+        const ignoredMemoryNewTurn = await client.callTool({
+            name: 'iranti_attend',
+            arguments: {
+                agent: ignoredMemoryAgentId,
+                latestMessage: 'Start another turn after repeatedly ignoring injected memory.',
+                currentContext: 'We are beginning another turn after repeated ignored injections.',
+                entityHints: [ignoredMemoryEntity],
+                maxFacts: 3,
+                phase: 'pre-response',
+            },
+        });
+        expect(!ignoredMemoryNewTurn.isError, 'Expected a new turn attend after repeated ignored injections to succeed.');
+
+        const blockedIgnoredMemoryQuery = await client.callTool({
+            name: 'iranti_query',
+            arguments: {
+                agent: ignoredMemoryAgentId,
+                entity: ignoredMemoryEntity,
+                key: 'next_step',
+            },
+        });
+        expect(!blockedIgnoredMemoryQuery.isError, 'Expected repeated ignored-memory query to return a structured protocol violation.');
+        expect(
+            JSON.stringify(blockedIgnoredMemoryQuery.structuredContent).includes('"code":"memory_use_required"'),
+            'Expected repeated ignored-memory query to be blocked with memory_use_required.',
+        );
+
+        const ignoredMemoryCheckpoint = await client.callTool({
+            name: 'iranti_checkpoint',
+            arguments: {
+                agent: ignoredMemoryAgentId,
+                task: 'Explain why injected memory was insufficient before rediscovery.',
+                recentMessages: ['Injected memory was insufficient because the response needed a fresh external validation step.'],
+                currentStep: 'documented why injected memory was insufficient',
+                nextStep: 'perform a fresh validation after acknowledging the limitation',
+                openRisks: ['Avoid redoing rediscovery without first recording why memory was insufficient.'],
+                entityTargets: [ignoredMemoryEntity],
+            },
+        });
+        expect(!ignoredMemoryCheckpoint.isError, 'Expected ignored-memory checkpoint to clear strict blocking.');
+
+        const ignoredMemoryRecoveredAttend = await client.callTool({
+            name: 'iranti_attend',
+            arguments: {
+                agent: ignoredMemoryAgentId,
+                latestMessage: 'Start a compliant turn after checkpointing the limitation.',
+                currentContext: 'We are resuming after acknowledging why injected memory was insufficient.',
+                entityHints: [ignoredMemoryEntity],
+                maxFacts: 3,
+                phase: 'pre-response',
+            },
+        });
+        expect(!ignoredMemoryRecoveredAttend.isError, 'Expected attend after ignored-memory checkpoint to succeed.');
+
+        const ignoredMemoryRecoveredQuery = await client.callTool({
+            name: 'iranti_query',
+            arguments: {
+                agent: ignoredMemoryAgentId,
+                entity: ignoredMemoryEntity,
+                key: 'next_step',
+            },
+        });
+        expect(!ignoredMemoryRecoveredQuery.isError, 'Expected query after ignored-memory checkpoint to succeed.');
+        expect(
+            JSON.stringify(ignoredMemoryRecoveredQuery.structuredContent).includes('rerun the runtime validation and capture the result'),
+            'Expected recovery query after ignored-memory checkpoint to return the stored next step.',
         );
     } finally {
         await client.close().catch(() => undefined);

@@ -557,6 +557,15 @@ export class Iranti {
         throw new ProtocolViolationError(violation);
     }
 
+    private syncMemoryUseCompliance(agentId: string, compliance?: SessionComplianceState | null): void {
+        const ignoredMemoryIssue = compliance?.issues.find((issue) => issue.code === 'ignored_injected_memory');
+        if (ignoredMemoryIssue?.severity === 'error') {
+            this.protocolTracker.markMemoryUseAcknowledgementRequired(agentId);
+            return;
+        }
+        this.protocolTracker.clearMemoryUseAcknowledgementRequired(agentId);
+    }
+
     private consumeDiscoveryBudget(operation: ProtocolOperation): void {
         if (this.protocolMode() === 'off') return;
         const agentId = this.protocolAgentId();
@@ -656,6 +665,7 @@ export class Iranti {
         });
 
         await getAttendant(input.agent).notifyWriteOccurred();
+        this.protocolTracker.clearMemoryUseAcknowledgementRequired(input.agent);
         return {
             action: result.action,
             key: input.key,
@@ -683,6 +693,7 @@ export class Iranti {
             createdBy: input.agent,
         });
         await getAttendant(input.agent).notifyWriteOccurred();
+        this.protocolTracker.clearMemoryUseAcknowledgementRequired(input.agent);
 
         return {
             extractedCandidates: result.extractedCandidates,
@@ -710,6 +721,7 @@ export class Iranti {
             ledgerContext: this.buildSessionLedgerContext(),
         });
         this.protocolTracker.markHandshake(agentId);
+        this.syncMemoryUseCompliance(agentId, result.compliance);
         return result;
     }
 
@@ -728,8 +740,9 @@ export class Iranti {
     }
 
     async checkpoint(input: SessionCheckpointInput): Promise<WorkingMemoryBrief> {
-        const attendant = getAttendant(resolveAgentId(input, 'checkpoint'));
-        return attendant.checkpoint({
+        const agentId = resolveAgentId(input, 'checkpoint');
+        const attendant = getAttendant(agentId);
+        const result = await attendant.checkpoint({
             task: input.task,
             recentMessages: input.recentMessages,
             checkpoint: input.checkpoint,
@@ -737,6 +750,8 @@ export class Iranti {
             heartbeatAt: input.heartbeatAt,
             ledgerContext: this.buildSessionLedgerContext(),
         });
+        this.protocolTracker.clearMemoryUseAcknowledgementRequired(agentId);
+        return result;
     }
 
     async resumeSession(input: SessionActionInput): Promise<WorkingMemoryBrief> {
@@ -1203,6 +1218,7 @@ export class Iranti {
             properties: options.properties,
         });
         await getAttendant(options.createdBy).notifyWriteOccurred();
+        this.protocolTracker.clearMemoryUseAcknowledgementRequired(options.createdBy);
     }
 
     async getRelated(entity: string): Promise<RelatedEntity[]> {
@@ -1409,6 +1425,9 @@ export class Iranti {
             this.protocolTracker.markHandshake(agentId);
         }
         this.protocolTracker.markAttend(agentId, input.phase);
+        if (input.phase === 'post-response') {
+            this.syncMemoryUseCompliance(agentId, result.compliance);
+        }
         return result;
     }
 

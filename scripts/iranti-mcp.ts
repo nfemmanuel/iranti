@@ -571,6 +571,39 @@ memory alone before checking Iranti.`,
         }
     });
 
+    server.registerTool('iranti_history', {
+        description: `Retrieve the full version history of a fact for an exact entity+key pair.
+Returns all archived past values plus the current value, ordered oldest-first.
+Each entry includes value, summary, confidence, source, validFrom, validUntil,
+isCurrent, archivedReason, and resolutionState.
+REQUIRED: call iranti_attend before this discovery tool so Iranti can decide
+whether memory should be injected first.
+Use this to understand how a fact evolved over time — decisions that changed,
+blockers that were resolved, values that were contested or superseded.`,
+        inputSchema: {
+            entity: z.string().min(1).describe('Entity in entityType/entityId format.'),
+            key: z.string().min(1).describe('Fact key to retrieve history for.'),
+            limit: z.number().int().min(1).optional().describe('Maximum number of entries to return (applied after sorting oldest-first).'),
+            includeExpired: z.boolean().optional().describe('Include entries that expired without being superseded.'),
+            includeContested: z.boolean().optional().describe('Include entries that were contested or escalated.'),
+            agent: z.string().optional().describe('Override the default agent id for protocol tracking.'),
+            agentId: z.string().optional().describe('Alias for agent. Override the default agent id for protocol tracking.'),
+        },
+    }, async ({ entity, key, limit, includeExpired, includeContested, agent, agentId }) => {
+        const resolvedAgent = resolveToolAgent(agent, agentId);
+        syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
+        try {
+            const history = await iranti.history(entity, key, { includeExpired, includeContested });
+            const result = limit != null ? history.slice(0, limit) : history;
+            return textResult(result);
+        } catch (error) {
+            if (error instanceof ProtocolViolationError) {
+                return protocolViolationResult(error);
+            }
+            throw error;
+        }
+    });
+
     server.registerTool('iranti_search', {
         description: `Search shared memory with natural language when the exact entity
 or key is unknown. Uses hybrid lexical and vector search across

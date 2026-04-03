@@ -105,6 +105,7 @@ async function main(): Promise<void> {
         assert.equal(scoredAttribution?.surfaced, true);
         assert.equal(scoredAttribution?.used, true);
         assert.equal(scoredAttribution?.helpful, true);
+        assert.equal(scoredAttend.compliance.status, 'healthy');
         assert.ok(
             scoredAttribution?.evidenceKinds.includes('checkpoint'),
             'Expected checkpoint evidence to be attached to the scored injection.',
@@ -144,6 +145,15 @@ async function main(): Promise<void> {
         assert.ok(surfacedOnlyScore, 'Expected the surfaced-only injection to be scored.');
         assert.equal(surfacedOnlyScore?.used, false);
         assert.equal(surfacedOnlyScore?.helpful, false);
+        assert.equal(surfacedOnlyClose.compliance.status, 'degraded');
+        assert.ok(
+            surfacedOnlyClose.compliance.issues.some((issue) => issue.code === 'ignored_injected_memory'),
+            'Expected unused injected memory to become a compliance issue.',
+        );
+        assert.match(
+            surfacedOnlyClose.complianceWarning ?? '',
+            /injected memory was surfaced but not used/i,
+        );
 
         const ledgerEvents = await querySessionLedger({ agentId, limit: 100 });
         assert.ok(

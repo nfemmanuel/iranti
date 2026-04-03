@@ -190,11 +190,21 @@ export interface WorkingMemoryEntry {
     lastUpdated: string;
 }
 
+export interface ProjectPolicyEntry {
+    entityKey: string;
+    summary: string;
+    key: string;
+    source: string;
+    lastUpdated: string;
+    rules: string[];
+}
+
 export interface WorkingMemoryBrief {
     agentId: string;
     operatingRules: string;
     inferredTaskType: string;
     workingMemory: WorkingMemoryEntry[];
+    projectPolicies?: ProjectPolicyEntry[];
     sessionStarted: string;
     briefGeneratedAt: string;
     contextCallCount: number;
@@ -221,7 +231,8 @@ export type SessionComplianceStatus = 'healthy' | 'degraded' | 'non_compliant';
 
 export type SessionComplianceIssueCode =
     | 'missing_post_response_attend'
-    | 'missing_durable_persistence';
+    | 'missing_durable_persistence'
+    | 'ignored_injected_memory';
 
 export interface SessionComplianceIssue {
     code: SessionComplianceIssueCode;
@@ -239,6 +250,7 @@ export interface SessionComplianceState {
     counters: {
         attendsWithoutPersist: number;
         consecutivePreResponseWithoutPost: number;
+        consecutiveUnusedMemoryInjections: number;
         pendingPostResponse: boolean;
         lastAttendPhase: 'pre-response' | 'post-response' | 'mid-turn' | null;
     };
@@ -593,6 +605,95 @@ function mergeWorkingMemoryWithLedger(entries: WorkingMemoryEntry[], learnings: 
         : retained;
 }
 
+function normalizeProjectPolicyRuleLines(value: unknown, fallbackSummary: string | null | undefined): string[] {
+    const rules: string[] = [];
+    if (typeof value === 'string' && value.trim()) {
+        rules.push(value.trim());
+    } else if (value && typeof value === 'object') {
+        const record = value as Record<string, unknown>;
+        if (typeof record.rule === 'string' && record.rule.trim()) {
+            rules.push(record.rule.trim());
+        }
+        if (typeof record.text === 'string' && record.text.trim()) {
+            rules.push(record.text.trim());
+        }
+        if (typeof record.instruction === 'string' && record.instruction.trim()) {
+            rules.push(record.instruction.trim());
+        }
+        if (Array.isArray(record.rules)) {
+            for (const rule of record.rules) {
+                if (typeof rule === 'string' && rule.trim()) {
+                    rules.push(rule.trim());
+                }
+            }
+        }
+        if (Array.isArray(record.preferences)) {
+            for (const preference of record.preferences) {
+                if (typeof preference === 'string' && preference.trim()) {
+                    rules.push(preference.trim());
+                }
+            }
+        }
+    }
+
+    if (rules.length === 0 && fallbackSummary?.trim()) {
+        rules.push(fallbackSummary.trim());
+    }
+
+    return Array.from(new Set(rules.map((rule) => rule.trim()).filter(Boolean)));
+}
+
+function isProjectPolicyKey(key: string): boolean {
+    return /(?:^agent_(?:operating_)?(?:rule|rules|preference|preferences)$|(?:_rule|_rules|_preference|_preferences)$)/i.test(key.trim());
+}
+
+function isProjectPolicyEntry(entry: {
+    key: string;
+    properties?: Record<string, unknown> | null;
+}): boolean {
+    if (isProjectPolicyKey(entry.key)) return true;
+    const durableClass = typeof entry.properties?.durableClass === 'string'
+        ? entry.properties.durableClass.trim().toLowerCase()
+        : '';
+    const semanticIntent = typeof entry.properties?.semanticIntent === 'string'
+        ? entry.properties.semanticIntent.trim().toLowerCase()
+        : '';
+    return durableClass === 'preference' || semanticIntent === 'preference_capture';
+}
+
+function toProjectPolicyWorkingMemoryEntries(entries: ProjectPolicyEntry[]): WorkingMemoryEntry[] {
+    return entries.map((entry) => ({
+        entityKey: entry.entityKey,
+        summary: `Project policy: ${entry.summary}`,
+        confidence: 100,
+        source: entry.source,
+        lastUpdated: entry.lastUpdated,
+    }));
+}
+
+function mergeWorkingMemoryWithProjectPolicies(entries: WorkingMemoryEntry[], policies: ProjectPolicyEntry[]): WorkingMemoryEntry[] {
+    const retained = entries.filter((entry) => !policies.some((policy) => policy.entityKey === entry.entityKey));
+    return policies.length > 0
+        ? [...toProjectPolicyWorkingMemoryEntries(policies), ...retained]
+        : retained;
+}
+
+function applyProjectPolicyOperatingRules(
+    operatingRules: string,
+    projectPolicies: ProjectPolicyEntry[],
+): string {
+    let nextRules = operatingRules;
+    for (const policy of projectPolicies) {
+        for (const rule of policy.rules) {
+            const renderedRule = `PROJECT POLICY (${policy.key}): ${rule}`;
+            if (!nextRules.includes(renderedRule)) {
+                nextRules = `${nextRules}\n- ${renderedRule}`;
+            }
+        }
+    }
+    return nextRules;
+}
+
 function formatMissingWriteCategories(categories: string[]): string {
     const labelMap: Record<string, string> = {
         findings: 'what you found',
@@ -877,6 +978,7 @@ function buildCheckpointSummary(checkpoint: SessionCheckpointRecord | null): Ses
 function buildSessionComplianceState(input: {
     attendsWithoutPersist: number;
     consecutivePreResponseWithoutPost: number;
+    consecutiveUnusedMemoryInjections: number;
     lastAttendPhase?: 'pre-response' | 'post-response' | 'mid-turn';
     lastUpdated?: string;
 }): SessionComplianceState {
@@ -904,6 +1006,19 @@ function buildSessionComplianceState(input: {
         });
     }
 
+    if (input.consecutiveUnusedMemoryInjections > 0) {
+        const severity = input.consecutiveUnusedMemoryInjections >= 2 ? 'error' : 'warn';
+        issues.push({
+            code: 'ignored_injected_memory',
+            severity,
+            count: input.consecutiveUnusedMemoryInjections,
+            message: input.consecutiveUnusedMemoryInjections >= 2
+                ? `Injected memory has been surfaced and then ignored across ${input.consecutiveUnusedMemoryInjections} consecutive turns.`
+                : 'Injected memory was surfaced but the response did not use it in the previous turn.',
+            requiredAction: 'On the next turn, either answer from the injected facts directly or persist why the injected memory was insufficient before rediscovering the same state manually.',
+        });
+    }
+
     let status: SessionComplianceStatus = 'healthy';
     if (issues.some((issue) => issue.severity === 'error')) {
         status = 'non_compliant';
@@ -916,10 +1031,14 @@ function buildSessionComplianceState(input: {
             ? 'Lifecycle is currently in progress and waiting for a post-response attend.'
             : 'Lifecycle is currently compliant.'
         : status === 'degraded'
-            ? 'Lifecycle is degraded: persistence breadcrumbs are lagging.'
+            ? input.consecutiveUnusedMemoryInjections > 0
+                ? 'Lifecycle is degraded: injected memory was surfaced but not used.'
+                : 'Lifecycle is degraded: persistence breadcrumbs are lagging.'
             : input.consecutivePreResponseWithoutPost > 0
                 ? 'Lifecycle is non-compliant: the previous turn is still missing a post-response attend.'
-                : 'Lifecycle is non-compliant: accountability breadcrumbs are missing.';
+                : input.consecutiveUnusedMemoryInjections > 0
+                    ? 'Lifecycle is non-compliant: injected memory is being ignored instead of used or explicitly challenged.'
+                    : 'Lifecycle is non-compliant: accountability breadcrumbs are missing.';
 
     return {
         status,
@@ -929,6 +1048,7 @@ function buildSessionComplianceState(input: {
         counters: {
             attendsWithoutPersist: input.attendsWithoutPersist,
             consecutivePreResponseWithoutPost: input.consecutivePreResponseWithoutPost,
+            consecutiveUnusedMemoryInjections: input.consecutiveUnusedMemoryInjections,
             pendingPostResponse,
             lastAttendPhase: input.lastAttendPhase ?? null,
         },
@@ -1732,6 +1852,7 @@ export class AttendantInstance {
     private contextCallCount: number = 0;
     private attendsWithoutPersist: number = 0;
     private consecutivePreResponseWithoutPost: number = 0;
+    private consecutiveUnusedMemoryInjections: number = 0;
     private lastAttendPhase: 'pre-response' | 'post-response' | 'mid-turn' | undefined = undefined;
     private complianceUpdatedAt: string = new Date().toISOString();
     private sessionStarted: string = new Date().toISOString();
@@ -1918,6 +2039,12 @@ export class AttendantInstance {
             return scoredEntry;
         });
 
+        if (scored.some((entry) => entry.used)) {
+            this.consecutiveUnusedMemoryInjections = 0;
+        } else if (scored.some((entry) => entry.surfaced)) {
+            this.consecutiveUnusedMemoryInjections += 1;
+        }
+
         this.pendingMemoryAttributions = [];
         this.updateBriefPendingMemoryAttributions();
         return scored;
@@ -1962,6 +2089,34 @@ export class AttendantInstance {
         }
     }
 
+    private async loadProjectPolicies(): Promise<ProjectPolicyEntry[]> {
+        const configured = getProjectMemoryEntity();
+        if (!configured) return [];
+
+        const parsed = parseEntityString(configured);
+        const entries = await findEntriesByEntity(parsed.entityType, parsed.entityId);
+        const policies = entries
+            .filter((entry) => isProjectPolicyEntry({
+                key: entry.key,
+                properties: (entry.properties as Record<string, unknown> | null) ?? null,
+            }))
+            .map((entry) => {
+                const rules = normalizeProjectPolicyRuleLines(entry.valueRaw, entry.valueSummary);
+                if (rules.length === 0) return null;
+                return {
+                    entityKey: `${entry.entityType}/${entry.entityId}/${entry.key}`,
+                    summary: rules.join(' '),
+                    key: entry.key,
+                    source: entry.source,
+                    lastUpdated: entry.updatedAt.toISOString(),
+                    rules,
+                } satisfies ProjectPolicyEntry;
+            })
+            .filter((entry): entry is ProjectPolicyEntry => Boolean(entry));
+
+        return policies;
+    }
+
     // ── Handshake ────────────────────────────────────────────────────────────
 
     async handshake(context: AgentContext): Promise<WorkingMemoryBrief> {
@@ -1977,13 +2132,15 @@ export class AttendantInstance {
         const inferredTaskType = await this.inferTask(context);
 
         // Load knowledge — agent entries + related entities
-        const [workingMemory, ledgerSignals] = await Promise.all([
+        const [workingMemory, ledgerSignals, projectPolicies] = await Promise.all([
             this.buildWorkingMemory(inferredTaskType),
             this.loadSessionLedgerSignals(inferredTaskType),
+            this.loadProjectPolicies(),
         ]);
         const sessionLedgerLearnings = ledgerSignals.learnings;
         this.advisoryLearningProfile = ledgerSignals.profile;
-        const workingMemoryWithLedger = mergeWorkingMemoryWithLedger(workingMemory, sessionLedgerLearnings);
+        const workingMemoryWithPolicies = mergeWorkingMemoryWithProjectPolicies(workingMemory, projectPolicies);
+        const workingMemoryWithLedger = mergeWorkingMemoryWithLedger(workingMemoryWithPolicies, sessionLedgerLearnings);
         const recoveryResult = persisted?.sessionCheckpoint
             ? this.buildRecovery(context, persisted.sessionCheckpoint)
             : { interrupted: false, recovery: null as SessionRecoveryInfo | null };
@@ -2001,9 +2158,13 @@ export class AttendantInstance {
 
         this.brief = {
             agentId: this.agentId,
-            operatingRules: applyAdvisoryOperatingRules(operatingRules, this.advisoryLearningProfile),
+            operatingRules: applyAdvisoryOperatingRules(
+                applyProjectPolicyOperatingRules(operatingRules, projectPolicies),
+                this.advisoryLearningProfile,
+            ),
             inferredTaskType,
             workingMemory: workingMemoryWithLedger,
+            projectPolicies,
             sessionStarted: persisted?.sessionStarted ?? this.sessionStarted,
             briefGeneratedAt: new Date().toISOString(),
             contextCallCount: this.contextCallCount,
@@ -2031,6 +2192,7 @@ export class AttendantInstance {
             metadata: this.buildEventMetadata({
                 briefSize: this.brief?.workingMemory.length ?? 0,
                 ledgerLearningCount: sessionLedgerLearnings.length,
+                projectPolicyCount: projectPolicies.length,
                 advisoryScopes: this.advisoryLearningProfile?.scopesUsed ?? [],
                 taskSummary: context.task.slice(0, 120),
             }),
@@ -2051,7 +2213,10 @@ export class AttendantInstance {
         }
 
         const newTaskType = await this.inferTask(context);
-        const ledgerSignals = await this.loadSessionLedgerSignals(newTaskType);
+        const [ledgerSignals, projectPolicies] = await Promise.all([
+            this.loadSessionLedgerSignals(newTaskType),
+            this.loadProjectPolicies(),
+        ]);
         this.advisoryLearningProfile = ledgerSignals.profile;
 
         // Task hasn't shifted — update timestamp only
@@ -2066,8 +2231,15 @@ export class AttendantInstance {
             }
             this.brief = {
                 ...this.brief,
-                operatingRules: applyAdvisoryOperatingRules(this.brief.operatingRules, this.advisoryLearningProfile),
-                workingMemory: mergeWorkingMemoryWithLedger(this.brief.workingMemory, ledgerSignals.learnings),
+                operatingRules: applyAdvisoryOperatingRules(
+                    applyProjectPolicyOperatingRules(await this.loadOperatingRules(), projectPolicies),
+                    this.advisoryLearningProfile,
+                ),
+                workingMemory: mergeWorkingMemoryWithLedger(
+                    mergeWorkingMemoryWithProjectPolicies(this.brief.workingMemory, projectPolicies),
+                    ledgerSignals.learnings,
+                ),
+                projectPolicies,
                 briefGeneratedAt: new Date().toISOString(),
                 contextCallCount: this.contextCallCount,
                 sessionLedgerLearnings: ledgerSignals.learnings,
@@ -2087,6 +2259,7 @@ export class AttendantInstance {
                 metadata: this.buildEventMetadata({
                     briefSize: this.brief?.workingMemory.length ?? 0,
                     contextCallCount: this.contextCallCount,
+                    projectPolicyCount: projectPolicies.length,
                     advisoryScopes: this.advisoryLearningProfile?.scopesUsed ?? [],
                 }),
             });
@@ -2098,9 +2271,16 @@ export class AttendantInstance {
         const workingMemory = await this.buildWorkingMemory(newTaskType);
         this.brief = {
             ...this.brief,
-            operatingRules: applyAdvisoryOperatingRules(this.brief.operatingRules, this.advisoryLearningProfile),
+            operatingRules: applyAdvisoryOperatingRules(
+                applyProjectPolicyOperatingRules(await this.loadOperatingRules(), projectPolicies),
+                this.advisoryLearningProfile,
+            ),
             inferredTaskType: newTaskType,
-            workingMemory: mergeWorkingMemoryWithLedger(workingMemory, ledgerSignals.learnings),
+            workingMemory: mergeWorkingMemoryWithLedger(
+                mergeWorkingMemoryWithProjectPolicies(workingMemory, projectPolicies),
+                ledgerSignals.learnings,
+            ),
+            projectPolicies,
             briefGeneratedAt: new Date().toISOString(),
             contextCallCount: this.contextCallCount,
             sessionLedgerLearnings: ledgerSignals.learnings,
@@ -2121,6 +2301,7 @@ export class AttendantInstance {
             metadata: this.buildEventMetadata({
                 briefSize: this.brief?.workingMemory.length ?? 0,
                 contextCallCount: this.contextCallCount,
+                projectPolicyCount: projectPolicies.length,
                 advisoryScopes: this.advisoryLearningProfile?.scopesUsed ?? [],
             }),
         });
@@ -2154,9 +2335,14 @@ export class AttendantInstance {
         const operatingRules = rulesResult.found && rulesResult.entry
             ? formatOperatingRulesText(rulesResult.entry.valueRaw, rulesResult.entry.valueSummary)
             : formatOperatingRulesText(null, 'Attendant operating rules:');
+        const projectPolicies = this.brief?.projectPolicies ?? await this.loadProjectPolicies();
 
         if (this.brief) {
-            this.brief.operatingRules = operatingRules;
+            this.brief.operatingRules = applyAdvisoryOperatingRules(
+                applyProjectPolicyOperatingRules(operatingRules, projectPolicies),
+                this.advisoryLearningProfile,
+            );
+            this.brief.projectPolicies = projectPolicies;
             this.brief.contextCallCount = 0;
         }
 
@@ -2205,6 +2391,7 @@ export class AttendantInstance {
         return buildSessionComplianceState({
             attendsWithoutPersist: this.attendsWithoutPersist,
             consecutivePreResponseWithoutPost: this.consecutivePreResponseWithoutPost,
+            consecutiveUnusedMemoryInjections: this.consecutiveUnusedMemoryInjections,
             lastAttendPhase: this.lastAttendPhase,
             lastUpdated: lastUpdated ?? this.complianceUpdatedAt,
         });
@@ -2489,6 +2676,7 @@ export class AttendantInstance {
         this.attendsWithoutPersist++;
         const phase = input.phase;
         let complianceWarning: string | undefined;
+        const ignoredMemoryWarning = 'COMPLIANCE: injected memory was surfaced but not used. On the next turn, either answer from injected facts directly or persist why the injected memory was insufficient before rediscovering the same state manually.';
 
         if (phase === 'post-response') {
             // Correct post-response call — reset counters
@@ -2510,7 +2698,10 @@ export class AttendantInstance {
             }
         }
         this.complianceUpdatedAt = new Date().toISOString();
-        const compliance = this.buildComplianceState(this.complianceUpdatedAt);
+        let compliance = this.buildComplianceState(this.complianceUpdatedAt);
+        if (!complianceWarning && compliance.issues.some((issue) => issue.code === 'ignored_injected_memory')) {
+            complianceWarning = ignoredMemoryWarning;
+        }
 
         if (!this.brief) {
             const bootstrapTask = buildAttendBootstrapTask(latestMessage, currentContext);
@@ -2550,6 +2741,10 @@ export class AttendantInstance {
 
         if (phase === 'post-response') {
             const memoryAttributions = this.scorePendingMemoryAttributions(latestMessage || currentContext);
+            compliance = this.buildComplianceState(this.complianceUpdatedAt);
+            if (memoryAttributions.some((entry) => !entry.used)) {
+                complianceWarning = ignoredMemoryWarning;
+            }
             if (this.brief) {
                 this.brief = {
                     ...this.brief,
@@ -3808,6 +4003,7 @@ If nothing is relevant, return: none`,
         this.sharedStateObservedAt = state.briefGeneratedAt;
         this.attendsWithoutPersist = state.compliance?.counters.attendsWithoutPersist ?? 0;
         this.consecutivePreResponseWithoutPost = state.compliance?.counters.consecutivePreResponseWithoutPost ?? 0;
+        this.consecutiveUnusedMemoryInjections = state.compliance?.counters.consecutiveUnusedMemoryInjections ?? 0;
         this.lastAttendPhase = state.compliance?.counters.lastAttendPhase ?? undefined;
         this.complianceUpdatedAt = state.compliance?.lastUpdated ?? state.briefGeneratedAt;
         this.pendingMemoryAttributions = Array.isArray(state.pendingMemoryAttributions)
