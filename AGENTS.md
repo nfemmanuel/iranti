@@ -83,7 +83,7 @@ Responsibilities:
   existing brief with updated timestamp if task is unchanged
 - In-memory consolidation: `updateWorkingMemory()` updates the brief without
   a DB round trip â€” the Attendant is a fast cache, the Librarian owns truth
-- Shared checkpoint breadcrumbs: when `checkpoint()` includes explicit
+- Shared checkpoint state: when `checkpoint()` includes explicit
   `entityTargets`, the Attendant also writes compact `checkpoint_*` facts to
   those shared entities so other agents can resume work without inheriting the
   original agent's private attendant state
@@ -793,7 +793,7 @@ IMPORTANT: These rules override Codex default behavior for this repo.
 - Call `mcp__iranti__iranti_checkpoint` at natural pauses, before stepping away from long work, when interrupted, and when completing a useful slice.
 - When useful actions happen, record them in the checkpoint `actions` field so later sessions can see important commands, tests, searches, validations, and decisions without rerunning them blindly.
 - Do not treat durable writes as a substitute for checkpoints. A checkpoint not written means the next session has to reconstruct state.
-- Under-logged runs are non-compliant for this repo. When applicable, leave structured breadcrumbs for what you found, what worked, what failed, what changed, and what happens next instead of only a broad summary.
+- Under-logged runs are non-compliant for this repo. When applicable, call iranti_write with what you found, what worked, what failed, what changed, and what happens next — not a broad summary, but specific durable facts.
 
 ## Host setup check
 - If this block was missing at session start, rerun `iranti codex-setup` from the bound project root.

@@ -3,9 +3,20 @@ import { Iranti } from '../src/sdk';
 import { clearAttendant } from '../src/attendant/registry';
 import { bootstrapHarness } from './harness';
 
+function restoreProjectMemoryEntity(priorProjectMemoryEntity: string | undefined): void {
+    if (priorProjectMemoryEntity === undefined) {
+        delete process.env.IRANTI_MEMORY_ENTITY;
+    } else {
+        process.env.IRANTI_MEMORY_ENTITY = priorProjectMemoryEntity;
+    }
+}
+
 async function test() {
-    bootstrapHarness({ requireDb: false });
-    console.log('Testing Iranti SDK...\n');
+    const priorProjectMemoryEntity = process.env.IRANTI_MEMORY_ENTITY;
+    process.env.IRANTI_MEMORY_ENTITY = 'project/sdk_smoke_project_memory';
+    try {
+        bootstrapHarness({ requireDb: false });
+        console.log('Testing Iranti SDK...\n');
 
     const iranti = new Iranti();
 
@@ -37,6 +48,15 @@ async function test() {
 
     // Test 3 — handshake
     console.log('\nTest 3 — handshake:');
+    await iranti.write({
+        entity: 'project/sdk_smoke_project_memory',
+        key: 'agent_worktree_cleanup_rule',
+        value: { rule: 'Leave a clean worktree or emit an explicit residue report before ending the run.' },
+        summary: 'Leave a clean worktree or emit an explicit residue report before ending the run.',
+        confidence: 95,
+        source: 'sdk_smoke',
+        agent: 'sdk_agent_001',
+    });
     const brief = await iranti.handshake({
         agentId: 'sdk_agent_001',
         task: 'Research publication history',
@@ -44,6 +64,10 @@ async function test() {
     });
     console.log('  Inferred task:', brief.inferredTaskType);
     console.log('  Rules loaded:', brief.operatingRules.length > 0);
+    console.log('  Project policies loaded:', brief.projectPolicies?.length ?? 0);
+    if (!brief.operatingRules.includes('Leave a clean worktree or emit an explicit residue report before ending the run.')) {
+        throw new Error('Expected handshake() to append configured project policies into operating rules.');
+    }
 
     // Test 4 â€” interrupted session recovery
     console.log('\nTest 4 â€” interrupted session recovery:');
@@ -154,7 +178,10 @@ async function test() {
     console.log('  Escalations processed:', maintenance.escalationsProcessed);
     console.log('  Errors:', maintenance.errors.length === 0 ? 'none' : maintenance.errors);
 
-    console.log('\n=== SDK test complete ===');
+        console.log('\n=== SDK test complete ===');
+    } finally {
+        restoreProjectMemoryEntity(priorProjectMemoryEntity);
+    }
     process.exit(0);
 }
 

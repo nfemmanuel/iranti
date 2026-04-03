@@ -152,7 +152,7 @@ Good uses:
 Good `iranti_checkpoint` uses:
 - after you finish a debugging slice and know the current step + next step
 - when you have open risks another agent should not rediscover
-- when you created or validated important outputs and want shared breadcrumbs
+- when you created or validated important outputs and want shared state persisted
 
 If Codex needs to pin the target explicitly instead of relying on the bound project defaults, pass `projectEntity` or `personalEntity` to `iranti_remember_response`.
 
@@ -188,6 +188,7 @@ Use the integration like this:
 - `iranti_attend` before every reply generation, not only when recall feels likely
 - `iranti_checkpoint` whenever the task reaches a meaningful milestone, handoff point, or resumable breakpoint
 - `iranti_query` when you know the exact entity and key
+- `iranti_history` when you know the exact entity and key and need the full version history
 - `iranti_search` when you need discovery
 - `iranti_remember_response` when your own final answer contains a strict durable summary worth persisting
 - `iranti_write` only for durable facts
@@ -246,7 +247,7 @@ iranti doctor --instance local
 
 5. Restart the Codex app or CLI session after changing MCP registrations.
 
-6. If Codex CLI works but Codex VS Code still says `iranti_query` or `iranti_attend` is not available:
+6. If Codex CLI works but Codex VS Code still says `iranti_query`, `iranti_history`, or `iranti_attend` is not available:
 
 ```bash
 iranti doctor

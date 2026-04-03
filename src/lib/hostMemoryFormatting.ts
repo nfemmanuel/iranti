@@ -58,6 +58,7 @@ export function formatStructuredFactBlock<T extends HostMemoryFactInput>(
         ...(options.introLines ?? [
             'REQUIRED: Prefer the injected facts below before re-inference.',
             'If an injected fact conflicts with your guess, use the injected fact.',
+            'REQUIRED: Call mcp__iranti__iranti_write after every file edit, confirmed finding, and subagent completion.',
             'Fact IDs are stable only within this block.',
         ]),
         'FACTS:',

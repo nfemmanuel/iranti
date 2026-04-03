@@ -859,14 +859,50 @@ function formatSetupBootstrapFailure(error: unknown): Error {
 async function handoffToScript(scriptName: string, rawArgs: string[]): Promise<void> {
     const builtPath = builtScriptPath(scriptName);
     debugLog('Handing off to companion script.', { scriptName, builtPath, rawArgs: rawArgs.join(' ') });
+    const shouldProxyStdin = !process.stdin.isTTY;
+
+    const wireChildStdin = (child: import('child_process').ChildProcess): (() => void) => {
+        if (!shouldProxyStdin || !child.stdin) {
+            return () => {};
+        }
+
+        const forwardChunk = (chunk: Buffer | string) => {
+            if (!child.stdin || child.stdin.destroyed) return;
+            child.stdin.write(chunk);
+        };
+        const endChildStdin = () => {
+            if (!child.stdin || child.stdin.destroyed || child.stdin.writableEnded) return;
+            child.stdin.end();
+        };
+        const destroyChildStdin = () => {
+            if (!child.stdin || child.stdin.destroyed) return;
+            child.stdin.destroy();
+        };
+
+        process.stdin.on('data', forwardChunk);
+        process.stdin.once('end', endChildStdin);
+        process.stdin.once('close', endChildStdin);
+        process.stdin.once('error', destroyChildStdin);
+        process.stdin.resume();
+
+        return () => {
+            process.stdin.off('data', forwardChunk);
+            process.stdin.off('end', endChildStdin);
+            process.stdin.off('close', endChildStdin);
+            process.stdin.off('error', destroyChildStdin);
+        };
+    };
+
     if (fs.existsSync(builtPath)) {
         await new Promise<void>((resolve, reject) => {
             const child = spawn(process.execPath, [builtPath, ...rawArgs], {
-                stdio: 'inherit',
+                stdio: shouldProxyStdin ? ['pipe', 'inherit', 'inherit'] : 'inherit',
                 env: process.env,
             });
+            const cleanupStdinProxy = wireChildStdin(child);
             child.on('error', reject);
             child.on('exit', (code, signal) => {
+                cleanupStdinProxy();
                 if (signal) {
                     reject(new Error(`${scriptName} terminated with signal ${signal}`));
                     return;
@@ -891,9 +927,30 @@ async function handoffToScript(scriptName: string, rawArgs: string[]): Promise<v
     }
 
     try {
-        await spawnResolved('npx', ['ts-node', sourcePath, ...rawArgs], {
-            stdio: 'inherit',
-            env: process.env,
+        await new Promise<void>((resolve, reject) => {
+            const invocation = resolveCommandInvocation('npx', ['ts-node', sourcePath, ...rawArgs]);
+            const child = spawn(invocation.executable, invocation.args, {
+                stdio: shouldProxyStdin ? ['pipe', 'inherit', 'inherit'] : 'inherit',
+                env: process.env,
+                shell: false,
+            });
+            const cleanupStdinProxy = wireChildStdin(child);
+            child.on('error', (error) => {
+                cleanupStdinProxy();
+                reject(error);
+            });
+            child.on('exit', (code, signal) => {
+                cleanupStdinProxy();
+                if (signal) {
+                    reject(new Error(`${scriptName} terminated with signal ${signal}`));
+                    return;
+                }
+                if ((code ?? 0) !== 0) {
+                    reject(new Error(`${scriptName} exited with code ${code ?? 1}`));
+                    return;
+                }
+                resolve();
+            });
         });
     } catch (error) {
         if (error instanceof Error && /exited with code/.test(error.message)) {
@@ -3084,7 +3141,7 @@ function buildIrantiClaudeMdBlock(): string {
         '- Call `mcp__iranti__iranti_checkpoint` when completing a task, when shifting to a new task mid-session, at any natural pause point, and before stepping away from long or interrupted work.',
         '- Record key actions in the checkpoint `actions` field so later sessions can see important commands, tests, searches, validations, and decisions without rerunning them blindly.',
         '- Do not rely on `mcp__iranti__iranti_write` alone — facts and checkpoints are separate stores. A checkpoint not written means the next handshake recovers from stale data.',
-        '- Under-logged runs are non-compliant. Leave structured breadcrumbs for what you found, what worked, what failed, what changed, and what happens next instead of only a broad summary.',
+        '- Under-logged runs are non-compliant. Call iranti_write with what you found, what worked, what failed, what changed, and what happens next — not a broad summary, but specific durable facts.',
         '',
         '## Host setup check',
         '- If this file was not present at session start, run `iranti claude-setup .` to complete integration.',

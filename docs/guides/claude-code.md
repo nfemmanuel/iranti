@@ -138,6 +138,7 @@ This exposes these tools to Claude Code:
 - `iranti_observe`
 - `iranti_checkpoint`
 - `iranti_query`
+- `iranti_history`
 - `iranti_search`
 - `iranti_write`
 - `iranti_remember_response`
@@ -199,7 +200,7 @@ By default the hook remains retrieval-focused:
 If you deliberately want narrow automatic writes, add `IRANTI_AUTO_REMEMBER=true` to `.env.iranti` or run `iranti configure project . --auto-remember true`. Then:
 - `UserPromptSubmit` saves only strict explicit prompt facts
 - `Stop` saves only strict assistant-response summaries such as `the next step is ...` or `the blocker is ...`
-- when those assistant summaries include progress fields like `current step`, `next step`, `open risks`, or important artifacts, `Stop` also writes shared checkpoint breadcrumbs to `IRANTI_MEMORY_ENTITY`
+- when those assistant summaries include progress fields like `current step`, `next step`, `open risks`, or important artifacts, `Stop` also writes shared checkpoint state to `IRANTI_MEMORY_ENTITY`
 - personal facts such as `my favorite book is ...` go to `IRANTI_PERSONAL_MEMORY_ENTITY` and default to `user/main`
 - prompt-captured personal facts are stored as direct user memory so later explicit user corrections can replace older hook-written values
 - project facts such as `we decided ...`, `the next step is ...`, and `the blocker is ...` go to `IRANTI_MEMORY_ENTITY`
@@ -215,7 +216,7 @@ While work is still in progress, use `iranti_checkpoint` explicitly for active s
 - next step
 - open risks
 - recent outputs
-- shared handoff breadcrumbs via `entityTargets`
+- shared handoff state via `entityTargets`
 
 Optional explicit overrides:
 
@@ -243,6 +244,7 @@ Use the integration like this:
 
 - treat recall prompts such as `what is my favorite ...`, `what is the next step`, `what did we decide`, and `what is the blocker` as mandatory Iranti turns
 - `iranti_query` when you know the exact entity and key
+- `iranti_history` when you know the exact entity and key but need the full timeline, not just the current truth
 - `iranti_search` when you do not know the key yet
 - `iranti_attend` or hooks for short-turn working-memory retrieval
 - `iranti_checkpoint` when the task reaches a meaningful milestone, handoff point, or resumable breakpoint
@@ -256,7 +258,7 @@ The only built-in exception is the opt-in `IRANTI_AUTO_REMEMBER=true` path above
 ## 6. Suggested Claude standing instruction
 
 ```text
-Use Iranti for durable memory. Prefer iranti_query for exact lookup, iranti_search for discovery, and iranti_write only for stable facts such as preferences, decisions, constraints, task state, and repository knowledge.
+Use Iranti for durable memory. Prefer iranti_query for exact lookup, iranti_history for exact timeline lookup, iranti_search for discovery, and iranti_write only for stable facts such as preferences, decisions, constraints, task state, and repository knowledge.
 ```
 
 If Claude Code is handing work to Codex, do not rely on Claude's private checkpoint as the handoff. Write the handoff to a shared `task/...` entity, checkpoint Claude's own session separately, and have Codex read the shared task through `query()` or `attend()` with explicit `entityHints`.

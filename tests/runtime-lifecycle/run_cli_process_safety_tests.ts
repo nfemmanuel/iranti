@@ -325,7 +325,7 @@ process.exit(1);
     assert.match(agentsText, /natural pauses, before stepping away from long work, when interrupted/i, 'workspace AGENTS.md should require checkpointing during interrupted work');
     assert.match(agentsText, /checkpoint `actions` field/i, 'workspace AGENTS.md should tell hosts to record key actions in checkpoint actions.');
     assert.match(agentsText, /confirmed durable findings/i, 'workspace AGENTS.md should require durable writes after confirmed findings');
-    assert.match(agentsText, /what you found, what worked, what failed, what changed, and what happens next/i, 'workspace AGENTS.md should require structured breadcrumbs instead of only broad summaries');
+    assert.match(agentsText, /what you found, what worked, what failed, what changed, and what happens next/i, 'workspace AGENTS.md should require durable writes instead of only broad summaries');
     assert.match(stdout, /Required host pattern:/, 'codex-setup output should print the explicit required host pattern');
     assert.match(stdout, /Run iranti_handshake at session start/i, 'codex-setup output should mention handshake at session start');
     assert.match(stdout, /Run iranti_checkpoint at natural pauses, during interrupted work/i, 'codex-setup output should mention checkpointing during interrupted work');

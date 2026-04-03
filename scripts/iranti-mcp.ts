@@ -381,7 +381,7 @@ Omitting currentContext falls back to the latest message only; pass the
 full visible context when available. For host compatibility, message is
 accepted as an alias for latestMessage. When phase='post-response', pass the
 assistant response so Iranti can persist strict continuity facts and shared
-checkpoint breadcrumbs before closing the turn.`,
+checkpoint state before closing the turn.`,
         inputSchema: {
             latestMessage: z.string().min(1).optional().describe('The latest user or assistant message.'),
             message: z.string().min(1).optional().describe('Alias for latestMessage, accepted for host compatibility.'),
@@ -460,11 +460,11 @@ checkpoint breadcrumbs before closing the turn.`,
     server.registerTool('iranti_checkpoint', {
         description: `Persist a shared progress checkpoint while you work.
 Use this at meaningful milestones so current step, next step, open risks,
-recent outputs, structured actions, and shared entity breadcrumbs survive across turns,
+recent outputs, structured actions, and shared entity state survive across turns,
 sessions, and agents. This is the strongest shared-RAM tool for active work:
 prefer it over ad-hoc prose when you need another session or another agent
 to pick up where you left off. If entityTargets are supplied, Iranti also
-writes canonical shared breadcrumbs such as current_step, next_step,
+writes canonical shared state such as current_step, next_step,
 open_risks, recent_actions, and recent_file_changes to those entities for handoff.`,
         inputSchema: {
             task: z.string().min(1).describe('Current task or objective for the active checkpoint.'),
@@ -486,7 +486,7 @@ open_risks, recent_actions, and recent_file_changes to those entities for handof
                 toPath: z.string().optional().describe('Destination path for move/rename actions.'),
                 purpose: z.string().optional().describe('Why the file changed or what role it now serves.'),
             })).optional().describe('Structured file actions produced so far.'),
-            entityTargets: z.array(z.string()).optional().describe('Shared entities that should receive checkpoint breadcrumbs, in entityType/entityId format.'),
+            entityTargets: z.array(z.string()).optional().describe('Shared entities that should receive checkpoint state, in entityType/entityId format.'),
             notes: z.string().optional().describe('Compact extra checkpoint notes that aid handoff.'),
             sessionId: z.string().optional().describe('Optional existing session id to refresh.'),
             agent: z.string().optional().describe('Override the default agent id.'),

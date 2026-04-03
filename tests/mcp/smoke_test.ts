@@ -326,7 +326,7 @@ async function main(): Promise<void> {
 
         const tools = { tools: allTools };
         const toolNames = tools.tools.map((tool: { name: string }) => tool.name);
-        for (const required of ['iranti_handshake', 'iranti_attend', 'iranti_checkpoint', 'iranti_query', 'iranti_search', 'iranti_write', 'iranti_write_issue', 'iranti_remember_response', 'iranti_related', 'iranti_related_deep']) {
+        for (const required of ['iranti_handshake', 'iranti_attend', 'iranti_checkpoint', 'iranti_query', 'iranti_history', 'iranti_search', 'iranti_write', 'iranti_write_issue', 'iranti_remember_response', 'iranti_related', 'iranti_related_deep']) {
             expect(toolNames.includes(required), `Expected MCP tool ${required} to be listed.`);
         }
 
@@ -361,6 +361,14 @@ Returns the current value, summary, confidence, source, and
 temporal metadata when available. Prefer this over iranti_search
 when the target fact is already known, and do not answer from
 memory alone before checking Iranti.`,
+            iranti_history: `Retrieve the full version history of a fact for an exact entity+key pair.
+Returns all archived past values plus the current value, ordered oldest-first.
+Each entry includes value, summary, confidence, source, validFrom, validUntil,
+isCurrent, archivedReason, and resolutionState.
+REQUIRED: call iranti_attend before this discovery tool so Iranti can decide
+whether memory should be injected first.
+Use this to understand how a fact evolved over time — decisions that changed,
+blockers that were resolved, values that were contested or superseded.`,
             iranti_search: `Search shared memory with natural language when the exact entity
 or key is unknown. Uses hybrid lexical and vector search across
 stored facts. Use this for discovery and recall, not exact lookup.
@@ -382,14 +390,14 @@ Omitting currentContext falls back to the latest message only; pass the
 full visible context when available. For host compatibility, message is
 accepted as an alias for latestMessage. When phase='post-response', pass the
 assistant response so Iranti can persist strict continuity facts and shared
-checkpoint breadcrumbs before closing the turn.`,
+checkpoint state before closing the turn.`,
             iranti_checkpoint: `Persist a shared progress checkpoint while you work.
 Use this at meaningful milestones so current step, next step, open risks,
-recent outputs, structured actions, and shared entity breadcrumbs survive across turns,
+recent outputs, structured actions, and shared entity state survive across turns,
 sessions, and agents. This is the strongest shared-RAM tool for active work:
 prefer it over ad-hoc prose when you need another session or another agent
 to pick up where you left off. If entityTargets are supplied, Iranti also
-writes canonical shared breadcrumbs such as current_step, next_step,
+writes canonical shared state such as current_step, next_step,
 open_risks, recent_actions, and recent_file_changes to those entities for handoff.`,
             iranti_handshake: `Initialize or refresh an agent's working-memory brief for the current task.
 Call this at session start or when a new task begins, passing the task and
@@ -419,6 +427,18 @@ whether memory should be injected before graph traversal.`,
         const entity = `project/mcp_smoke_${Date.now()}`;
         const relatedEntity = `team/mcp_smoke_team_${Date.now()}`;
 
+        const projectPolicyWrite = await client.callTool({
+            name: 'iranti_write',
+            arguments: {
+                entity: 'project/mcp_smoke_project_memory',
+                key: 'agent_worktree_cleanup_rule',
+                valueJson: JSON.stringify({ rule: 'Leave a clean worktree or emit an explicit residue report before ending the run.' }),
+                summary: 'Leave a clean worktree or emit an explicit residue report before ending the run.',
+                confidence: 95,
+            },
+        });
+        expect(!projectPolicyWrite.isError, 'Expected project policy seed write to succeed before MCP handshake.');
+
         const handshake = await client.callTool({
             name: 'iranti_handshake',
             arguments: {
@@ -427,6 +447,15 @@ whether memory should be injected before graph traversal.`,
             },
         });
         expect(!handshake.isError, 'Expected iranti_handshake to succeed.');
+        const handshakePayload = JSON.stringify(handshake.structuredContent);
+        expect(
+            handshakePayload.includes('"projectPolicies"') && handshakePayload.includes('agent_worktree_cleanup_rule'),
+            'Expected MCP smoke handshake to surface project-scoped policies.',
+        );
+        expect(
+            handshakePayload.includes('Leave a clean worktree or emit an explicit residue report before ending the run.'),
+            'Expected MCP smoke handshake to append the project-scoped policy into operating rules.',
+        );
         await expectApplicationName('iranti:mcp:codex_cli');
 
         const claudeHandshake = await client.callTool({
@@ -626,6 +655,19 @@ whether memory should be injected before graph traversal.`,
             'Expected iranti_search before attend to be blocked with a protocol violation.'
         );
 
+        const historyBeforeAttend = await client.callTool({
+            name: 'iranti_history',
+            arguments: {
+                entity,
+                key: 'issue_mcp_issue_lifecycle',
+            },
+        });
+        expect(!historyBeforeAttend.isError, 'Expected iranti_history to return a structured protocol violation before attend.');
+        expect(
+            JSON.stringify(historyBeforeAttend.structuredContent).includes('protocolViolation'),
+            'Expected iranti_history before attend to be blocked with a protocol violation.'
+        );
+
         const rememberResponse = await client.callTool({
             name: 'iranti_remember_response',
             arguments: {
@@ -768,6 +810,36 @@ whether memory should be injected before graph traversal.`,
         expect(
             typeof attendAlias.structuredContent === 'object' && attendAlias.structuredContent !== null,
             'Expected iranti_attend alias call to return structured content.'
+        );
+
+        const historyAfterAttend = await client.callTool({
+            name: 'iranti_history',
+            arguments: {
+                entity,
+                key: 'issue_mcp_issue_lifecycle',
+            },
+        });
+        expect(!historyAfterAttend.isError, 'Expected iranti_history after attend to succeed.');
+        const historyPayload = JSON.stringify(historyAfterAttend.structuredContent);
+        expect(
+            historyPayload.includes('\"status\":\"open\"') && historyPayload.includes('\"status\":\"resolved\"'),
+            'Expected iranti_history after attend to return both open and resolved issue states.'
+        );
+
+        const refreshAttendForQuery = await client.callTool({
+            name: 'iranti_attend',
+            arguments: {
+                latestMessage: 'What is the smoke test project status after checking issue history?',
+                currentContext: 'We already read the issue lifecycle history and need a fresh discovery window for exact lookup.',
+                entityHints: [entity],
+                maxFacts: 3,
+                phase: 'mid-turn',
+            },
+        });
+        expect(!refreshAttendForQuery.isError, 'Expected a fresh iranti_attend before querying after history.');
+        expect(
+            !JSON.stringify(refreshAttendForQuery.structuredContent).includes('"code":"post_response_required"'),
+            'Expected the refresh attend to reopen the discovery budget within the active turn, not request a new pre-response cycle.'
         );
 
         const queryAfterAttend = await client.callTool({

@@ -5,15 +5,26 @@ import { bootstrapHarness } from './harness';
 import { configureMock } from '../src/lib/providers/mock';
 import { librarianWrite } from '../src/librarian';
 
+function restoreProjectMemoryEntity(priorProjectMemoryEntity: string | undefined): void {
+    if (priorProjectMemoryEntity === undefined) {
+        delete process.env.IRANTI_MEMORY_ENTITY;
+    } else {
+        process.env.IRANTI_MEMORY_ENTITY = priorProjectMemoryEntity;
+    }
+}
+
 async function test() {
     process.env.LLM_PROVIDER = 'mock';
-    bootstrapHarness();
-    configureMock({
-        scenario: 'default',
-        seed: 42,
-        failureRate: 0,
-    });
-    console.log('Testing Attendant...\n');
+    const priorProjectMemoryEntity = process.env.IRANTI_MEMORY_ENTITY;
+    process.env.IRANTI_MEMORY_ENTITY = 'project/attendant_smoke_memory';
+    try {
+        bootstrapHarness({ dbApplicationName: 'iranti:attendant:legacy_api' });
+        configureMock({
+            scenario: 'default',
+            seed: 42,
+            failureRate: 0,
+        });
+        console.log('Testing Attendant...\n');
 
     // Test 1 — handshake with a fresh agent
     const context = {
@@ -27,12 +38,26 @@ async function test() {
     };
 
     console.log('Test 1 — handshake:');
+    await librarianWrite({
+        entityType: 'project',
+        entityId: 'attendant_smoke_memory',
+        key: 'agent_worktree_cleanup_rule',
+        valueRaw: { rule: 'Leave a clean worktree or emit an explicit residue report before ending the run.' },
+        valueSummary: 'Leave a clean worktree or emit an explicit residue report before ending the run.',
+        confidence: 95,
+        source: 'attendant_test',
+        createdBy: context.agentId,
+    });
     const brief = await handshake(context);
     console.log('  Agent ID:', brief.agentId);
     console.log('  Inferred task:', brief.inferredTaskType);
     console.log('  Relevant knowledge entries:', brief.workingMemory.length);
     console.log('  Operating rules loaded:', brief.operatingRules.length > 0);
+    console.log('  Project policies loaded:', brief.projectPolicies?.length ?? 0);
     console.log('  Generated at:', brief.briefGeneratedAt);
+    if (!brief.operatingRules.includes('Leave a clean worktree or emit an explicit residue report before ending the run.')) {
+        throw new Error('Expected handshake() smoke to append the configured project policy into operating rules.');
+    }
 
     // Test 2 — reconvene with same task (should not regenerate)
     console.log('\nTest 2 — reconvene same task:');
@@ -141,6 +166,9 @@ async function test() {
         sessionId: recoveryCheckpoint.sessionCheckpoint?.sessionId,
     });
 
+    } finally {
+        restoreProjectMemoryEntity(priorProjectMemoryEntity);
+    }
     process.exit(0);
 }
 

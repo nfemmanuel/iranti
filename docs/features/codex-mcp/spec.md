@@ -55,17 +55,19 @@ This spec is intentionally host-specific. The shared memory contract lives in `d
 17. Handshake returns the Attendant operating-rules summary plus a stricter read/write discipline for Iranti usage, including when to query, search, write, remember durable summaries, and avoid saving ephemeral chatter.
 18. The operating rules explicitly position Iranti as the default shared working-memory layer for anything another session, another agent, or a later handoff may need, even if Codex also keeps private notes elsewhere.
 19. The operating rules explicitly tell agents to persist durable file-state changes that matter later, including file creation, moves, renames, deletions, repurposing, and notable artifacts or paths produced during the task.
-20. If `IRANTI_AUTO_REMEMBER=true`, `iranti_attend` first persists only narrow explicit prompt facts, routing personal facts to `IRANTI_PERSONAL_MEMORY_ENTITY`/`user/main` and project facts to `IRANTI_MEMORY_ENTITY`.
-21. Prompt-captured personal facts are stored as direct user memory so later explicit user corrections can replace older hook-written values.
-22. If no handshake has been performed yet for that agent in the current process, `iranti_attend` auto-runs a bootstrap handshake before making the injection decision.
-23. If Codex explicitly calls `iranti_write` for a personal-memory key such as `favorite_book`, the MCP server reroutes that write to the configured canonical personal entity instead of allowing project-local identity forks like `user/nf` vs `user/main`.
-24. Recall questions about remembered preferences, decisions, blockers, next steps, or prior project facts are treated as mandatory memory prompts and bypass the LLM memory-needed classifier.
-25. Handshake may also return a backfill suggestion when recent messages appear to contain durable facts that have not yet been persisted.
-26. At meaningful milestones during active work, Codex calls `iranti_checkpoint` so current step, next step, open risks, recent outputs, structured actions, file changes, and shared entity breadcrumbs persist without waiting for a final answer.
-27. `iranti_attend` accepts `message` as a host-compatibility alias for `latestMessage` when a client cannot rename that field cleanly.
-28. If Codex's own final answer contains a strict durable summary such as `The next step is ...`, `The current step is ...`, `Open risks are ...`, `Important artifacts are ...`, or `We decided ...`, call `iranti_remember_response` explicitly because there is no Codex-side `Stop` hook.
-29. Shared checkpoints leave `checkpoint_*` breadcrumbs on explicit entity targets so Codex can recover shared work without inheriting another agent's private attendant state.
-30. Launch Codex with `codex -C <project>` for the intended workspace context.
+20. When `IRANTI_MEMORY_ENTITY` contains explicit project-scoped policy facts such as `agent_operating_rules`, `agent_preferences`, or `*_rule`, handshake may also return a bounded `projectPolicies` appendix and append those rules as `PROJECT POLICY (...)` guidance in the effective operating rules.
+21. If `IRANTI_AUTO_REMEMBER=true`, `iranti_attend` first persists only narrow explicit prompt facts, routing personal facts to `IRANTI_PERSONAL_MEMORY_ENTITY`/`user/main` and project facts to `IRANTI_MEMORY_ENTITY`.
+22. Prompt-captured personal facts are stored as direct user memory so later explicit user corrections can replace older hook-written values.
+23. If no handshake has been performed yet for that agent in the current process, `iranti_attend` auto-runs a bootstrap handshake before making the injection decision.
+24. If Codex explicitly calls `iranti_write` for a personal-memory key such as `favorite_book`, the MCP server reroutes that write to the configured canonical personal entity instead of allowing project-local identity forks like `user/nf` vs `user/main`.
+25. Recall questions about remembered preferences, decisions, blockers, next steps, or prior project facts are treated as mandatory memory prompts and bypass the LLM memory-needed classifier.
+26. Handshake may also return a backfill suggestion when recent messages appear to contain durable facts that have not yet been persisted.
+27. At meaningful milestones during active work, Codex calls `iranti_checkpoint` so current step, next step, open risks, recent outputs, structured actions, file changes, and shared entity state persists without waiting for a final answer.
+28. `iranti_attend` accepts `message` as a host-compatibility alias for `latestMessage` when a client cannot rename that field cleanly.
+29. Use `iranti_query` when the exact entity and key are known, `iranti_history` when the exact entity and key are known but historical evolution matters, and `iranti_search` when discovery is still required.
+30. If Codex's own final answer contains a strict durable summary such as `The next step is ...`, `The current step is ...`, `Open risks are ...`, `Important artifacts are ...`, or `We decided ...`, call `iranti_remember_response` explicitly because there is no Codex-side `Stop` hook.
+31. Shared checkpoints write `checkpoint_*` state to explicit entity targets so Codex can recover shared work without inheriting another agent's private attendant state.
+32. Launch Codex with `codex -C <project>` for the intended workspace context.
 
 ## Edge Cases
 
@@ -90,7 +92,8 @@ This spec is intentionally host-specific. The shared memory contract lives in `d
 ## Test Results
 
 - `npm run build` passes with the updated Codex setup script included.
-- `npm run test:mcp-smoke` exercises `iranti_checkpoint`, `iranti_write_issue`, `iranti_remember_response`, `iranti_relate`, `iranti_related`, and `iranti_related_deep`, and verifies they persist shared checkpoint breadcrumbs, canonical issue lifecycle, and strict summary facts.
+- `npm run test:mcp-smoke` exercises `iranti_checkpoint`, `iranti_write_issue`, `iranti_history`, `iranti_remember_response`, `iranti_relate`, `iranti_related`, and `iranti_related_deep`, and verifies they persist shared checkpoint state, canonical issue lifecycle, strict summary facts, and version-history access.
+- `npm run test:mcp-smoke` also verifies handshake surfaces bounded `projectPolicies` when `IRANTI_MEMORY_ENTITY` contains explicit project-scoped policy facts.
 - `npm run test:mcp-attend-shutdown-regressions` verifies focused attend alias and shutdown checkpoint preservation as a narrower regression separate from the broader smoke.
 - `iranti codex-setup` successfully registers `iranti` in Codex MCP config.
 - `iranti codex-setup` writes or merges project-local `.mcp.json` and `.vscode/mcp.json` files when run from a bound project.

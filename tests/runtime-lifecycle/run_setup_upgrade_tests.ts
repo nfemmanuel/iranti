@@ -167,6 +167,22 @@ async function main(): Promise<void> {
         const sharedPort = await reservePort();
         const testApiKey = `test_${randomBytes(16).toString('hex')}`;
         const sharedApiKey = `test_${randomBytes(16).toString('hex')}`;
+        const upgradeTestDbUrl = process.env.IRANTI_SETUP_SMOKE_DB ?? 'postgresql://postgres:postgres@localhost:5432/iranti_setup_smoke';
+
+        // Clean stale test data from previous runs so scaffold/sentinel assertions compare fresh data only.
+        try {
+            const dbForCleanup = initDb(upgradeTestDbUrl);
+            await dbForCleanup.knowledgeEntry.deleteMany({
+                where: { entityType: 'user', entityId: 'main', key: { in: ['claude_setup_scaffold_status', 'codex_setup_scaffold_status'] } },
+            });
+            await dbForCleanup.knowledgeEntry.deleteMany({
+                where: { entityType: 'project', entityId: 'upgrade_preservation_test', key: 'sentinel' },
+            });
+            await disconnectDb();
+        } catch {
+            try { await disconnectDb(); } catch { /* ignore */ }
+            // DB may not be accessible — cleanup is best-effort.
+        }
 
         const setupRun = runCli([
             'setup',
@@ -182,7 +198,7 @@ async function main(): Promise<void> {
             '--db-mode',
             'managed',
             '--db-url',
-            'postgresql://postgres:postgres@localhost:5432/iranti_setup_smoke',
+            process.env.IRANTI_SETUP_SMOKE_DB ?? 'postgresql://postgres:postgres@localhost:5432/iranti_setup_smoke',
             '--provider',
             'mock',
             '--api-key',
@@ -196,11 +212,9 @@ async function main(): Promise<void> {
         assert.match(setupRun.stdout, /Dependency (preflight|check)/i, 'Expected setup to print dependency status before executing the plan.');
 
         // Write a sentinel KB fact BEFORE re-running setup to prove user data survives (upgrade_preservation_not_proven).
-        // The test DB (postgres:postgres@localhost:5432/iranti_setup_smoke) is only accessible when the standard CI
-        // postgres setup is in place. When it is not reachable, the sentinel is skipped with a notice — preservation
-        // is analytically proven (additive migrations, guarded Staff seed, scoped seed-codebase) even when the live
-        // DB assertion cannot run. Pass IRANTI_SETUP_SMOKE_DB to override the URL for a different local DB.
-        const upgradeTestDbUrl = process.env.IRANTI_SETUP_SMOKE_DB ?? 'postgresql://postgres:postgres@localhost:5432/iranti_setup_smoke';
+        // The test DB is only accessible when the standard CI postgres setup is in place or IRANTI_SETUP_SMOKE_DB is set.
+        // When it is not reachable, the sentinel is skipped with a notice — preservation is analytically proven
+        // (additive migrations, guarded Staff seed, scoped seed-codebase) even when the live DB assertion cannot run.
         let sentinelDbAvailable = false;
         try {
             const dbForSentinelWrite = initDb(upgradeTestDbUrl);
@@ -299,7 +313,7 @@ async function main(): Promise<void> {
             '--db-mode',
             'managed',
             '--db-url',
-            'postgresql://postgres:postgres@localhost:5432/iranti_setup_smoke',
+            process.env.IRANTI_SETUP_SMOKE_DB ?? 'postgresql://postgres:postgres@localhost:5432/iranti_setup_smoke',
             '--provider',
             'mock',
             '--api-key',
@@ -310,7 +324,6 @@ async function main(): Promise<void> {
             '--claude-code',
         ], repoRoot);
         assert.strictEqual(setupRepeatRun.status, 0, `repeat setup failed:\n${setupRepeatRun.stdout}\n${setupRepeatRun.stderr}`);
-
         // Verify the sentinel KB fact survived the setup re-run (when the test DB was accessible).
         // Proves upgrade_preservation_not_proven is resolved: additive migrations, guarded Staff seed, scoped codebase seed.
         if (sentinelDbAvailable) {
@@ -425,7 +438,7 @@ async function main(): Promise<void> {
         assert.match(claudeMd, /before stepping away from long or interrupted work/i, 'Expected scaffolded CLAUDE.md to require checkpointing for interrupted work.');
         assert.match(claudeMd, /checkpoint `actions` field/i, 'Expected scaffolded CLAUDE.md to tell hosts to record key actions in checkpoint actions.');
         assert.match(claudeMd, /confirmed durable findings/i, 'Expected scaffolded CLAUDE.md to require durable writes after confirmed findings.');
-        assert.match(claudeMd, /what you found, what worked, what failed, what changed, and what happens next/i, 'Expected scaffolded CLAUDE.md to require structured breadcrumbs instead of only broad summaries.');
+        assert.match(claudeMd, /what you found, what worked, what failed, what changed, and what happens next/i, 'Expected scaffolded CLAUDE.md to require durable writes instead of only broad summaries.');
         assert.doesNotMatch(claudeMd, /Old checkpoint wording that should be refreshed only by a rerun\./, 'Expected rerunning setup to refresh an existing Iranti CLAUDE.md block without requiring --force.');
 
         const localGuardRoot = path.join(tempRoot, 'local-guard-runtime');
@@ -556,7 +569,7 @@ async function main(): Promise<void> {
             assert.match(sharedClaudeMd, /before using any knowledge discovery tool/i, 'Expected shared CLAUDE.md to require attend before discovery.');
             assert.match(sharedClaudeMd, /before stepping away from long or interrupted work/i, 'Expected shared CLAUDE.md to require checkpointing for interrupted work.');
             assert.match(sharedClaudeMd, /checkpoint `actions` field/i, 'Expected shared CLAUDE.md to tell hosts to record key actions in checkpoint actions.');
-            assert.match(sharedClaudeMd, /what you found, what worked, what failed, what changed, and what happens next/i, 'Expected shared CLAUDE.md to require structured breadcrumbs instead of only broad summaries.');
+            assert.match(sharedClaudeMd, /what you found, what worked, what failed, what changed, and what happens next/i, 'Expected shared CLAUDE.md to require durable writes instead of only broad summaries.');
         }
 
         const projectInitRun = runCli([

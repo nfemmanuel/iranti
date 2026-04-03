@@ -110,7 +110,7 @@ Iranti should support at least these edges:
 2. The creating host writes `status=open`, `requested_by`, and a compact `summary`.
 3. A host or agent may claim the task by writing `current_owner`.
 4. During active work, hosts append `current_step`, `next_step`, `blockers`, `important_artifacts`, `failed_paths`, and `implementation_status`.
-5. Shared progress should use existing checkpoint breadcrumbs where appropriate, but the task entity remains the canonical collaboration surface.
+5. Shared progress should use existing checkpoint records where appropriate, but the task entity remains the canonical collaboration surface.
 6. When the task is complete, write `status=resolved` and `resolution`.
 
 ### Ask Lifecycle

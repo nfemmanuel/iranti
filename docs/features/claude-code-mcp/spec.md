@@ -26,7 +26,7 @@ This spec is intentionally host-specific. The shared memory contract lives in `d
 ## Outputs
 | Output | Type | Description |
 |---|---|---|
-| MCP tools | stdio MCP server | Exposes `iranti_handshake`, `iranti_attend`, `iranti_observe`, `iranti_checkpoint`, `iranti_query`, `iranti_search`, `iranti_write`, `iranti_write_issue`, `iranti_remember_response`, `iranti_ingest`, `iranti_relate`, `iranti_related`, `iranti_related_deep`, and `iranti_who_knows`. |
+| MCP tools | stdio MCP server | Exposes `iranti_handshake`, `iranti_attend`, `iranti_observe`, `iranti_checkpoint`, `iranti_query`, `iranti_history`, `iranti_search`, `iranti_write`, `iranti_write_issue`, `iranti_remember_response`, `iranti_ingest`, `iranti_relate`, `iranti_related`, `iranti_related_deep`, and `iranti_who_knows`. |
 | Hook context | JSON | Emits `hookSpecificOutput.additionalContext` for Claude Code hook events. |
 | Structured tool results | JSON | Returns tool output as both plain text and `structuredContent` for MCP clients. |
 | Claude scaffold files | filesystem | Writes `.mcp.json`, `.vscode/mcp.json`, and `.claude/settings.local.json` in the target project. |
@@ -56,16 +56,17 @@ This spec is intentionally host-specific. The shared memory contract lives in `d
 17. Handshake returns the Attendant operating-rules summary plus a stricter read/write discipline for Iranti usage, including when to query, search, write, remember durable summaries, and avoid saving ephemeral chatter.
 18. The operating rules explicitly position Iranti as the default shared working-memory layer for anything another session, another agent, or a later handoff may need, even if the client also keeps private notes elsewhere.
 19. The operating rules explicitly tell agents to persist durable file-state changes that matter later, including file creation, moves, renames, deletions, repurposing, and notable artifacts or paths produced during the task.
-20. On `UserPromptSubmit`, if `IRANTI_AUTO_REMEMBER=true`, extract only narrow explicit prompt facts and write personal facts to `IRANTI_PERSONAL_MEMORY_ENTITY`/`user/main` while project facts still go to `IRANTI_MEMORY_ENTITY`.
-21. Prompt-captured personal facts are stored as direct user memory so later explicit user corrections can replace older hook-written values.
-22. On `UserPromptSubmit`, call `attend()` and emit only relevant retrieved facts when injection is needed.
-23. If no handshake has been performed yet for that agent in the current process, `attend()` auto-runs a bootstrap handshake before making the injection decision.
-24. The MCP `iranti_attend` tool accepts `message` as a host-compatibility alias for `latestMessage` when a client cannot rename that field cleanly.
-25. If Claude explicitly calls `iranti_write` for a personal-memory key such as `favorite_book`, the MCP server reroutes that write to the configured canonical personal entity instead of allowing project-local identity forks like `user/nf` vs `user/main`.
-26. Recall-class prompts such as `what is my favorite ...`, `what is the next step`, `what did we decide`, and `what is the blocker` are treated as mandatory memory prompts and bypass the LLM memory-needed classifier.
-27. On `Stop`, if `IRANTI_AUTO_REMEMBER=true`, extract only narrow assistant-response summary patterns from `last_assistant_message` and write project-scoped summaries to `IRANTI_MEMORY_ENTITY`.
-28. If the strict assistant summary contains checkpoint-worthy project progress such as `current_step`, `next_step`, `open_risks`, or important artifacts, the `Stop` hook should also emit a shared checkpoint to `IRANTI_MEMORY_ENTITY` so other sessions can resume work without waiting for an explicit MCP checkpoint call.
-29. Narrow project durability now includes strict patterns for:
+20. When `IRANTI_MEMORY_ENTITY` contains explicit project-scoped policy facts such as `agent_operating_rules`, `agent_preferences`, or `*_rule`, handshake may also return a bounded `projectPolicies` appendix and append those rules as `PROJECT POLICY (...)` guidance in the effective operating rules.
+21. On `UserPromptSubmit`, if `IRANTI_AUTO_REMEMBER=true`, extract only narrow explicit prompt facts and write personal facts to `IRANTI_PERSONAL_MEMORY_ENTITY`/`user/main` while project facts still go to `IRANTI_MEMORY_ENTITY`.
+22. Prompt-captured personal facts are stored as direct user memory so later explicit user corrections can replace older hook-written values.
+23. On `UserPromptSubmit`, call `attend()` and emit only relevant retrieved facts when injection is needed.
+24. If no handshake has been performed yet for that agent in the current process, `attend()` auto-runs a bootstrap handshake before making the injection decision.
+25. The MCP `iranti_attend` tool accepts `message` as a host-compatibility alias for `latestMessage` when a client cannot rename that field cleanly.
+26. If Claude explicitly calls `iranti_write` for a personal-memory key such as `favorite_book`, the MCP server reroutes that write to the configured canonical personal entity instead of allowing project-local identity forks like `user/nf` vs `user/main`.
+27. Recall-class prompts such as `what is my favorite ...`, `what is the next step`, `what did we decide`, and `what is the blocker` are treated as mandatory memory prompts and bypass the LLM memory-needed classifier.
+28. On `Stop`, if `IRANTI_AUTO_REMEMBER=true`, extract only narrow assistant-response summary patterns from `last_assistant_message` and write project-scoped summaries to `IRANTI_MEMORY_ENTITY`.
+29. If the strict assistant summary contains checkpoint-worthy project progress such as `current_step`, `next_step`, `open_risks`, or important artifacts, the `Stop` hook should also emit a shared checkpoint to `IRANTI_MEMORY_ENTITY` so other sessions can resume work without waiting for an explicit MCP checkpoint call.
+30. Narrow project durability now includes strict patterns for:
    - `current_step`
    - `next_step`
    - `blocker`
@@ -76,11 +77,11 @@ This spec is intentionally host-specific. The shared memory contract lives in `d
    - `recent_file_changes`
    - `failed_paths`
    - `alternative_routes`
-28. MCP clients may call `iranti_checkpoint` explicitly during active work to persist current step, next step, open risks, recent outputs, and shared entity breadcrumbs without waiting for a final answer.
-29. MCP clients may call `iranti_remember_response` explicitly to persist a strict assistant summary such as `The next step is ...` without relying on the Claude `Stop` hook path.
-30. MCP tool descriptions explicitly tell Claude-facing clients to consult Iranti for recall questions about remembered preferences, decisions, blockers, next steps, and prior project facts before guessing or saying they do not know.
-31. Handshake may also return a backfill suggestion when recent messages appear to contain durable facts that have not yet been persisted.
-32. Keep durable writes explicit through MCP tool calls rather than auto-saving all turns; the hook never bulk-saves Claude responses.
+31. MCP clients may call `iranti_checkpoint` explicitly during active work to persist current step, next step, open risks, recent outputs, and shared entity state without waiting for a final answer.
+32. MCP clients may call `iranti_remember_response` explicitly to persist a strict assistant summary such as `The next step is ...` without relying on the Claude `Stop` hook path.
+33. MCP tool descriptions explicitly tell Claude-facing clients to consult Iranti for recall questions about remembered preferences, decisions, blockers, next steps, and prior project facts before guessing or saying they do not know.
+34. Handshake may also return a backfill suggestion when recent messages appear to contain durable facts that have not yet been persisted.
+35. Keep durable writes explicit through MCP tool calls rather than auto-saving all turns; the hook never bulk-saves Claude responses.
 
 ## Edge Cases
 - Missing `DATABASE_URL`: process exits with a fatal configuration error.
@@ -109,7 +110,8 @@ This spec is intentionally host-specific. The shared memory contract lives in `d
 - `iranti claude-setup --scan <dir> --recursive` finds nested Claude-enabled projects.
 - `iranti claude-setup` writes both `.mcp.json` and `.vscode/mcp.json` when a bound project is available.
 - `iranti mcp --help` works through the installed CLI handoff path.
-- `npm run test:mcp-smoke` starts the stdio MCP server, lists tools, and successfully calls `iranti_handshake`, `iranti_checkpoint`, `iranti_write`, `iranti_write_issue`, `iranti_query`, `iranti_search`, `iranti_attend`, `iranti_remember_response`, `iranti_relate`, `iranti_related`, `iranti_related_deep`, and verifies the graceful-shutdown and stdin-close lifecycle.
+- `npm run test:mcp-smoke` starts the stdio MCP server, lists tools, and successfully calls `iranti_handshake`, `iranti_checkpoint`, `iranti_write`, `iranti_write_issue`, `iranti_query`, `iranti_history`, `iranti_search`, `iranti_attend`, `iranti_remember_response`, `iranti_relate`, `iranti_related`, `iranti_related_deep`, and verifies the graceful-shutdown and stdin-close lifecycle.
+- `npm run test:mcp-smoke` also verifies handshake surfaces bounded `projectPolicies` when `IRANTI_MEMORY_ENTITY` contains explicit project-scoped policy facts.
 - `npm run test:mcp-attend-shutdown-regressions` verifies `iranti_attend` message alias and shutdown checkpoint preservation as focused regressions separate from the broader smoke.
 - `iranti claude-hook --help` works through the installed CLI handoff path.
 - Installed-package Claude Code integration no longer requires hardcoded `DATABASE_URL` in hook commands when `.env.iranti` points to a valid instance env.

@@ -178,7 +178,7 @@ async function main(): Promise<void> {
     );
     expect(
         advisoryAttend.usageGuidance.expectedCallSequence.some((step: string) => step.includes('file changes are always durable')),
-        'Expected attend() usage guidance to require breadcrumbs after knowledge-changing actions.'
+        'Expected attend() usage guidance to require durable writes after knowledge-changing actions.'
     );
     expect(
         advisoryAttend.usageGuidance.expectedCallSequence.some((step: string) => step.includes('change what is loaded next')),

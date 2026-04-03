@@ -83,7 +83,7 @@ const ATTEND_EXPECTED_CALL_SEQUENCE = [
     "Call iranti_attend(phase='post-response') after every response without exception — even short replies may contain durable findings. Omitting this call is a compliance violation.",
     'Call iranti_attend again when the new knowledge should change what is loaded next.',
 ];
-const ATTEND_USAGE_REMINDER = 'Iranti is a hive mind. iranti_attend is mandatory before each reply and around knowledge discovery, and knowledge-changing actions must leave breadcrumbs through iranti_write and/or iranti_checkpoint so later sessions do not have to rediscover context.';
+const ATTEND_USAGE_REMINDER = 'Iranti is a hive mind. MANDATORY: call iranti_attend before every reply and around knowledge discovery. MANDATORY: call iranti_write after every file edit, confirmed finding, environment state change, and subagent completion — write what changed, why, and what it means. Skipping writes means the next session starts blind and must rediscover everything from scratch.';
 const OBSERVE_USAGE_NOTE = 'observe() is retrieval-only. It surfaces candidate facts for context and warm-up, but it does not persist memory, replace iranti_attend, or count as a checkpoint/write.';
 
 function normalizeContinuityKey(key: string): string {
@@ -232,6 +232,7 @@ export type SessionComplianceStatus = 'healthy' | 'degraded' | 'non_compliant';
 export type SessionComplianceIssueCode =
     | 'missing_post_response_attend'
     | 'missing_durable_persistence'
+    | 'missing_writes_across_turns'
     | 'ignored_injected_memory';
 
 export interface SessionComplianceIssue {
@@ -249,6 +250,7 @@ export interface SessionComplianceState {
     lastUpdated: string;
     counters: {
         attendsWithoutPersist: number;
+        turnsWithoutWrite: number;
         consecutivePreResponseWithoutPost: number;
         consecutiveUnusedMemoryInjections: number;
         pendingPostResponse: boolean;
@@ -739,10 +741,18 @@ function advisoryTaskTokens(taskType: string | null | undefined): string[] {
     ));
 }
 
-function buildUsageGuidance(tool: 'observe' | 'attend'): ObserveResult['usageGuidance'] {
+function buildUsageGuidance(tool: 'observe' | 'attend', turnsWithoutWrite: number = 0): ObserveResult['usageGuidance'] {
+    let reminder = ATTEND_USAGE_REMINDER;
+    if (turnsWithoutWrite >= 3) {
+        reminder += ` NON-COMPLIANT: ${turnsWithoutWrite} turns have completed without a single iranti_write call. You are losing knowledge. Call iranti_write NOW for any findings, file changes, or decisions from recent turns.`;
+    } else if (turnsWithoutWrite >= 2) {
+        reminder += ` WARNING: ${turnsWithoutWrite} turns without an iranti_write call. If you discovered, changed, or confirmed anything, write it now before it is lost.`;
+    } else if (turnsWithoutWrite === 1) {
+        reminder += ' Reminder: if the previous turn produced durable findings, call iranti_write before continuing.';
+    }
     return {
         tool,
-        reminder: ATTEND_USAGE_REMINDER,
+        reminder,
         expectedCallSequence: ATTEND_EXPECTED_CALL_SEQUENCE,
         note: tool === 'observe'
             ? OBSERVE_USAGE_NOTE
@@ -977,6 +987,7 @@ function buildCheckpointSummary(checkpoint: SessionCheckpointRecord | null): Ses
 
 function buildSessionComplianceState(input: {
     attendsWithoutPersist: number;
+    turnsWithoutWrite: number;
     consecutivePreResponseWithoutPost: number;
     consecutiveUnusedMemoryInjections: number;
     lastAttendPhase?: 'pre-response' | 'post-response' | 'mid-turn';
@@ -1003,6 +1014,17 @@ function buildSessionComplianceState(input: {
             count: input.attendsWithoutPersist,
             message: `There have been ${input.attendsWithoutPersist} attend calls since the last iranti_write or iranti_checkpoint.`,
             requiredAction: 'Persist durable findings with iranti_write or iranti_checkpoint before the next turn if new knowledge, validation, or file changes occurred.',
+        });
+    }
+
+    if (input.turnsWithoutWrite >= 2) {
+        const severity = input.turnsWithoutWrite >= 3 ? 'error' : 'warn';
+        issues.push({
+            code: 'missing_writes_across_turns',
+            severity,
+            count: input.turnsWithoutWrite,
+            message: `${input.turnsWithoutWrite} completed turns without a single iranti_write or iranti_checkpoint call. Knowledge discovered during these turns is not being persisted.`,
+            requiredAction: 'Call iranti_write for each durable finding — file edits, confirmed facts, environment state, subagent results. Every turn that discovers something should write it.',
         });
     }
 
@@ -1033,12 +1055,12 @@ function buildSessionComplianceState(input: {
         : status === 'degraded'
             ? input.consecutiveUnusedMemoryInjections > 0
                 ? 'Lifecycle is degraded: injected memory was surfaced but not used.'
-                : 'Lifecycle is degraded: persistence breadcrumbs are lagging.'
+                : 'Lifecycle is degraded: iranti_write has not been called after recent knowledge-changing actions.'
             : input.consecutivePreResponseWithoutPost > 0
                 ? 'Lifecycle is non-compliant: the previous turn is still missing a post-response attend.'
                 : input.consecutiveUnusedMemoryInjections > 0
                     ? 'Lifecycle is non-compliant: injected memory is being ignored instead of used or explicitly challenged.'
-                    : 'Lifecycle is non-compliant: accountability breadcrumbs are missing.';
+                    : 'Lifecycle is non-compliant: iranti_write calls are missing — durable findings are not being persisted.';
 
     return {
         status,
@@ -1047,6 +1069,7 @@ function buildSessionComplianceState(input: {
         lastUpdated: input.lastUpdated ?? new Date().toISOString(),
         counters: {
             attendsWithoutPersist: input.attendsWithoutPersist,
+            turnsWithoutWrite: input.turnsWithoutWrite,
             consecutivePreResponseWithoutPost: input.consecutivePreResponseWithoutPost,
             consecutiveUnusedMemoryInjections: input.consecutiveUnusedMemoryInjections,
             pendingPostResponse,
@@ -1851,6 +1874,7 @@ export class AttendantInstance {
     private advisoryLearningProfile: SessionLedgerLearningProfile | null = null;
     private contextCallCount: number = 0;
     private attendsWithoutPersist: number = 0;
+    private turnsWithoutWrite: number = 0;
     private consecutivePreResponseWithoutPost: number = 0;
     private consecutiveUnusedMemoryInjections: number = 0;
     private lastAttendPhase: 'pre-response' | 'post-response' | 'mid-turn' | undefined = undefined;
@@ -2390,6 +2414,7 @@ export class AttendantInstance {
     private buildComplianceState(lastUpdated?: string): SessionComplianceState {
         return buildSessionComplianceState({
             attendsWithoutPersist: this.attendsWithoutPersist,
+            turnsWithoutWrite: this.turnsWithoutWrite,
             consecutivePreResponseWithoutPost: this.consecutivePreResponseWithoutPost,
             consecutiveUnusedMemoryInjections: this.consecutiveUnusedMemoryInjections,
             lastAttendPhase: this.lastAttendPhase,
@@ -2399,6 +2424,7 @@ export class AttendantInstance {
 
     async notifyWriteOccurred(): Promise<void> {
         this.attendsWithoutPersist = 0;
+        this.turnsWithoutWrite = 0;
         this.lastAttendPhase = undefined;
         this.consecutivePreResponseWithoutPost = 0;
         this.complianceUpdatedAt = new Date().toISOString();
@@ -2416,6 +2442,7 @@ export class AttendantInstance {
 
     async checkpoint(input: SessionCheckpointInput): Promise<WorkingMemoryBrief> {
         this.attendsWithoutPersist = 0;
+        this.turnsWithoutWrite = 0;
         this.lastAttendPhase = undefined;
         this.consecutivePreResponseWithoutPost = 0;
         this.complianceUpdatedAt = new Date().toISOString();
@@ -2679,8 +2706,10 @@ export class AttendantInstance {
         const ignoredMemoryWarning = 'COMPLIANCE: injected memory was surfaced but not used. On the next turn, either answer from injected facts directly or persist why the injected memory was insufficient before rediscovering the same state manually.';
 
         if (phase === 'post-response') {
-            // Correct post-response call — reset counters
+            // Correct post-response call — reset attend counters but NOT turnsWithoutWrite
+            // turnsWithoutWrite only resets on actual writes/checkpoints
             this.attendsWithoutPersist = 0;
+            this.turnsWithoutWrite++;
             this.lastAttendPhase = 'post-response';
             this.consecutivePreResponseWithoutPost = 0;
         } else if (phase === 'pre-response') {
@@ -2767,7 +2796,7 @@ export class AttendantInstance {
                 complianceWarning,
                 compliance,
                 memoryAttributions,
-                usageGuidance: buildUsageGuidance('attend'),
+                usageGuidance: buildUsageGuidance('attend', this.turnsWithoutWrite),
                 facts: [],
                 entitiesDetected: [],
                 alreadyPresent: 0,
@@ -2847,7 +2876,7 @@ export class AttendantInstance {
                 complianceWarning,
                 compliance,
                 memoryAttributions: [],
-                usageGuidance: buildUsageGuidance('attend'),
+                usageGuidance: buildUsageGuidance('attend', this.turnsWithoutWrite),
                 facts: [],
                 entitiesDetected: [],
                 alreadyPresent: 0,
@@ -2945,7 +2974,7 @@ export class AttendantInstance {
             complianceWarning,
             compliance,
             memoryAttributions,
-            usageGuidance: buildUsageGuidance('attend'),
+            usageGuidance: buildUsageGuidance('attend', this.turnsWithoutWrite),
         };
         if (input.suppressEvents !== true) {
             getStaffEventEmitter().emit({
@@ -4002,6 +4031,7 @@ If nothing is relevant, return: none`,
         this.advisoryLearningProfile = null;
         this.sharedStateObservedAt = state.briefGeneratedAt;
         this.attendsWithoutPersist = state.compliance?.counters.attendsWithoutPersist ?? 0;
+        this.turnsWithoutWrite = state.compliance?.counters.turnsWithoutWrite ?? 0;
         this.consecutivePreResponseWithoutPost = state.compliance?.counters.consecutivePreResponseWithoutPost ?? 0;
         this.consecutiveUnusedMemoryInjections = state.compliance?.counters.consecutiveUnusedMemoryInjections ?? 0;
         this.lastAttendPhase = state.compliance?.counters.lastAttendPhase ?? undefined;

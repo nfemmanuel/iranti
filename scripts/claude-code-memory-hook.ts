@@ -282,6 +282,7 @@ function formatSessionContext(facts: HookFact[], cwd: string): string {
         'REQUIRED: Call mcp__iranti__iranti_attend(phase=\'pre-response\') before every reply and before factual discovery.',
         'REQUIRED: After every response, call mcp__iranti__iranti_attend(phase=\'post-response\').',
         'REQUIRED: Prefer injected Iranti facts before re-inferring project state.',
+        'REQUIRED: Call mcp__iranti__iranti_write after every file edit, confirmed finding, system state discovery, and subagent completion — write what changed, why, and what it means.',
     ];
 
     const block = formatStructuredFactBlock(
