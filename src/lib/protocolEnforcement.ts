@@ -100,6 +100,15 @@ export class AgentProtocolTracker {
         });
     }
 
+    clearPendingPostResponse(agentId: string): void {
+        const current = this.state.get(agentId);
+        if (!current) return;
+        this.state.set(agentId, {
+            ...current,
+            pendingPostResponse: false,
+        });
+    }
+
     notifyDiscoveryConsumed(agentId: string): void {
         const current = this.state.get(agentId);
         if (!current) return;

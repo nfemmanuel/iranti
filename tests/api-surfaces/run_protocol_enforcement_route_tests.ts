@@ -408,8 +408,8 @@ async function main(): Promise<void> {
         assert.equal(ignoredMemoryRecoveredQueryBody.found, true, 'Expected recovery query after checkpoint acknowledgement to return the fact.');
         assert.equal(
             ignoredMemoryRecoveredQueryBody.value?.instruction,
-            'rerun the runtime validation and capture the result.',
-            'Expected recovery query after checkpoint acknowledgement to return the stored next step.',
+            'perform a fresh validation after acknowledging the limitation. Prior task step: rerun the runtime validation and capture the result.',
+            'Expected recovery query after checkpoint acknowledgement to return the merged next step.',
         );
 
         console.log('protocol enforcement route tests passed');

@@ -751,6 +751,7 @@ export class Iranti {
             ledgerContext: this.buildSessionLedgerContext(),
         });
         this.protocolTracker.clearMemoryUseAcknowledgementRequired(agentId);
+        this.protocolTracker.clearPendingPostResponse(agentId);
         return result;
     }
 
