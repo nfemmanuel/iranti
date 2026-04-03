@@ -70,10 +70,12 @@ function isDbUnavailableError(error: unknown): boolean {
         if (!value) return [];
         if (typeof value === 'string') return [value];
         if (value instanceof Error) {
-            const maybeCause = value as Error & { cause?: unknown };
+            const maybeCause = value as Error & { cause?: unknown; code?: unknown; errorCode?: unknown };
             return [
                 value.name,
                 value.message,
+                ...(typeof maybeCause.code === 'string' ? [maybeCause.code] : []),
+                ...(typeof maybeCause.errorCode === 'string' ? [maybeCause.errorCode] : []),
                 ...(maybeCause.cause ? visit(maybeCause.cause) : []),
             ];
         }
