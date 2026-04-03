@@ -91,7 +91,7 @@ function isDbUnavailableError(error: unknown): boolean {
     };
 
     const details = visit(error).join(' ');
-    return /P1000|P1001|ECONNREFUSED|authentication|password|connect ETIMEDOUT/i.test(details);
+    return /P1000|P1001|P1003|ECONNREFUSED|authentication|password|connect ETIMEDOUT|database does not exist|DatabaseDoesNotExist/i.test(details);
 }
 
 async function reservePort(): Promise<number> {
