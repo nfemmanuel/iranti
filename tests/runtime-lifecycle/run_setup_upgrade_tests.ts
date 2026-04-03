@@ -65,6 +65,33 @@ function readJson<T>(filePath: string): T {
     return JSON.parse(fs.readFileSync(filePath, 'utf8')) as T;
 }
 
+function isDbUnavailableError(error: unknown): boolean {
+    const visit = (value: unknown): string[] => {
+        if (!value) return [];
+        if (typeof value === 'string') return [value];
+        if (value instanceof Error) {
+            const maybeCause = value as Error & { cause?: unknown };
+            return [
+                value.name,
+                value.message,
+                ...(maybeCause.cause ? visit(maybeCause.cause) : []),
+            ];
+        }
+        if (typeof value === 'object') {
+            const record = value as Record<string, unknown>;
+            return [
+                ...(typeof record.code === 'string' ? [record.code] : []),
+                ...(typeof record.errorCode === 'string' ? [record.errorCode] : []),
+                ...(record.cause ? visit(record.cause) : []),
+            ];
+        }
+        return [];
+    };
+
+    const details = visit(error).join(' ');
+    return /P1000|P1001|ECONNREFUSED|authentication|password|connect ETIMEDOUT/i.test(details);
+}
+
 async function reservePort(): Promise<number> {
     const server = net.createServer();
     await new Promise<void>((resolve, reject) => {
@@ -201,8 +228,7 @@ async function main(): Promise<void> {
             sentinelDbAvailable = true;
         } catch (dbWriteErr) {
             try { await disconnectDb(); } catch { /* ignore */ }
-            const msg = dbWriteErr instanceof Error ? dbWriteErr.message : String(dbWriteErr);
-            if (/P1000|P1001|ECONNREFUSED|authentication|password|connect ETIMEDOUT/i.test(msg)) {
+            if (isDbUnavailableError(dbWriteErr)) {
                 console.warn('  ⚠ KB preservation sentinel skipped — test DB not accessible. Set IRANTI_SETUP_SMOKE_DB to enable.');
             } else {
                 throw dbWriteErr;
@@ -609,8 +635,7 @@ async function main(): Promise<void> {
             assert.match(overviewFact?.valueSummary ?? '', /Initial project snapshot/i);
             assert.strictEqual((bindingFact?.valueRaw as { codebaseEntity?: string } | null)?.codebaseEntity, codebaseEntity);
         } catch (dbAssertErr) {
-            const message = dbAssertErr instanceof Error ? dbAssertErr.message : String(dbAssertErr);
-            if (/P1000|P1001|ECONNREFUSED|authentication|password|connect ETIMEDOUT/i.test(message)) {
+            if (isDbUnavailableError(dbAssertErr)) {
                 console.warn('  ⚠ Project-learning DB assertions skipped — configured test DB not accessible from harness.');
             } else {
                 throw dbAssertErr;
