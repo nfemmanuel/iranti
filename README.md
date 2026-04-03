@@ -9,11 +9,11 @@
 
 Iranti gives agents persistent, identity-based memory. Facts written by one agent are retrievable by any other agent through exact entity+key lookup. Iranti also supports hybrid search (lexical + vector) when exact keys are unknown. Memory persists across sessions and survives context window limits.
 
-**Repo version:** `0.3.0`  
+**Repo version:** `0.3.4`  
 Published packages:
-- npm `iranti@0.3.0`
-- npm `@iranti/sdk@0.3.0`
-- PyPI `iranti==0.3.0`
+- npm `iranti@0.3.4`
+- npm `@iranti/sdk@0.3.4`
+- PyPI `iranti==0.3.4`
 
 ---
 
