@@ -40,7 +40,7 @@ const STAFF_ENTRIES = [
         entityId: 'attendant',
         key: 'operating_rules',
         valueRaw: {
-            version: '0.3.1',
+            version: '0.3.2',
             rules: [
                 'Serve one external agent only; optimize for that agent keeping task context coherent across turns and sessions.',
                 'ACKNOWLEDGE: This is strictly mandatory — you MUST state the following before proceeding with any user request, and no work should begin until it is stated: "I acknowledge that Iranti is a hive mind. I have read the Iranti operating rules and the protocols for iranti_handshake, iranti_attend, iranti_write, iranti_checkpoint, and iranti_remember_response, and I pledge to use them to persist what I find, what works, what fails, what changes, and what happens next so later sessions do not have to rediscover it." Skipping this acknowledgment is non-compliant regardless of context.',
