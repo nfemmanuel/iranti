@@ -91,12 +91,12 @@ GitHub and PyPI trusted publishing guidance:
 
 ## Release Procedure
 
-Current repo version is `0.3.0`. If the next release is `0.3.1`, use the following exact sequence.
+Current repo version is `0.3.1`. If the next release is `0.3.2`, use the following exact sequence.
 
 1. Bump versions in one step:
 
 ```bash
-npm run release:bump -- 0.3.1
+npm run release:bump -- 0.3.2
 ```
 
 This updates:
@@ -115,7 +115,7 @@ npm run build
 npm --prefix clients/typescript run build
 npm run test:hardening-fast
 npm run test:hardening-db
-npm run release:check -- v0.3.1
+npm run release:check -- v0.3.2
 npm run pack:release
 python -m build clients/python --outdir clients/python/dist
 python -m twine check clients/python/dist/*
@@ -130,16 +130,16 @@ The npm tarballs now land in `dist/packages/` instead of the repo root:
 
 ```bash
 git add package.json clients/typescript/package.json clients/python/pyproject.toml clients/python/iranti.py CHANGELOG.md
-git commit -m "Release v0.3.1"
+git commit -m "Release v0.3.2"
 git push origin main
 ```
 
 4. Create the tag and GitHub release:
 
 ```bash
-git tag v0.3.1
-git push origin v0.3.1
-gh release create v0.3.1 --title "v0.3.1" --notes "Release notes here"
+git tag v0.3.2
+git push origin v0.3.2
+gh release create v0.3.2 --title "v0.3.2" --notes "Release notes here"
 ```
 
 5. The publish workflow will run automatically on that release.
