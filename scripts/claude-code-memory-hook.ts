@@ -335,7 +335,17 @@ function formatPromptContext(facts: HookFact[], prompt?: string): string {
         ...fact,
         entityKey: `${fact.entity}/${fact.key}`,
     })));
-    const lines: string[] = [];
+    const lines: string[] = [
+        'IRANTI PROTOCOL (required this turn):',
+        '1. iranti_attend(phase=pre-response) BEFORE replying',
+        '2. iranti_attend BEFORE each Read / Grep / Glob / Bash / WebSearch / WebFetch',
+        '3. iranti_write AFTER each Edit or Write:',
+        '   entity: project/[id]/file/[filename] -- not the broad project entity',
+        '   value must include: absolutePath, lines, before, after, verify, why',
+        '4. iranti_write AFTER each Bash that reveals system state (build, errors, ports, env)',
+        '5. iranti_write AFTER each WebSearch/WebFetch -- write findings AND dead ends / 404s',
+        '6. iranti_attend(phase=post-response) AFTER every response without exception',
+    ];
     const targetKey = prompt ? extractSelfMemoryQueryKey(prompt) : null;
     if (targetKey) {
         const answerCandidate = structuredFacts.find((fact) => canonicalizeMemoryKey(fact.entityKey.split('/').slice(2).join('/')) === targetKey);

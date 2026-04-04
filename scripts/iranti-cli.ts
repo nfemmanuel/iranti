@@ -8564,6 +8564,409 @@ async function handoffCommand(args: ParsedArgs): Promise<void> {
     }
 }
 
+function getGlobalAgentsMdPath(): string {
+    return path.join(os.homedir(), 'AGENTS.md');
+}
+
+const GLOBAL_IRANTI_AGENTS_BLOCK = [
+    '<!-- iranti-rules -->',
+    '# Iranti MCP Protocol (Global)',
+    '',
+    'These rules apply only when Iranti MCP tools (`mcp__iranti__*`) are available in the current',
+    'session. If Iranti tools are not accessible, skip this block entirely.',
+    '',
+    '## Session start',
+    '- Call `mcp__iranti__iranti_handshake` with the active task before responding to the first user message.',
+    '',
+    '## Each turn',
+    "- Call `mcp__iranti__iranti_attend(phase='pre-response')` before every reply.",
+    '- Call `mcp__iranti__iranti_attend` before any file read, search, or knowledge discovery.',
+    "- Call `mcp__iranti__iranti_attend(phase='post-response')` after every response.",
+    '',
+    '## After writes and discoveries',
+    '- Call `mcp__iranti__iranti_write` after every file edit. Value must include:',
+    '  - entity: `project/[project_id]/file/[filename_without_ext]` — not the broad project entity.',
+    '  - absolutePath, lines (e.g. "65-70"), before (prior text), after (new text), verify (grep/read to confirm), why (the decision).',
+    '- Call `mcp__iranti__iranti_write` after WebSearch/WebFetch — record findings AND dead ends / 404s.',
+    '- Call `mcp__iranti__iranti_write` after Bash commands that reveal system state — include the command and relevant output lines, not just a summary.',
+    '',
+    '## Checkpoints',
+    '- Call `mcp__iranti__iranti_checkpoint` when completing a task, shifting tasks, or at natural pauses.',
+    '- A checkpoint not written means the next session reconstructs state from scratch.',
+    '<!-- /iranti-rules -->',
+    '',
+].join('\n');
+
+function isIrantiGlobalAgentsMdInstalled(): boolean {
+    const agentsMd = getGlobalAgentsMdPath();
+    if (!fs.existsSync(agentsMd)) return false;
+    return fs.readFileSync(agentsMd, 'utf8').includes('<!-- iranti-rules -->');
+}
+
+async function codexGlobalSetupCommand(force: boolean): Promise<void> {
+    const agentsMdPath = getGlobalAgentsMdPath();
+
+    let status: ClaudeScaffoldStatus = 'unchanged';
+    if (!fs.existsSync(agentsMdPath)) {
+        await writeText(agentsMdPath, GLOBAL_IRANTI_AGENTS_BLOCK);
+        status = 'created';
+    } else {
+        const existing = fs.readFileSync(agentsMdPath, 'utf8');
+        if (!existing.includes('<!-- iranti-rules -->')) {
+            await writeText(agentsMdPath, `${existing.trimEnd()}\n\n${GLOBAL_IRANTI_AGENTS_BLOCK}`);
+            status = 'updated';
+        } else if (force) {
+            const replaced = existing.replace(
+                /<!-- iranti-rules -->[\s\S]*?<!-- \/iranti-rules -->/,
+                GLOBAL_IRANTI_AGENTS_BLOCK.trim(),
+            );
+            await writeText(agentsMdPath, replaced);
+            status = 'updated';
+        }
+    }
+
+    console.log(`${okLabel()} Global Codex Iranti protocol block installed`);
+    console.log(`  file    ${agentsMdPath}  (${status})`);
+    console.log(`${infoLabel()} Codex reads AGENTS.md from the project up to ~/. This block fires for all Codex sessions.`);
+    console.log(`${infoLabel()} The block is self-disabling: it instructs Codex to skip it if Iranti MCP tools are not available.`);
+    console.log(`${infoLabel()} To remove: iranti codex-unsetup --global`);
+}
+
+async function codexGlobalUnsetup(): Promise<void> {
+    const agentsMdPath = getGlobalAgentsMdPath();
+
+    if (!fs.existsSync(agentsMdPath)) {
+        console.log(`${infoLabel()} ${agentsMdPath} does not exist — nothing to remove.`);
+        return;
+    }
+
+    const existing = fs.readFileSync(agentsMdPath, 'utf8');
+    if (!existing.includes('<!-- iranti-rules -->')) {
+        console.log(`${infoLabel()} Iranti protocol block not found in ${agentsMdPath} — nothing to remove.`);
+        return;
+    }
+
+    const cleaned = existing
+        .replace(/\n*<!-- iranti-rules -->[\s\S]*?<!-- \/iranti-rules -->\n*/g, '\n')
+        .trimEnd();
+    await writeText(agentsMdPath, cleaned ? `${cleaned}\n` : '');
+    console.log(`${okLabel()} Iranti protocol block removed from ${agentsMdPath}`);
+}
+
+function getGlobalClaudeDir(): string {
+    return path.join(os.homedir(), '.claude');
+}
+
+function getGlobalClaudeSettingsPath(): string {
+    return path.join(getGlobalClaudeDir(), 'settings.json');
+}
+
+function getGlobalProtocolHookScriptPath(): string {
+    return path.join(getGlobalClaudeDir(), 'iranti-protocol-hook.js');
+}
+
+const PROTOCOL_HOOK_SCRIPT_CONTENT = [
+    "#!/usr/bin/env node",
+    "'use strict';",
+    "// Iranti protocol reminder hook — fires on UserPromptSubmit for any Iranti project.",
+    "// Cross-platform: runs on Windows, macOS, Linux via Node.js (same runtime as Iranti itself).",
+    "// Exits cleanly with no output for non-Iranti projects.",
+    "const fs = require('fs');",
+    "const path = require('path');",
+    "",
+    "const envFile = path.join(process.cwd(), '.env.iranti');",
+    "if (!fs.existsSync(envFile)) process.exit(0);",
+    "",
+    "process.stdout.write([",
+    "  'IRANTI PROTOCOL (required this turn):',",
+    "  '1. iranti_attend(phase=pre-response) BEFORE replying',",
+    "  '2. iranti_attend BEFORE each Read / Grep / Glob / Bash / WebSearch / WebFetch',",
+    "  '3. iranti_write AFTER each Edit or Write:',",
+    "  '   entity: project/[id]/file/[filename] -- not the broad project entity',",
+    "  '   value must include: absolutePath, lines, before, after, verify, why',",
+    "  '4. iranti_write AFTER each Bash that reveals system state (build, errors, ports, env)',",
+    "  '5. iranti_write AFTER each WebSearch/WebFetch -- write findings AND dead ends / 404s',",
+    "  '6. iranti_attend(phase=post-response) AFTER every response without exception',",
+    "].join('\\n') + '\\n');",
+].join('\n') + '\n';
+
+function isGlobalProtocolHookInstalled(): boolean {
+    const settingsPath = getGlobalClaudeSettingsPath();
+    if (!fs.existsSync(settingsPath)) return false;
+    const settings = readJsonFile<Record<string, unknown>>(settingsPath);
+    if (!settings || !isClaudeHooksObject(settings.hooks)) return false;
+    const hooks = settings.hooks;
+    const entries = Array.isArray(hooks.UserPromptSubmit) ? hooks.UserPromptSubmit : [];
+    return entries.some((entry: unknown) => {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
+        const nested = (entry as Record<string, unknown>).hooks;
+        if (!Array.isArray(nested)) return false;
+        return nested.some((h: unknown) => {
+            if (!h || typeof h !== 'object' || Array.isArray(h)) return false;
+            const cmd = (h as Record<string, unknown>).command;
+            return typeof cmd === 'string' && cmd.includes('iranti-protocol-hook.js');
+        });
+    });
+}
+
+async function claudeGlobalSetupCommand(force: boolean): Promise<void> {
+    const globalDir = getGlobalClaudeDir();
+    const settingsPath = getGlobalClaudeSettingsPath();
+    const hookScriptPath = getGlobalProtocolHookScriptPath();
+
+    await ensureDir(globalDir);
+
+    // Write hook script
+    let scriptStatus: ClaudeScaffoldStatus = 'unchanged';
+    if (!fs.existsSync(hookScriptPath)) {
+        await writeText(hookScriptPath, PROTOCOL_HOOK_SCRIPT_CONTENT);
+        scriptStatus = 'created';
+    } else if (force) {
+        await writeText(hookScriptPath, PROTOCOL_HOOK_SCRIPT_CONTENT);
+        scriptStatus = 'updated';
+    }
+
+    // Use forward slashes so bash does not mangle the path on Windows
+    const hookCommand = `node ${hookScriptPath.replace(/\\/g, '/')}`;
+    const hookEntry = {
+        matcher: '',
+        hooks: [{ type: 'command', command: hookCommand }],
+    };
+
+    // Read/merge settings.json
+    let settingsStatus: ClaudeScaffoldStatus = 'unchanged';
+    let settings: Record<string, unknown> = {};
+    if (fs.existsSync(settingsPath)) {
+        const existing = readJsonFile<Record<string, unknown>>(settingsPath);
+        if (existing && typeof existing === 'object' && !Array.isArray(existing)) {
+            settings = existing;
+        }
+    }
+
+    const alreadyInstalled = isGlobalProtocolHookInstalled();
+    if (!alreadyInstalled || force) {
+        const existingHooks = isClaudeHooksObject(settings.hooks) ? settings.hooks : {};
+        const existingEntries = Array.isArray(existingHooks.UserPromptSubmit) ? existingHooks.UserPromptSubmit : [];
+        // Remove any existing iranti-protocol-hook.js entries then append fresh
+        const filtered = existingEntries.filter((entry: unknown) => {
+            if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return true;
+            const nested = (entry as Record<string, unknown>).hooks;
+            if (!Array.isArray(nested)) return true;
+            return !nested.some((h: unknown) => {
+                if (!h || typeof h !== 'object' || Array.isArray(h)) return false;
+                const cmd = (h as Record<string, unknown>).command;
+                return typeof cmd === 'string' && cmd.includes('iranti-protocol-hook.js');
+            });
+        });
+        const newSettings = {
+            ...settings,
+            hooks: {
+                ...existingHooks,
+                UserPromptSubmit: [...filtered, hookEntry],
+            },
+        };
+        await writeText(settingsPath, `${JSON.stringify(newSettings, null, 2)}\n`);
+        settingsStatus = alreadyInstalled ? 'updated' : 'created';
+    }
+
+    console.log(`${okLabel()} Global Claude Code protocol hook installed`);
+    console.log(`  hook script  ${hookScriptPath}  (${scriptStatus})`);
+    console.log(`  settings     ${settingsPath}  (${settingsStatus})`);
+    console.log(`  command      ${hookCommand}`);
+    console.log(`${infoLabel()} Fires on every UserPromptSubmit in any directory containing .env.iranti.`);
+    console.log(`${infoLabel()} Silent no-op in all other projects. To remove: iranti claude-unsetup --global`);
+}
+
+async function claudeUnsetupCommand(args: ParsedArgs): Promise<void> {
+    if (hasFlag(args, 'help')) {
+        console.log([
+            'Remove Iranti Claude Code integration.',
+            '',
+            'Usage:',
+            '  iranti claude-unsetup [path] [--force]       Remove per-project integration',
+            '  iranti claude-unsetup --global [--force]     Remove global protocol hook',
+            '',
+            'Per-project removes:',
+            '  - Iranti hook entries from .claude/settings.local.json',
+            '  - Iranti server from .mcp.json and .vscode/mcp.json',
+            '  - Iranti protocol block from CLAUDE.md',
+            '',
+            'Global (--global) removes:',
+            '  - UserPromptSubmit hook entry from ~/.claude/settings.json',
+            '  - ~/.claude/iranti-protocol-hook.js script',
+        ].join('\n'));
+        return;
+    }
+
+    const force = hasFlag(args, 'force');
+
+    if (hasFlag(args, 'global')) {
+        await claudeGlobalUnsetup(force);
+        return;
+    }
+
+    // Per-project unsetup
+    const projectArg = args.positionals[0] ?? (args.command === 'claude-unsetup' ? args.subcommand ?? undefined : undefined);
+    const projectPath = path.resolve(projectArg ?? process.cwd());
+
+    if (!fs.existsSync(projectPath)) {
+        throw cliError('IRANTI_PROJECT_PATH_NOT_FOUND', `Project path not found: ${projectPath}`);
+    }
+
+    let removedHooks = false;
+    let removedMcp = false;
+    let removedVscodeMcp = false;
+    let removedClaudeMd = false;
+
+    // settings.local.json — remove iranti hooks
+    const settingsFile = path.join(projectPath, '.claude', 'settings.local.json');
+    if (fs.existsSync(settingsFile)) {
+        const existing = readJsonFile<Record<string, unknown>>(settingsFile);
+        if (existing && typeof existing === 'object' && !Array.isArray(existing)) {
+            const hooks = isClaudeHooksObject(existing.hooks) ? existing.hooks : {};
+            const cleaned: Record<string, unknown> = {};
+            for (const [event, entries] of Object.entries(hooks)) {
+                if (!Array.isArray(entries)) { cleaned[event] = entries; continue; }
+                const filtered = entries.filter((entry: unknown) => {
+                    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return true;
+                    const nested = (entry as Record<string, unknown>).hooks;
+                    if (!Array.isArray(nested)) return true;
+                    return !nested.some((h: unknown) => {
+                        if (!h || typeof h !== 'object' || Array.isArray(h)) return false;
+                        const cmd = (h as Record<string, unknown>).command;
+                        return typeof cmd === 'string' && cmd.includes('iranti claude-hook');
+                    });
+                });
+                if (filtered.length > 0) cleaned[event] = filtered;
+            }
+            // Remove iranti from permissions.allow
+            const permissions = existing.permissions && typeof existing.permissions === 'object' && !Array.isArray(existing.permissions)
+                ? { ...(existing.permissions as Record<string, unknown>) }
+                : {};
+            const allow = Array.isArray(permissions.allow)
+                ? (permissions.allow as string[]).filter((t) => !String(t).startsWith('mcp__iranti__'))
+                : undefined;
+            if (allow) permissions.allow = allow;
+
+            const updated: Record<string, unknown> = { ...existing };
+            if (Object.keys(cleaned).length > 0) {
+                updated.hooks = cleaned;
+            } else {
+                delete updated.hooks;
+            }
+            if (allow !== undefined) updated.permissions = permissions;
+            await writeText(settingsFile, `${JSON.stringify(updated, null, 2)}\n`);
+            removedHooks = true;
+        }
+    }
+
+    // .mcp.json — remove iranti server
+    const mcpFile = path.join(projectPath, '.mcp.json');
+    if (fs.existsSync(mcpFile)) {
+        const existing = readJsonFile<Record<string, unknown>>(mcpFile);
+        if (existing && typeof existing === 'object' && !Array.isArray(existing)) {
+            const servers = existing.mcpServers && typeof existing.mcpServers === 'object' && !Array.isArray(existing.mcpServers)
+                ? { ...(existing.mcpServers as Record<string, unknown>) }
+                : null;
+            if (servers && Object.prototype.hasOwnProperty.call(servers, 'iranti')) {
+                delete servers.iranti;
+                await writeText(mcpFile, `${JSON.stringify({ ...existing, mcpServers: servers }, null, 2)}\n`);
+                removedMcp = true;
+            }
+        }
+    }
+
+    // .vscode/mcp.json — remove iranti server
+    const vscodeMcpFile = path.join(projectPath, '.vscode', 'mcp.json');
+    if (fs.existsSync(vscodeMcpFile)) {
+        const existing = readJsonFile<Record<string, unknown>>(vscodeMcpFile);
+        if (existing && typeof existing === 'object' && !Array.isArray(existing)) {
+            const servers = existing.servers && typeof existing.servers === 'object' && !Array.isArray(existing.servers)
+                ? { ...(existing.servers as Record<string, unknown>) }
+                : null;
+            if (servers && Object.prototype.hasOwnProperty.call(servers, 'iranti')) {
+                delete servers.iranti;
+                await writeText(vscodeMcpFile, `${JSON.stringify({ ...existing, servers }, null, 2)}\n`);
+                removedVscodeMcp = true;
+            }
+        }
+    }
+
+    // CLAUDE.md — remove iranti protocol block
+    const claudeMdFile = path.join(projectPath, 'CLAUDE.md');
+    if (fs.existsSync(claudeMdFile)) {
+        const content = fs.readFileSync(claudeMdFile, 'utf8');
+        if (content.includes('<!-- iranti-rules -->')) {
+            const cleaned = content
+                .replace(/\n*<!-- iranti-rules -->[\s\S]*?<!-- \/iranti-rules -->\n*/g, '\n')
+                .trimEnd();
+            await writeText(claudeMdFile, cleaned ? `${cleaned}\n` : '');
+            removedClaudeMd = true;
+        }
+    }
+
+    console.log(`${okLabel()} Per-project Iranti Claude Code integration removed`);
+    console.log(`  project         ${projectPath}`);
+    console.log(`  hooks           ${removedHooks ? 'removed' : 'not present'}`);
+    console.log(`  .mcp.json       ${removedMcp ? 'removed' : 'not present'}`);
+    console.log(`  .vscode/mcp     ${removedVscodeMcp ? 'removed' : 'not present'}`);
+    console.log(`  CLAUDE.md       ${removedClaudeMd ? 'block removed' : 'not present'}`);
+    console.log(`${infoLabel()} The global hook (if installed) is separate — use --global to remove it.`);
+}
+
+async function claudeGlobalUnsetup(force: boolean): Promise<void> {
+    const settingsPath = getGlobalClaudeSettingsPath();
+    const hookScriptPath = getGlobalProtocolHookScriptPath();
+
+    let settingsStatus = 'not present';
+    let scriptStatus = 'not present';
+
+    if (fs.existsSync(settingsPath)) {
+        const existing = readJsonFile<Record<string, unknown>>(settingsPath);
+        if (existing && typeof existing === 'object' && !Array.isArray(existing)) {
+            const hooks = isClaudeHooksObject(existing.hooks) ? existing.hooks : {};
+            const entries = Array.isArray(hooks.UserPromptSubmit) ? hooks.UserPromptSubmit : [];
+            const filtered = entries.filter((entry: unknown) => {
+                if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return true;
+                const nested = (entry as Record<string, unknown>).hooks;
+                if (!Array.isArray(nested)) return true;
+                return !nested.some((h: unknown) => {
+                    if (!h || typeof h !== 'object' || Array.isArray(h)) return false;
+                    const cmd = (h as Record<string, unknown>).command;
+                    return typeof cmd === 'string' && cmd.includes('iranti-protocol-hook.js');
+                });
+            });
+            if (filtered.length !== entries.length || force) {
+                const updatedHooks = { ...hooks };
+                if (filtered.length > 0) {
+                    updatedHooks.UserPromptSubmit = filtered;
+                } else {
+                    delete updatedHooks.UserPromptSubmit;
+                }
+                const updated: Record<string, unknown> = { ...existing };
+                if (Object.keys(updatedHooks).length === 0) {
+                    delete updated['hooks'];
+                } else {
+                    updated.hooks = updatedHooks;
+                }
+                await writeText(settingsPath, `${JSON.stringify(updated, null, 2)}\n`);
+                settingsStatus = 'hook removed';
+            } else {
+                settingsStatus = 'hook not found';
+            }
+        }
+    }
+
+    if (fs.existsSync(hookScriptPath)) {
+        fs.unlinkSync(hookScriptPath);
+        scriptStatus = 'deleted';
+    }
+
+    console.log(`${okLabel()} Global Iranti protocol hook removed`);
+    console.log(`  settings     ${settingsPath}  (${settingsStatus})`);
+    console.log(`  hook script  ${hookScriptPath}  (${scriptStatus})`);
+}
+
 function printClaudeSetupHelp(): void {
     console.log([
         'Scaffold Claude Code MCP and hook files for the current project.',
@@ -8571,6 +8974,7 @@ function printClaudeSetupHelp(): void {
         '',
         'Usage:',
         '  iranti claude-setup [path] [--project-env <path>] [--force]',
+        '  iranti claude-setup --global [--force]',
         '  iranti claude-setup --scan <dir> [--recursive] [--force]',
         '  iranti integrate claude [path] [--project-env <path>] [--force]',
         '  iranti integrate claude --scan <dir> [--recursive] [--force]',
@@ -8740,6 +9144,11 @@ async function discoverProjectArtifacts(scanRoots: string[]): Promise<UninstallP
 async function claudeSetupCommand(args: ParsedArgs): Promise<void> {
     if (hasFlag(args, 'help')) {
         printClaudeSetupHelp();
+        return;
+    }
+
+    if (hasFlag(args, 'global')) {
+        await claudeGlobalSetupCommand(hasFlag(args, 'force'));
         return;
     }
 
@@ -9603,13 +10012,74 @@ async function main(): Promise<void> {
         return;
     }
 
+    if (args.command === 'claude-unsetup') {
+        await claudeUnsetupCommand(args);
+        return;
+    }
+
     if (args.command === 'claude-hook') {
         await handoffToScript('claude-code-memory-hook', process.argv.slice(3));
         return;
     }
 
     if (args.command === 'codex-setup') {
+        if (hasFlag(args, 'global')) {
+            await codexGlobalSetupCommand(hasFlag(args, 'force'));
+            return;
+        }
         await handoffToScript('codex-setup', process.argv.slice(3));
+        return;
+    }
+
+    if (args.command === 'codex-unsetup') {
+        if (hasFlag(args, 'global')) {
+            await codexGlobalUnsetup();
+            return;
+        }
+        // Per-project codex unsetup: remove iranti block from AGENTS.md, iranti from .mcp.json/.vscode/mcp.json
+        const projectArg = args.positionals[0];
+        const projectPath = path.resolve(projectArg ?? process.cwd());
+        let agentsStatus = 'not present';
+        let mcpStatus = 'not present';
+        let vscodeMcpStatus = 'not present';
+        const agentsFile = path.join(projectPath, 'AGENTS.md');
+        if (fs.existsSync(agentsFile)) {
+            const content = fs.readFileSync(agentsFile, 'utf8');
+            if (content.includes('<!-- iranti-rules -->')) {
+                const cleaned = content.replace(/\n*<!-- iranti-rules -->[\s\S]*?<!-- \/iranti-rules -->\n*/g, '\n').trimEnd();
+                await writeText(agentsFile, cleaned ? `${cleaned}\n` : '');
+                agentsStatus = 'block removed';
+            }
+        }
+        const mcpFile = path.join(projectPath, '.mcp.json');
+        if (fs.existsSync(mcpFile)) {
+            const existing = readJsonFile<Record<string, unknown>>(mcpFile);
+            if (existing && typeof existing === 'object' && !Array.isArray(existing)) {
+                const servers = existing.mcpServers && typeof existing.mcpServers === 'object' && !Array.isArray(existing.mcpServers) ? { ...(existing.mcpServers as Record<string, unknown>) } : null;
+                if (servers && Object.prototype.hasOwnProperty.call(servers, 'iranti')) {
+                    delete servers.iranti;
+                    await writeText(mcpFile, `${JSON.stringify({ ...existing, mcpServers: servers }, null, 2)}\n`);
+                    mcpStatus = 'removed';
+                }
+            }
+        }
+        const vscodeMcpFile = path.join(projectPath, '.vscode', 'mcp.json');
+        if (fs.existsSync(vscodeMcpFile)) {
+            const existing = readJsonFile<Record<string, unknown>>(vscodeMcpFile);
+            if (existing && typeof existing === 'object' && !Array.isArray(existing)) {
+                const servers = existing.servers && typeof existing.servers === 'object' && !Array.isArray(existing.servers) ? { ...(existing.servers as Record<string, unknown>) } : null;
+                if (servers && Object.prototype.hasOwnProperty.call(servers, 'iranti')) {
+                    delete servers.iranti;
+                    await writeText(vscodeMcpFile, `${JSON.stringify({ ...existing, servers }, null, 2)}\n`);
+                    vscodeMcpStatus = 'removed';
+                }
+            }
+        }
+        console.log(`${okLabel()} Per-project Codex Iranti integration removed`);
+        console.log(`  project       ${projectPath}`);
+        console.log(`  AGENTS.md     ${agentsStatus}`);
+        console.log(`  .mcp.json     ${mcpStatus}`);
+        console.log(`  .vscode/mcp   ${vscodeMcpStatus}`);
         return;
     }
 
