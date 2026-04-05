@@ -475,6 +475,7 @@ export interface MemoryAttributionResult {
     reason: string;
     injectedKeys: string[];
     injectedEntryIds: number[];
+    injectedSummaries?: string[];
     evidenceKinds: MemoryAttributionEvidenceKind[];
 }
 
@@ -1922,6 +1923,7 @@ export class AttendantInstance {
         phase: 'pre-response' | 'mid-turn';
         injectedKeys: string[];
         injectedEntryIds: number[];
+        injectedSummaries?: string[];
     }): MemoryAttributionResult {
         const attribution: MemoryAttributionResult = {
             injectionId: randomUUID(),
@@ -1934,6 +1936,7 @@ export class AttendantInstance {
             reason: 'awaiting_post_response_evaluation',
             injectedKeys: [...input.injectedKeys],
             injectedEntryIds: [...input.injectedEntryIds],
+            injectedSummaries: input.injectedSummaries ? [...input.injectedSummaries] : undefined,
             evidenceKinds: [],
         };
         this.pendingMemoryAttributions.push(attribution);
@@ -1978,6 +1981,20 @@ export class AttendantInstance {
             for (const token of tokenize(key.replace(/[_/.-]+/g, ' '))) {
                 if (responseTokens.has(token)) {
                     return true;
+                }
+            }
+        }
+
+        // Secondary: require ≥2 content tokens (>5 chars) from summaries to match,
+        // avoiding single-word false positives from common short terms.
+        if (attribution.injectedSummaries && attribution.injectedSummaries.length > 0) {
+            const contentTokens = attribution.injectedSummaries
+                .flatMap((s) => tokenize(s).filter((t) => t.length > 5));
+            let contentMatches = 0;
+            for (const token of contentTokens) {
+                if (responseTokens.has(token)) {
+                    contentMatches++;
+                    if (contentMatches >= 2) return true;
                 }
             }
         }
@@ -2968,6 +2985,7 @@ export class AttendantInstance {
                     injectedEntryIds: structuredFacts
                         .map((fact) => fact.knowledgeEntryId)
                         .filter((value): value is number => typeof value === 'number'),
+                    injectedSummaries: structuredFacts.map((fact) => fact.summary).filter(Boolean),
                 }),
             ]
             : [];
