@@ -332,6 +332,8 @@ async function main(): Promise<void> {
 
         const expectedDescriptions: Record<string, string> = {
             iranti_write: `Write one durable fact to shared memory for a specific entity.
+TIMING: Call IMMEDIATELY when a fact is confirmed — do not batch or defer to end of turn.
+One call per finding. If you edited a file, write before the next action. If you ran a command and got a result, write before the next action. If you got a search result, write before moving on.
 Use this when you learned something concrete that future turns,
 agents, or sessions should retain. Requires: entity ("type/id"),
 key, value JSON, and summary. Confidence is optional and defaults
@@ -377,14 +379,13 @@ whether memory should be injected before search.
 If the user asks what they previously told you and you do not know
 the exact key, use this before saying you do not know.`,
             iranti_attend: `Ask Iranti whether memory should be injected before the next LLM turn.
-Call this before each turn, passing the latest message and the current
-visible context window. If the user is asking you to recall a remembered
-fact (for example a preference, decision, blocker, next step, or prior
-project detail), use this before answering instead of guessing or saying
-you do not know. Returns an injection decision plus any facts that should
-be added to context if relevant memory is missing. If no handshake has been
-performed yet for this agent in the current process, attend will auto-bootstrap
-the session first and report that in the result metadata.
+REQUIRED CALL SEQUENCE — follow this every turn, regardless of host:
+1. Call with phase='pre-response' BEFORE replying to the user.
+2. Call BEFORE any lookup tool (Read, Grep, Glob, Bash, WebSearch, WebFetch) where Iranti might already hold the answer.
+3. If you just ran Edit/Write/Bash/WebSearch/WebFetch since your last iranti_write, call iranti_write FIRST — then attend.
+4. Call with phase='post-response' AFTER every reply, without exception.
+
+If the user is asking you to recall a remembered fact (preference, decision, blocker, next step, prior project detail), use this before answering instead of guessing or saying you do not know. Returns an injection decision plus any facts that should be added to context if relevant memory is missing. If no handshake has been performed yet for this agent in the current process, attend will auto-bootstrap the session first and report that in the result metadata.
 This is the minimum safe pre-reply call even when the host skipped handshake.
 Omitting currentContext falls back to the latest message only; pass the
 full visible context when available. For host compatibility, message is
