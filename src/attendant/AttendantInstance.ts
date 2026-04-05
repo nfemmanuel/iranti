@@ -559,21 +559,21 @@ export function formatOperatingRulesText(
         .map((rule) => (typeof rule === 'string' ? rule.trim() : ''))
         .filter(Boolean);
 
-    const mergedRules = [...normalizedRules];
-    for (const fallbackRule of fallbackRules) {
-        if (!mergedRules.includes(fallbackRule)) {
-            mergedRules.push(fallbackRule);
-        }
-    }
+    // If stored rules exist, they are the authoritative source — do not merge defaults.
+    // The full protocol now lives in IRANTI.md; stored rules carry the compressed version.
+    // Defaults are only used as a fallback when no rules are stored in the Staff Namespace.
+    const resolvedRules = normalizedRules.length > 0
+        ? normalizedRules
+        : [...fallbackRules];
 
-    if (mergedRules.length === 0) {
+    if (resolvedRules.length === 0) {
         return summary?.trim() || 'No operating rules found.';
     }
 
     return [
         summary?.trim() || 'Attendant operating rules:',
         '',
-        ...mergedRules.map((rule) => `- ${rule}`),
+        ...resolvedRules.map((rule) => `- ${rule}`),
     ].join('\n');
 }
 
