@@ -46,7 +46,7 @@ const RUNTIME_AUTHORITY = resolveRuntimeAuthorityFromEnv(process.env);
 const INSTANCE_DIR = RUNTIME_AUTHORITY.instanceDir;
 const INSTANCE_RUNTIME_FILE = RUNTIME_AUTHORITY.runtimeFile;
 const INSTANCE_NAME = process.env.IRANTI_INSTANCE_NAME?.trim() || (INSTANCE_DIR ? path.basename(INSTANCE_DIR) : 'adhoc');
-const VERSION = '0.3.5';
+const VERSION = '0.3.6';
 const PORT_RAW = (process.env.IRANTI_PORT ?? '3001').trim();
 const PORT = Number.parseInt(PORT_RAW, 10);
 
