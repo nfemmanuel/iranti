@@ -389,7 +389,7 @@ export interface ObserveDebug {
 export interface MemoryUsageGuidance {
     tool: 'observe' | 'attend';
     reminder: string;
-    expectedCallSequence: string[];
+    expectedCallSequence?: string[];
     note: string;
 }
 

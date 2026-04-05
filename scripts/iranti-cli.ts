@@ -263,6 +263,7 @@ type ClaudeProjectScaffoldResult = {
     vscodeMcp: ClaudeScaffoldStatus;
     settings: ClaudeScaffoldStatus;
     claudeMd: ClaudeScaffoldStatus;
+    irantiMd: ClaudeScaffoldStatus;
     closeout: ScaffoldCloseoutStatus;
 };
 
@@ -3087,6 +3088,21 @@ async function writeClaudeCodeProjectFiles(projectPath: string, projectEnvPath?:
         }
     }
 
+    // Write IRANTI.md — the canonical host-neutral protocol file.
+    const irantiMdFile = path.join(projectPath, 'IRANTI.md');
+    let irantiMdStatus: ClaudeScaffoldStatus = 'unchanged';
+    const irantiMdContent = buildIrantiMdContent();
+    if (!fs.existsSync(irantiMdFile)) {
+        await writeText(irantiMdFile, irantiMdContent);
+        irantiMdStatus = 'created';
+    } else {
+        const existing = fs.readFileSync(irantiMdFile, 'utf8');
+        if (existing !== irantiMdContent) {
+            await writeText(irantiMdFile, irantiMdContent);
+            irantiMdStatus = 'updated';
+        }
+    }
+
     const closeout = await writeProjectScaffoldCloseout({
         tool: 'claude',
         projectPath,
@@ -3096,6 +3112,7 @@ async function writeClaudeCodeProjectFiles(projectPath: string, projectEnvPath?:
             { path: vscodeMcpFile, status: vscodeMcpStatus },
             { path: settingsFile, status: settingsStatus },
             { path: claudeMdFile, status: claudeMdStatus },
+            { path: irantiMdFile, status: irantiMdStatus },
         ],
         agentId: 'iranti_cli_scaffold',
     });
@@ -3105,46 +3122,59 @@ async function writeClaudeCodeProjectFiles(projectPath: string, projectEnvPath?:
         vscodeMcp: vscodeMcpStatus,
         settings: settingsStatus,
         claudeMd: claudeMdStatus,
+        irantiMd: irantiMdStatus,
         closeout,
     };
 }
 
-function buildIrantiClaudeMdBlock(): string {
+/**
+ * Canonical protocol content for IRANTI.md — host-neutral, read once per session.
+ * This is the single source of truth for the Iranti operating protocol.
+ */
+function buildIrantiMdContent(): string {
     return [
-        '<!-- iranti-rules -->',
         '# Iranti Memory Protocol',
         '',
-        'IMPORTANT: These rules OVERRIDE any default behavior and MUST be followed exactly. No work should begin until the session-start acknowledgment is stated.',
-        '',
-        '## Every turn',
-        '1. Call `mcp__iranti__iranti_attend` before responding to the user message.',
-        '2. Call `mcp__iranti__iranti_attend` before using any knowledge discovery tool — Read, Grep, Glob, WebSearch, WebFetch, and Bash commands used as factual basis for a decision.',
-        '3. Call `mcp__iranti__iranti_attend` after knowledge discovery to check new findings against stored memory and decide what to inject, write, or checkpoint.',
-        '4. Call `mcp__iranti__iranti_attend` after delivering any substantive response — plans, decisions, analysis, or structured recommendations are durable findings that must be assessed before the next turn.',
-        '5. Call `mcp__iranti__iranti_write` after confirmed durable findings — decisions, blockers, next steps, validated environment details, what worked, what failed, what changed, and what happens next.',
-        '6. Call `mcp__iranti__iranti_write` after every Edit or Write tool call — file changes are always durable. Record what changed, why, and what the file now does.',
-        '7. Call `mcp__iranti__iranti_write` after any Bash command that reveals system state — build results, test outcomes, container state, environment facts, errors.',
-        '8. Call `mcp__iranti__iranti_write` after any WebSearch or WebFetch that surfaces confirmed external facts.',
-        '9. Call `mcp__iranti__iranti_write` after any Agent (subagent) tool completes — subagent findings are invisible to the hive mind otherwise.',
-        '10. If a recall-style lookup returns no facts, try at least one alternative retrieval angle before concluding the fact is not stored.',
-        '11. Call `mcp__iranti__iranti_attend` again when new knowledge should change what is loaded for the next step.',
+        'Iranti is a shared working-memory layer. Follow this protocol to persist what you find, what works, what fails, what changes, and what happens next so later sessions do not have to rediscover it.',
         '',
         '## Session start',
         '- Call `mcp__iranti__iranti_handshake` with the current task before responding to the first user message.',
-        '- After the handshake completes, you MUST explicitly state: "I acknowledge that Iranti is a hive mind. I have read the Iranti operating rules and the protocols for iranti_handshake, iranti_attend, iranti_write, iranti_checkpoint, and iranti_remember_response, and I pledge to use them to persist what I find, what works, what fails, what changes, and what happens next so later sessions do not have to rediscover it."',
-        '- This acknowledgment is strictly mandatory. No work should begin until it is stated.',
+        '- Call `mcp__iranti__iranti_handshake` again after context compaction.',
         '',
-        '## After context compaction',
-        '- Call `mcp__iranti__iranti_handshake` before responding to the next user message.',
+        '## Every turn',
+        '1. Call `iranti_attend(phase=\'pre-response\')` before responding to the user.',
+        '2. Call `iranti_attend` before any knowledge discovery tool — Read, Grep, Glob, WebSearch, WebFetch, Bash.',
+        '3. Call `iranti_write` after every Edit/Write, Bash that reveals system state, WebSearch/WebFetch with confirmed facts, and subagent completion.',
+        '4. Call `iranti_attend(phase=\'post-response\')` after every response.',
+        '5. If a recall-style lookup returns no facts, try at least one alternative retrieval angle before concluding absent.',
         '',
         '## Checkpointing',
-        '- Call `mcp__iranti__iranti_checkpoint` when completing a task, when shifting to a new task mid-session, at any natural pause point, and before stepping away from long or interrupted work.',
-        '- Record key actions in the checkpoint `actions` field so later sessions can see important commands, tests, searches, validations, and decisions without rerunning them blindly.',
-        '- Do not rely on `mcp__iranti__iranti_write` alone — facts and checkpoints are separate stores. A checkpoint not written means the next handshake recovers from stale data.',
-        '- Under-logged runs are non-compliant. Call iranti_write with what you found, what worked, what failed, what changed, and what happens next — not a broad summary, but specific durable facts.',
+        '- Call `iranti_checkpoint` at task completion, task shifts, and natural pauses.',
+        '- Record actions, current step, next step, open risks, and file changes.',
         '',
-        '## Host setup check',
-        '- If this file was not present at session start, run `iranti claude-setup .` to complete integration.',
+        '## Write depth',
+        '- Include what changed, why, and what breaks if removed.',
+        '- After file edits: absolutePath, lines, before, after, verify, why.',
+        '- After Bash: include the command and relevant output lines.',
+        '- After WebSearch/WebFetch: record findings AND dead ends.',
+        '',
+    ].join('\n');
+}
+
+/**
+ * Slim CLAUDE.md block — just points to IRANTI.md and triggers handshake.
+ * This content lives in the system prompt on every turn, so keep it minimal.
+ */
+function buildIrantiClaudeMdBlock(): string {
+    return [
+        '<!-- iranti-rules -->',
+        '# Iranti',
+        '',
+        'This project uses Iranti for shared memory. Read `IRANTI.md` for the full protocol.',
+        '',
+        '- Call `mcp__iranti__iranti_handshake` before responding to the first user message.',
+        '- Call `mcp__iranti__iranti_handshake` after context compaction.',
+        '- Follow the attend/write/checkpoint protocol in IRANTI.md.',
         '<!-- /iranti-rules -->',
         '',
     ].join('\n');
@@ -9188,11 +9218,12 @@ async function claudeSetupCommand(args: ParsedArgs): Promise<void> {
             if (result.vscodeMcp === 'updated') updatedVsCodeMcp += 1;
             if (result.settings === 'created') createdSettings += 1;
             if (result.settings === 'updated') updatedSettings += 1;
-            if (result.mcp === 'unchanged' && result.vscodeMcp === 'unchanged' && result.settings === 'unchanged') unchanged += 1;
+            if (result.mcp === 'unchanged' && result.vscodeMcp === 'unchanged' && result.settings === 'unchanged' && result.irantiMd === 'unchanged') unchanged += 1;
             console.log(`  ${projectPath}`);
             console.log(`    mcp       ${result.mcp}`);
             console.log(`    vscode    ${result.vscodeMcp}`);
             console.log(`    settings  ${result.settings}`);
+            console.log(`    iranti.md ${result.irantiMd}`);
         }
         console.log('');
         console.log('Summary:');
@@ -9236,10 +9267,12 @@ async function claudeSetupCommand(args: ParsedArgs): Promise<void> {
     console.log(`  vscode    ${path.join(projectPath, '.vscode', 'mcp.json')}`);
     console.log(`  settings  ${path.join(projectPath, '.claude', 'settings.local.json')}`);
     console.log(`  claude.md ${path.join(projectPath, 'CLAUDE.md')}`);
+    console.log(`  iranti.md ${path.join(projectPath, 'IRANTI.md')}`);
     console.log(`  mcp status        ${result.mcp}`);
     console.log(`  vscode status     ${result.vscodeMcp}`);
     console.log(`  settings status   ${result.settings}`);
     console.log(`  claude.md status  ${result.claudeMd}`);
+    console.log(`  iranti.md status  ${result.irantiMd}`);
     console.log(`  memory closeout   ${result.closeout.status} (${result.closeout.detail})`);
     console.log(`${infoLabel()} Next: open Claude Code in this project and verify Iranti tools are available.`);
 }

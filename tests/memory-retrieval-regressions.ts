@@ -131,9 +131,10 @@ async function main(): Promise<void> {
       'Expected attend() to return slash-bearing fact when explicit hint is provided.'
     );
     assert.equal(slashAttend.usageGuidance.tool, 'attend', 'Expected attend() to return explicit usage guidance.');
+    // expectedCallSequence removed from attend responses — protocol now lives in IRANTI.md.
     assert.ok(
-      slashAttend.usageGuidance.expectedCallSequence.some((step: string) => step.includes('before replying to the user')),
-      'Expected attend() usage guidance to reinforce the pre-reply attend loop.'
+      !slashAttend.usageGuidance.expectedCallSequence || slashAttend.usageGuidance.expectedCallSequence.length === 0,
+      'Expected attend() to omit expectedCallSequence (protocol moved to IRANTI.md).'
     );
 
     await iranti.write({

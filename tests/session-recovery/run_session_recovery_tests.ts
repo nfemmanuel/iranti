@@ -172,17 +172,11 @@ async function main(): Promise<void> {
         advisoryAttend.usageGuidance.tool === 'attend',
         'Expected attend() to return explicit usage guidance.'
     );
+    // expectedCallSequence was removed from attend responses — protocol now lives in IRANTI.md.
+    // Verify the field is absent or empty (backward compat: older servers may still send it).
     expect(
-        advisoryAttend.usageGuidance.expectedCallSequence.some((step: string) => step.includes('before replying to the user')),
-        'Expected attend() usage guidance to reinforce the pre-reply attend loop.'
-    );
-    expect(
-        advisoryAttend.usageGuidance.expectedCallSequence.some((step: string) => step.includes('file changes are always durable')),
-        'Expected attend() usage guidance to require durable writes after knowledge-changing actions.'
-    );
-    expect(
-        advisoryAttend.usageGuidance.expectedCallSequence.some((step: string) => step.includes('change what is loaded next')),
-        'Expected attend() usage guidance to require a follow-up attend when new knowledge changes the next step context.'
+        !advisoryAttend.usageGuidance.expectedCallSequence || advisoryAttend.usageGuidance.expectedCallSequence.length === 0,
+        'Expected attend() to omit expectedCallSequence (protocol moved to IRANTI.md).'
     );
     expect(advisoryAttend.decision.method === 'advisory', 'Expected advisory learning to trigger the memory decision for an ambiguous prompt.');
     expect(advisoryAttend.shouldInject === true, 'Expected advisory-guided attend() to inject the learned checkpoint fact.');

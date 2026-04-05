@@ -76,16 +76,8 @@ const LEGACY_CONTINUITY_KEY_MAP: Record<string, string> = {
     checkpoint_next_step: 'next_step',
     checkpoint_open_risks: 'open_risks',
 };
-const ATTEND_EXPECTED_CALL_SEQUENCE = [
-    'Call iranti_handshake at session start and again after context compaction.',
-    "Call iranti_attend(phase='pre-response') before replying to the user.",
-    'Call iranti_attend before any lookup where Iranti might already hold the answer — Read, Grep, Glob, WebSearch, WebFetch, Bash-as-factual-basis.',
-    'Call iranti_attend again after any such lookup when new findings may affect what to inject, write, or checkpoint.',
-    'Call iranti_write after every Edit or Write tool call — file changes are always durable.',
-    'Call iranti_write after Bash commands that reveal system state, after WebSearch/WebFetch with confirmed facts, and after any subagent completes.',
-    "Call iranti_attend(phase='post-response') after every response without exception — even short replies may contain durable findings. Omitting this call is a compliance violation.",
-    'Call iranti_attend again when the new knowledge should change what is loaded next.',
-];
+// expectedCallSequence removed — the full protocol now lives in IRANTI.md,
+// written once per project by `iranti claude-setup`, instead of repeated on every attend call.
 const ATTEND_USAGE_REMINDER = 'Iranti is a hive mind. MANDATORY: call iranti_attend before every reply and around knowledge discovery. MANDATORY: call iranti_write after every file edit, confirmed finding, environment state change, and subagent completion — write what changed, why, and what it means. Skipping writes means the next session starts blind and must rediscover everything from scratch.';
 const OBSERVE_USAGE_NOTE = 'observe() is retrieval-only. It surfaces candidate facts for context and warm-up, but it does not persist memory, replace iranti_attend, or count as a checkpoint/write.';
 
@@ -395,7 +387,7 @@ export interface ObserveResult {
     usageGuidance: {
         tool: 'observe' | 'attend';
         reminder: string;
-        expectedCallSequence: string[];
+        expectedCallSequence?: string[];
         note: string;
     };
     entitiesResolved?: Array<{
@@ -752,7 +744,7 @@ function buildUsageGuidance(tool: 'observe' | 'attend', turnsWithoutWrite: numbe
         return {
             tool,
             reminder: ATTEND_USAGE_REMINDER + ' Reminder: if the previous turn produced durable findings, call iranti_write before continuing.',
-            expectedCallSequence: ATTEND_EXPECTED_CALL_SEQUENCE,
+            // expectedCallSequence omitted — protocol lives in IRANTI.md, not repeated per-call.
             note: '',
         };
     }
@@ -766,7 +758,7 @@ function buildUsageGuidance(tool: 'observe' | 'attend', turnsWithoutWrite: numbe
     return {
         tool,
         reminder,
-        expectedCallSequence: ATTEND_EXPECTED_CALL_SEQUENCE,
+        // expectedCallSequence omitted — protocol lives in IRANTI.md, not repeated per-call.
         note: tool === 'observe'
             ? OBSERVE_USAGE_NOTE
             : 'After using attend() and any retrieved facts, persist durable learnings with iranti_write and shared progress with iranti_checkpoint when applicable.',
