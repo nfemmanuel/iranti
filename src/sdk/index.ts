@@ -85,6 +85,7 @@ export interface HandshakeInput {
     agentId?: string;
     task: string;
     recentMessages: string[];
+    postCompaction?: boolean;
 }
 
 export type SessionStatus = 'active' | 'interrupted' | 'completed' | 'abandoned';
@@ -718,6 +719,7 @@ export class Iranti {
         const result = await attendant.handshake({
             task: input.task,
             recentMessages: input.recentMessages,
+            postCompaction: input.postCompaction,
             ledgerContext: this.buildSessionLedgerContext(),
         });
         this.protocolTracker.markHandshake(agentId);

@@ -177,6 +177,7 @@ const WEAK_EXPLICIT_TASK_PATTERNS: RegExp[] = [
 export interface AgentContext {
     task: string;
     recentMessages: string[];
+    postCompaction?: boolean;
     ledgerContext?: {
         source?: string;
         host?: string | null;
@@ -743,13 +744,22 @@ function advisoryTaskTokens(taskType: string | null | undefined): string[] {
 }
 
 function buildUsageGuidance(tool: 'observe' | 'attend', turnsWithoutWrite: number = 0): ObserveResult['usageGuidance'] {
+    const hasComplianceIssue = turnsWithoutWrite >= 2;
+
+    if (!hasComplianceIssue) {
+        return {
+            tool,
+            reminder: 'Iranti active. Write after edits/findings, attend pre/post-response.',
+            expectedCallSequence: [],
+            note: '',
+        };
+    }
+
     let reminder = ATTEND_USAGE_REMINDER;
     if (turnsWithoutWrite >= 3) {
         reminder += ` NON-COMPLIANT: ${turnsWithoutWrite} turns have completed without a single iranti_write call. You are losing knowledge. Call iranti_write NOW for any findings, file changes, or decisions from recent turns.`;
-    } else if (turnsWithoutWrite >= 2) {
+    } else {
         reminder += ` WARNING: ${turnsWithoutWrite} turns without an iranti_write call. If you discovered, changed, or confirmed anything, write it now before it is lost.`;
-    } else if (turnsWithoutWrite === 1) {
-        reminder += ' Reminder: if the previous turn produced durable findings, call iranti_write before continuing.';
     }
     return {
         tool,
@@ -1887,6 +1897,7 @@ export class AttendantInstance {
     private sharedStateObservedAt: string | null = null;
     private pendingSharedStateInvalidations = new Map<string, Set<string>>();
     private pendingMemoryAttributions: MemoryAttributionResult[] = [];
+    private rulesDelivered = false;
 
     constructor(agentId: string) {
         this.agentId = agentId;
@@ -2150,6 +2161,11 @@ export class AttendantInstance {
         // Try to resume from persisted state first
         const persisted = await this.loadPersistedState();
 
+        // Reset rulesDelivered flag on post-compaction handshake
+        if (context.postCompaction) {
+            this.rulesDelivered = false;
+        }
+
         // Load operating rules from Staff Namespace
         const operatingRules = await this.loadOperatingRules();
 
@@ -2181,12 +2197,21 @@ export class AttendantInstance {
             this.sessionCheckpoint = persisted?.sessionCheckpoint ?? null;
         }
 
+        const fullOperatingRules = applyAdvisoryOperatingRules(
+            applyProjectPolicyOperatingRules(operatingRules, projectPolicies),
+            this.advisoryLearningProfile,
+        );
+        const isFirstDelivery = !this.rulesDelivered;
+        const operatingRulesPayload = this.rulesDelivered
+            ? '[operating rules previously delivered this session — call handshake with postCompaction:true after context compaction to reload]'
+            : fullOperatingRules;
+        if (!this.rulesDelivered) {
+            this.rulesDelivered = true;
+        }
+
         this.brief = {
             agentId: this.agentId,
-            operatingRules: applyAdvisoryOperatingRules(
-                applyProjectPolicyOperatingRules(operatingRules, projectPolicies),
-                this.advisoryLearningProfile,
-            ),
+            operatingRules: operatingRulesPayload,
             inferredTaskType,
             workingMemory: workingMemoryWithLedger,
             projectPolicies,
@@ -2196,7 +2221,7 @@ export class AttendantInstance {
             backfillSuggestion: buildBackfillSuggestion(context, workingMemoryWithLedger),
             sessionLedgerLearnings,
             sessionCheckpoint: this.sessionCheckpoint,
-            sessionRecovery: recoveryResult.recovery,
+            sessionRecovery: isFirstDelivery ? recoveryResult.recovery : null,
             compliance: persisted?.compliance ?? this.buildComplianceState(),
             watchedEntities: normalizeWatchedEntities([
                 ...(persisted?.watchedEntities ?? []),
