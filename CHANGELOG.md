@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.8 - 2026-04-05
+
+### Fixed
+
+- **Handshake operatingRules bloat.** `formatOperatingRulesText` merged all 22 `DEFAULT_ATTENDANT_OPERATING_RULES` alongside the 9 compressed Staff Namespace rules because exact-string dedup never matched. This produced ~31 rules (~3000 tokens) in every handshake. Stored rules now replace defaults entirely — defaults are only used as a fallback when no Staff Namespace rules exist.
+
+### Changed
+
+- **Codex host parity.** `iranti codex-setup` now generates a slim `AGENTS.md` pointer (~80 tokens, down from ~800) plus the canonical `IRANTI.md` protocol file, matching `iranti claude-setup` behavior.
+
 ## 0.3.7 - 2026-04-05
 
 ### Fixed
