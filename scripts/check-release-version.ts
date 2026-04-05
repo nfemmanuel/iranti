@@ -6,6 +6,7 @@ type VersionSnapshot = {
     typescriptClient: string;
     pythonProject: string;
     pythonClient: string;
+    apiServer: string;
 };
 
 function readJson(filePath: string): any {
@@ -32,17 +33,27 @@ function extractTomlVersion(source: string): string {
     return match[1];
 }
 
+function extractApiServerVersion(source: string): string {
+    const match = source.match(/^const VERSION = '([^']+)'/m);
+    if (!match) {
+        throw new Error('Could not find VERSION constant in src/api/server.ts');
+    }
+    return match[1];
+}
+
 function loadVersions(rootDir: string): VersionSnapshot {
     const packageJson = readJson(path.join(rootDir, 'package.json'));
     const tsClientPackageJson = readJson(path.join(rootDir, 'clients', 'typescript', 'package.json'));
     const pyproject = readText(path.join(rootDir, 'clients', 'python', 'pyproject.toml'));
     const pythonClient = readText(path.join(rootDir, 'clients', 'python', 'iranti.py'));
+    const apiServer = readText(path.join(rootDir, 'src', 'api', 'server.ts'));
 
     return {
         nodePackage: String(packageJson.version),
         typescriptClient: String(tsClientPackageJson.version),
         pythonProject: extractTomlVersion(pyproject),
         pythonClient: extractPythonClientVersion(pythonClient),
+        apiServer: extractApiServerVersion(apiServer),
     };
 }
 
@@ -60,7 +71,8 @@ function assertVersionsMatch(versions: VersionSnapshot): void {
             `Version mismatch detected: package.json=${versions.nodePackage}, `
             + `clients/typescript/package.json=${versions.typescriptClient}, `
             + `clients/python/pyproject.toml=${versions.pythonProject}, `
-            + `clients/python/iranti.py=${versions.pythonClient}`
+            + `clients/python/iranti.py=${versions.pythonClient}, `
+            + `src/api/server.ts=${versions.apiServer}`
         );
     }
 }
