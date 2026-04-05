@@ -371,9 +371,11 @@ async function main(): Promise<void> {
             },
         });
         expect(!ignoredMemoryRecoveredQuery.isError, 'Expected query after ignored-memory checkpoint to succeed.');
+        // next_step is now a clean replace (no accumulation of prior steps).
+        // The checkpoint wrote "perform a fresh validation after acknowledging the limitation" as the latest next_step.
         expect(
-            JSON.stringify(ignoredMemoryRecoveredQuery.structuredContent).includes('rerun the runtime validation and capture the result'),
-            'Expected recovery query after ignored-memory checkpoint to return the stored next step.',
+            JSON.stringify(ignoredMemoryRecoveredQuery.structuredContent).includes('perform a fresh validation after acknowledging the limitation'),
+            'Expected recovery query after ignored-memory checkpoint to return the latest next step (clean replace).',
         );
     } finally {
         await client.close().catch(() => undefined);
