@@ -406,10 +406,11 @@ async function main(): Promise<void> {
         assert.equal(ignoredMemoryRecoveredQuery.status, 200, `Expected /kb/query after checkpoint acknowledgement to succeed, got ${ignoredMemoryRecoveredQuery.status}.`);
         const ignoredMemoryRecoveredQueryBody = await ignoredMemoryRecoveredQuery.json() as { found?: boolean; value?: { instruction?: string } };
         assert.equal(ignoredMemoryRecoveredQueryBody.found, true, 'Expected recovery query after checkpoint acknowledgement to return the fact.');
+        // next_step is now a clean replace (no accumulation of prior steps).
         assert.equal(
             ignoredMemoryRecoveredQueryBody.value?.instruction,
-            'perform a fresh validation after acknowledging the limitation. Prior task step: rerun the runtime validation and capture the result.',
-            'Expected recovery query after checkpoint acknowledgement to return the merged next step.',
+            'perform a fresh validation after acknowledging the limitation',
+            'Expected recovery query after checkpoint acknowledgement to return the latest next step (clean replace).',
         );
 
         console.log('protocol enforcement route tests passed');
