@@ -262,7 +262,7 @@ function formatJson(value: unknown): string {
 export function buildMemoryBlock(facts: FactInjection[]): string {
     return formatStructuredFactBlock(facts, {
         title: 'Iranti Retrieved Memory',
-        includeValues: true,
+        includeValues: false,
     });
 }
 

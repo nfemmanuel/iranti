@@ -443,7 +443,7 @@ checkpoint state before closing the turn.`,
             const injectionBlock = result.shouldInject
                 ? formatStructuredFactBlock(result.facts, {
                     title: 'Iranti Retrieved Memory',
-                    includeValues: true,
+                    includeValues: false,
                 })
                 : '';
             return textResult({

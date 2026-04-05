@@ -49,7 +49,8 @@ function main(): void {
     assert.match(memoryBlock, /\[Iranti Retrieved Memory\]/, 'Expected chat memory blocks to use the shared structured memory title.');
     assert.match(memoryBlock, /F1 \| entity=project\/iranti \| key=current_step/, 'Expected chat memory blocks to surface stable fact IDs and parsed entity/key fields.');
     assert.match(memoryBlock, /Prefer the injected facts below before re-inference\./, 'Expected chat memory blocks to instruct the model to prefer injected facts.');
-    assert.match(memoryBlock, /value: \{\"text\":\"verify the host contract\"\}/, 'Expected chat memory blocks to preserve structured values.');
+    assert.match(memoryBlock, /summary: current step is verify the host contract/, 'Expected chat memory blocks to surface fact summaries.');
+    assert.doesNotMatch(memoryBlock, /value: /, 'Expected chat memory blocks to omit structured values (summary-only injection).');
 
     console.log('chat shutdown checkpoint tests passed');
 }
