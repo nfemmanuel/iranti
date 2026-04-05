@@ -363,6 +363,7 @@ export interface ObserveInput {
     entityHints?: string[];     // deterministic canonical entities from caller
     priorityKeys?: string[];    // exact keys to prioritize within resolved entities
     skipContextFilter?: boolean; // when true, skip already-in-context filtering (used by forceInject)
+    recoveryKeys?: string[];    // entity keys to bypass context filter — used for post-compaction re-injection of facts that were in context just before the compact
     ledgerContext?: AgentContext['ledgerContext'];
 }
 
@@ -1882,6 +1883,7 @@ export class AttendantInstance {
     private pendingSharedStateInvalidations = new Map<string, Set<string>>();
     private pendingMemoryAttributions: MemoryAttributionResult[] = [];
     private rulesDelivered = false;
+    private postCompactionPending = false;
 
     constructor(agentId: string) {
         this.agentId = agentId;
@@ -2161,9 +2163,11 @@ export class AttendantInstance {
         // Try to resume from persisted state first
         const persisted = await this.loadPersistedState();
 
-        // Reset rulesDelivered flag on post-compaction handshake
+        // Reset rulesDelivered flag on post-compaction handshake and queue a recovery
+        // injection pass so facts that were in context just before compaction get re-surfaced.
         if (context.postCompaction) {
             this.rulesDelivered = false;
+            this.postCompactionPending = true;
         }
 
         // Load operating rules from Staff Namespace
@@ -2921,17 +2925,40 @@ export class AttendantInstance {
             };
         }
 
+        // Post-compaction recovery: re-surface facts that were recently injected (likely in context
+        // just before the compact) without blocking them on the already-in-context filter.
+        // The flag is set by handshake(postCompaction:true) and consumed exactly once here.
+        const postCompactionRecoveryKeys: string[] = [];
+        let postCompactionMaxFacts = input.maxFacts;
+        if (this.postCompactionPending) {
+            const recentInjections = this.pendingMemoryAttributions.slice(-5);
+            for (const attr of recentInjections) {
+                postCompactionRecoveryKeys.push(...attr.injectedKeys);
+            }
+            postCompactionMaxFacts = Math.min((input.maxFacts ?? 5) * 2, 10);
+            this.postCompactionPending = false;
+        }
         const observeEntityHints = effectiveEntityHints.length > 0 ? effectiveEntityHints : freshState.entities;
+        const allObserveEntityHints = postCompactionRecoveryKeys.length > 0
+            ? [...new Set([
+                ...observeEntityHints,
+                ...postCompactionRecoveryKeys.map((k) => {
+                    const parts = k.split('/');
+                    return parts.length >= 2 ? `${parts[0]}/${parts[1]}` : k;
+                }),
+            ])]
+            : observeEntityHints;
         const observed = await this.observe({
             currentContext: observationContext,
-            maxFacts: input.maxFacts,
-            entityHints: observeEntityHints,
+            maxFacts: postCompactionMaxFacts,
+            entityHints: allObserveEntityHints,
             priorityKeys: expandContinuityPriorityKeys(Array.from(new Set([
                 ...(mandatoryRecall.key ? [mandatoryRecall.key] : []),
                 ...(this.advisoryLearningProfile?.priorityKeys ?? []),
                 ...freshState.priorityKeys,
             ]))),
             skipContextFilter: forceInject,
+            recoveryKeys: postCompactionRecoveryKeys.length > 0 ? postCompactionRecoveryKeys : undefined,
             ledgerContext: input.ledgerContext,
         });
 
@@ -3398,8 +3425,13 @@ ${detectionWindow}`,
         if (input.skipContextFilter) {
             newFacts.push(...allFacts);
         } else {
+            const recoveryKeySet = new Set(input.recoveryKeys ?? []);
             for (const fact of allFacts) {
-                const alreadyInContext = factAlreadyPresentInContext(contextLower, fact);
+                // Recovery keys bypass the already-in-context filter: these facts were recently
+                // injected and likely visible before compaction, so substring match would wrongly
+                // block re-injection into the fresh post-compaction context.
+                const isRecoveryKey = recoveryKeySet.has(fact.entityKey);
+                const alreadyInContext = !isRecoveryKey && factAlreadyPresentInContext(contextLower, fact);
 
                 if (alreadyInContext) {
                     alreadyPresent++;
