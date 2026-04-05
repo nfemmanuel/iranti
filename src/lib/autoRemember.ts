@@ -98,7 +98,7 @@ function normalizeEntity(entity: string | null | undefined): string | undefined 
     return trimmed && trimmed.includes('/') ? trimmed : undefined;
 }
 
-function isPersonalEntityType(entityType: string): boolean {
+export function isPersonalEntityType(entityType: string): boolean {
     const normalized = entityType.trim().toLowerCase();
     return normalized === 'user' || normalized === 'person';
 }
@@ -614,7 +614,15 @@ export function classifyMemoryScope(message: string): 'personal' | 'project' | n
     if (/\b(next step|current step|blocker|decision|current owner|open risks?|artifacts?|failed path|alternative route|file (?:created|moved|renamed|deleted))\b/.test(normalized)) {
         return 'project';
     }
-    if (/\b(my|me|i)\b/.test(normalized)) {
+    // Only classify as personal when the message explicitly asks about personal profile data.
+    // Generic first-person pronouns ("I'm trying", "let me check") should NOT trigger personal scope.
+    if (
+        /\bwhat(?:'s| is| was)?\s+my\b/.test(normalized) ||
+        /\bwho\s+am\s+i\b/.test(normalized) ||
+        /\bwhat\s+(?:do\s+you\s+)?(?:know|remember)\s+about\s+me\b/.test(normalized) ||
+        /\b(?:remember|forget)\s+(?:that\s+)?(?:my|i)\b/.test(normalized) ||
+        /\bmy\s+(?:name|email|phone|address|city|country|home|height|favou?rite|prefer\w*)\b/.test(normalized)
+    ) {
         return 'personal';
     }
     if (/\b(our|we)\b/.test(normalized)) {

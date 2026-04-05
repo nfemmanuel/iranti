@@ -19,6 +19,8 @@ import {
     getPersonalMemoryEntity,
     getPersonalRecallEntities,
     getProjectMemoryEntity,
+    isPersonalEntityType,
+    isPersonalMemoryKey,
 } from '../lib/autoRemember';
 import { buildSemanticFactTags } from '../lib/semanticFactTags';
 import {
@@ -1639,24 +1641,13 @@ async function persistSharedCheckpointBreadcrumbs(params: {
         }
 
         if (checkpoint.nextStep) {
-            const existingNextStep = await findEntry({
-                entityType: resolved.entityType,
-                entityId: resolved.entityId,
-                key: 'next_step',
-            });
-            const priorInstruction = existingNextStep?.valueRaw && typeof existingNextStep.valueRaw === 'object'
-                ? (existingNextStep.valueRaw as { instruction?: unknown }).instruction
-                : null;
-            const mergedNextStep = typeof priorInstruction === 'string'
-                && priorInstruction.trim().length > 0
-                && priorInstruction.trim() !== checkpoint.nextStep.trim()
-                ? `${checkpoint.nextStep}. Prior task step: ${priorInstruction.trim()}`
-                : checkpoint.nextStep;
+            // Replace next_step cleanly — no accumulation of prior steps.
+            // History is preserved in checkpoint_summary and session history.
             await librarianWrite({
                 ...common,
                 key: 'next_step',
-                valueRaw: { instruction: mergedNextStep },
-                valueSummary: truncate(`next step is ${mergedNextStep}`, 220),
+                valueRaw: { instruction: checkpoint.nextStep },
+                valueSummary: truncate(`next step is ${checkpoint.nextStep}`, 220),
                 properties: {
                     ...checkpointBaseProperties,
                     durableClass: 'next_step',
@@ -3407,10 +3398,31 @@ ${detectionWindow}`,
             }
         }
 
-        // Step 4 — return top facts by confidence
+        // Step 4 — relevance-weighted fact ranking
+        // Profile facts (favorite_city, country_of_origin, etc.) on personal entities
+        // are deprioritized unless the context/message shows token overlap with them.
+        const contextTokens = new Set(tokenizePresenceText(currentContext));
         const topFacts = newFacts
-            .sort((a, b) => b.confidence - a.confidence)
-            .slice(0, maxFacts);
+            .map((fact) => {
+                const parts = fact.entityKey.split('/');
+                const entityType = parts[0] ?? '';
+                const factKey = parts[2] ?? '';
+                const isProfile = isPersonalEntityType(entityType) && isPersonalMemoryKey(factKey);
+
+                // Compute token overlap between context and fact summary
+                const factTokens = tokenizePresenceText(fact.summary);
+                const overlap = factTokens.filter((t) => contextTokens.has(t)).length;
+                const relevance = factTokens.length > 0 ? overlap / factTokens.length : 0;
+
+                // Profile facts with no relevance to the current context get deprioritized
+                const profilePenalty = isProfile && relevance === 0 ? 50 : 0;
+                const effectiveConfidence = fact.confidence - profilePenalty;
+
+                return { fact, effectiveConfidence, relevance };
+            })
+            .sort((a, b) => b.effectiveConfidence - a.effectiveConfidence || b.relevance - a.relevance)
+            .slice(0, maxFacts)
+            .map(({ fact }) => fact);
 
         await recordKnowledgeEntryAccess(topFacts.map((fact) => fact.entryId));
 
