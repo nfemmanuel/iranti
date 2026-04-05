@@ -314,9 +314,11 @@ async function main(): Promise<void> {
 
     const nextStepQuery = await iranti.query(taskEntity, 'next_step');
     expect(nextStepQuery.found === true, 'Expected Codex to be able to query the shared next_step fact.');
+    // next_step is now a clean replace (no accumulation of prior steps).
+    // The checkpoint wrote "hand task to Codex via shared memory" as the current next_step.
     expect(
-        JSON.stringify(nextStepQuery.value).includes('runtime verification pass'),
-        'Expected next_step fact to mention the runtime verification pass.'
+        JSON.stringify(nextStepQuery.value).includes('hand task to Codex'),
+        'Expected next_step to reflect the latest checkpoint next step (clean replace, not accumulated).'
     );
 
     const claudeSession = await iranti.inspectSession({ agentId: claudeAgent });

@@ -433,14 +433,20 @@ async function main(): Promise<void> {
         );
         const claudeMd = fs.readFileSync(claudeMdFile, 'utf8');
         assert.match(claudeMd, /mcp__iranti__iranti_handshake/, 'Expected scaffolded CLAUDE.md to require handshake.');
-        assert.match(claudeMd, /Iranti is a hive mind/i, 'Expected scaffolded CLAUDE.md to use the hive-mind acknowledgment framing.');
-        assert.match(claudeMd, /iranti_handshake, iranti_attend, iranti_write, iranti_checkpoint, and iranti_remember_response/i, 'Expected scaffolded CLAUDE.md to name the core memory-duty tools in the acknowledgment.');
-        assert.match(claudeMd, /before using any knowledge discovery tool/i, 'Expected scaffolded CLAUDE.md to require attend before discovery.');
-        assert.match(claudeMd, /before stepping away from long or interrupted work/i, 'Expected scaffolded CLAUDE.md to require checkpointing for interrupted work.');
-        assert.match(claudeMd, /checkpoint `actions` field/i, 'Expected scaffolded CLAUDE.md to tell hosts to record key actions in checkpoint actions.');
-        assert.match(claudeMd, /confirmed durable findings/i, 'Expected scaffolded CLAUDE.md to require durable writes after confirmed findings.');
-        assert.match(claudeMd, /what you found, what worked, what failed, what changed, and what happens next/i, 'Expected scaffolded CLAUDE.md to require durable writes instead of only broad summaries.');
+        // CLAUDE.md is now a slim pointer — full protocol lives in IRANTI.md.
+        assert.match(claudeMd, /IRANTI\.md/i, 'Expected scaffolded CLAUDE.md to point to IRANTI.md for the full protocol.');
+        assert.match(claudeMd, /attend\/write\/checkpoint protocol/i, 'Expected scaffolded CLAUDE.md to reference the attend/write/checkpoint protocol.');
         assert.doesNotMatch(claudeMd, /Old checkpoint wording that should be refreshed only by a rerun\./, 'Expected rerunning setup to refresh an existing Iranti CLAUDE.md block without requiring --force.');
+
+        // Verify IRANTI.md contains the canonical protocol that moved out of CLAUDE.md.
+        const irantiMdFile = path.join(projectDir, 'IRANTI.md');
+        assert.ok(fs.existsSync(irantiMdFile), 'Expected setup to scaffold IRANTI.md.');
+        const irantiMd = fs.readFileSync(irantiMdFile, 'utf8');
+        assert.match(irantiMd, /Iranti Memory Protocol/i, 'Expected IRANTI.md to contain the protocol heading.');
+        assert.match(irantiMd, /iranti_attend.*pre-response/i, 'Expected IRANTI.md to require pre-response attend.');
+        assert.match(irantiMd, /iranti_write/i, 'Expected IRANTI.md to require durable writes.');
+        assert.match(irantiMd, /iranti_checkpoint/i, 'Expected IRANTI.md to require checkpointing.');
+        assert.match(irantiMd, /what changed, why/i, 'Expected IRANTI.md to specify write depth requirements.');
 
         const localGuardRoot = path.join(tempRoot, 'local-guard-runtime');
         const localGuardPort = await reservePort();
@@ -565,12 +571,17 @@ async function main(): Promise<void> {
             );
             const sharedClaudeMd = fs.readFileSync(path.join(projectPath, 'CLAUDE.md'), 'utf8');
             assert.match(sharedClaudeMd, /mcp__iranti__iranti_handshake/, 'Expected shared CLAUDE.md to require handshake.');
-            assert.match(sharedClaudeMd, /Iranti is a hive mind/i, 'Expected shared CLAUDE.md to use the hive-mind acknowledgment framing.');
-            assert.match(sharedClaudeMd, /iranti_handshake, iranti_attend, iranti_write, iranti_checkpoint, and iranti_remember_response/i, 'Expected shared CLAUDE.md to name the core memory-duty tools in the acknowledgment.');
-            assert.match(sharedClaudeMd, /before using any knowledge discovery tool/i, 'Expected shared CLAUDE.md to require attend before discovery.');
-            assert.match(sharedClaudeMd, /before stepping away from long or interrupted work/i, 'Expected shared CLAUDE.md to require checkpointing for interrupted work.');
-            assert.match(sharedClaudeMd, /checkpoint `actions` field/i, 'Expected shared CLAUDE.md to tell hosts to record key actions in checkpoint actions.');
-            assert.match(sharedClaudeMd, /what you found, what worked, what failed, what changed, and what happens next/i, 'Expected shared CLAUDE.md to require durable writes instead of only broad summaries.');
+            // CLAUDE.md is now a slim pointer — full protocol lives in IRANTI.md.
+            assert.match(sharedClaudeMd, /IRANTI\.md/i, 'Expected shared CLAUDE.md to point to IRANTI.md.');
+            assert.match(sharedClaudeMd, /attend\/write\/checkpoint protocol/i, 'Expected shared CLAUDE.md to reference the protocol.');
+
+            // Verify IRANTI.md contains the canonical protocol.
+            const sharedIrantiMdFile = path.join(projectPath, 'IRANTI.md');
+            assert.ok(fs.existsSync(sharedIrantiMdFile), 'Expected shared setup to scaffold IRANTI.md.');
+            const sharedIrantiMd = fs.readFileSync(sharedIrantiMdFile, 'utf8');
+            assert.match(sharedIrantiMd, /Iranti Memory Protocol/i, 'Expected shared IRANTI.md to contain the protocol heading.');
+            assert.match(sharedIrantiMd, /iranti_write/i, 'Expected shared IRANTI.md to require durable writes.');
+            assert.match(sharedIrantiMd, /iranti_checkpoint/i, 'Expected shared IRANTI.md to require checkpointing.');
         }
 
         const projectInitRun = runCli([
