@@ -749,8 +749,8 @@ function buildUsageGuidance(tool: 'observe' | 'attend', turnsWithoutWrite: numbe
     if (!hasComplianceIssue) {
         return {
             tool,
-            reminder: 'Iranti active. Write after edits/findings, attend pre/post-response.',
-            expectedCallSequence: [],
+            reminder: ATTEND_USAGE_REMINDER + ' Reminder: if the previous turn produced durable findings, call iranti_write before continuing.',
+            expectedCallSequence: ATTEND_EXPECTED_CALL_SEQUENCE,
             note: '',
         };
     }
