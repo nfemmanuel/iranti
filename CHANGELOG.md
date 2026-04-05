@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.7 - 2026-04-05
+
+### Fixed
+
+- **Attend profile-fact injection.** `classifyMemoryScope` used a regex (`/\b(my|me|i)\b/`) that matched nearly all English, causing irrelevant user profile facts (name, city, preferences) to be injected on every turn. Replaced with 5 specific patterns that only trigger on genuine personal-data questions.
+- **Observe relevance ranking.** `observe()` step 4 sorted facts by confidence only, with no relevance scoring. Added token-overlap relevance scoring and a -50 penalty on zero-overlap profile facts so the top-N slots go to contextually relevant facts.
+- **next_step O(N^2) accumulation.** Each `iranti_checkpoint` call concatenated the entire prior `next_step` chain with `"Prior task step: ..."`, growing quadratically. Replaced with a clean overwrite — history is preserved in `checkpoint_summary` and session records.
+
+### Changed
+
+- **Host-neutral IRANTI.md protocol file.** The full operating protocol now lives in `IRANTI.md`, generated once per project by setup commands. `CLAUDE.md` is slimmed to a 3-line pointer (~80 tokens, down from ~800). This saves ~720 tokens per API turn since CLAUDE.md is injected on every call.
+- **Removed `expectedCallSequence` from attend responses.** The 8-item call-order array (~300 tokens) was returned on every `iranti_attend` call. Protocol delivery is now handled by `IRANTI.md` (read once per session), not repeated per-call.
+- `iranti claude-setup` now generates both `IRANTI.md` and the slim `CLAUDE.md` pointer, and reports both in scaffold output.
+
 ## 0.3.0 - 2026-04-02
 
 ### Added
