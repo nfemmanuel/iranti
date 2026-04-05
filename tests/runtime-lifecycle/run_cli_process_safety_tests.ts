@@ -321,15 +321,23 @@ process.exit(1);
 
     const agentsText = fs.readFileSync(agentsFile, 'utf8');
     assert.match(agentsText, /mcp__iranti__iranti_handshake/, 'workspace AGENTS.md should require handshake');
-    assert.match(agentsText, /before each reply and before\/after knowledge discovery/i, 'workspace AGENTS.md should require attend ordering');
-    assert.match(agentsText, /natural pauses, before stepping away from long work, when interrupted/i, 'workspace AGENTS.md should require checkpointing during interrupted work');
-    assert.match(agentsText, /checkpoint `actions` field/i, 'workspace AGENTS.md should tell hosts to record key actions in checkpoint actions.');
-    assert.match(agentsText, /confirmed durable findings/i, 'workspace AGENTS.md should require durable writes after confirmed findings');
-    assert.match(agentsText, /what you found, what worked, what failed, what changed, and what happens next/i, 'workspace AGENTS.md should require durable writes instead of only broad summaries');
+    // AGENTS.md is now a slim pointer — full protocol lives in IRANTI.md.
+    assert.match(agentsText, /IRANTI\.md/i, 'workspace AGENTS.md should point to IRANTI.md for the full protocol');
+    assert.match(agentsText, /attend\/write\/checkpoint protocol/i, 'workspace AGENTS.md should reference the attend/write/checkpoint protocol');
+
+    // Verify IRANTI.md contains the canonical protocol.
+    const irantiMdFile = path.join(path.dirname(agentsFile), 'IRANTI.md');
+    assert.ok(fs.existsSync(irantiMdFile), 'workspace should have IRANTI.md alongside AGENTS.md');
+    const irantiMdText = fs.readFileSync(irantiMdFile, 'utf8');
+    assert.match(irantiMdText, /Iranti Memory Protocol/i, 'workspace IRANTI.md should contain the protocol heading');
+    assert.match(irantiMdText, /iranti_attend.*pre-response/i, 'workspace IRANTI.md should require pre-response attend');
+    assert.match(irantiMdText, /iranti_write/i, 'workspace IRANTI.md should require durable writes');
+    assert.match(irantiMdText, /iranti_checkpoint/i, 'workspace IRANTI.md should require checkpointing');
     assert.match(stdout, /Required host pattern:/, 'codex-setup output should print the explicit required host pattern');
     assert.match(stdout, /Run iranti_handshake at session start/i, 'codex-setup output should mention handshake at session start');
     assert.match(stdout, /Run iranti_checkpoint at natural pauses, during interrupted work/i, 'codex-setup output should mention checkpointing during interrupted work');
     assert.match(stdout, /Include key commands, tests, validations, and decisions in checkpoint actions/i, 'codex-setup output should mention structured checkpoint actions.');
+    assert.match(stdout, /Workspace IRANTI\.md:/i, 'codex-setup output should report IRANTI.md status');
     assert.match(stdout, /Shared memory closeout: (written|skipped|failed)/i, 'codex-setup output should report whether a shared-memory closeout was written.');
 }
 

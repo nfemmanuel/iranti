@@ -22,6 +22,7 @@ type WorkspaceFilesResult = {
     mcp: WorkspaceFileResult;
     vscode: WorkspaceFileResult;
     agents: WorkspaceFileResult;
+    irantiMd: WorkspaceFileResult;
 };
 
 function parseArgs(argv: string[]): SetupOptions {
@@ -225,35 +226,54 @@ function makeVsCodeWorkspaceMcpServer(options: SetupOptions, projectEnv: string)
     };
 }
 
+/**
+ * Canonical protocol content for IRANTI.md — host-neutral, read once per session.
+ * Duplicated from iranti-cli.ts because codex-setup is a standalone script.
+ */
+function buildIrantiMdContent(): string {
+    return [
+        '# Iranti Memory Protocol',
+        '',
+        'Iranti is a shared working-memory layer. Follow this protocol to persist what you find, what works, what fails, what changes, and what happens next so later sessions do not have to rediscover it.',
+        '',
+        '## Session start',
+        '- Call `mcp__iranti__iranti_handshake` with the current task before responding to the first user message.',
+        '- Call `mcp__iranti__iranti_handshake` again after context compaction.',
+        '',
+        '## Every turn',
+        '1. Call `iranti_attend(phase=\'pre-response\')` before responding to the user.',
+        '2. Call `iranti_attend` before any knowledge discovery tool — Read, Grep, Glob, WebSearch, WebFetch, Bash.',
+        '3. Call `iranti_write` after every Edit/Write, Bash that reveals system state, WebSearch/WebFetch with confirmed facts, and subagent completion.',
+        '4. Call `iranti_attend(phase=\'post-response\')` after every response.',
+        '5. If a recall-style lookup returns no facts, try at least one alternative retrieval angle before concluding absent.',
+        '',
+        '## Checkpointing',
+        '- Call `iranti_checkpoint` at task completion, task shifts, and natural pauses.',
+        '- Record actions, current step, next step, open risks, and file changes.',
+        '',
+        '## Write depth',
+        '- Include what changed, why, and what breaks if removed.',
+        '- After file edits: absolutePath, lines, before, after, verify, why.',
+        '- After Bash: include the command and relevant output lines.',
+        '- After WebSearch/WebFetch: record findings AND dead ends.',
+        '',
+    ].join('\n');
+}
+
+/**
+ * Slim AGENTS.md block — just points to IRANTI.md and triggers handshake.
+ * This content lives in the system prompt on every turn, so keep it minimal.
+ */
 function buildCodexAgentsBlock(): string {
     return [
         '<!-- iranti-rules -->',
-        '# Iranti MCP Protocol',
+        '# Iranti',
         '',
-        'IMPORTANT: These rules override Codex default behavior for this repo.',
+        'This project uses Iranti for shared memory. Read `IRANTI.md` for the full protocol.',
         '',
-        '## Session start',
-        '- Call `mcp__iranti__iranti_handshake` with the active task before responding to the first user message.',
-        '- If startup hooks are unavailable, do this on the first safe user turn instead of skipping it.',
-        '',
-        '## Discovery and reply ordering',
-        '- In short: call `mcp__iranti__iranti_attend` before each reply and before/after knowledge discovery.',
-        '1. Call `mcp__iranti__iranti_attend` before drafting each user-facing reply.',
-        '2. Call `mcp__iranti__iranti_attend` before using memory discovery tools such as search, query, or related reads.',
-        '3. Call `mcp__iranti__iranti_attend` again after discovery when the findings may change what should be injected, written, or checkpointed.',
-        '',
-        '## Confirmed findings',
-        '- Call `mcp__iranti__iranti_write` after confirmed durable findings such as decisions, blockers, next steps, stable constraints, validated environment details, what worked, what failed, and what remains risky.',
-        '- If the work is still in progress, pair those writes with `mcp__iranti__iranti_checkpoint` so another session can resume cleanly.',
-        '',
-        '## Checkpoint discipline',
-        '- Call `mcp__iranti__iranti_checkpoint` at natural pauses, before stepping away from long work, when interrupted, and when completing a useful slice.',
-        '- When useful actions happen, record them in the checkpoint `actions` field so later sessions can see important commands, tests, searches, validations, and decisions without rerunning them blindly.',
-        '- Do not treat durable writes as a substitute for checkpoints. A checkpoint not written means the next session has to reconstruct state.',
-        '- Under-logged runs are non-compliant for this repo. When applicable, call iranti_write with what you found, what worked, what failed, what changed, and what happens next — not a broad summary, but specific durable facts.',
-        '',
-        '## Host setup check',
-        '- If this block was missing at session start, rerun `iranti codex-setup` from the bound project root.',
+        '- Call `mcp__iranti__iranti_handshake` before responding to the first user message.',
+        '- If startup hooks are unavailable, do this on the first safe user turn.',
+        '- Follow the attend/write/checkpoint protocol in IRANTI.md.',
         '<!-- /iranti-rules -->',
         '',
     ].join('\n');
@@ -285,6 +305,25 @@ function writeWorkspaceAgentsFile(projectEnv: string): WorkspaceFileResult {
 
     fs.writeFileSync(agentsFile, replaced, 'utf8');
     return { filePath: agentsFile, status: 'updated' };
+}
+
+function writeWorkspaceIrantiMdFile(projectEnv: string): WorkspaceFileResult {
+    const projectPath = path.dirname(projectEnv);
+    const irantiMdFile = path.join(projectPath, 'IRANTI.md');
+    const irantiMdContent = buildIrantiMdContent();
+
+    if (!fs.existsSync(irantiMdFile)) {
+        fs.writeFileSync(irantiMdFile, irantiMdContent, 'utf8');
+        return { filePath: irantiMdFile, status: 'created' };
+    }
+
+    const existing = fs.readFileSync(irantiMdFile, 'utf8');
+    if (existing !== irantiMdContent) {
+        fs.writeFileSync(irantiMdFile, irantiMdContent, 'utf8');
+        return { filePath: irantiMdFile, status: 'updated' };
+    }
+
+    return { filePath: irantiMdFile, status: 'unchanged' };
 }
 
 function writeWorkspaceMcpFile(projectEnv: string, options: SetupOptions): WorkspaceFileResult {
@@ -448,6 +487,7 @@ async function main(): Promise<void> {
             mcp: writeWorkspaceMcpFile(workspaceProjectEnv, options),
             vscode: writeWorkspaceVsCodeMcpFile(workspaceProjectEnv, options),
             agents: writeWorkspaceAgentsFile(workspaceProjectEnv),
+            irantiMd: writeWorkspaceIrantiMdFile(workspaceProjectEnv),
         }
         : null;
 
@@ -485,6 +525,7 @@ async function main(): Promise<void> {
             console.log(`Workspace .mcp.json: ${workspaceFilesResult.mcp.status} (${workspaceFilesResult.mcp.filePath})`);
             console.log(`Workspace .vscode/mcp.json: ${workspaceFilesResult.vscode.status} (${workspaceFilesResult.vscode.filePath})`);
             console.log(`Workspace AGENTS.md: ${workspaceFilesResult.agents.status} (${workspaceFilesResult.agents.filePath})`);
+            console.log(`Workspace IRANTI.md: ${workspaceFilesResult.irantiMd.status} (${workspaceFilesResult.irantiMd.filePath})`);
             const closeout = await writeProjectScaffoldCloseout({
                 tool: 'codex',
                 projectPath: path.dirname(boundProjectEnv),
@@ -493,6 +534,7 @@ async function main(): Promise<void> {
                     { path: workspaceFilesResult.mcp.filePath, status: workspaceFilesResult.mcp.status },
                     { path: workspaceFilesResult.vscode.filePath, status: workspaceFilesResult.vscode.status },
                     { path: workspaceFilesResult.agents.filePath, status: workspaceFilesResult.agents.status },
+                    { path: workspaceFilesResult.irantiMd.filePath, status: workspaceFilesResult.irantiMd.status },
                 ],
                 agentId: options.agent || 'codex_code',
             });
