@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.9 - 2026-04-05
+
+### Changed
+
+- **Summary-only injection blocks.** Fact injection blocks sent to agents (both MCP and chat hosts) now omit the raw `value` JSON and surface only the human-readable `summary` line. This reduces per-turn injection token cost without losing the signal agents need.
+- **Recency tiebreaker in observe sort.** When two facts have equal confidence, the more recently written fact now ranks higher in observe results. Newer session facts naturally beat stale historical facts at equal confidence.
+
+### Improved
+
+- **Memory attribution accuracy.** `responseMentionsInjectedMemory` now includes a secondary check: if ≥2 content tokens (>5 chars) from injected fact summaries appear in the response, the injection is scored as used. Reduces false negatives when the agent uses a fact implicitly.
+
 ## 0.3.8 - 2026-04-05
 
 ### Fixed
