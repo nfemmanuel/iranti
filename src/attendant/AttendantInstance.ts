@@ -3364,6 +3364,7 @@ ${detectionWindow}`,
                     return (
                         checkpointPenalty(a.key) - checkpointPenalty(b.key)
                         || b.confidence - a.confidence
+                        || b.updatedAt.getTime() - a.updatedAt.getTime()
                         || a.key.localeCompare(b.key)
                     );
                 });
