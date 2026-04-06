@@ -359,7 +359,7 @@ function buildCopilotInstructionsBlock(): string {
         '<!-- iranti-rules -->',
         '# Iranti',
         '',
-        'This project uses Iranti for shared memory. Full protocol in `IRANTI.md`.',
+        'This project uses Iranti for shared memory. Follow the attend/write/checkpoint protocol in `IRANTI.md`.',
         '',
         '**Session start:** Call `mcp__iranti__iranti_handshake` before responding to the first user message.',
         '',
