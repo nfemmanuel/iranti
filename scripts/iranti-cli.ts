@@ -10116,6 +10116,59 @@ async function main(): Promise<void> {
         return;
     }
 
+    if (args.command === 'copilot-setup') {
+        await handoffToScript('copilot-setup', process.argv.slice(3));
+        return;
+    }
+
+    if (args.command === 'copilot-unsetup') {
+        // Per-project copilot unsetup: remove iranti block from .github/copilot-instructions.md, iranti from .mcp.json/.vscode/mcp.json
+        const projectArg = args.positionals[0];
+        const projectPath = path.resolve(projectArg ?? process.cwd());
+        let instructionsStatus = 'not present';
+        let mcpStatus = 'not present';
+        let vscodeMcpStatus = 'not present';
+        const instructionsFile = path.join(projectPath, '.github', 'copilot-instructions.md');
+        if (fs.existsSync(instructionsFile)) {
+            const content = fs.readFileSync(instructionsFile, 'utf8');
+            if (content.includes('<!-- iranti-rules -->')) {
+                const cleaned = content.replace(/\n*<!-- iranti-rules -->[\s\S]*?<!-- \/iranti-rules -->\n*/g, '\n').trimEnd();
+                await writeText(instructionsFile, cleaned ? `${cleaned}\n` : '');
+                instructionsStatus = 'block removed';
+            }
+        }
+        const mcpFile = path.join(projectPath, '.mcp.json');
+        if (fs.existsSync(mcpFile)) {
+            const existing = readJsonFile<Record<string, unknown>>(mcpFile);
+            if (existing && typeof existing === 'object' && !Array.isArray(existing)) {
+                const servers = existing.mcpServers && typeof existing.mcpServers === 'object' && !Array.isArray(existing.mcpServers) ? { ...(existing.mcpServers as Record<string, unknown>) } : null;
+                if (servers && Object.prototype.hasOwnProperty.call(servers, 'iranti')) {
+                    delete servers.iranti;
+                    await writeText(mcpFile, `${JSON.stringify({ ...existing, mcpServers: servers }, null, 2)}\n`);
+                    mcpStatus = 'removed';
+                }
+            }
+        }
+        const vscodeMcpFile = path.join(projectPath, '.vscode', 'mcp.json');
+        if (fs.existsSync(vscodeMcpFile)) {
+            const existing = readJsonFile<Record<string, unknown>>(vscodeMcpFile);
+            if (existing && typeof existing === 'object' && !Array.isArray(existing)) {
+                const servers = existing.servers && typeof existing.servers === 'object' && !Array.isArray(existing.servers) ? { ...(existing.servers as Record<string, unknown>) } : null;
+                if (servers && Object.prototype.hasOwnProperty.call(servers, 'iranti')) {
+                    delete servers.iranti;
+                    await writeText(vscodeMcpFile, `${JSON.stringify({ ...existing, servers }, null, 2)}\n`);
+                    vscodeMcpStatus = 'removed';
+                }
+            }
+        }
+        console.log(`${okLabel()} Per-project Copilot Iranti integration removed`);
+        console.log(`  project                          ${projectPath}`);
+        console.log(`  .github/copilot-instructions.md  ${instructionsStatus}`);
+        console.log(`  .mcp.json                        ${mcpStatus}`);
+        console.log(`  .vscode/mcp                      ${vscodeMcpStatus}`);
+        return;
+    }
+
     if (args.command === 'integrate') {
         if (!args.subcommand || args.subcommand === 'help' || args.subcommand === '--help') {
             printIntegrateHelp();
@@ -10129,7 +10182,11 @@ async function main(): Promise<void> {
             await handoffToScript('codex-setup', process.argv.slice(4));
             return;
         }
-        throw new Error(`Unknown integrate target '${args.subcommand ?? ''}'. Use 'claude' or 'codex'.`);
+        if (args.subcommand === 'copilot') {
+            await handoffToScript('copilot-setup', process.argv.slice(4));
+            return;
+        }
+        throw new Error(`Unknown integrate target '${args.subcommand ?? ''}'. Use 'claude', 'codex', or 'copilot'.`);
     }
 
     throw cliError(

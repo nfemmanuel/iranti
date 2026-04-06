@@ -262,6 +262,12 @@ export const INTEGRATIONS_HELP: HelpEntry[] = [
         scenario: 'Making the `codex` CLI able to call Iranti tools from bound repos.',
     },
     {
+        command: 'iranti copilot-setup [--name iranti] [--agent copilot_code] [--source Copilot] [--provider openai] [--project-env <path>] [--local-script] [--no-workspace-file]',
+        description: 'Register Iranti with GitHub Copilot CLI and scaffold workspace MCP plus local Copilot protocol guidance when a binding is available.',
+        useWhen: 'Copilot CLI should see Iranti through its global MCP configuration (~/.copilot/mcp-config.json) and the bound workspace should get .github/copilot-instructions.md plus deterministic MCP files.',
+        scenario: 'Making GitHub Copilot CLI able to call Iranti tools from bound repos.',
+    },
+    {
         command: 'iranti integrate claude [path] [--project-env <path>] [--force]',
         description: 'Alias for Claude setup.',
         useWhen: 'you prefer the integration verb but want the same behavior as `claude-setup`.',
@@ -278,6 +284,12 @@ export const INTEGRATIONS_HELP: HelpEntry[] = [
         description: 'Alias for Codex setup.',
         useWhen: 'same as `codex-setup`, but called through the integration command group.',
         scenario: 'Registering the Codex MCP server from a script that groups integrations under one verb.',
+    },
+    {
+        command: 'iranti integrate copilot [--name iranti] [--agent copilot_code] [--source Copilot] [--provider openai] [--project-env <path>] [--local-script] [--no-workspace-file]',
+        description: 'Alias for GitHub Copilot CLI setup.',
+        useWhen: 'same as `copilot-setup`, but called through the integration command group.',
+        scenario: 'Registering the Copilot MCP server from a script that groups integrations under one verb.',
     },
 ];
 
@@ -408,6 +420,12 @@ export const INTEGRATE_HELP: HelpEntry[] = [
         description: 'Alias for Codex MCP setup.',
         useWhen: 'you want Codex integration but prefer the integration command group naming.',
         scenario: 'Registering Iranti with the global Codex MCP config.',
+    },
+    {
+        command: 'iranti integrate copilot [--name iranti] [--agent copilot_code] [--source Copilot] [--provider openai] [--project-env <path>] [--local-script] [--no-workspace-file]',
+        description: 'Alias for GitHub Copilot CLI MCP setup.',
+        useWhen: 'you want Copilot integration but prefer the integration command group naming.',
+        scenario: 'Registering Iranti with the global Copilot MCP config and scaffolding workspace files.',
     },
 ];
 

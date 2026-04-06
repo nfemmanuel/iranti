@@ -15,7 +15,7 @@ export type ScaffoldCloseoutFile = {
 };
 
 type ScaffoldCloseoutInput = {
-    tool: 'claude' | 'codex';
+    tool: 'claude' | 'codex' | 'copilot';
     projectPath: string;
     projectEnvFile?: string | null;
     files: ScaffoldCloseoutFile[];
@@ -41,20 +41,28 @@ async function readEnvFile(filePath: string): Promise<Record<string, string>> {
     return out;
 }
 
-function toolDisplayName(tool: 'claude' | 'codex'): string {
-    return tool === 'claude' ? 'Claude' : 'Codex';
+function toolDisplayName(tool: 'claude' | 'codex' | 'copilot'): string {
+    switch (tool) {
+        case 'claude': return 'Claude';
+        case 'codex': return 'Codex';
+        case 'copilot': return 'Copilot';
+    }
 }
 
-function closeoutKey(tool: 'claude' | 'codex'): string {
-    return tool === 'claude'
-        ? 'claude_setup_scaffold_status'
-        : 'codex_setup_scaffold_status';
+function closeoutKey(tool: 'claude' | 'codex' | 'copilot'): string {
+    switch (tool) {
+        case 'claude': return 'claude_setup_scaffold_status';
+        case 'codex': return 'codex_setup_scaffold_status';
+        case 'copilot': return 'copilot_setup_scaffold_status';
+    }
 }
 
-function closeoutSource(tool: 'claude' | 'codex'): string {
-    return tool === 'claude'
-        ? 'ClaudeSetupScaffold'
-        : 'CodexSetupScaffold';
+function closeoutSource(tool: 'claude' | 'codex' | 'copilot'): string {
+    switch (tool) {
+        case 'claude': return 'ClaudeSetupScaffold';
+        case 'codex': return 'CodexSetupScaffold';
+        case 'copilot': return 'CopilotSetupScaffold';
+    }
 }
 
 export async function writeProjectScaffoldCloseout(input: ScaffoldCloseoutInput): Promise<ScaffoldCloseoutStatus> {
