@@ -109,6 +109,74 @@ function defaultWriteSource(host?: string): string {
     return 'MCP';
 }
 
+// ── Summary completeness check (A1 accuracy guard) ──────────────────────────
+// Warns when value JSON tokens are not present in the summary.
+// Prevents silent accuracy loss under summary-only injection (A1).
+function extractValueLeafStrings(obj: unknown, depth = 0): string[] {
+    if (depth > 6 || obj === null || obj === undefined) return [];
+    if (typeof obj === 'string') return obj.length > 0 ? [obj] : [];
+    if (typeof obj === 'number' || typeof obj === 'boolean') return [String(obj)];
+    if (Array.isArray(obj)) return obj.flatMap(item => extractValueLeafStrings(item, depth + 1));
+    if (typeof obj === 'object') return Object.values(obj as Record<string, unknown>).flatMap(v => extractValueLeafStrings(v, depth + 1));
+    return [];
+}
+
+function tokenizeForCompleteness(text: string): string[] {
+    return text.toLowerCase().split(/[^a-z0-9_.\-\/]+/).filter(t => t.length >= 2);
+}
+
+function computeSummaryCompleteness(valueJson: string, summary: string): { score: number; missed: string[] } | null {
+    let value: unknown;
+    try { value = JSON.parse(valueJson); } catch { return null; }
+    const leaves = extractValueLeafStrings(value);
+    if (leaves.length === 0) return null;
+    const summaryTokens = new Set(tokenizeForCompleteness(summary));
+    const allToks: string[] = [];
+    const missed: string[] = [];
+    for (const leaf of leaves) {
+        for (const tok of tokenizeForCompleteness(leaf)) {
+            allToks.push(tok);
+            if (!summaryTokens.has(tok)) missed.push(tok);
+        }
+    }
+    if (allToks.length === 0) return null;
+    const score = Math.round(((allToks.length - missed.length) / allToks.length) * 100) / 100;
+    return { score, missed: [...new Set(missed)].slice(0, 6) };
+}
+
+// Builds a compact key=value suffix containing only the values that are NOT
+// already present in the summary. Scans top-level and one level of nesting.
+// Capped at 20 pairs to prevent bloat on very rich facts.
+function buildSummaryEnhancement(value: unknown, existingSummary: string): string {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return '';
+    const lower = existingSummary.toLowerCase();
+    const pairs: string[] = [];
+
+    function addIfMissing(k: string, v: unknown): void {
+        if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+            const s = String(v);
+            if ((typeof v !== 'string' || s.length >= 2) && !lower.includes(s.toLowerCase())) pairs.push(`${k}=${s}`);
+        } else if (Array.isArray(v) && v.every(x => typeof x !== 'object')) {
+            const joined = (v as (string | number | boolean)[]).join(',');
+            if (!lower.includes(joined.slice(0, 8).toLowerCase())) pairs.push(`${k}=[${joined}]`);
+        }
+    }
+
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+        addIfMissing(k, v);
+        // One level deep for nested objects
+        if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+            for (const [k2, v2] of Object.entries(v as Record<string, unknown>)) {
+                addIfMissing(`${k}.${k2}`, v2);
+            }
+        }
+    }
+
+    if (pairs.length === 0) return '';
+    return ` [${pairs.slice(0, 20).join(', ')}]`;
+}
+// ────────────────────────────────────────────────────────────────────────────
+
 function safeJsonParse(raw: string): unknown {
     try {
         return JSON.parse(raw);
@@ -330,7 +398,7 @@ async function main(): Promise<void> {
 
     const server = new McpServer({
         name: 'iranti-mcp',
-        version: '0.3.9',
+        version: '0.3.10',
     });
 
     server.registerTool('iranti_handshake', {
@@ -675,11 +743,19 @@ such as issueStatus=open|resolved, severity, or resolution notes.`,
         const target = resolvePersonalWriteTarget({ entity, key });
         const resolvedAgent = resolveToolAgent(agent, agentId);
         syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
+        // Auto-enhance summary before write: if value tokens are missing from summary,
+        // append a compact key=value suffix so A1 summary-only injection stays accurate.
+        const parsedValue = safeJsonParse(valueJson);
+        const completeness = computeSummaryCompleteness(valueJson, summary);
+        const needsEnhancement = completeness !== null && completeness.score < 0.7;
+        const enhancement = needsEnhancement ? buildSummaryEnhancement(parsedValue, summary) : '';
+        const effectiveSummary = enhancement ? summary + enhancement : summary;
+
         const result = await iranti.write({
             entity: target.entity,
             key,
-            value: safeJsonParse(valueJson),
-            summary,
+            value: parsedValue,
+            summary: effectiveSummary,
             confidence: confidence ?? 85,
             source: source?.trim() || defaultWriteSource(),
             agent: resolvedAgent,
@@ -691,6 +767,11 @@ such as issueStatus=open|resolved, severity, or resolution notes.`,
             ...toStructuredContent(result),
             resolvedEntity: target.entity,
             ...(target.rerouted ? { originalEntity: target.originalEntity, canonicalizedPersonalEntity: true } : {}),
+            ...(enhancement ? {
+                summaryEnhanced: true,
+                summaryCompleteness: completeness?.score,
+                originalSummary: summary,
+            } : {}),
         });
     });
 

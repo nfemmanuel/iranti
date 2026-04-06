@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.10 - 2026-04-06
+
+### Added
+
+- **Post-compaction fact recovery.** `iranti_handshake(postCompaction: true)` now triggers a recovery inject pass: recently-lost keys are re-surfaced with doubled `maxFacts` and a context-filter bypass. Agents resuming after context compaction receive the facts they had before the compact without needing to re-ask.
+
 ## 0.3.9 - 2026-04-05
 
 ### Changed

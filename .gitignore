@@ -53,6 +53,9 @@ experiments/*.json
 # Local planning notes (never commit)
 /docs/BACKLOG.local.md
 
+# Marketing docs (internal, never commit)
+/docs/marketing/
+
 *iranti_roadmap*
 tests/consistency/.runtime/
 tests/conflict/.runtime/
