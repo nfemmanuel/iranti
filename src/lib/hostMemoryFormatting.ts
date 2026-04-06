@@ -22,6 +22,17 @@ function formatValue(value: unknown): string {
     return typeof value === 'string' ? value : JSON.stringify(value);
 }
 
+// Compact header threshold: high-confidence recent facts don't need
+// confidence/source/lastUpdated in the injection block — they add noise.
+const COMPACT_CONFIDENCE_MIN = 90;
+const COMPACT_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+function isCompactFact(fact: HostMemoryFactInput): boolean {
+    if (fact.confidence < COMPACT_CONFIDENCE_MIN) return false;
+    if (!fact.lastUpdated) return false;
+    return Date.now() - new Date(fact.lastUpdated).getTime() < COMPACT_AGE_MS;
+}
+
 export function splitEntityKey(entityKey: string): { entity: string; key: string } {
     const segments = entityKey.split('/');
     if (segments.length < 3) {
@@ -66,12 +77,17 @@ export function formatStructuredFactBlock<T extends HostMemoryFactInput>(
 
     for (const fact of structuredFacts) {
         const identity = splitEntityKey(fact.entityKey);
-        lines.push(`- ${fact.factId} | entity=${identity.entity} | key=${identity.key || '(none)'} | confidence=${fact.confidence} | source=${fact.source}`);
+        const compact = isCompactFact(fact);
+        if (compact) {
+            lines.push(`- ${fact.factId} | ${fact.entityKey}`);
+        } else {
+            lines.push(`- ${fact.factId} | entity=${identity.entity} | key=${identity.key || '(none)'} | confidence=${fact.confidence} | source=${fact.source}`);
+        }
         lines.push(`  summary: ${fact.summary}`);
         if (options.includeValues && fact.value !== undefined) {
             lines.push(`  value: ${formatValue(fact.value)}`);
         }
-        if (fact.lastUpdated) {
+        if (!compact && fact.lastUpdated) {
             lines.push(`  last_updated: ${fact.lastUpdated}`);
         }
     }

@@ -109,6 +109,26 @@ function defaultWriteSource(host?: string): string {
     return 'MCP';
 }
 
+// ── Ambient injection value sanitization ────────────────────────────────────
+// Strips large values from attend/handshake results before JSON serialization.
+// Facts with small values (≤ VALUE_INLINE_CHARS) keep their value inline so
+// the agent has it without a round-trip. Large values are stripped; the agent
+// calls iranti_query to retrieve them explicitly when needed.
+const VALUE_INLINE_CHARS = 400; // rough ~100 token ceiling
+
+function sanitizeFactValue<T extends { value?: unknown }>(fact: T): Omit<T, 'value'> | T {
+    if (fact.value === undefined) return fact;
+    const serialized = JSON.stringify(fact.value);
+    if (serialized.length <= VALUE_INLINE_CHARS) return fact;
+    const { value: _stripped, ...rest } = fact as T & { value: unknown };
+    return rest as Omit<T, 'value'>;
+}
+
+function sanitizeFacts<T extends { value?: unknown }>(facts: T[]): Array<Omit<T, 'value'> | T> {
+    return facts.map(sanitizeFactValue);
+}
+// ────────────────────────────────────────────────────────────────────────────
+
 // ── Summary completeness check (A1 accuracy guard) ──────────────────────────
 // Warns when value JSON tokens are not present in the summary.
 // Prevents silent accuracy loss under summary-only injection (A1).
@@ -398,7 +418,7 @@ async function main(): Promise<void> {
 
     const server = new McpServer({
         name: 'iranti-mcp',
-        version: '0.3.10',
+        version: '0.3.11',
     });
 
     server.registerTool('iranti_handshake', {
@@ -516,6 +536,7 @@ checkpoint state before closing the turn.`,
                 : '';
             return textResult({
                 ...result,
+                facts: sanitizeFacts(result.facts),
                 injectionBlock,
             });
         } catch (error) {

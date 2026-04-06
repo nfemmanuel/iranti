@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.11 - 2026-04-06
+
+### Added
+
+- **GitHub Copilot CLI host integration.** `iranti setup` now scaffolds Copilot CLI host files (`.github/copilot-instructions.md`, MCP config) and validates the setup. Adds `test:copilot-setup` to the hardening suite.
+
+### Changed
+
+- **Attend value sanitization.** `iranti_attend` tool responses no longer include large fact values (> 400 chars) in the raw JSON result. Small values are kept inline; large values are stripped and available via `iranti_query`. Eliminates verbose value blobs from per-turn MCP tool results.
+- **Compact injection block format.** High-confidence (≥ 90) recent (< 7 days) facts render with a condensed header line — entity/key only, no confidence/source/last_updated noise. Saves ~15 tokens per fact in typical sessions.
+
 ## 0.3.10 - 2026-04-06
 
 ### Added

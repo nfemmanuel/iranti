@@ -1,6 +1,6 @@
 {
   "name": "iranti",
-  "version": "0.3.10",
+  "version": "0.3.11",
   "description": "Memory infrastructure for multi-agent AI systems",
   "main": "dist/src/sdk/index.js",
   "files": [
@@ -84,6 +84,7 @@
     "test:api-surfaces-protocol-enforcement": "ts-node tests/api-surfaces/run_protocol_enforcement_route_tests.ts",
     "test:vector-health-monitoring": "ts-node tests/api-surfaces/run_vector_health_monitor_tests.ts",
     "test:cli-process-safety": "ts-node tests/runtime-lifecycle/run_cli_process_safety_tests.ts",
+    "test:copilot-setup": "ts-node tests/runtime-lifecycle/run_copilot_setup_tests.ts",
     "test:setup-upgrade-lifecycle": "ts-node tests/runtime-lifecycle/run_setup_upgrade_tests.ts",
     "test:setup-metadata-persistence": "ts-node tests/runtime-lifecycle/run_setup_metadata_persistence_tests.ts",
     "test:uninstall-lifecycle": "ts-node tests/runtime-lifecycle/run_uninstall_tests.ts",
@@ -100,7 +101,7 @@
     "test:staff-events": "ts-node tests/staff-events/run_db_staff_event_emitter_tests.ts",
     "test:session-ledger": "ts-node tests/staff-events/run_session_ledger_tests.ts",
     "test:archive-vector-contracts": "node -r ts-node/register/transpile-only tests/consistency/run_archive_vector_contract_tests.ts",
-    "test:hardening-fast": "npm run test:contracts && npm run test:first-party-host-contracts-fast && npm run test:cli-surface && npm run test:runtime-lifecycle && npm run test:setup-metadata-persistence && npm run test:cli-process-safety && npm run test:setup-upgrade-lifecycle && npm run test:uninstall-lifecycle",
+    "test:hardening-fast": "npm run test:contracts && npm run test:first-party-host-contracts-fast && npm run test:cli-surface && npm run test:runtime-lifecycle && npm run test:setup-metadata-persistence && npm run test:cli-process-safety && npm run test:copilot-setup && npm run test:setup-upgrade-lifecycle && npm run test:uninstall-lifecycle",
     "test:hardening-db": "npm run test:access-control && npm run test:consistency && npm run test:archive-vector-contracts && npm run test:vector-backends && npm run test:cross-tool-handoff && npm run test:cross-process-invalidation && npm run test:first-party-host-contracts",
     "release:check": "ts-node scripts/check-release-version.ts",
     "release:bump": "ts-node scripts/bump-version.ts",
