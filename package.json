@@ -101,7 +101,7 @@
     "test:staff-events": "ts-node tests/staff-events/run_db_staff_event_emitter_tests.ts",
     "test:session-ledger": "ts-node tests/staff-events/run_session_ledger_tests.ts",
     "test:archive-vector-contracts": "node -r ts-node/register/transpile-only tests/consistency/run_archive_vector_contract_tests.ts",
-    "test:hardening-fast": "npm run test:contracts && npm run test:first-party-host-contracts-fast && npm run test:cli-surface && npm run test:runtime-lifecycle && npm run test:setup-metadata-persistence && npm run test:cli-process-safety && npm run test:setup-upgrade-lifecycle && npm run test:uninstall-lifecycle",
+    "test:hardening-fast": "npm run test:contracts && npm run test:first-party-host-contracts-fast && npm run test:cli-surface && npm run test:runtime-lifecycle && npm run test:setup-metadata-persistence && npm run test:cli-process-safety && npm run test:setup-upgrade-lifecycle && npm run test:uninstall-lifecycle && npm run test:copilot-setup",
     "test:hardening-db": "npm run test:access-control && npm run test:consistency && npm run test:archive-vector-contracts && npm run test:vector-backends && npm run test:cross-tool-handoff && npm run test:cross-process-invalidation && npm run test:first-party-host-contracts",
     "release:check": "ts-node scripts/check-release-version.ts",
     "release:bump": "ts-node scripts/bump-version.ts",

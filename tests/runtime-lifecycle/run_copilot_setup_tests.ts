@@ -90,7 +90,14 @@ async function testCopilotSetupWritesWorkspaceFiles(root: string): Promise<void>
     };
     assert.ok(globalMcp.mcpServers?.iranti, 'global config should have an iranti server entry');
     assert.strictEqual(globalMcp.mcpServers.iranti.type, 'stdio', 'global config should use stdio transport');
-    assert.deepStrictEqual(globalMcp.mcpServers.iranti.args, ['mcp'], 'global config should pass mcp argument');
+    // Accepts both installed ('iranti mcp') and local build ('node /path/iranti-mcp.js') forms
+    const isInstalledForm = globalMcp.mcpServers.iranti.command === 'iranti' &&
+        Array.isArray(globalMcp.mcpServers.iranti.args) &&
+        globalMcp.mcpServers.iranti.args[0] === 'mcp';
+    const isLocalBuildForm = globalMcp.mcpServers.iranti.command === 'node' &&
+        Array.isArray(globalMcp.mcpServers.iranti.args) &&
+        globalMcp.mcpServers.iranti.args[0]?.includes('iranti-mcp');
+    assert.ok(isInstalledForm || isLocalBuildForm, `global config should use installed or local-build form, got: ${JSON.stringify(globalMcp.mcpServers.iranti)}`);
     assert.strictEqual(globalMcp.mcpServers.iranti.env?.IRANTI_MCP_DEFAULT_AGENT, 'copilot_code', 'global config should set default Copilot agent');
     assert.strictEqual(globalMcp.mcpServers.iranti.env?.IRANTI_MCP_DEFAULT_SOURCE, 'Copilot', 'global config should set default Copilot source');
     assert.strictEqual(globalMcp.mcpServers.iranti.env?.IRANTI_MCP_HOST, 'copilot_cli', 'global config should set Copilot CLI host identity');
