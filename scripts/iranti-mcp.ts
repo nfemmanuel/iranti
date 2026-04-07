@@ -784,6 +784,24 @@ such as issueStatus=open|resolved, severity, or resolution notes.`,
             validFrom: parseIsoDate(validFrom),
             requestId,
         });
+
+        // Clear the write-debt signal file used by the PreToolUse write-guard hook.
+        // This completes the enforcement loop: PostToolUse increments debt → iranti_write clears it → PreToolUse checks it.
+        try {
+            const debtFile = path.join(process.cwd(), '.iranti-write-debt');
+            if (fs.existsSync(debtFile)) {
+                const debt = JSON.parse(fs.readFileSync(debtFile, 'utf8'));
+                debt.pendingEdits = Math.max(0, (debt.pendingEdits || 0) - 1);
+                if (debt.pendingEdits <= 0) {
+                    fs.unlinkSync(debtFile);
+                } else {
+                    fs.writeFileSync(debtFile, JSON.stringify(debt, null, 2), 'utf8');
+                }
+            }
+        } catch {
+            // Non-fatal: guard will still work on next check
+        }
+
         return textResult({
             ...toStructuredContent(result),
             resolvedEntity: target.entity,

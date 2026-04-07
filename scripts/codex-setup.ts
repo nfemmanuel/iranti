@@ -23,6 +23,8 @@ type WorkspaceFilesResult = {
     vscode: WorkspaceFileResult;
     agents: WorkspaceFileResult;
     irantiMd: WorkspaceFileResult;
+    protocolHook: WorkspaceFileResult;
+    hooksConfig: WorkspaceFileResult;
 };
 
 function parseArgs(argv: string[]): SetupOptions {
@@ -417,6 +419,159 @@ function writeWorkspaceVsCodeMcpFile(projectEnv: string, options: SetupOptions):
     return { filePath: mcpFile, status: 'updated' };
 }
 
+/**
+ * Protocol reminder hook script content for Codex UserPromptSubmit.
+ * Same content as the Claude Code version — fires before every user prompt.
+ */
+function buildProtocolReminderHookScript(): string {
+    return [
+        '#!/usr/bin/env node',
+        "'use strict';",
+        '// Iranti protocol reminder hook — fires on UserPromptSubmit for any Iranti project.',
+        '// Cross-platform: runs on Windows, macOS, Linux via Node.js.',
+        '// Exits cleanly with no output for non-Iranti projects.',
+        "const fs = require('fs');",
+        "const path = require('path');",
+        '',
+        "const envFile = path.join(process.cwd(), '.env.iranti');",
+        'if (!fs.existsSync(envFile)) process.exit(0);',
+        '',
+        'const content = [',
+        "  'IRANTI PROTOCOL (required this turn):',",
+        "  '1. iranti_attend(phase=pre-response) BEFORE replying',",
+        "  '2. iranti_attend BEFORE each Read / Grep / Glob / Bash / WebSearch / WebFetch',",
+        "  '3. iranti_write AFTER each Edit or Write:',",
+        "  '   entity: project/[id]/file/[filename] -- not the broad project entity',",
+        "  '   value must include: absolutePath, lines, before, after, verify, why',",
+        "  '4. iranti_write AFTER each Bash that reveals system state (build, errors, ports, env)',",
+        "  '5. iranti_write AFTER each WebSearch/WebFetch -- write findings AND dead ends / 404s',",
+        "  '6. iranti_attend(phase=post-response) AFTER every response without exception',",
+        "].join('\\n') + '\\n';",
+        "require('fs').writeSync(1, content);",
+        '',
+    ].join('\n');
+}
+
+/**
+ * Write the protocol-reminder hook script into the project's .codex/ directory
+ * and return a status result matching the workspace file pattern.
+ */
+function writeProtocolReminderHook(projectEnv: string): WorkspaceFileResult {
+    const projectPath = path.dirname(projectEnv);
+    const codexDir = path.join(projectPath, '.codex');
+    const hookFile = path.join(codexDir, 'iranti-protocol-hook.js');
+    const hookContent = buildProtocolReminderHookScript();
+
+    fs.mkdirSync(codexDir, { recursive: true });
+
+    if (!fs.existsSync(hookFile)) {
+        fs.writeFileSync(hookFile, hookContent, 'utf8');
+        return { filePath: hookFile, status: 'created' };
+    }
+
+    const existing = fs.readFileSync(hookFile, 'utf8');
+    if (existing !== hookContent) {
+        fs.writeFileSync(hookFile, hookContent, 'utf8');
+        return { filePath: hookFile, status: 'updated' };
+    }
+
+    return { filePath: hookFile, status: 'unchanged' };
+}
+
+/**
+ * Write a .codex/hooks.json referencing the protocol-reminder hook.
+ * This fires on UserPromptSubmit when the codex_hooks feature is enabled.
+ */
+function writeCodexHooksConfig(projectEnv: string): WorkspaceFileResult {
+    const projectPath = path.dirname(projectEnv);
+    const codexDir = path.join(projectPath, '.codex');
+    const hooksConfigFile = path.join(codexDir, 'hooks.json');
+    const hookScriptPath = path.join(codexDir, 'iranti-protocol-hook.js');
+
+    const hooksConfig = {
+        hooks: {
+            UserPromptSubmit: [
+                {
+                    matcher: '',
+                    hooks: [
+                        {
+                            type: 'command',
+                            command: `node ${hookScriptPath.replace(/\\/g, '/')}`,
+                        },
+                    ],
+                },
+            ],
+        },
+    };
+
+    fs.mkdirSync(codexDir, { recursive: true });
+
+    const nextContent = `${JSON.stringify(hooksConfig, null, 2)}\n`;
+
+    if (!fs.existsSync(hooksConfigFile)) {
+        fs.writeFileSync(hooksConfigFile, nextContent, 'utf8');
+        return { filePath: hooksConfigFile, status: 'created' };
+    }
+
+    const existing = fs.readFileSync(hooksConfigFile, 'utf8');
+    if (existing === nextContent) {
+        return { filePath: hooksConfigFile, status: 'unchanged' };
+    }
+
+    // Merge: keep existing hooks, add/replace UserPromptSubmit from iranti.
+    try {
+        const parsed = JSON.parse(existing) as Record<string, unknown>;
+        const existingHooks = parsed.hooks && typeof parsed.hooks === 'object' && !Array.isArray(parsed.hooks)
+            ? parsed.hooks as Record<string, unknown>
+            : {};
+        const merged = {
+            ...parsed,
+            hooks: {
+                ...existingHooks,
+                UserPromptSubmit: hooksConfig.hooks.UserPromptSubmit,
+            },
+        };
+        const mergedContent = `${JSON.stringify(merged, null, 2)}\n`;
+        if (mergedContent === existing) {
+            return { filePath: hooksConfigFile, status: 'unchanged' };
+        }
+        fs.writeFileSync(hooksConfigFile, mergedContent, 'utf8');
+        return { filePath: hooksConfigFile, status: 'updated' };
+    } catch {
+        // Can't parse existing — overwrite
+        fs.writeFileSync(hooksConfigFile, nextContent, 'utf8');
+        return { filePath: hooksConfigFile, status: 'updated' };
+    }
+}
+
+/**
+ * Check if the codex_hooks feature is enabled globally.
+ */
+function isCodexHooksFeatureEnabled(repoRoot: string): boolean {
+    try {
+        const output = run('codex', ['features', 'list'], repoRoot);
+        const match = output.match(/codex_hooks\s+\S+\s+(true|false)/);
+        return match?.[1] === 'true';
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Enable the codex_hooks feature flag if not already enabled.
+ */
+function ensureCodexHooksFeature(repoRoot: string): boolean {
+    if (isCodexHooksFeatureEnabled(repoRoot)) {
+        return true;
+    }
+    try {
+        run('codex', ['features', 'enable', 'codex_hooks'], repoRoot);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 function canUseInstalledIranti(repoRoot: string): boolean {
     try {
         run('iranti', ['mcp', '--help'], repoRoot);
@@ -488,8 +643,13 @@ async function main(): Promise<void> {
             vscode: writeWorkspaceVsCodeMcpFile(workspaceProjectEnv, options),
             agents: writeWorkspaceAgentsFile(workspaceProjectEnv),
             irantiMd: writeWorkspaceIrantiMdFile(workspaceProjectEnv),
+            protocolHook: writeProtocolReminderHook(workspaceProjectEnv),
+            hooksConfig: writeCodexHooksConfig(workspaceProjectEnv),
         }
         : null;
+
+    // Enable the codex_hooks feature flag so the UserPromptSubmit hook fires.
+    const hooksFeatureEnabled = ensureCodexHooksFeature(repoRoot);
 
     const registered = run('codex', ['mcp', 'get', options.name], repoRoot);
     console.log(registered);
@@ -526,6 +686,9 @@ async function main(): Promise<void> {
             console.log(`Workspace .vscode/mcp.json: ${workspaceFilesResult.vscode.status} (${workspaceFilesResult.vscode.filePath})`);
             console.log(`Workspace AGENTS.md: ${workspaceFilesResult.agents.status} (${workspaceFilesResult.agents.filePath})`);
             console.log(`Workspace IRANTI.md: ${workspaceFilesResult.irantiMd.status} (${workspaceFilesResult.irantiMd.filePath})`);
+            console.log(`Protocol hook: ${workspaceFilesResult.protocolHook.status} (${workspaceFilesResult.protocolHook.filePath})`);
+            console.log(`Hooks config: ${workspaceFilesResult.hooksConfig.status} (${workspaceFilesResult.hooksConfig.filePath})`);
+            console.log(`codex_hooks feature: ${hooksFeatureEnabled ? 'enabled' : 'not enabled (UserPromptSubmit hook requires codex_hooks feature)'}`);
             const closeout = await writeProjectScaffoldCloseout({
                 tool: 'codex',
                 projectPath: path.dirname(boundProjectEnv),
@@ -535,6 +698,8 @@ async function main(): Promise<void> {
                     { path: workspaceFilesResult.vscode.filePath, status: workspaceFilesResult.vscode.status },
                     { path: workspaceFilesResult.agents.filePath, status: workspaceFilesResult.agents.status },
                     { path: workspaceFilesResult.irantiMd.filePath, status: workspaceFilesResult.irantiMd.status },
+                    { path: workspaceFilesResult.protocolHook.filePath, status: workspaceFilesResult.protocolHook.status },
+                    { path: workspaceFilesResult.hooksConfig.filePath, status: workspaceFilesResult.hooksConfig.status },
                 ],
                 agentId: options.agent || 'codex_code',
             });

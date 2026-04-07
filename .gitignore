@@ -7,6 +7,7 @@ dist
 bench_logs/
 logs/
 *.bak_*
+.iranti-write-debt
 .mcp.json
 .vscode/mcp.json
 .claude/settings.local.json

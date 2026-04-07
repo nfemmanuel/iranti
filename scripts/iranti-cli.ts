@@ -264,6 +264,9 @@ type ClaudeProjectScaffoldResult = {
     settings: ClaudeScaffoldStatus;
     claudeMd: ClaudeScaffoldStatus;
     irantiMd: ClaudeScaffoldStatus;
+    writeGuardHook: ClaudeScaffoldStatus;
+    editTrackerHook: ClaudeScaffoldStatus;
+    protocolReminderHook: ClaudeScaffoldStatus;
     closeout: ScaffoldCloseoutStatus;
 };
 
@@ -2851,6 +2854,223 @@ function makeClaudeHookEntry(event: 'SessionStart' | 'UserPromptSubmit' | 'Stop'
     };
 }
 
+function makeClaudeWriteGuardHookEntry(hookScriptDir: string): Record<string, unknown> {
+    return {
+        matcher: 'Edit|Write',
+        hooks: [
+            {
+                type: 'command',
+                command: `node ${quoteClaudeHookArg(path.join(hookScriptDir, 'iranti-write-guard-hook.js'))}`,
+            },
+        ],
+    };
+}
+
+function makeClaudeEditTrackerHookEntry(hookScriptDir: string): Record<string, unknown> {
+    return {
+        matcher: 'Edit|Write',
+        hooks: [
+            {
+                type: 'command',
+                command: `node ${quoteClaudeHookArg(path.join(hookScriptDir, 'iranti-edit-tracker-hook.js'))}`,
+            },
+        ],
+    };
+}
+
+/**
+ * Embedded JS content for the write-guard hook (PreToolUse).
+ * Blocks Edit/Write if the agent has pending unwritten edits in .iranti-write-debt.
+ */
+function buildWriteGuardHookScript(): string {
+    return `#!/usr/bin/env node
+'use strict';
+// Iranti write-guard hook — fires on PreToolUse for Edit/Write.
+// Checks whether the agent has pending unwritten edits by querying the
+// .iranti-write-debt signal file. If the agent edited files without calling
+// iranti_write, this hook DENIES the next edit and injects a reminder.
+//
+// Falls through silently (allows) for non-Iranti projects or if check fails.
+const fs = require('fs');
+const path = require('path');
+
+const envFile = path.join(process.cwd(), '.env.iranti');
+if (!fs.existsSync(envFile)) {
+    process.exit(0);
+}
+
+let input = '';
+try {
+    input = fs.readFileSync(0, 'utf8');
+} catch {
+    process.exit(0);
+}
+
+let hookData;
+try {
+    hookData = JSON.parse(input);
+} catch {
+    process.exit(0);
+}
+
+const toolName = hookData.tool_name || hookData.toolName || '';
+if (toolName !== 'Edit' && toolName !== 'Write') {
+    process.exit(0);
+}
+
+const signalFile = path.join(process.cwd(), '.iranti-write-debt');
+if (!fs.existsSync(signalFile)) {
+    process.exit(0);
+}
+
+let debt;
+try {
+    debt = JSON.parse(fs.readFileSync(signalFile, 'utf8'));
+} catch {
+    process.exit(0);
+}
+
+const pendingEdits = debt.pendingEdits || 0;
+const lastEditAt = debt.lastEditAt || null;
+
+if (pendingEdits < 1) {
+    process.exit(0);
+}
+
+const output = JSON.stringify({
+    hookEventName: 'PreToolUse',
+    permissionDecision: 'deny',
+    permissionDecisionReason: \`Iranti write-guard: \${pendingEdits} file edit(s) since last iranti_write (last edit: \${lastEditAt || 'unknown'}). Call iranti_write for each pending edit before making new changes.\`,
+    additionalContext: [
+        'IRANTI WRITE-GUARD BLOCKED THIS EDIT.',
+        \`You have \${pendingEdits} pending file edit(s) that have not been written to Iranti shared memory.\`,
+        'Before making any more edits, you MUST call iranti_write for each pending edit.',
+        'Include: entity (project/[id]/file/[filename]), absolutePath, lines changed, what changed and why.',
+        'After writing all pending edits, this guard will allow new edits.',
+    ].join('\\n'),
+});
+
+require('fs').writeSync(1, output);
+`;
+}
+
+/**
+ * Embedded JS content for the edit-tracker hook (PostToolUse).
+ * Increments the .iranti-write-debt counter after each Edit/Write.
+ */
+function buildEditTrackerHookScript(): string {
+    return `#!/usr/bin/env node
+'use strict';
+// Iranti edit-tracker hook — fires on PostToolUse for Edit/Write.
+// Increments the write-debt counter so the PreToolUse write-guard knows
+// the agent has pending unwritten edits.
+//
+// The write-debt file (.iranti-write-debt) is cleared by the MCP server
+// when iranti_write is called, completing the enforcement loop.
+//
+// Falls through silently for non-Iranti projects.
+const fs = require('fs');
+const path = require('path');
+
+const envFile = path.join(process.cwd(), '.env.iranti');
+if (!fs.existsSync(envFile)) {
+    process.exit(0);
+}
+
+let input = '';
+try {
+    input = fs.readFileSync(0, 'utf8');
+} catch {
+    process.exit(0);
+}
+
+let hookData;
+try {
+    hookData = JSON.parse(input);
+} catch {
+    process.exit(0);
+}
+
+const toolName = hookData.tool_name || hookData.toolName || '';
+if (toolName !== 'Edit' && toolName !== 'Write') {
+    process.exit(0);
+}
+
+const signalFile = path.join(process.cwd(), '.iranti-write-debt');
+let debt = { pendingEdits: 0, edits: [] };
+
+try {
+    if (fs.existsSync(signalFile)) {
+        debt = JSON.parse(fs.readFileSync(signalFile, 'utf8'));
+    }
+} catch {
+    debt = { pendingEdits: 0, edits: [] };
+}
+
+const editedFile = hookData.tool_input?.file_path
+    || hookData.input?.file_path
+    || hookData.tool_input?.filePath
+    || hookData.input?.filePath
+    || 'unknown';
+
+debt.pendingEdits = (debt.pendingEdits || 0) + 1;
+debt.lastEditAt = new Date().toISOString();
+debt.edits = debt.edits || [];
+debt.edits.push({
+    file: editedFile,
+    at: debt.lastEditAt,
+});
+
+if (debt.edits.length > 20) {
+    debt.edits = debt.edits.slice(-20);
+}
+
+try {
+    fs.writeFileSync(signalFile, JSON.stringify(debt, null, 2), 'utf8');
+} catch {
+    // Can't write signal — that's okay, guard just won't fire
+}
+
+const output = JSON.stringify({
+    hookEventName: 'PostToolUse',
+    additionalContext: \`Iranti: file edited (\${path.basename(editedFile)}). \${debt.pendingEdits} pending edit(s) awaiting iranti_write. Write before making more edits.\`,
+});
+
+require('fs').writeSync(1, output);
+`;
+}
+
+/**
+ * Embedded JS content for the Codex/generic protocol reminder hook (UserPromptSubmit).
+ * Injects a protocol reminder before every user prompt in Codex sessions.
+ */
+function buildProtocolReminderHookScript(): string {
+    return `#!/usr/bin/env node
+'use strict';
+// Iranti protocol reminder hook — fires on UserPromptSubmit for any Iranti project.
+// Cross-platform: runs on Windows, macOS, Linux via Node.js.
+// Exits cleanly with no output for non-Iranti projects.
+const fs = require('fs');
+const path = require('path');
+
+const envFile = path.join(process.cwd(), '.env.iranti');
+if (!fs.existsSync(envFile)) process.exit(0);
+
+const content = [
+  'IRANTI PROTOCOL (required this turn):',
+  '1. iranti_attend(phase=pre-response) BEFORE replying',
+  '2. iranti_attend BEFORE each Read / Grep / Glob / Bash / WebSearch / WebFetch',
+  '3. iranti_write AFTER each Edit or Write:',
+  '   entity: project/[id]/file/[filename] -- not the broad project entity',
+  '   value must include: absolutePath, lines, before, after, verify, why',
+  '4. iranti_write AFTER each Bash that reveals system state (build, errors, ports, env)',
+  '5. iranti_write AFTER each WebSearch/WebFetch -- write findings AND dead ends / 404s',
+  '6. iranti_attend(phase=post-response) AFTER every response without exception',
+].join('\\n') + '\\n';
+require('fs').writeSync(1, content);
+`;
+}
+
 const IRANTI_CLAUDE_ALLOWED_TOOLS = [
     'mcp__iranti__iranti_handshake',
     'mcp__iranti__iranti_attend',
@@ -2890,6 +3110,7 @@ function needsClaudeHookSettingsUpgrade(value: unknown): boolean {
     if (!hooks) {
         return false;
     }
+    // Legacy hook format detection — upgrade needed if old-style entries exist.
     for (const event of ['SessionStart', 'UserPromptSubmit', 'Stop'] as const) {
         const entries = hooks[event];
         if (!Array.isArray(entries) || entries.length === 0) {
@@ -2898,6 +3119,13 @@ function needsClaudeHookSettingsUpgrade(value: unknown): boolean {
         if (entries.some((entry) => isLegacyIrantiClaudeHookEntry(entry))) {
             return true;
         }
+    }
+    // Write-guard hooks missing — upgrade needed to add PreToolUse/PostToolUse.
+    if (!Array.isArray(hooks.PreToolUse) || hooks.PreToolUse.length === 0) {
+        return true;
+    }
+    if (!Array.isArray(hooks.PostToolUse) || hooks.PostToolUse.length === 0) {
+        return true;
     }
     return false;
 }
@@ -2923,7 +3151,7 @@ function mergeClaudePermissionAllowList(existing?: Record<string, unknown>): Rec
     };
 }
 
-function makeClaudeHookSettings(projectEnvPath?: string, existing?: Record<string, unknown>): Record<string, unknown> {
+function makeClaudeHookSettings(projectEnvPath?: string, existing?: Record<string, unknown>, hookScriptDir?: string): Record<string, unknown> {
     const existingHooks = existing && isClaudeHooksObject(existing.hooks)
         ? existing.hooks
         : {};
@@ -2937,6 +3165,19 @@ function makeClaudeHookSettings(projectEnvPath?: string, existing?: Record<strin
             .filter((value) => value !== 'iranti')
         : undefined;
 
+    const hooks: Record<string, unknown> = {
+        ...existingHooks,
+        SessionStart: [makeClaudeHookEntry('SessionStart', projectEnvPath)],
+        UserPromptSubmit: [makeClaudeHookEntry('UserPromptSubmit', projectEnvPath)],
+        Stop: [makeClaudeHookEntry('Stop', projectEnvPath)],
+    };
+
+    // Write-guard hooks: block edits until prior edits are written to Iranti.
+    if (hookScriptDir) {
+        hooks.PreToolUse = [makeClaudeWriteGuardHookEntry(hookScriptDir)];
+        hooks.PostToolUse = [makeClaudeEditTrackerHookEntry(hookScriptDir)];
+    }
+
     return {
         ...(existing ?? {}),
         enableAllProjectMcpServers: false,
@@ -2948,12 +3189,7 @@ function makeClaudeHookSettings(projectEnvPath?: string, existing?: Record<strin
         ...(existingEnabledMcpjsonServers
             ? { enabledMcpjsonServers: existingEnabledMcpjsonServers }
             : {}),
-        hooks: {
-            ...existingHooks,
-            SessionStart: [makeClaudeHookEntry('SessionStart', projectEnvPath)],
-            UserPromptSubmit: [makeClaudeHookEntry('UserPromptSubmit', projectEnvPath)],
-            Stop: [makeClaudeHookEntry('Stop', projectEnvPath)],
-        },
+        hooks,
     };
 }
 
@@ -3047,20 +3283,64 @@ async function writeClaudeCodeProjectFiles(projectPath: string, projectEnvPath?:
 
     const claudeDir = path.join(projectPath, '.claude');
     await ensureDir(claudeDir);
+
+    // Write hook scripts into .claude/ directory.
+    const writeGuardHookFile = path.join(claudeDir, 'iranti-write-guard-hook.js');
+    let writeGuardHookStatus: ClaudeScaffoldStatus = 'unchanged';
+    const writeGuardContent = buildWriteGuardHookScript();
+    if (!fs.existsSync(writeGuardHookFile)) {
+        await writeText(writeGuardHookFile, writeGuardContent);
+        writeGuardHookStatus = 'created';
+    } else {
+        const existing = fs.readFileSync(writeGuardHookFile, 'utf8');
+        if (existing !== writeGuardContent) {
+            await writeText(writeGuardHookFile, writeGuardContent);
+            writeGuardHookStatus = 'updated';
+        }
+    }
+
+    const editTrackerHookFile = path.join(claudeDir, 'iranti-edit-tracker-hook.js');
+    let editTrackerHookStatus: ClaudeScaffoldStatus = 'unchanged';
+    const editTrackerContent = buildEditTrackerHookScript();
+    if (!fs.existsSync(editTrackerHookFile)) {
+        await writeText(editTrackerHookFile, editTrackerContent);
+        editTrackerHookStatus = 'created';
+    } else {
+        const existing = fs.readFileSync(editTrackerHookFile, 'utf8');
+        if (existing !== editTrackerContent) {
+            await writeText(editTrackerHookFile, editTrackerContent);
+            editTrackerHookStatus = 'updated';
+        }
+    }
+
+    const protocolReminderHookFile = path.join(claudeDir, 'iranti-protocol-hook.js');
+    let protocolReminderHookStatus: ClaudeScaffoldStatus = 'unchanged';
+    const protocolReminderContent = buildProtocolReminderHookScript();
+    if (!fs.existsSync(protocolReminderHookFile)) {
+        await writeText(protocolReminderHookFile, protocolReminderContent);
+        protocolReminderHookStatus = 'created';
+    } else {
+        const existing = fs.readFileSync(protocolReminderHookFile, 'utf8');
+        if (existing !== protocolReminderContent) {
+            await writeText(protocolReminderHookFile, protocolReminderContent);
+            protocolReminderHookStatus = 'updated';
+        }
+    }
+
     const settingsFile = path.join(claudeDir, 'settings.local.json');
     let settingsStatus: ClaudeScaffoldStatus = 'unchanged';
     if (!fs.existsSync(settingsFile)) {
-        await writeText(settingsFile, `${JSON.stringify(makeClaudeHookSettings(projectEnvPath), null, 2)}\n`);
+        await writeText(settingsFile, `${JSON.stringify(makeClaudeHookSettings(projectEnvPath, undefined, claudeDir), null, 2)}\n`);
         settingsStatus = 'created';
     } else {
         const existingSettings = readJsonFile<Record<string, unknown>>(settingsFile);
         if (existingSettings && typeof existingSettings === 'object' && !Array.isArray(existingSettings)) {
             if (force || needsClaudeHookSettingsUpgrade(existingSettings)) {
-                await writeText(settingsFile, `${JSON.stringify(makeClaudeHookSettings(projectEnvPath, existingSettings), null, 2)}\n`);
+                await writeText(settingsFile, `${JSON.stringify(makeClaudeHookSettings(projectEnvPath, existingSettings, claudeDir), null, 2)}\n`);
                 settingsStatus = 'updated';
             }
         } else if (force) {
-            await writeText(settingsFile, `${JSON.stringify(makeClaudeHookSettings(projectEnvPath), null, 2)}\n`);
+            await writeText(settingsFile, `${JSON.stringify(makeClaudeHookSettings(projectEnvPath, undefined, claudeDir), null, 2)}\n`);
             settingsStatus = 'updated';
         }
     }
@@ -3110,6 +3390,9 @@ async function writeClaudeCodeProjectFiles(projectPath: string, projectEnvPath?:
         files: [
             { path: mcpFile, status: mcpStatus },
             { path: vscodeMcpFile, status: vscodeMcpStatus },
+            { path: writeGuardHookFile, status: writeGuardHookStatus },
+            { path: editTrackerHookFile, status: editTrackerHookStatus },
+            { path: protocolReminderHookFile, status: protocolReminderHookStatus },
             { path: settingsFile, status: settingsStatus },
             { path: claudeMdFile, status: claudeMdStatus },
             { path: irantiMdFile, status: irantiMdStatus },
@@ -3123,6 +3406,9 @@ async function writeClaudeCodeProjectFiles(projectPath: string, projectEnvPath?:
         settings: settingsStatus,
         claudeMd: claudeMdStatus,
         irantiMd: irantiMdStatus,
+        writeGuardHook: writeGuardHookStatus,
+        editTrackerHook: editTrackerHookStatus,
+        protocolReminderHook: protocolReminderHookStatus,
         closeout,
     };
 }
@@ -9218,12 +9504,14 @@ async function claudeSetupCommand(args: ParsedArgs): Promise<void> {
             if (result.vscodeMcp === 'updated') updatedVsCodeMcp += 1;
             if (result.settings === 'created') createdSettings += 1;
             if (result.settings === 'updated') updatedSettings += 1;
-            if (result.mcp === 'unchanged' && result.vscodeMcp === 'unchanged' && result.settings === 'unchanged' && result.irantiMd === 'unchanged') unchanged += 1;
+            if (result.mcp === 'unchanged' && result.vscodeMcp === 'unchanged' && result.settings === 'unchanged' && result.irantiMd === 'unchanged' && result.writeGuardHook === 'unchanged' && result.editTrackerHook === 'unchanged') unchanged += 1;
             console.log(`  ${projectPath}`);
-            console.log(`    mcp       ${result.mcp}`);
-            console.log(`    vscode    ${result.vscodeMcp}`);
-            console.log(`    settings  ${result.settings}`);
-            console.log(`    iranti.md ${result.irantiMd}`);
+            console.log(`    mcp          ${result.mcp}`);
+            console.log(`    vscode       ${result.vscodeMcp}`);
+            console.log(`    settings     ${result.settings}`);
+            console.log(`    iranti.md    ${result.irantiMd}`);
+            console.log(`    write-guard  ${result.writeGuardHook}`);
+            console.log(`    edit-tracker ${result.editTrackerHook}`);
         }
         console.log('');
         console.log('Summary:');
@@ -9261,19 +9549,25 @@ async function claudeSetupCommand(args: ParsedArgs): Promise<void> {
     const result = await writeClaudeCodeProjectFiles(projectPath, projectEnvPath, force);
 
     console.log(`${okLabel()} Claude Code integration scaffolded`);
-    console.log(`  project   ${projectPath}`);
-    console.log(`  binding   ${projectEnvPath}`);
-    console.log(`  mcp       ${path.join(projectPath, '.mcp.json')}`);
-    console.log(`  vscode    ${path.join(projectPath, '.vscode', 'mcp.json')}`);
-    console.log(`  settings  ${path.join(projectPath, '.claude', 'settings.local.json')}`);
-    console.log(`  claude.md ${path.join(projectPath, 'CLAUDE.md')}`);
-    console.log(`  iranti.md ${path.join(projectPath, 'IRANTI.md')}`);
-    console.log(`  mcp status        ${result.mcp}`);
-    console.log(`  vscode status     ${result.vscodeMcp}`);
-    console.log(`  settings status   ${result.settings}`);
-    console.log(`  claude.md status  ${result.claudeMd}`);
-    console.log(`  iranti.md status  ${result.irantiMd}`);
-    console.log(`  memory closeout   ${result.closeout.status} (${result.closeout.detail})`);
+    console.log(`  project      ${projectPath}`);
+    console.log(`  binding      ${projectEnvPath}`);
+    console.log(`  mcp          ${path.join(projectPath, '.mcp.json')}`);
+    console.log(`  vscode       ${path.join(projectPath, '.vscode', 'mcp.json')}`);
+    console.log(`  settings     ${path.join(projectPath, '.claude', 'settings.local.json')}`);
+    console.log(`  claude.md    ${path.join(projectPath, 'CLAUDE.md')}`);
+    console.log(`  iranti.md    ${path.join(projectPath, 'IRANTI.md')}`);
+    console.log(`  write-guard  ${path.join(projectPath, '.claude', 'iranti-write-guard-hook.js')}`);
+    console.log(`  edit-tracker ${path.join(projectPath, '.claude', 'iranti-edit-tracker-hook.js')}`);
+    console.log(`  protocol     ${path.join(projectPath, '.claude', 'iranti-protocol-hook.js')}`);
+    console.log(`  mcp status           ${result.mcp}`);
+    console.log(`  vscode status        ${result.vscodeMcp}`);
+    console.log(`  settings status      ${result.settings}`);
+    console.log(`  claude.md status     ${result.claudeMd}`);
+    console.log(`  iranti.md status     ${result.irantiMd}`);
+    console.log(`  write-guard status   ${result.writeGuardHook}`);
+    console.log(`  edit-tracker status  ${result.editTrackerHook}`);
+    console.log(`  protocol status      ${result.protocolReminderHook}`);
+    console.log(`  memory closeout      ${result.closeout.status} (${result.closeout.detail})`);
     console.log(`${infoLabel()} Next: open Claude Code in this project and verify Iranti tools are available.`);
 }
 

@@ -274,8 +274,12 @@ async function main(): Promise<void> {
                     files: [
                         { path: path.join(projectDir, '.mcp.json'), status: 'created' },
                         { path: path.join(projectDir, '.vscode', 'mcp.json'), status: 'created' },
+                        { path: path.join(projectDir, '.claude', 'iranti-write-guard-hook.js'), status: 'created' },
+                        { path: path.join(projectDir, '.claude', 'iranti-edit-tracker-hook.js'), status: 'created' },
+                        { path: path.join(projectDir, '.claude', 'iranti-protocol-hook.js'), status: 'created' },
                         { path: path.join(projectDir, '.claude', 'settings.local.json'), status: 'created' },
                         { path: path.join(projectDir, 'CLAUDE.md'), status: 'created' },
+                        { path: path.join(projectDir, 'IRANTI.md'), status: 'created' },
                     ],
                     updatedAt: scaffoldCloseout?.valueRaw && typeof scaffoldCloseout.valueRaw === 'object'
                         ? (scaffoldCloseout.valueRaw as { updatedAt?: string }).updatedAt
