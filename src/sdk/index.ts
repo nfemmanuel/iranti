@@ -619,14 +619,16 @@ export class Iranti {
             if (!brief?.sessionStarted) return { handshakeRestored: false, attendRestored: false };
 
             const sessionStartedAt = new Date(brief.sessionStarted).getTime();
-            if (isNaN(sessionStartedAt) || now - sessionStartedAt > handshakeTtl) {
+            // Use briefGeneratedAt (last activity time) for TTL, not sessionStarted (session creation time).
+            // Sessions are persistent and can be days old; briefGeneratedAt is updated on every handshake/attend.
+            const briefGeneratedAt = new Date(brief.briefGeneratedAt).getTime();
+            if (isNaN(sessionStartedAt) || isNaN(briefGeneratedAt) || now - briefGeneratedAt > handshakeTtl) {
                 return { handshakeRestored: false, attendRestored: false };
             }
 
             const complianceUpdatedAt = brief.compliance?.lastUpdated
                 ? new Date(brief.compliance.lastUpdated).getTime()
                 : NaN;
-            const briefGeneratedAt = new Date(brief.briefGeneratedAt).getTime();
             const lastAttendTime = !isNaN(complianceUpdatedAt) ? Math.max(briefGeneratedAt, complianceUpdatedAt) : briefGeneratedAt;
             const lastAttendPhaseRaw = brief.compliance?.counters.lastAttendPhase;
             const lastAttendPhase: 'pre-response' | 'post-response' | 'mid-turn' =
