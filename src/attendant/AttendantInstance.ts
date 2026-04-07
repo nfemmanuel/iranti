@@ -2995,8 +2995,8 @@ export class AttendantInstance {
                     .filter(Boolean);
                 searchSuggestion = {
                     hint: terms.length > 0
-                        ? `No facts found via attend. Try iranti_search with: ${terms.join(' ')}`
-                        : 'No facts found via attend. Try iranti_search with a different query or entity path.',
+                        ? `Iranti found no auto-inject facts for this turn. Call iranti_search(query='${terms.join(' ')}') BEFORE reading the codebase — empty attend facts do NOT mean data is absent; Iranti is the cross-session source of truth.`
+                        : 'Iranti found no auto-inject facts for this turn. Call iranti_search with a relevant query BEFORE reading the codebase — do not conclude absence of data without searching first.',
                     suggestedTerms: terms,
                     alternativeEntities,
                 };
