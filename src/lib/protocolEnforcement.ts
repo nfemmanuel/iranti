@@ -184,7 +184,7 @@ export class AgentProtocolTracker {
                     agentId,
                     operation,
                     message: `Protocol violation: ${operation} is blocked for agent ${agentId} until iranti_attend is called for this turn.`,
-                    requiredAction: 'Call iranti_attend(phase=\'pre-response\') immediately before this discovery step. After the response, call iranti_attend(phase=\'post-response\') and persist durable findings with iranti_write or iranti_checkpoint.',
+                    requiredAction: 'Call iranti_attend(phase=\'pre-response\'), then RETRY this exact operation (' + operation + '). The attend call is a protocol gate, not a search — empty facts from attend does NOT mean the data is absent. You MUST retry the blocked operation after attend succeeds.',
                 };
             }
         }

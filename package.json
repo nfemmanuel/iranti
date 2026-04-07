@@ -1,6 +1,6 @@
 {
   "name": "iranti",
-  "version": "0.3.14",
+  "version": "0.3.15",
   "description": "Memory infrastructure for multi-agent AI systems",
   "main": "dist/src/sdk/index.js",
   "files": [
