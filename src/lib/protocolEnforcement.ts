@@ -118,6 +118,23 @@ export class AgentProtocolTracker {
         });
     }
 
+    bootstrapState(agentId: string, state: {
+        lastHandshakeAt?: number;
+        lastAttendAt?: number;
+        lastAttendPhase?: 'pre-response' | 'post-response' | 'mid-turn';
+        discoveryBudget?: number;
+        pendingPostResponse?: boolean;
+    }): void {
+        const current = this.state.get(agentId) ?? { discoveryBudget: 0, pendingPostResponse: false, pendingMemoryUseAck: false };
+        const next: AgentProtocolState = { ...current };
+        if (state.lastHandshakeAt !== undefined) next.lastHandshakeAt = state.lastHandshakeAt;
+        if (state.lastAttendAt !== undefined) next.lastAttendAt = state.lastAttendAt;
+        if (state.lastAttendPhase !== undefined) next.lastAttendPhase = state.lastAttendPhase;
+        if (state.discoveryBudget !== undefined) next.discoveryBudget = state.discoveryBudget;
+        if (state.pendingPostResponse !== undefined) next.pendingPostResponse = state.pendingPostResponse;
+        this.state.set(agentId, next);
+    }
+
     clearAgent(agentId: string): void {
         this.state.delete(agentId);
     }

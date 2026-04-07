@@ -2873,6 +2873,7 @@ export class AttendantInstance {
                         contextCallCount: this.contextCallCount,
                         shouldInject: false,
                         attendReason: 'memory_not_needed',
+                        phase: input.phase ?? null,
                     }),
                 });
                 getStaffEventEmitter().emit({
@@ -3047,6 +3048,7 @@ export class AttendantInstance {
                     advisoryScopes: this.advisoryLearningProfile?.scopesUsed ?? [],
                     freshStateEntities: freshState.entities,
                     freshStateKeys: freshState.priorityKeys,
+                    phase: input.phase ?? null,
                     }),
                 });
             getStaffEventEmitter().emit({

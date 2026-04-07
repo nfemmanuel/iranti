@@ -416,6 +416,17 @@ async function main(): Promise<void> {
 
     await ensureDefaultAgent(iranti);
 
+    // Restore protocol tracker state from the session ledger so that
+    // hosts which restart the MCP subprocess per tool call (e.g. Copilot CLI)
+    // can complete a cross-process handshake → attend → search sequence.
+    const agentForBootstrap = defaultAgentId();
+    const bootstrapResult = await iranti.loadProtocolStateFromLedger(agentForBootstrap);
+    if (bootstrapResult.handshakeRestored || bootstrapResult.attendRestored) {
+        process.stderr.write(
+            `[iranti-mcp] Protocol state restored from ledger: handshake=${bootstrapResult.handshakeRestored} attend=${bootstrapResult.attendRestored}\n`
+        );
+    }
+
     const server = new McpServer({
         name: 'iranti-mcp',
         version: '0.3.11',

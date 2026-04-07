@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { initDb } from '../library/client';
+import { getDb, initDb } from '../library/client';
 import {
     IStaffEventEmitter,
     NoopEventEmitter,
@@ -595,6 +595,61 @@ export class Iranti {
             this.sessionLedgerContext.agentId = typeof context.agentId === 'string'
                 ? (context.agentId.trim() || undefined)
                 : undefined;
+        }
+    }
+
+    async loadProtocolStateFromLedger(agentId: string, options: {
+        handshakeTtlMs?: number;
+        attendTtlMs?: number;
+    } = {}): Promise<{ handshakeRestored: boolean; attendRestored: boolean }> {
+        const handshakeTtl = options.handshakeTtlMs ?? 10 * 60 * 1000;
+        const attendTtl = options.attendTtlMs ?? 3 * 60 * 1000;
+        const now = Date.now();
+        try {
+            // Read from the synchronously-written attendant_state knowledge entry
+            // rather than the fire-and-forget session ledger, to avoid a race
+            // condition where the DB write hasn't landed before process exit.
+            const row = await getDb().knowledgeEntry.findUnique({
+                where: { entityType_entityId_key: { entityType: 'agent', entityId: agentId, key: 'attendant_state' } },
+                select: { valueRaw: true, updatedAt: true },
+            });
+            if (!row) return { handshakeRestored: false, attendRestored: false };
+
+            const brief = row.valueRaw as WorkingMemoryBrief | null;
+            if (!brief?.sessionStarted) return { handshakeRestored: false, attendRestored: false };
+
+            const sessionStartedAt = new Date(brief.sessionStarted).getTime();
+            if (isNaN(sessionStartedAt) || now - sessionStartedAt > handshakeTtl) {
+                return { handshakeRestored: false, attendRestored: false };
+            }
+
+            const complianceUpdatedAt = brief.compliance?.lastUpdated
+                ? new Date(brief.compliance.lastUpdated).getTime()
+                : NaN;
+            const briefGeneratedAt = new Date(brief.briefGeneratedAt).getTime();
+            const lastAttendTime = !isNaN(complianceUpdatedAt) ? Math.max(briefGeneratedAt, complianceUpdatedAt) : briefGeneratedAt;
+            const lastAttendPhaseRaw = brief.compliance?.counters.lastAttendPhase;
+            const lastAttendPhase: 'pre-response' | 'post-response' | 'mid-turn' =
+                (lastAttendPhaseRaw === 'pre-response' || lastAttendPhaseRaw === 'post-response' || lastAttendPhaseRaw === 'mid-turn')
+                    ? lastAttendPhaseRaw : 'pre-response';
+
+            const attendRestored = !isNaN(lastAttendTime)
+                && now - lastAttendTime <= attendTtl
+                && lastAttendTime > sessionStartedAt;
+
+            this.protocolTracker.bootstrapState(agentId, {
+                lastHandshakeAt: sessionStartedAt,
+                ...(attendRestored && {
+                    lastAttendAt: lastAttendTime,
+                    lastAttendPhase,
+                    discoveryBudget: lastAttendPhase !== 'post-response' ? 1 : 0,
+                    pendingPostResponse: lastAttendPhase === 'pre-response' || lastAttendPhase === 'mid-turn',
+                }),
+            });
+
+            return { handshakeRestored: true, attendRestored };
+        } catch {
+            return { handshakeRestored: false, attendRestored: false };
         }
     }
 
