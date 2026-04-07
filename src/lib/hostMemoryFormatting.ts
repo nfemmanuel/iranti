@@ -79,7 +79,7 @@ export function formatStructuredFactBlock<T extends HostMemoryFactInput>(
         const identity = splitEntityKey(fact.entityKey);
         const compact = isCompactFact(fact);
         if (compact) {
-            lines.push(`- ${fact.factId} | ${fact.entityKey}`);
+            lines.push(`- ${fact.factId} | ${fact.entityKey} | source=${fact.source}`);
         } else {
             lines.push(`- ${fact.factId} | entity=${identity.entity} | key=${identity.key || '(none)'} | confidence=${fact.confidence} | source=${fact.source}`);
         }

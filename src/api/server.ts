@@ -31,6 +31,16 @@ import { createHealthCheckState, createVectorBackendMonitor, deriveOperatorStatu
 
 const app = express();
 
+// Trust proxy: set IRANTI_TRUST_PROXY=true when running behind nginx/caddy/etc.
+// Without this, req.ip falls back to the socket address and X-Forwarded-For is ignored,
+// which allows IP spoofing of the unauthenticated rate-limit fallback path.
+// Accepts: 'true'|'1' (trust all proxies), a hop count integer, or a specific IP/subnet.
+const trustProxyEnv = process.env.IRANTI_TRUST_PROXY?.trim();
+if (trustProxyEnv && trustProxyEnv !== 'false' && trustProxyEnv !== '0') {
+    const hopCount = Number.parseInt(trustProxyEnv, 10);
+    app.set('trust proxy', Number.isFinite(hopCount) ? hopCount : trustProxyEnv === 'true' || trustProxyEnv === '1' ? true : trustProxyEnv);
+}
+
 // Route prefixes
 const ROUTES = {
     agents: '/agents',

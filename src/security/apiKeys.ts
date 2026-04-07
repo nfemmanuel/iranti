@@ -82,6 +82,14 @@ function safeEqual(a: string, b: string): boolean {
     return timingSafeEqual(ab, bb);
 }
 
+// Hash both sides to a fixed-length digest before comparing.
+// This removes the length oracle present in direct buffer comparison.
+function safeEqualString(a: string, b: string): boolean {
+    const aHash = createHash('sha256').update(a).digest();
+    const bHash = createHash('sha256').update(b).digest();
+    return timingSafeEqual(aHash, bHash);
+}
+
 function parseLegacyList(): string[] {
     const raw = process.env.IRANTI_API_KEYS ?? '';
     return raw
@@ -277,12 +285,19 @@ export async function validateApiKey(providedKey: string | undefined): Promise<A
     }
 
     const provided = providedKey.trim();
-    if (legacy && provided === legacy) {
+    if (legacy && safeEqualString(provided, legacy)) {
         return { ok: true, mode: 'legacy_env', keyId: 'legacy_env', owner: 'legacy_env', scopes: ['*'] };
     }
 
-    if (legacyList.length > 0 && legacyList.includes(provided)) {
-        return { ok: true, mode: 'legacy_list', keyId: 'legacy_list', owner: 'legacy_list', scopes: ['*'] };
+    if (legacyList.length > 0) {
+        // Iterate all entries without short-circuiting to avoid a timing oracle.
+        let matchedLegacy = false;
+        for (const key of legacyList) {
+            if (safeEqualString(provided, key)) matchedLegacy = true;
+        }
+        if (matchedLegacy) {
+            return { ok: true, mode: 'legacy_list', keyId: 'legacy_list', owner: 'legacy_list', scopes: ['*'] };
+        }
     }
 
     const parsed = parseApiKeyToken(provided);
