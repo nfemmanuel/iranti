@@ -157,6 +157,25 @@ async function testCopilotSetupWritesWorkspaceFiles(root: string): Promise<void>
     assert.match(irantiMdText, /iranti_write/i, 'IRANTI.md should require durable writes');
     assert.match(irantiMdText, /iranti_checkpoint/i, 'IRANTI.md should require checkpointing');
 
+    // ── .github/hooks/iranti-protocol-hook.js ──
+    const hookScriptFile = path.join(projectDir, '.github', 'hooks', 'iranti-protocol-hook.js');
+    assert.ok(fs.existsSync(hookScriptFile), 'copilot-setup should create .github/hooks/iranti-protocol-hook.js');
+    const hookScriptText = fs.readFileSync(hookScriptFile, 'utf8');
+    assert.match(hookScriptText, /IRANTI PROTOCOL/, 'hook script should contain IRANTI PROTOCOL reminder');
+    assert.match(hookScriptText, /iranti_attend/, 'hook script should require iranti_attend');
+    assert.match(hookScriptText, /iranti_handshake/, 'hook script should remind about iranti_handshake');
+
+    // ── .github/hooks/hooks.json ──
+    const hooksJsonFile = path.join(projectDir, '.github', 'hooks', 'hooks.json');
+    assert.ok(fs.existsSync(hooksJsonFile), 'copilot-setup should create .github/hooks/hooks.json');
+    const hooksConfig = JSON.parse(fs.readFileSync(hooksJsonFile, 'utf8')) as {
+        version?: number;
+        hooks?: Record<string, unknown[]>;
+    };
+    assert.strictEqual(hooksConfig.version, 1, 'hooks.json should have version 1');
+    assert.ok(Array.isArray(hooksConfig.hooks?.userPromptSubmitted), 'hooks.json should have userPromptSubmitted array');
+    assert.strictEqual((hooksConfig.hooks?.userPromptSubmitted ?? []).length, 1, 'hooks.json userPromptSubmitted should have one entry');
+
     // ── Console output ──
     assert.match(stdout, /Global Copilot MCP config: created/i, 'copilot-setup output should report global config created');
     assert.match(stdout, /GitHub Copilot CLI is now configured/i, 'copilot-setup output should confirm Copilot CLI configuration');
@@ -167,6 +186,8 @@ async function testCopilotSetupWritesWorkspaceFiles(root: string): Promise<void>
     assert.match(stdout, /Workspace \.vscode\/mcp\.json:/i, 'copilot-setup output should report workspace .vscode/mcp.json status');
     assert.match(stdout, /Workspace \.github\/copilot-instructions\.md:/i, 'copilot-setup output should report copilot-instructions.md status');
     assert.match(stdout, /Workspace IRANTI\.md:/i, 'copilot-setup output should report IRANTI.md status');
+    assert.match(stdout, /Workspace \.github\/hooks\/iranti-protocol-hook\.js:/i, 'copilot-setup output should report hook script status');
+    assert.match(stdout, /Workspace \.github\/hooks\/hooks\.json:/i, 'copilot-setup output should report hooks.json status');
     assert.match(stdout, /Shared memory closeout: (written|skipped|failed)/i, 'copilot-setup output should report closeout status');
 }
 
@@ -348,6 +369,8 @@ async function testNoWorkspaceFileFlag(root: string): Promise<void> {
     assert.ok(!fs.existsSync(path.join(projectDir, '.vscode', 'mcp.json')), '.vscode/mcp.json should not be created with --no-workspace-file');
     assert.ok(!fs.existsSync(path.join(projectDir, '.github', 'copilot-instructions.md')), 'copilot-instructions.md should not be created with --no-workspace-file');
     assert.ok(!fs.existsSync(path.join(projectDir, 'IRANTI.md')), 'IRANTI.md should not be created with --no-workspace-file');
+    assert.ok(!fs.existsSync(path.join(projectDir, '.github', 'hooks', 'iranti-protocol-hook.js')), 'iranti-protocol-hook.js should not be created with --no-workspace-file');
+    assert.ok(!fs.existsSync(path.join(projectDir, '.github', 'hooks', 'hooks.json')), 'hooks.json should not be created with --no-workspace-file');
 }
 
 // ── Test: custom --agent, --source, --provider flags ─────────────────
@@ -546,6 +569,43 @@ async function testUnknownArgumentFails(): Promise<void> {
     }
 }
 
+// ── Test: hooks.json merge preserves existing hooks ──────────────────
+
+async function testCopilotHooksJsonMergePreservesExistingHooks(root: string): Promise<void> {
+    const projectDir = path.join(root, 'hooks-merge');
+    const githubHooksDir = path.join(projectDir, '.github', 'hooks');
+    fs.mkdirSync(githubHooksDir, { recursive: true });
+    const projectEnv = path.join(projectDir, '.env.iranti');
+    fs.writeFileSync(projectEnv, 'IRANTI_URL=http://localhost:3500\nIRANTI_API_KEY=test\n', 'utf8');
+
+    // Pre-existing hooks.json with an unrelated hook
+    const existingHooks = {
+        version: 1,
+        hooks: {
+            sessionStart: [{ type: 'command', command: 'echo session-start' }],
+        },
+    };
+    fs.writeFileSync(path.join(githubHooksDir, 'hooks.json'), JSON.stringify(existingHooks, null, 2), 'utf8');
+
+    const fakeHome = path.join(root, 'fake-home-hooks-merge');
+    fs.mkdirSync(fakeHome, { recursive: true });
+
+    const result = runCopilotSetup(['--project-env', projectEnv], {
+        cwd: projectDir,
+        env: { USERPROFILE: fakeHome, HOME: fakeHome, NO_COLOR: '1' },
+    });
+
+    assert.strictEqual(result.status, 0, `copilot-setup should succeed when merging hooks.json:\n${result.stdout}\n${result.stderr}`);
+
+    const merged = JSON.parse(
+        fs.readFileSync(path.join(githubHooksDir, 'hooks.json'), 'utf8'),
+    ) as { version?: number; hooks?: Record<string, unknown[]> };
+
+    assert.ok(Array.isArray(merged.hooks?.userPromptSubmitted), 'merged hooks.json should have userPromptSubmitted');
+    assert.ok(Array.isArray(merged.hooks?.sessionStart), 'merged hooks.json should preserve existing sessionStart hook');
+    assert.strictEqual((merged.hooks?.sessionStart ?? []).length, 1, 'sessionStart hook should be preserved');
+}
+
 // ── Test: scaffoldCloseout type union includes copilot ───────────────
 
 async function testScaffoldCloseoutCopilotType(): Promise<void> {
@@ -639,6 +699,9 @@ async function main(): Promise<void> {
 
         await testCopilotHostIdentityDiffersFromCodex(root);
         console.log('  copilot host identity differs from codex: passed');
+
+        await testCopilotHooksJsonMergePreservesExistingHooks(root);
+        console.log('  hooks.json merge preserves existing hooks: passed');
 
         console.log('copilot-setup tests passed');
     } finally {

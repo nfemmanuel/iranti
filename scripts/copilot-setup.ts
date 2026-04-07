@@ -24,6 +24,8 @@ type WorkspaceFilesResult = {
     vscode: WorkspaceFileResult;
     instructions: WorkspaceFileResult;
     irantiMd: WorkspaceFileResult;
+    hookScript: WorkspaceFileResult;
+    hooksJson: WorkspaceFileResult;
 };
 
 function parseArgs(argv: string[]): SetupOptions {
@@ -361,7 +363,7 @@ function buildCopilotInstructionsBlock(): string {
         '',
         'This project uses Iranti for shared memory. Follow the attend/write/checkpoint protocol in `IRANTI.md`.',
         '',
-        '**Session start:** Call `mcp__iranti__iranti_handshake` before responding to the first user message.',
+        '**Session start:** Call `mcp__iranti__iranti_handshake` IMMEDIATELY on the first user message — before deciding what to respond, before asking any clarification questions, before reading any files. Do not ask the user for clarification before calling handshake and `iranti_search`. Iranti may already have the context needed to answer directly.',
         '',
         '**Every turn:**',
         '1. Call `iranti_attend(phase=\'pre-response\')` before responding.',
@@ -369,7 +371,7 @@ function buildCopilotInstructionsBlock(): string {
         '3. Call `iranti_write` after every file edit, Bash that reveals system state, WebSearch/WebFetch finding, and subagent result. Write: what changed, why, what breaks if removed.',
         '4. Call `iranti_attend(phase=\'post-response\')` after every response.',
         '',
-        '**Recall:** When the user asks about prior work, status, or progress — call `iranti_search` BEFORE reading the codebase. If `iranti_attend` returns a `searchSuggestion`, call `iranti_search` with those terms. Empty attend facts do NOT mean the data is absent; Iranti is the cross-session source of truth.',
+        '**Recall:** When the user asks about prior work, status, or progress — call `iranti_search` BEFORE reading the codebase. Do not ask the user for clarification — call `iranti_search` first; Iranti likely has the answer. If `iranti_attend` returns a `searchSuggestion`, call `iranti_search` with those terms. Empty attend facts do NOT mean the data is absent; Iranti is the cross-session source of truth.',
         '',
         '**Writes:** Use a specific entity for the work area (e.g. `project/iranti_benchmarking` for benchmark findings, not the top-level project entity). If unsure of the right entity, use `iranti_search` to find where prior facts on that topic were stored.',
         '',
@@ -520,6 +522,126 @@ function writeWorkspaceVsCodeMcpFile(projectEnv: string, options: SetupOptions):
     return { filePath: mcpFile, status: 'updated' };
 }
 
+/**
+ * Protocol reminder hook script content for Copilot userPromptSubmitted.
+ * Same content as the Codex version — fires before every user prompt.
+ */
+function buildCopilotProtocolReminderHookScript(): string {
+    return [
+        '#!/usr/bin/env node',
+        "'use strict';",
+        '// Iranti protocol reminder hook — fires on userPromptSubmitted for any Iranti project.',
+        '// Cross-platform: runs on Windows, macOS, Linux via Node.js.',
+        '// Exits cleanly with no output for non-Iranti projects.',
+        "const fs = require('fs');",
+        "const path = require('path');",
+        '',
+        "const envFile = path.join(process.cwd(), '.env.iranti');",
+        'if (!fs.existsSync(envFile)) process.exit(0);',
+        '',
+        'const content = [',
+        "  'IRANTI PROTOCOL (required this turn):',",
+        "  '1. If handshake not yet called: call iranti_handshake FIRST — before clarifying, before reading files.',",
+        "  '2. iranti_attend(phase=pre-response) BEFORE replying',",
+        "  '3. iranti_attend BEFORE each Read / Grep / Glob / Bash / WebSearch / WebFetch',",
+        "  '4. iranti_write AFTER each Edit or Write:',",
+        "  '   entity: project/[id]/file/[filename] -- not the broad project entity',",
+        "  '   value must include: absolutePath, lines, before, after, verify, why',",
+        "  '5. iranti_write AFTER each Bash that reveals system state (build, errors, ports, env)',",
+        "  '6. iranti_write AFTER each WebSearch/WebFetch -- write findings AND dead ends / 404s',",
+        "  '7. iranti_attend(phase=post-response) AFTER every response without exception',",
+        "].join('\\n') + '\\n';",
+        "require('fs').writeSync(1, content);",
+        '',
+    ].join('\n');
+}
+
+/**
+ * Write the protocol-reminder hook script into the project's .github/hooks/ directory.
+ */
+function writeCopilotProtocolReminderHook(projectEnv: string): WorkspaceFileResult {
+    const projectPath = path.dirname(projectEnv);
+    const hooksDir = path.join(projectPath, '.github', 'hooks');
+    const hookFile = path.join(hooksDir, 'iranti-protocol-hook.js');
+    const hookContent = buildCopilotProtocolReminderHookScript();
+
+    fs.mkdirSync(hooksDir, { recursive: true });
+
+    if (!fs.existsSync(hookFile)) {
+        fs.writeFileSync(hookFile, hookContent, 'utf8');
+        return { filePath: hookFile, status: 'created' };
+    }
+
+    const existing = fs.readFileSync(hookFile, 'utf8');
+    if (existing !== hookContent) {
+        fs.writeFileSync(hookFile, hookContent, 'utf8');
+        return { filePath: hookFile, status: 'updated' };
+    }
+
+    return { filePath: hookFile, status: 'unchanged' };
+}
+
+/**
+ * Write a .github/hooks/hooks.json referencing the protocol-reminder hook.
+ * This fires on userPromptSubmitted — the Copilot CLI per-turn injection point.
+ */
+function writeCopilotHooksConfig(projectEnv: string): WorkspaceFileResult {
+    const projectPath = path.dirname(projectEnv);
+    const hooksDir = path.join(projectPath, '.github', 'hooks');
+    const hooksConfigFile = path.join(hooksDir, 'hooks.json');
+
+    const hooksConfig = {
+        version: 1,
+        hooks: {
+            userPromptSubmitted: [
+                {
+                    type: 'command',
+                    command: 'node .github/hooks/iranti-protocol-hook.js',
+                },
+            ],
+        },
+    };
+
+    fs.mkdirSync(hooksDir, { recursive: true });
+
+    const nextContent = `${JSON.stringify(hooksConfig, null, 2)}\n`;
+
+    if (!fs.existsSync(hooksConfigFile)) {
+        fs.writeFileSync(hooksConfigFile, nextContent, 'utf8');
+        return { filePath: hooksConfigFile, status: 'created' };
+    }
+
+    const existing = fs.readFileSync(hooksConfigFile, 'utf8');
+    if (existing === nextContent) {
+        return { filePath: hooksConfigFile, status: 'unchanged' };
+    }
+
+    // Merge: keep existing hooks, add/replace userPromptSubmitted from iranti.
+    try {
+        const parsed = JSON.parse(existing) as Record<string, unknown>;
+        const existingHooks = parsed.hooks && typeof parsed.hooks === 'object' && !Array.isArray(parsed.hooks)
+            ? parsed.hooks as Record<string, unknown>
+            : {};
+        const merged = {
+            ...parsed,
+            version: hooksConfig.version,
+            hooks: {
+                ...existingHooks,
+                userPromptSubmitted: hooksConfig.hooks.userPromptSubmitted,
+            },
+        };
+        const mergedContent = `${JSON.stringify(merged, null, 2)}\n`;
+        if (mergedContent === existing) {
+            return { filePath: hooksConfigFile, status: 'unchanged' };
+        }
+        fs.writeFileSync(hooksConfigFile, mergedContent, 'utf8');
+        return { filePath: hooksConfigFile, status: 'updated' };
+    } catch {
+        fs.writeFileSync(hooksConfigFile, nextContent, 'utf8');
+        return { filePath: hooksConfigFile, status: 'updated' };
+    }
+}
+
 function canUseInstalledIranti(repoRoot: string): boolean {
     try {
         run('iranti', ['mcp', '--help'], repoRoot);
@@ -577,6 +699,8 @@ async function main(): Promise<void> {
             vscode: writeWorkspaceVsCodeMcpFile(workspaceProjectEnv, options),
             instructions: writeWorkspaceCopilotInstructionsFile(workspaceProjectEnv),
             irantiMd: writeWorkspaceIrantiMdFile(workspaceProjectEnv),
+            hookScript: writeCopilotProtocolReminderHook(workspaceProjectEnv),
+            hooksJson: writeCopilotHooksConfig(workspaceProjectEnv),
         }
         : null;
 
@@ -587,6 +711,8 @@ async function main(): Promise<void> {
             console.log(`Workspace .vscode/mcp.json: ${workspaceFilesResult.vscode.status} (${workspaceFilesResult.vscode.filePath})`);
             console.log(`Workspace .github/copilot-instructions.md: ${workspaceFilesResult.instructions.status} (${workspaceFilesResult.instructions.filePath})`);
             console.log(`Workspace IRANTI.md: ${workspaceFilesResult.irantiMd.status} (${workspaceFilesResult.irantiMd.filePath})`);
+            console.log(`Workspace .github/hooks/iranti-protocol-hook.js: ${workspaceFilesResult.hookScript.status} (${workspaceFilesResult.hookScript.filePath})`);
+            console.log(`Workspace .github/hooks/hooks.json: ${workspaceFilesResult.hooksJson.status} (${workspaceFilesResult.hooksJson.filePath})`);
             const closeout = await writeProjectScaffoldCloseout({
                 tool: 'copilot',
                 projectPath: path.dirname(boundProjectEnv),
@@ -596,6 +722,8 @@ async function main(): Promise<void> {
                     { path: workspaceFilesResult.vscode.filePath, status: workspaceFilesResult.vscode.status },
                     { path: workspaceFilesResult.instructions.filePath, status: workspaceFilesResult.instructions.status },
                     { path: workspaceFilesResult.irantiMd.filePath, status: workspaceFilesResult.irantiMd.status },
+                    { path: workspaceFilesResult.hookScript.filePath, status: workspaceFilesResult.hookScript.status },
+                    { path: workspaceFilesResult.hooksJson.filePath, status: workspaceFilesResult.hooksJson.status },
                 ],
                 agentId: options.agent || 'copilot_code',
             });

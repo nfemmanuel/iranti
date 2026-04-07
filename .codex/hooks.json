@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node C:/Users/NF/Documents/Projects/iranti/.codex/iranti-protocol-hook.js"
+          }
+        ]
+      }
+    ]
+  }
+}
