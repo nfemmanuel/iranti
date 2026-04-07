@@ -115,6 +115,21 @@
     "demo": "ts-node scripts/demo.ts",
     "api": "ts-node src/api/server.ts"
   },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "mcp-server",
+    "agent-memory",
+    "memory-infrastructure",
+    "multi-agent",
+    "ai-agents",
+    "persistent-memory",
+    "shared-memory",
+    "claude-code",
+    "codex",
+    "iranti"
+  ],
+  "homepage": "https://iranti.site",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/nfemmanuel/iranti.git"

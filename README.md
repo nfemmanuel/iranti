@@ -1,25 +1,53 @@
 # Iranti
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://www.gnu.org/licenses/agpl-3.0.en.html)
+[![MCP Server](https://img.shields.io/badge/MCP-server-purple.svg)](https://modelcontextprotocol.io)
+[![npm](https://img.shields.io/badge/npm-iranti-red.svg)](https://www.npmjs.com/package/iranti)
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![TypeScript](https://img.shields.io/badge/typescript-5.0+-blue.svg)](https://www.typescriptlang.org/)
 [![CrewAI Compatible](https://img.shields.io/badge/CrewAI-compatible-green.svg)](https://www.crewai.com/)
 
-**Memory infrastructure for multi-agent AI systems.**
+**Memory infrastructure for multi-agent AI systems — with a built-in MCP server.**
 
 Iranti gives agents persistent, identity-based memory. Facts written by one agent are retrievable by any other agent through exact entity+key lookup. Iranti also supports hybrid search (lexical + vector) when exact keys are unknown. Memory persists across sessions and survives context window limits.
 
-**Repo version:** `0.3.4`  
+**Repo version:** `0.3.11`
 Published packages:
-- npm `iranti@0.3.4`
-- npm `@iranti/sdk@0.3.4`
-- PyPI `iranti==0.3.4`
+- npm `iranti@0.3.11`
+- npm `@iranti/sdk@0.3.11`
+- PyPI `iranti==0.3.11`
 
 ---
 
 ## What is Iranti?
 
 Iranti is a knowledge base for multi-agent systems. The primary read path is identity retrieval — this specific entity (`project/nexus_prime`), this specific key (`deadline`), with confidence attached. When Agent A writes a fact, Agent B can retrieve it by exact lookup without being told it exists. Facts persist in PostgreSQL and survive context window boundaries through the `observe()` API. For discovery workflows, Iranti supports hybrid search (full-text + vector similarity).
+
+---
+
+## MCP Server
+
+Iranti ships a stdio MCP server compatible with Claude Code, GitHub Copilot, Codex, and any MCP-compliant client:
+
+```bash
+# Fast path for Claude Code
+iranti claude-setup
+
+# Fast path for Codex
+iranti codex-setup
+
+# Fast path for GitHub Copilot
+iranti copilot-setup
+
+# Manual / other MCP clients
+iranti mcp
+```
+
+MCP tools exposed: `iranti_handshake`, `iranti_attend`, `iranti_write`, `iranti_query`, `iranti_search`, `iranti_checkpoint`, `iranti_ingest`, `iranti_relate`, `iranti_related`, `iranti_related_deep`, `iranti_history`, `iranti_who_knows`, `iranti_observe`, and more.
+
+Full setup guides:
+- [Claude Code](docs/guides/claude-code.md)
+- [Codex](docs/guides/codex.md)
 
 ---
 
