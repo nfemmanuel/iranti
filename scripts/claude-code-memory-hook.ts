@@ -368,7 +368,9 @@ function emitHookContext(event: HookEventName, additionalContext: string): void 
             additionalContext,
         },
     };
-    process.stdout.write(`${JSON.stringify(payload)}\n`);
+    // Use synchronous write to fd 1 to avoid libuv UV_HANDLE_CLOSING assertion
+    // on Windows when Node exits while an async stdout write is still pending.
+    require('fs').writeSync(1, `${JSON.stringify(payload)}\n`);
 }
 
 function shouldFetchMemory(prompt: string): boolean {
