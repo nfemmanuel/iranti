@@ -817,6 +817,51 @@ export function extractExplicitAssistantMemory(response: string): ExtractedMemor
     return Array.from(deduped.values());
 }
 
+const ARTIFACT_MIN_LENGTH = 200;
+const ARTIFACT_MAX_PER_RESPONSE = 3;
+
+function looksLikeFrontmatter(content: string): boolean {
+    const firstNonEmpty = content.split('\n').find((line) => line.trim().length > 0);
+    if (!firstNonEmpty) return false;
+    return /^[a-zA-Z_][a-zA-Z0-9_]*\s*:/.test(firstNonEmpty.trim());
+}
+
+function extractArtifactTitle(content: string): string {
+    const firstLine = content.split('\n').find((line) => line.trim().length > 0) ?? '';
+    return firstLine.replace(/^[#*]+\s*/, '').replace(/\*+$/g, '').replace(/\*+/g, '').trim();
+}
+
+export function extractResponseArtifacts(response: string): ExtractedMemoryFact[] {
+    if (!response || response.length < ARTIFACT_MIN_LENGTH) return [];
+
+    const facts: ExtractedMemoryFact[] = [];
+    const blockPattern = /(?:^|\n)---\s*\n([\s\S]+?)\n---\s*(?:\n|$)/g;
+    let match: RegExpExecArray | null;
+
+    while ((match = blockPattern.exec(response)) !== null) {
+        if (facts.length >= ARTIFACT_MAX_PER_RESPONSE) break;
+
+        const content = match[1].trim();
+        if (content.length < ARTIFACT_MIN_LENGTH) continue;
+        if (looksLikeFrontmatter(content)) continue;
+
+        const title = extractArtifactTitle(content);
+        if (!title) continue;
+
+        const key = `generated_${canonicalizeMemoryKey(title.slice(0, 60))}`;
+
+        facts.push({
+            scope: 'project',
+            key,
+            value: { content, generatedAt: new Date().toISOString() },
+            summary: trimSummary(`Generated content: ${title}`),
+            durableClass: 'artifact',
+        });
+    }
+
+    return facts;
+}
+
 function comparableValue(value: unknown): string {
     try {
         return JSON.stringify(value);
@@ -1047,9 +1092,14 @@ export async function rememberAssistantResponseFacts(params: {
         ledgerContext,
     } = params;
 
+    const facts = [
+        ...extractExplicitAssistantMemory(response),
+        ...extractResponseArtifacts(response),
+    ];
+
     return persistExtractedFacts({
         iranti,
-        facts: extractExplicitAssistantMemory(response),
+        facts,
         agent,
         source,
         phase: 'assistant_response',
