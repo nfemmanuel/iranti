@@ -3,906 +3,256 @@
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://www.gnu.org/licenses/agpl-3.0.en.html)
 [![MCP Server](https://img.shields.io/badge/MCP-server-purple.svg)](https://modelcontextprotocol.io)
 [![npm](https://img.shields.io/badge/npm-iranti-red.svg)](https://www.npmjs.com/package/iranti)
-[![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![TypeScript](https://img.shields.io/badge/typescript-5.0+-blue.svg)](https://www.typescriptlang.org/)
-[![CrewAI Compatible](https://img.shields.io/badge/CrewAI-compatible-green.svg)](https://www.crewai.com/)
+[![npm version](https://img.shields.io/npm/v/iranti.svg)](https://www.npmjs.com/package/iranti)
 
-**Memory infrastructure for multi-agent AI systems — with a built-in MCP server.**
+**Shared memory for AI coding tools — Claude Code, Codex CLI, and GitHub Copilot.**
 
-Iranti gives agents persistent, identity-based memory. Facts written by one agent are retrievable by any other agent through exact entity+key lookup. Iranti also supports hybrid search (lexical + vector) when exact keys are unknown. Memory persists across sessions and survives context window limits.
-
-**Repo version:** `0.3.11`
-Published packages:
-- npm `iranti@0.3.11`
-- npm `@iranti/sdk@0.3.11`
-- PyPI `iranti==0.3.11`
+Iranti is a self-hosted MCP server that gives your AI tools persistent, identity-based memory. Facts written in one session are retrievable in any other — across tools, projects, and context resets.
 
 ---
 
-## What is Iranti?
-
-Iranti is a knowledge base for multi-agent systems. The primary read path is identity retrieval — this specific entity (`project/nexus_prime`), this specific key (`deadline`), with confidence attached. When Agent A writes a fact, Agent B can retrieve it by exact lookup without being told it exists. Facts persist in PostgreSQL and survive context window boundaries through the `observe()` API. For discovery workflows, Iranti supports hybrid search (full-text + vector similarity).
-
----
-
-## MCP Server
-
-Iranti ships a stdio MCP server compatible with Claude Code, GitHub Copilot, Codex, and any MCP-compliant client:
+## Quick Start
 
 ```bash
-# Fast path for Claude Code
-iranti claude-setup
-
-# Fast path for Codex
-iranti codex-setup
-
-# Fast path for GitHub Copilot
-iranti copilot-setup
-
-# Manual / other MCP clients
-iranti mcp
-```
-
-MCP tools exposed: `iranti_handshake`, `iranti_attend`, `iranti_write`, `iranti_query`, `iranti_search`, `iranti_checkpoint`, `iranti_ingest`, `iranti_relate`, `iranti_related`, `iranti_related_deep`, `iranti_history`, `iranti_who_knows`, `iranti_observe`, and more.
-
-Full setup guides:
-- [Claude Code](docs/guides/claude-code.md)
-- [Codex](docs/guides/codex.md)
-
----
-
-## Runtime Roles
-
-- **User**: Person who interacts with an app or chatbot built on Iranti.
-- **Agent**: External AI worker that writes/reads facts through Iranti APIs.
-- **Attendant**: Per-agent memory manager that decides what to inject for each turn.
-- **Librarian**: Conflict-aware writer that owns all KB writes.
-- **Library**: Active truth store (`knowledge_base`) in PostgreSQL.
-- **Archive**: Historical/superseded truth store (`archive`) in PostgreSQL.
-- **Archivist**: Maintenance worker that archives stale/low-confidence facts and processes resolved escalations.
-- **Resolutionist**: Interactive CLI reviewer that guides humans through pending escalation files and writes valid authoritative resolutions.
-
----
-
-## Why Not a Vector Database?
-
-| Feature | Vector DB | Iranti |
-|---|---|---|
-| **Retrieval** | Similarity (nearest neighbor) | Identity-first + optional hybrid search |
-| **Storage** | Embeddings in vector space | Structured facts with keys |
-| **Persistence** | Stateless between calls | Persistent across sessions |
-| **Confidence** | No confidence tracking | Per-fact confidence scores |
-| **Conflicts** | No conflict resolution | Automatic resolution + escalation |
-| **Context** | No context awareness | `observe()` injects missing facts |
-
-Vector databases answer "what's similar to X?" Iranti answers "what do we know about X?" and can run hybrid search when exact keys are unknown.
-
----
-
-## Benchmark Summary
-
-Iranti now has current rerun evidence across exact retrieval, process continuity, upgrade durability, relationships, bounded conflict handling, and bounded recovery behavior. The current picture is stronger and narrower than the early validation story: exact, durable, shared memory is validated; broad semantic-memory and autonomous-recovery claims still need explicit limits.
-
-### Confirmed Strengths
-
-- **Exact lookup (`iranti_query`)**: The prepublish candidate for the current `0.3.0` line still scored `10/10` on the canonical B1 exact-retrieval arm.
-- **Persistence across sessions and processes**: Facts survive context-window loss and genuine process boundaries, with current reruns and validation passes covering process-isolated reads plus cross-process invalidation.
-- **Upgrade durability**: A fresh continuity chain now passes across public npm `0.2.49 -> 0.2.50 -> 0.2.51` plus a final prepublish candidate hop on the `0.3.0` line.
-- **Conflict handling**: Reliable when confidence differentials are large and explicit.
-- **Relationship traversal and multi-agent coordination**: Relationship writes plus one-hop/deep traversal work, and agents can share memory across genuine subprocess boundaries with zero shared conversational context.
-- **Provenance on writes**: Write-side attribution through stored source metadata is working and benchmark-confirmed.
-- **Ingest**: Prose extraction is accurate on clean entities in the bounded rerun surfaces already documented.
-- **Observe with hints / explicit recovery**: `iranti_observe` with hints and explicit query-based recovery are meaningfully useful today.
-- **Protocol enforcement turn-gate**: Strict turn-cycle enforcement (handshake → attend → discover → post-response) is validated by focused route and MCP regression tests. In `strict` mode, KB discovery routes return HTTP 428 with a structured violation payload before an agent that skipped attend can silently read stale memory. Injected facts now include a `lastUpdated` timestamp so the calling agent can judge freshness at the point of injection.
-
-Recent fixes since the last rerun:
-- **Search now bridges semantic hits across relationships for filtered retrieval.** A strong incident or issue hit can now propagate back onto the owning filtered entity over up to two hops, so filtered project search no longer depends on direct lexical overlap alone.
-- **`iranti_attend` now safe-defaults parse failures toward memory on non-greeting turns.** Terse prompts such as `help`, `why?`, or `how?` no longer silently fall through to `classification_parse_failed_default_false`.
-- **Hybrid search now indexes entity addresses directly.** Addressed queries such as `project/<id> status` no longer rely on value-summary overlap alone.
-
-### Current Limits
-
-- **Upgrade durability is now test-covered.** The `v0.2.21` upgrade reinitialized the instance under test — a one-time operator incident, not a systemic design flaw. All Prisma migrations are additive (no DROP or TRUNCATE); Staff Namespace seeding is guarded by `isSeeded()`; `seed-codebase.ts` upserts to `codebase/*` entities only. A KB preservation test in `tests/runtime-lifecycle/run_setup_upgrade_tests.ts` now confirms user KB data written before a `setup` re-run survives intact.
-- **Project learning is now only a bounded bind-time snapshot.** When you bind a project, Iranti derives a stable `IRANTI_CODEBASE_ENTITY` and writes a small snapshot from authoritative files such as `package.json`, `README.md`, `tsconfig.json`, `pyproject.toml`, `prisma/schema.prisma`, and common source directories. It does not yet crawl the repo continuously or build autonomous whole-project understanding.
-- **Relationship and provenance reflection surfaces remain partially permission-gated in benchmark sessions.** The rerun did not prove `iranti_relate`, `iranti_related`, `iranti_related_deep`, or `iranti_who_knows` end-to-end under the benchmark session policy.
-
-### Practical Position
-
-Iranti is strongest today as **structured memory infrastructure for multi-agent systems**:
-- exact entity/key lookup
-- durable shared memory
-- provenance-aware writes with source attribution and freshness timestamps
-- conflict-aware storage
-- session-aware recovery
-- protocol-enforced turn discipline for trustworthy injection (opt-in strict mode)
-
-It should not yet be described as a fully general semantic-memory, semantic-search, or autonomous-memory-injection system.
-
-Historical benchmark material remains available here:
-- [`docs/internal/validation_results.md`](docs/internal/validation_results.md)
-- [`docs/internal/MULTI_FRAMEWORK_VALIDATION.md`](docs/internal/MULTI_FRAMEWORK_VALIDATION.md)
-- [`docs/internal/conflict_benchmark.md`](docs/internal/conflict_benchmark.md)
-- [`docs/internal/consistency_model.md`](docs/internal/consistency_model.md)
-
-## Gap Analysis
-
-Iranti targets a specific gap in the agent infrastructure stack: most competing systems give you semantic retrieval, framework-specific memory, or raw vector storage, but not the same combination of structured fact storage, cross-agent sharing, identity-based lookup, explicit confidence, and developer-visible conflict handling in one self-hostable package.
-
-The current competitive case for Iranti is strongest when a team needs memory that behaves more like shared infrastructure than a chat transcript: facts are attached to entities, retrieved deterministically by `entityType/entityId + key`, versioned over time, and made available across agents without framework lock-in.
-
-### Where Iranti Is Differentiated
-
-- Identity-first fact retrieval through `entityType/entityId + key`
-- Cross-agent fact sharing as a first-class model
-- Conflict-aware writes through the Librarian
-- Explicit per-fact confidence scores
-- Per-agent memory injection through the Attendant
-- Temporal exact lookup with `asOf` and ordered `history()`
-- Relationship primitives through `relate()`, `getRelated()`, and `getRelatedDeep()` at the product surface, with benchmark confirmation for those MCP-accessible paths still pending
-- Hybrid retrieval when exact keys are unknown
-- Local install + project binding flow for Claude Code and Codex
-- Published npm / PyPI surfaces with machine-level CLI setup
-
-### Why That Gap Exists
-
-The current landscape splits into three buckets:
-
-1. **Memory libraries**
-   - Systems like Mem0, Zep, Letta, and framework-native memory layers solve parts of the problem.
-   - They usually optimize for semantic retrieval, agent-local memory, or framework integration.
-   - They rarely expose deterministic `entity + key` lookup, explicit confidence surfaces, and developer-controlled conflict handling together.
-
-2. **Vector databases**
-   - Pinecone, Weaviate, Qdrant, Chroma, Milvus, LanceDB, and `pgvector` solve storage and retrieval infrastructure.
-   - They do not, by themselves, solve memory semantics such as conflict resolution, context injection, fact lifecycle, or shared agent-facing state.
-
-3. **Multi-agent frameworks**
-   - CrewAI, LangGraph, AutoGen, CAMEL, MetaGPT, and similar frameworks often include some memory support.
-   - In practice, that memory is usually framework-coupled, shallow on conflict semantics, and difficult to reuse outside the framework that created it.
-
-### Main Gaps
-
-1. **Operational maturity**
-   - Local PostgreSQL setup is still a real source of friction.
-   - The product needs stronger diagnostics, connection recovery, and less dependence on users debugging local database state by hand.
-
-2. **Onboarding still has sharp edges**
-   - `iranti setup` is materially better than before, but first-run still assumes too much infrastructure literacy.
-   - Managed Postgres paths, cleaner bootstrap verification, and fewer environment-level surprises are still needed.
-
-3. **No operator UI yet**
-   - Iranti is still CLI-first.
-   - There is no control plane yet for provider keys, project bindings, integrations, memory inspection, and escalation review.
-
-4. **Adoption proof is still early**
-   - The repo has validation experiments and real local end-to-end usage, but broad production adoption is still limited.
-   - The next product truth has to come from external users and real workloads, not more speculative architecture alone.
-
-5. **Hosted product is not built**
-   - Open-source/local infrastructure is the active surface today.
-   - Hosted deployment, multi-tenant operations, billing, and cloud onboarding remain future work.
-
-6. **Graph-native reasoning is still limited**
-   - Iranti supports explicit entity relationships today.
-   - It does not yet compete with graph-first systems on temporal graph traversal or graph-native reasoning depth.
-
-7. **Memory extraction is not the main model**
-   - Iranti supports structured writes and ingest/chunking, but it is not primarily a "dump arbitrary conversations in and auto-magically derive perfect memory" system.
-   - That is a deliberate tradeoff in favor of explicit, inspectable facts, but it increases integration work.
-
-### Current Position
-
-Iranti is strongest today as infrastructure for developers building multi-agent systems who need shared, structured, queryable memory rather than pure semantic recall. The current benchmark base now supports a more concrete product claim:
-
-- exact cross-agent fact transfer works at meaningful context scales
-- facts survive session loss and genuine process breaks
-- same-key conflicting writes are serialized and observable
-- prose ingest is accurate on clean entities
-- attended recovery works with explicit hints, while autonomous attend classification remains a known defect
-
-That is still not a claim that multi-agent memory is solved. It is a claim that Iranti now has broader evidence for durable, structured, attribution-aware memory with exact retrieval and bounded recovery behavior.
-
-The next leverage is still product simplicity: setup, operations, and day-to-day inspection need to be simple enough that real users keep Iranti in the loop.
-
-## Quickstart
-
-**Requirements**: Node.js 18+, PostgreSQL with pgvector support, Python 3.8+
-
-Docker is optional. It is one local way to run PostgreSQL if you do not already have a database. Iranti still requires PostgreSQL; the setup improvement is smarter bootstrap and clearer guidance, not a second storage backend.
-
-```bash
-# 1. Install the CLI
+# Install globally
 npm install -g iranti
 
-# 2. Run the guided setup
+# Run the guided setup (configures database, API key, project binding)
 iranti setup
 
-# 3. Start the instance
+# Start the instance
 iranti run --instance local
 ```
 
-`iranti setup` now defaults to an isolated per-project runtime. Shared machine-level instances are still supported, but they are now an explicit choice rather than the default.
-
-If local PostgreSQL is available and pgvector-capable, setup can bootstrap a localhost database for you. If Docker is available, setup now prefers the Docker path over a plain local listener because it guarantees pgvector. If local PostgreSQL is reachable but does not provide pgvector, setup now fails early with a direct action path instead of a late Prisma migration error.
-
-Long-running agents can now checkpoint and recover interrupted work. Programmatic session lifecycle methods are available through the SDK and REST API:
-- `checkpoint()`
-- `inspectSession()`
-- `listSessions()`
-- `resumeSession()`
-- `completeSession()`
-- `abandonSession()`
-
-Running instances now publish runtime metadata in `/health`, and the CLI can see that state through `iranti status`, `iranti instance show`, and `iranti upgrade --check`. When you want an installed upgrade to immediately take effect on an instance-backed API server, use:
+Then wire it into your AI tool:
 
 ```bash
-iranti upgrade --restart --instance local
+iranti claude-setup    # Claude Code
+iranti codex-setup     # Codex CLI
+iranti copilot-setup   # GitHub Copilot
 ```
 
-If something still fails and you need more detail, use:
+That's it. Your AI tool now has persistent memory across sessions.
 
-```bash
-iranti doctor --debug
-iranti run --instance local --debug
-iranti upgrade --verbose
+---
+
+## Supported Tools
+
+| Tool | Command | What it does |
+|---|---|---|
+| **Claude Code** | `iranti claude-setup` | Adds `.mcp.json`, `CLAUDE.md`, and session hooks |
+| **Codex CLI** | `iranti codex-setup` | Registers Iranti in the global MCP registry |
+| **GitHub Copilot** | `iranti copilot-setup` | Writes MCP config to `.mcp.json` + `.vscode/mcp.json`, protocol instructions to `.github/copilot-instructions.md` |
+| **Any MCP client** | `iranti mcp` | Runs the stdio MCP server directly |
+
+---
+
+## What It Does
+
+Iranti stores facts as `entityType/entityId → key → value` triples in PostgreSQL. Any agent that knows the entity and key can retrieve the fact exactly — no semantic guessing, no hallucinated state.
+
+```
+Agent A writes:  project/my-app → deployment_status → "deployed to staging"
+Agent B reads:   project/my-app → deployment_status → "deployed to staging" ✓
 ```
 
-If you want to remove Iranti cleanly:
+Facts persist across sessions, context resets, and tool switches. When you restart Claude Code tomorrow, it can pick up exactly where you left off.
+
+### Key capabilities
+
+- **Exact lookup** — retrieve by `entityType/entityId + key`, deterministic and fast
+- **Hybrid search** — lexical + vector similarity when exact keys are unknown
+- **Cross-tool sharing** — Claude Code, Codex, and Copilot share the same memory
+- **Conflict resolution** — concurrent writes from multiple agents are detected and resolved
+- **Per-fact confidence** — every fact carries a confidence score; low-confidence facts age out
+- **Session recovery** — checkpoint/resume for interrupted work
+- **User operating rules** — define rules that surface only when relevant (v0.3.20)
+- **File-change recall** — agents remember which files changed and why (v0.3.20)
+
+---
+
+## MCP Tools
+
+When connected via MCP, Iranti exposes these tools to your AI tool:
+
+| Tool | Purpose |
+|---|---|
+| `iranti_handshake` | Initialize session, load operating rules and working memory |
+| `iranti_attend` | Pre/post-response memory injection — call before every reply |
+| `iranti_write` | Write a durable fact to shared memory |
+| `iranti_query` | Exact entity+key lookup |
+| `iranti_search` | Hybrid semantic/lexical search |
+| `iranti_checkpoint` | Save current task progress |
+| `iranti_ingest` | Extract facts from prose or documents |
+| `iranti_relate` | Create a relationship between two entities |
+| `iranti_related` / `iranti_related_deep` | Traverse entity relationships |
+| `iranti_history` | Fact history with timestamps |
+| `iranti_who_knows` | Find which agents have written about an entity |
+| `iranti_observe` | Demand-driven context injection with entity hints |
+| `iranti_write_rule` | Write a user operating rule with trigger conditions |
+| `iranti_remember_response` | Auto-persist facts from an assistant response |
+
+---
+
+## Install Strategy
+
+Iranti uses a two-layer model: one machine-level runtime, many project bindings.
+
+### 1. Install and set up
 
 ```bash
-iranti uninstall --dry-run
-iranti uninstall --all --yes
+npm install -g iranti
+iranti setup
 ```
 
-Default uninstall keeps runtime data and project bindings. `--all` removes discovered runtime roots plus project-local Iranti integrations.
+`iranti setup` walks you through:
+- Instance creation and database onboarding (local Postgres, managed Postgres, or Docker)
+- LLM provider API keys (OpenAI, Claude, Gemini, Groq, Mistral, or local Ollama)
+- Project binding
 
-Advanced/manual path:
+Non-interactive automation:
 
 ```bash
-# 1. Clone and configure
-git clone https://github.com/nfemmanuel/iranti
-cd iranti
-cp .env.example .env          # Set DATABASE_URL and IRANTI_API_KEY
-
-# Optional runtime hygiene
-# IRANTI_ESCALATION_DIR=C:/Users/<you>/.iranti/escalation
-# IRANTI_ARCHIVIST_WATCH=true
-# IRANTI_ARCHIVIST_DEBOUNCE_MS=60000
-# IRANTI_ARCHIVIST_INTERVAL_MS=21600000
-
-# 2. Start PostgreSQL
-docker-compose up -d
-
-# 3. Install and initialize
-npm install
-npm run setup                 # Runs migrations
-
-# 4. Start API server
-npm run api                   # Runs on port 3001
-
-# 5. Install Python client
-pip install iranti
-
-# Optional: install the TypeScript client
-npm install @iranti/sdk
+iranti setup --defaults --db-url "postgresql://postgres:yourpassword@localhost:5432/iranti"
 ```
 
-### Archivist Scheduling Knobs
-
-- `IRANTI_ARCHIVIST_WATCH=true` enables file-change watching on escalation `active/`.
-- `IRANTI_ARCHIVIST_DEBOUNCE_MS=60000` runs maintenance 60s after the latest file change.
-- `IRANTI_ARCHIVIST_INTERVAL_MS=21600000` runs maintenance every 6 hours (set `0` to disable).
-- `IRANTI_ESCALATION_DIR` sets escalation storage root. Default is `~/.iranti/escalation`, keeping escalation files out of the repo by default.
-
-### Per-User API Keys (Recommended)
+### 2. Start the instance
 
 ```bash
-# Create a key for one user/app (prints token once)
-npm run api-key:create -- --key-id chatbot_alice --owner "Alice chatbot" --scopes "kb:read,kb:write,memory:read,memory:write,agents:read,agents:write"
+iranti run --instance local
+```
+
+### 3. Bind a project
+
+```bash
+cd /path/to/your/project
+iranti project init . --instance local --agent-id my_agent
+```
+
+This writes `.env.iranti` with `IRANTI_URL`, `IRANTI_API_KEY`, and agent identity. Each agent in a multi-agent system gets its own `--agent-id`.
+
+### 4. Integrate with your AI tool
+
+```bash
+iranti claude-setup    # or codex-setup / copilot-setup
+```
+
+---
+
+## API Keys
+
+```bash
+# Create a scoped key for one user or service
+iranti auth create-key --instance local --key-id my_app --owner "My App" \
+  --scopes "kb:read,kb:write,memory:read,memory:write"
 
 # List keys
-npm run api-key:list
+iranti list api-keys --instance local
 
 # Revoke a key
-npm run api-key:revoke -- --key-id chatbot_alice
+iranti auth revoke-key --instance local --key-id my_app
 ```
-
-Use the printed token (`keyId.secret`) as `X-Iranti-Key`.
-Scopes use `resource:action` format (for example `kb:read`, `memory:write`, `metrics:read`, `proxy:chat`).
-
-### Security Baseline
-
-- Use one scoped key per app/service identity.
-- Rotate any key that is exposed in logs, screenshots, or chat.
-- Keep escalation/log paths outside the repo working tree.
-- Use TLS/reverse proxy for non-local deployments.
-
-Security quickstart: [`docs/guides/security-quickstart.md`](docs/guides/security-quickstart.md)
-Operator manual: [`docs/guides/manual.md`](docs/guides/manual.md)
-Claude Code guide: [`docs/guides/claude-code.md`](docs/guides/claude-code.md)
-Codex guide: [`docs/guides/codex.md`](docs/guides/codex.md)
-Release guide: [`docs/guides/releasing.md`](docs/guides/releasing.md)
-Vector backend guide: [`docs/guides/vector-backends.md`](docs/guides/vector-backends.md)
-
-### Claude Code via MCP
-
-Iranti ships a local stdio MCP server for Claude Code and other MCP clients:
-
-```bash
-iranti mcp
-```
-
-Use it with a project-local `.mcp.json`, and optionally add `iranti claude-hook` for `SessionStart` and `UserPromptSubmit`.
-
-Fast path:
-
-```bash
-iranti claude-setup
-```
-
-Guide: [`docs/guides/claude-code.md`](docs/guides/claude-code.md)
-
-### Codex via MCP
-
-Codex uses a global MCP registry rather than a project-local `.mcp.json`. Register Iranti once, then launch Codex in the bound project so `.env.iranti` is in scope:
-
-```bash
-iranti codex-setup
-codex -C /path/to/your/project
-```
-
-By default, `iranti codex-setup` does not pin a project binding globally. `iranti mcp` resolves `.env.iranti` from the active project/workspace at runtime. Use `--project-env` only if you deliberately want to pin Codex globally to one project binding.
-
-Alias:
-
-```bash
-iranti integrate codex
-```
-
-Guide: [`docs/guides/codex.md`](docs/guides/codex.md)
-
-### Resolve Pending Escalations
-
-Review unresolved human-escalation files from the CLI:
-
-```bash
-iranti resolve
-```
-
-Use `--dir` to point at a non-default escalation root. Guide: [`docs/guides/conflict-resolution.md`](docs/guides/conflict-resolution.md)
-
-### Native Chat
-
-Start a CLI chat session against the configured Iranti instance:
-
-```bash
-iranti chat
-```
-
-Use `--agent`, `--provider`, and `--model` to pin the session identity and model routing.
-The chat surface now includes slash commands for fact history, relationships, conflict-resolution handoff, and confidence updates in addition to memory search/write operations.
-Guide: [`docs/guides/chat.md`](docs/guides/chat.md)
-
-### Manual Attendant Inspection
-
-For debugging and operator visibility, Iranti also exposes manual Attendant commands:
-
-```bash
-iranti handshake --task "Working on ProofScript repo"
-iranti attend "What did we decide about the parser?" --context-file transcript.txt
-```
-
-Both commands accept `--json`.
-They are useful for verifying what the Attendant would load or inject for a given agent and project binding.
-They are not a replacement for Claude Code hooks or MCP tools in normal use.
 
 ---
 
-## Install Strategy (Double Layer)
+## SDK Usage
 
-Iranti now supports a two-layer install flow:
+**Python** ([PyPI](https://pypi.org/project/iranti/)):
 
-1. **Machine/runtime layer**: one local runtime root with one or more named Iranti instances.
-2. **Project layer**: each chatbot/app binds to one instance with a local `.env.iranti`.
+```python
+from iranti import IrantiClient
 
-### 1) Install CLI
+client = IrantiClient(base_url="http://localhost:3001", api_key="your_key")
 
-```bash
-# If published package is available
-npm install -g iranti
+# Write a fact
+client.write(
+    entity="project/my-app",
+    key="status",
+    value="in_review",
+    summary="App is in review",
+    confidence=90,
+    source="my_script",
+    agent="my_agent",
+)
 
-# Or from this repo (local simulation)
-npm install -g .
+# Read it back
+fact = client.query(entity="project/my-app", key="status")
 ```
 
-### 2) Initialize machine runtime root
+**TypeScript** ([npm](https://www.npmjs.com/package/@iranti/sdk)):
 
-```bash
-iranti setup
+```typescript
+import { IrantiClient } from "@iranti/sdk";
 
-# non-interactive automation
-iranti setup --defaults --db-url "postgresql://postgres:realpassword@localhost:5432/iranti_local"
-iranti setup --config ./iranti.setup.json
+const client = new IrantiClient({ baseUrl: "http://localhost:3001", apiKey: "your_key" });
 
-# or, if you want the lower-level manual path:
-iranti install --scope user
+await client.write({
+    entity: "project/my-app",
+    key: "status",
+    value: "in_review",
+    summary: "App is in review",
+    confidence: 90,
+    source: "my_script",
+    agent: "my_agent",
+});
+
+const fact = await client.query("project/my-app", "status");
 ```
-
-`iranti setup` is the recommended first-run path. It walks through:
-- shared vs isolated runtime setup
-- instance creation or update
-- API port selection with conflict detection and next-free suggestions
-- database onboarding:
-  - existing Postgres
-  - managed Postgres
-  - optional Docker-hosted Postgres for local development
-- provider API keys
-- Iranti client API key generation
-- one or more project bindings
-- optional Claude Code / Codex integration scaffolding
-
-Operator-facing CLI help now includes short "what it does" and "use this when" guidance, so `iranti <command> --help` is the quickest way to choose the right entry point.
-
-For automation:
-- `iranti setup --defaults` uses sensible defaults plus environment/flag input, but still requires a real `DATABASE_URL`.
-- `iranti setup --config <file>` reads a JSON setup plan for repeatable bootstrap.
-- `--bootstrap-db` runs migrations and seeding during automated setup when the database is reachable.
-- Example config: [docs/guides/iranti.setup.example.json](docs/guides/iranti.setup.example.json)
-
-Default API port remains `3001`. The setup wizard now warns when that port is already in use and suggests the next free port instead of forcing users to debug the collision manually.
-
-Defaults:
-- Windows user scope: `%USERPROFILE%\\.iranti`
-- Windows system scope: `%ProgramData%\\Iranti`
-- Linux system scope: `/var/lib/iranti`
-- macOS system scope: `/Library/Application Support/Iranti`
-
-### 3) Create a named instance
-
-```bash
-iranti instance create local --port 3001 --db-url "postgresql://postgres:yourpassword@localhost:5432/iranti_local" --provider mock
-iranti instance show local
-```
-
-Finish onboarding or change settings later with:
-
-```bash
-# Provider/db updates
-iranti configure instance local --provider openai --provider-key replace-with-real-openai-key --db-url "postgresql://postgres:realpassword@localhost:5432/iranti_local"
-iranti configure instance local --interactive
-
-# Provider key shortcuts
-iranti list api-keys --instance local
-iranti add api-key openai --instance local
-iranti update api-key claude --instance local
-iranti remove api-key gemini --instance local
-
-# Create a registry-backed API key and sync it into the instance env
-iranti auth create-key --instance local --key-id local_admin --owner "Local Admin" --scopes "kb:read,kb:write,memory:read,memory:write,agents:read,agents:write" --write-instance
-```
-
-`iranti add|update|remove api-key` updates the stored upstream provider credentials in the instance env without hand-editing `.env` files. `iranti list api-keys` shows which provider keys are currently stored. Supported remote providers are OpenAI, Claude, Gemini, Groq, and Mistral. `mock` and `ollama` do not require remote API keys, and Perplexity is not yet supported.
-
-### 4) Run Iranti from that instance
-
-```bash
-iranti run --instance local
-```
-
-If a provider rejects requests because credits are exhausted, billing is disabled, or the account is quota-limited, Iranti now surfaces a direct message such as `OpenAI quota or billing limit reached. Add credits, update the API key, or switch providers.`
-
-### 5) Bind any chatbot/app project to that instance
-
-```bash
-cd /path/to/your/chatbot
-iranti project init . --instance local --agent-id chatbot_main
-```
-
-This writes `.env.iranti` in the project with the correct `IRANTI_URL`, `IRANTI_API_KEY`, and default agent identity.
-It also writes a derived `IRANTI_CODEBASE_ENTITY` and a bounded initial project snapshot for that bound repo.
-
-Later changes use the same surface:
-
-```bash
-iranti configure project . --instance local --agent-id chatbot_worker
-iranti configure project . --interactive
-iranti project unbind .
-iranti auth create-key --instance local --key-id chatbot_worker --owner "Chatbot Worker" --scopes "kb:read,memory:read,memory:write" --project .
-```
-
-For multi-agent systems, bind once per project and set unique agent IDs per worker (for example `planner_agent`, `research_agent`, `critic_agent`).
-
-### Installation Diagnostics
-
-Use the CLI doctor command before first run or before a release check:
-
-```bash
-iranti doctor
-iranti doctor --instance local
-iranti status
-iranti upgrade --check
-iranti upgrade --dry-run
-iranti upgrade --yes
-```
-
-This validates the active env file, database URL, API key presence, provider selection, and provider-specific credentials.
-`iranti status` shows the current runtime root, known instances, and local binding files.
-`iranti upgrade` detects repo/global/Python install paths, compares current vs latest published versions, prints the exact plan, and executes the selected upgrade path when you pass `--yes`.
-On Windows, if the currently running CLI is itself the global npm install being upgraded, Iranti now hands that npm-global step off to a detached updater process instead of trying to replace the live binary in place.
-`iranti configure ...` updates instance/project credentials without manual env editing.
-`iranti auth ...` manages registry-backed API keys and can sync them into instance or project bindings.
-When you pass `--root` in Windows `cmd.exe`, use no quotes or double quotes. Single quotes are treated literally there.
 
 ---
 
-## Core API
+## Diagnostics
 
-### Write a Fact
-
-```python
-from clients.python.iranti import IrantiClient
-
-client = IrantiClient(
-    base_url="http://localhost:3001",
-    api_key="your_api_key_here"
-)
-
-result = client.write(
-    entity="researcher/jane_smith",      # Format: entityType/entityId
-    key="affiliation",
-    value={"institution": "MIT", "department": "CSAIL"},
-    summary="Affiliated with MIT CSAIL",  # Compressed for working memory
-    confidence=85,                        # 0-100
-    source="OpenAlex",
-    agent="research_agent_001"
-)
-
-print(result.action)  # 'created', 'updated', 'escalated', or 'rejected'
+```bash
+iranti doctor              # Validate database, API key, and provider
+iranti status              # Show known instances and project bindings
+iranti upgrade --check     # Check for available updates
+iranti upgrade --yes       # Apply updates
 ```
 
-### Query a Fact
+---
 
-```python
-result = client.query("researcher/jane_smith", "affiliation")
+## Configuration
 
-if result.found:
-    print(result.value)       # {"institution": "MIT", "department": "CSAIL"}
-    print(result.confidence)  # 85
-    print(result.source)      # "OpenAlex"
-```
+Environment variables (set during `iranti setup` or manually in `.env`):
 
-### Query All Facts for an Entity
-
-```python
-facts = client.query_all("researcher/jane_smith")
-
-for fact in facts:
-    print(f"[{fact['key']}] {fact['summary']} (confidence: {fact['confidence']})")
-```
-
-### Graph Traversal
-
-```python
-from clients.python.iranti import IrantiClient
-
-client = IrantiClient(base_url="http://localhost:3001", api_key="your_api_key_here")
-
-# Agent 1 writes facts and links them into a graph.
-client.write("researcher/jane_smith", "affiliation", {"lab": "CSAIL"}, "Jane Smith is affiliated with CSAIL", 90, "OpenAlex", "research_agent")
-client.write("project/quantum_bridge", "status", {"phase": "active"}, "Quantum Bridge is active", 88, "project_brief", "research_agent")
-
-client.relate("researcher/jane_smith", "MEMBER_OF", "lab/csail", created_by="research_agent")
-client.relate("lab/csail", "LEADS", "project/quantum_bridge", created_by="research_agent")
-
-# Agent 2 starts cold and traverses outward from Jane Smith.
-one_hop = client.related("researcher/jane_smith")
-labs = [f"{r['toType']}/{r['toId']}" for r in one_hop if r["relationshipType"] == "MEMBER_OF"]
-
-projects = []
-for lab in labs:
-    for rel in client.related(lab):
-        if rel["relationshipType"] == "LEADS":
-            project = f"{rel['toType']}/{rel['toId']}"
-            status = client.query(project, "status")
-            projects.append((project, status.value["phase"]))
-
-print(projects)
-# Agent 2 learned which project Jane Smith is connected to without being told the project directly.
-```
-
-### Relationship Types
-
-Relationship types are caller-defined strings. Common conventions:
-
-| Relationship Type | Meaning |
+| Variable | Description |
 |---|---|
-| `MEMBER_OF` | Entity belongs to a team, lab, org, or group |
-| `PART_OF` | Entity is a component or sub-unit of another entity |
-| `AUTHORED` | Person or agent created a document, paper, or artifact |
-| `LEADS` | Person, team, or org leads a project or effort |
-| `DEPENDS_ON` | Project, service, or task depends on another entity |
-| `REPORTS_TO` | Directed reporting relationship between people or agents |
-
-Use uppercase snake case for consistency. Iranti does not enforce a fixed ontology here; the calling application owns the relationship vocabulary.
-
-### Hybrid Search
-
-```python
-matches = client.search(
-    query="current blocker launch readiness",
-    entity_type="project",
-    limit=5,
-    lexical_weight=0.45,
-    vector_weight=0.55,
-)
-
-for item in matches:
-    print(item["entity"], item["key"], item["score"])
-```
-
-### Context Persistence (attend)
-
-`handshake()` establishes the session contract. Discovery surfaces such as `query`, `search`, `get_related`, and `who_knows` are now fail-closed until the host has run `handshake()` for the session and `attend()` for the current turn. Starting a new `attend(phase="pre-response")` turn without first closing the previous one with `attend(phase="post-response")` is now blocked as a protocol violation, and `inspectSession()` / `listSessions()` expose structured lifecycle compliance state (`healthy`, `degraded`, `non_compliant`) so hosts and operators can see when breadcrumb discipline is slipping.
-
-```python
-# Before each LLM call, let Attendant decide if memory is needed
-result = client.attend(
-    agent_id="research_agent_001",
-    latest_message="What's Jane Smith's current affiliation?",
-    current_context="User: What's Jane Smith's current affiliation?\nAssistant: Let me check...",
-    max_facts=5,
-    phase="pre-response"
-)
-
-if result["shouldInject"]:
-    for fact in result['facts']:
-        print(f"Inject: [{fact['entityKey']}] {fact['summary']}")
-```
-
-### Working Memory (handshake)
-
-```python
-# At session start, get personalized brief for agent's current task
-brief = client.handshake(
-    agent_id="research_agent_001",
-    task="Research publication history for Dr. Jane Smith",
-    recent_messages=["Starting literature review..."]
-)
-
-print(brief.operating_rules)      # Staff namespace rules for this agent
-print(brief.inferred_task_type)   # e.g. "research", "verification"
-
-for entry in brief.working_memory:
-    print(f"{entry.entity_key}: {entry.summary}")
-```
+| `DATABASE_URL` | PostgreSQL connection string (pgvector required) |
+| `IRANTI_API_KEY` | Server authentication key |
+| `LLM_PROVIDER` | `openai` \| `claude` \| `gemini` \| `groq` \| `mistral` \| `ollama` \| `mock` |
+| `IRANTI_PORT` | API port (default: `3001`) |
+| `IRANTI_ARCHIVIST_WATCH` | Watch escalation files and auto-run maintenance (`true`/`false`) |
 
 ---
 
-## CrewAI Integration
-
-Minimal working example based on validated experiments:
-
-```python
-from crewai import Agent, Task, Crew, LLM
-from crewai.tools import tool
-from clients.python.iranti import IrantiClient
-
-iranti = IrantiClient(base_url="http://localhost:3001", api_key="your_key")
-ENTITY = "project/my_project"
-
-@tool("Write finding to shared memory")
-def write_finding(key: str, value: str, summary: str, confidence: int) -> str:
-    """Write a fact to Iranti so other agents can access it."""
-    result = iranti.write(
-        entity=ENTITY,
-        key=key,
-        value={"data": value},
-        summary=summary,
-        confidence=confidence,
-        source="briefing_doc",
-        agent="researcher_agent"
-    )
-    return f"Saved '{key}': {result.action}"
-
-@tool("Get all findings")
-def get_all_findings() -> str:
-    """Load all facts from Iranti."""
-    facts = iranti.query_all(ENTITY)
-    if not facts:
-        return "No findings in shared memory."
-    lines = [f"[{f['key']}] {f['summary']} (confidence: {f['confidence']})" for f in facts]
-    return "\n".join(lines)
-
-# Researcher agent: writes to Iranti
-researcher = Agent(
-    role="Research Analyst",
-    goal="Extract facts from documents and save to shared memory",
-    tools=[write_finding],
-    llm=LLM(model="gpt-4o-mini")
-)
-
-# Analyst agent: reads from Iranti
-analyst = Agent(
-    role="Project Analyst",
-    goal="Summarize projects using shared memory",
-    tools=[get_all_findings],
-    llm=LLM(model="gpt-4o-mini")
-)
-
-# Researcher extracts facts, analyst loads them — no direct communication needed
-crew = Crew(agents=[researcher, analyst], tasks=[...])
-crew.kickoff()
-```
-
-**Result**: Analyst successfully loads all facts written by researcher (validated 6/6 transfer rate).
-
----
-
-## Middleware for Any LLM
-
-Add Iranti memory to Claude, ChatGPT, or any LLM via API wrapper:
-
-```python
-from clients.middleware.iranti_middleware import IrantiMiddleware
-
-middleware = IrantiMiddleware(
-    agent_id="my_agent",
-    iranti_url="http://localhost:3001"
-)
-
-# Before sending to LLM
-augmented = middleware.before_send(
-    user_message="What was the blocker?",
-    conversation_history=[...]
-)
-
-# After receiving response
-middleware.after_receive(
-    response="The blocker is...",
-    conversation_history=[...]
-)
-```
-
-**How it works**:
-1. `before_send()` calls `attend()` with conversation context
-2. Forgotten facts are prepended as `[MEMORY: ...]`
-3. `after_receive()` extracts new facts and saves them (best-effort)
-4. If the host skips `handshake()` or `attend()`, discovery calls block instead of returning warn-only metadata
-
-**Note**: Browser extensions are blocked by ChatGPT and Claude's Content Security Policy. Use API-based middleware instead.
-
-**Examples**: [`clients/middleware/claude_example.py`](clients/middleware/claude_example.py)
-
----
-
-## Architecture
-
-Iranti has five internal components:
-
-| Component | Role |
-|---|---|
-| **Library** | PostgreSQL knowledge base. Current truth lives in `knowledge_base`; closed and contested intervals live in `archive`. |
-| **Librarian** | Manages all writes. Detects conflicts, reasons about resolution, escalates when uncertain. |
-| **Attendant** | Per-agent working memory manager. Implements `attend()`, `observe()`, and `handshake()` APIs. |
-| **Archivist** | Periodic cleanup. Archives expired and low-confidence entries. Processes human-resolved conflicts. |
-| **Resolutionist** | Interactive CLI helper that walks pending escalation files, writes `AUTHORITATIVE_JSON`, and marks them resolved for the Archivist. |
-
-### REST API
-
-Express server on port 3001 with endpoints:
-
-- `POST /kb/write` - Write atomic fact
-- `POST /kb/ingest` - Ingest raw text for one entity, auto-chunk into facts with per-fact confidence and per-fact write outcomes
-- `GET /kb/query/:entityType/:entityId/:key` - Query specific fact
-- `GET /kb/query/:entityType/:entityId` - Query all facts for entity
-- `GET /kb/search` - Hybrid search across facts
-- `POST /memory/attend` - Decide whether to inject memory for this turn and unlock one discovery step for the current turn
-- `POST /memory/observe` - Context persistence (inject missing facts)
-- `POST /memory/handshake` - Working memory brief for agent session
-- `GET /memory/ledger` - Read structured session ledger events from `staff_events`
-- `GET /memory/sessions` - List persisted operator-visible session checkpoints across agents, with optional operator filters/sorting
-- `GET /memory/session/:agentId` - Inspect the current persisted session checkpoint/recovery state
-- `POST /kb/relate` - Create entity relationship
-- `GET /kb/related/:entityType/:entityId` - Get related entities
-- `POST /agents/register` - Register agent in registry
-
-All endpoints require `X-Iranti-Key` header for authentication.
-Discovery endpoints return `428 Precondition Required` when a host skips the required session `handshake` or current-turn `attend`.
-
----
-
-## Schema
-
-Six PostgreSQL tables:
-
-```
-knowledge_base          - current truth (one live row per entity/key)
-archive                 - temporal and provenance history for superseded, contradicted, escalated, and expired rows
-entity_relationships    - directional graph: MEMBER_OF, PART_OF, AUTHORED, etc.
-entities                - canonical entity identity registry
-entity_aliases          - normalized aliases mapped to canonical entities
-write_receipts          - idempotency receipts for requestId replay safety
-```
-
-New entity types, relationship types, and fact keys do not require migrations; they are caller-defined strings.
-
-**Archive semantics**: When a current fact is superseded or contested, the current row is removed from `knowledge_base` and a closed historical interval is written to `archive`. Temporal queries use `validFrom` / `validUntil` plus archive metadata to answer point-in-time reads.
-
----
-
-## Running Tests
+## Uninstall
 
 ```bash
-npm run test:integration      # Full end-to-end
-npm run test:librarian        # Conflict resolution
-npm run test:attendant        # Working memory
-npm run test:reliability      # Source scoring
-
-# Python validation experiments
-cd clients/experiments
-python validate_nexus_observe.py        # Context persistence
-python validate_nexus_treatment.py      # Cross-agent transfer
+iranti uninstall --dry-run    # Preview what would be removed
+iranti uninstall --all --yes  # Remove runtime + project bindings
 ```
 
 ---
 
-## Contributing
+## Guides
 
-Contributions welcome! Please:
+- [Claude Code setup](docs/guides/claude-code.md)
+- [Codex CLI setup](docs/guides/codex.md)
+- [Python client](docs/guides/python-client.md)
+- [Security quickstart](docs/guides/security-quickstart.md)
+- [Operator manual](docs/guides/manual.md)
+- [Conflict resolution](docs/guides/conflict-resolution.md)
+- [Vector backends](docs/guides/vector-backends.md)
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+## Links
 
----
+- [Website](https://iranti.dev)
+- [GitHub](https://github.com/nfemmanuel/iranti)
+- [npm](https://www.npmjs.com/package/iranti)
+- [Python client (PyPI)](https://pypi.org/project/iranti/)
+- [TypeScript SDK](https://www.npmjs.com/package/@iranti/sdk)
 
 ## License
 
-GNU Affero General Public License v3.0 (AGPL-3.0) - see [LICENSE](LICENSE) file for details.
-
-Free to use, modify, and distribute under AGPL terms. If you offer Iranti as a hosted service and modify it, AGPL requires publishing those modifications.
-
----
-
-## Name
-
-Iranti is the Yoruba word for memory and remembrance.
-
----
-
-## Project Structure
-
-```
-src/
-├── library/            — DB client, queries, relationships, agent registry
-├── librarian/          — Write logic, conflict resolution, reliability
-├── attendant/          — Per-agent working memory, observe() implementation
-├── archivist/          — Periodic cleanup, escalation processing
-├── lib/                — LLM abstraction, model router, providers
-├── sdk/                — Public TypeScript API
-└── api/                — REST API server
-
-clients/
-├── python/             — Python client (IrantiClient)
-├── middleware/         — LLM conversation wrappers (Claude, ChatGPT, etc.)
-└── experiments/        — Validated experiments with real results
-
-docs/
-└── internal/validation_results.md  — Full experiment outputs and analysis
-```
-
----
-
-## Support
-
-- **Issues**: [GitHub Issues](https://github.com/nfemmanuel/iranti/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/nfemmanuel/iranti/discussions)
-- **Email**: oluwaniifemi.emmanuel@uni.minerva.edu
-- **Changelog**: [`CHANGELOG.md`](CHANGELOG.md)
-
----
-
-**Built with ❤️ for the multi-agent AI community.**
-
+AGPL-3.0-or-later

@@ -1,0 +1,33 @@
+# Smithery configuration — https://smithery.ai/docs/config/project
+startCommand:
+  type: stdio
+  commandFunction: |
+    (config) => ({
+      command: 'npx',
+      args: ['-y', 'iranti@latest', 'mcp'],
+      env: {
+        IRANTI_URL: config.irantiUrl,
+        IRANTI_API_KEY: config.irantiApiKey,
+      }
+    })
+  configSchema:
+    type: object
+    required:
+      - irantiUrl
+      - irantiApiKey
+    properties:
+      irantiUrl:
+        type: string
+        description: >
+          URL of your running iranti server.
+          Local default: http://localhost:3001.
+          Run `iranti setup` then `iranti api` to start it.
+        default: http://localhost:3001
+      irantiApiKey:
+        type: string
+        description: >
+          API key for your iranti server.
+          Set during `iranti setup`, or find it in your ~/.iranti/.env file.
+  exampleConfig:
+    irantiUrl: http://localhost:3001
+    irantiApiKey: your_api_key_here
