@@ -228,6 +228,18 @@ export const DIAGNOSTICS_HELP: HelpEntry[] = [
         useWhen: 'Windows MCP residue has accumulated and you want a first-party cleanup path that leaves active host-attached chains alone.',
         scenario: 'Trimming orphaned `iranti mcp` processes after debugging sessions or host crashes without killing active attached sessions.',
     },
+    {
+        command: 'iranti list-rules [--instance <name>] [--project-env <path>] [--json]',
+        description: 'List all user-defined operating rules with their triggers and enforcement levels.',
+        useWhen: 'you want to see which rules will be matched during attend() or audit what rules exist.',
+        scenario: 'Checking which rules are active before adding a new one or diagnosing why a rule was not triggered.',
+    },
+    {
+        command: 'iranti delete-rule <rule-id> [--instance <name>] [--project-env <path>] [--json]',
+        description: 'Delete a user-defined operating rule by its entity ID.',
+        useWhen: 'a rule is outdated, wrong, or no longer needed.',
+        scenario: 'Removing a stale rule after the workflow it guarded has changed.',
+    },
 ];
 
 export const INTEGRATIONS_HELP: HelpEntry[] = [

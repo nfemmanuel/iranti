@@ -208,7 +208,11 @@ iranti doctor              # Validate database, API key, and provider
 iranti status              # Show known instances and project bindings
 iranti upgrade --check     # Check for available updates
 iranti upgrade --yes       # Apply updates
+iranti list-rules          # Show all operating rules
+iranti delete-rule <id>    # Remove an operating rule
 ```
+
+Operator-facing CLI help now includes short "what it does" and "use this when" guidance for every command — run `iranti --help` or `iranti <command> --help` for details.
 
 ---
 

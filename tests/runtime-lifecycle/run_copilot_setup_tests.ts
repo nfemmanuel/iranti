@@ -176,6 +176,12 @@ async function testCopilotSetupWritesWorkspaceFiles(root: string): Promise<void>
     assert.ok(Array.isArray(hooksConfig.hooks?.userPromptSubmitted), 'hooks.json should have userPromptSubmitted array');
     assert.strictEqual((hooksConfig.hooks?.userPromptSubmitted ?? []).length, 1, 'hooks.json userPromptSubmitted should have one entry');
 
+    // ── hooks.json entry-level format validation ──
+    const hookEntry = (hooksConfig.hooks?.userPromptSubmitted as Array<Record<string, unknown>>)[0];
+    assert.strictEqual(hookEntry.type, 'command', 'hooks.json entry should have type "command"');
+    assert.ok(typeof hookEntry.command === 'string', 'hooks.json entry should have a string command field');
+    assert.match(hookEntry.command as string, /node\s+.*iranti-protocol-hook\.js/, 'hooks.json entry command should invoke iranti-protocol-hook.js via node');
+
     // ── Console output ──
     assert.match(stdout, /Global Copilot MCP config: created/i, 'copilot-setup output should report global config created');
     assert.match(stdout, /GitHub Copilot CLI is now configured/i, 'copilot-setup output should confirm Copilot CLI configuration');
@@ -602,6 +608,9 @@ async function testCopilotHooksJsonMergePreservesExistingHooks(root: string): Pr
     ) as { version?: number; hooks?: Record<string, unknown[]> };
 
     assert.ok(Array.isArray(merged.hooks?.userPromptSubmitted), 'merged hooks.json should have userPromptSubmitted');
+    const mergedEntry = (merged.hooks?.userPromptSubmitted as Array<Record<string, unknown>>)[0];
+    assert.strictEqual(mergedEntry.type, 'command', 'merged hooks.json entry should have type "command"');
+    assert.ok(typeof mergedEntry.command === 'string', 'merged hooks.json entry should have a string command field');
     assert.ok(Array.isArray(merged.hooks?.sessionStart), 'merged hooks.json should preserve existing sessionStart hook');
     assert.strictEqual((merged.hooks?.sessionStart ?? []).length, 1, 'sessionStart hook should be preserved');
 }

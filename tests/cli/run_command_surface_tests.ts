@@ -94,6 +94,8 @@ function testHelpMatrix(): void {
         { args: ['resolve', '--help'], token: 'Resolve Command' },
         { args: ['integrate', '--help'], token: 'Integrations' },
         { args: ['mcp', '--help'], token: 'MCP server and maintenance commands.' },
+        { args: ['list-rules', '--help'], token: 'List all user-defined operating rules.' },
+        { args: ['delete-rule', '--help'], token: 'Delete a user-defined operating rule by ID.' },
         { args: ['claude-setup', '--help'], token: 'Scaffold Claude Code MCP and hook files for the current project.' },
         { args: ['claude-hook', '--help'], token: 'Claude Code -> Iranti hook helper' },
         { args: ['codex-setup', '--help'], token: 'Configure Codex to use the local Iranti MCP server.' },

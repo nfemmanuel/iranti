@@ -54,7 +54,7 @@ import { startChatSession } from '../src/chat';
 import { createVectorBackend, resolveVectorBackendName } from '../src/library/backends';
 import { InstanceRuntimeState, RuntimeInspection, inspectRuntimeState, isPidRunning, resolveRuntimeAuthorityFromEnv, waitForPidExit } from '../src/lib/runtimeLifecycle';
 import type { Iranti } from '../src/sdk';
-import { auditVectorIndexConsistency } from '../src/library/queries';
+import { auditVectorIndexConsistency, findEntriesByEntityType, deleteEntryById } from '../src/library/queries';
 import { backfillChatHistory, parseBackfillChatTranscript } from '../src/lib/autoRemember';
 import { buildSemanticFactTags } from '../src/lib/semanticFactTags';
 import { flushStaffEventEmitter } from '../src/lib/staffEventRegistry';
@@ -10023,6 +10023,154 @@ async function mcpCleanupCommand(args: ParsedArgs): Promise<void> {
     printMcpCleanupReport(report);
 }
 
+// ── Rule commands ────────────────────────────────────────────────────────────
+
+function printListRulesHelp(): void {
+    console.log([
+        'List all user-defined operating rules.',
+        'Use this to see which rules will be matched during attend() based on trigger keywords.',
+        '',
+        'Usage:',
+        '  iranti list-rules [--instance <name>] [--project-env <path>] [--json]',
+        '',
+        'Notes:',
+        '  - Rules are stored as rule/* entities with trigger keywords.',
+        '  - During attend(), triggers are matched against the current context.',
+        '  - Soft rules are injected as guidance; hard rules as requirements.',
+    ].join('\n'));
+}
+
+function printDeleteRuleHelp(): void {
+    console.log([
+        'Delete a user-defined operating rule by ID.',
+        'Use this to remove a rule that is no longer needed.',
+        '',
+        'Usage:',
+        '  iranti delete-rule <rule-id> [--instance <name>] [--project-env <path>] [--json]',
+        '',
+        'Examples:',
+        '  iranti delete-rule no_npm_publish',
+        '  iranti delete-rule watch_ci --instance myapp',
+    ].join('\n'));
+}
+
+async function resolveDbForRuleCommands(args: ParsedArgs): Promise<void> {
+    const instanceName = getFlag(args, 'instance');
+    if (instanceName) {
+        const scope = normalizeScope(getFlag(args, 'scope'));
+        const root = resolveInstallRoot(args, scope);
+        const loaded = await loadInstanceEnv(root, instanceName);
+        applyEnvMap(loaded.env);
+    } else {
+        const cwd = path.resolve(getFlag(args, 'project') ?? process.cwd());
+        const explicitProjectEnv = getFlag(args, 'project-env');
+        loadRuntimeEnv({
+            cwd,
+            projectEnvFile: explicitProjectEnv ? path.resolve(explicitProjectEnv) : undefined,
+        });
+    }
+    const databaseUrl = process.env.DATABASE_URL?.trim();
+    if (!databaseUrl) {
+        throw cliError(
+            'IRANTI_DATABASE_URL_MISSING',
+            'DATABASE_URL is required. Run from a bound project, pass --instance <name>, or set DATABASE_URL.',
+            ['Run `iranti project init . --instance <name>` to bind this project.'],
+        );
+    }
+    initDb(databaseUrl, { applicationName: 'iranti:cli:rules' });
+}
+
+async function listRulesCommand(args: ParsedArgs): Promise<void> {
+    try {
+        const json = hasFlag(args, 'json');
+        await resolveDbForRuleCommands(args);
+
+        const entries = await findEntriesByEntityType('rule');
+
+        if (json) {
+            const items = entries.map((entry) => {
+                const props = entry.properties && typeof entry.properties === 'object' && !Array.isArray(entry.properties)
+                    ? entry.properties as Record<string, unknown>
+                    : null;
+                return {
+                    ruleId: entry.entityId,
+                    key: entry.key,
+                    rule: entry.valueSummary || '',
+                    triggers: Array.isArray(props?.triggers) ? props!.triggers : [],
+                    enforcement: props?.enforcement ?? 'soft',
+                    scope: props?.scope ?? 'project',
+                    updatedAt: entry.updatedAt.toISOString(),
+                };
+            });
+            console.log(JSON.stringify({ total: items.length, rules: items }, null, 2));
+            process.exit(0);
+        }
+
+        if (entries.length === 0) {
+            console.log(`${infoLabel()} No operating rules found.`);
+            console.log('  Create rules with: iranti mcp → iranti_write_rule, or iranti_write with entity type "rule".');
+            return;
+        }
+
+        console.log(sectionTitle(`Operating Rules (${entries.length})`));
+        for (const entry of entries) {
+            const props = entry.properties && typeof entry.properties === 'object' && !Array.isArray(entry.properties)
+                ? entry.properties as Record<string, unknown>
+                : null;
+            const triggers = Array.isArray(props?.triggers) ? (props!.triggers as string[]).join(', ') : '(none)';
+            const enforcement = props?.enforcement === 'hard' ? 'REQUIRED' : 'soft';
+            console.log(`  ${commandText(entry.entityId)} [${enforcement}]`);
+            console.log(`    rule:     ${entry.valueSummary || '(no summary)'}`);
+            console.log(`    triggers: ${triggers}`);
+            console.log(`    scope:    ${props?.scope ?? 'project'}`);
+            console.log(`    updated:  ${entry.updatedAt.toISOString()}`);
+        }
+    } finally {
+        await disconnectDb().catch(() => undefined);
+    }
+}
+
+async function deleteRuleCommand(args: ParsedArgs): Promise<void> {
+    try {
+        const json = hasFlag(args, 'json');
+        const ruleId = args.positionals[0]?.trim();
+        if (!ruleId) {
+            throw cliError(
+                'IRANTI_RULE_ID_REQUIRED',
+                'Missing rule ID. Usage: iranti delete-rule <rule-id>',
+                ['Run `iranti list-rules` to see available rules.'],
+            );
+        }
+
+        await resolveDbForRuleCommands(args);
+
+        const entries = await findEntriesByEntityType('rule');
+        const matching = entries.filter((entry) => entry.entityId === ruleId);
+
+        if (matching.length === 0) {
+            throw cliError(
+                'IRANTI_RULE_NOT_FOUND',
+                `Rule '${ruleId}' not found.`,
+                ['Run `iranti list-rules` to see available rules.'],
+                { ruleId },
+            );
+        }
+
+        for (const entry of matching) {
+            await deleteEntryById(entry.id);
+        }
+
+        if (json) {
+            console.log(JSON.stringify({ deleted: ruleId, entriesRemoved: matching.length }, null, 2));
+            process.exit(0);
+        }
+
+        console.log(`${okLabel()} Deleted rule '${ruleId}' (${matching.length} ${matching.length === 1 ? 'entry' : 'entries'} removed).`);
+    } finally {
+        await disconnectDb().catch(() => undefined);
+    }
+}
+
 async function main(): Promise<void> {
     const args = parseArgs(process.argv.slice(2));
     ACTIVE_PARSED_ARGS = args;
@@ -10331,6 +10479,24 @@ async function main(): Promise<void> {
             return;
         }
         await handoffToScript('iranti-mcp', process.argv.slice(3));
+        return;
+    }
+
+    if (args.command === 'list-rules') {
+        if (hasFlag(args, 'help')) {
+            printListRulesHelp();
+            return;
+        }
+        await listRulesCommand(args);
+        return;
+    }
+
+    if (args.command === 'delete-rule') {
+        if (hasFlag(args, 'help')) {
+            printDeleteRuleHelp();
+            return;
+        }
+        await deleteRuleCommand(args);
         return;
     }
 

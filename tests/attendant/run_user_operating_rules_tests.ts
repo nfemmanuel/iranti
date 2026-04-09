@@ -73,6 +73,42 @@ function main(): void {
         'Expected match when any one trigger matches.',
     );
 
+    // Short trigger (≤4 chars) matches via word-boundary substring
+    assert.ok(
+        matchesRuleTriggers(['git'], new Set(['release']), 'running git push to deploy'),
+        'Expected short trigger "git" to match via word-boundary substring.',
+    );
+
+    // Short trigger does not match partial word
+    assert.ok(
+        !matchesRuleTriggers(['git'], new Set([]), 'the digit was wrong'),
+        'Expected short trigger "git" NOT to match inside "digit".',
+    );
+
+    // Short trigger matches at start of context
+    assert.ok(
+        matchesRuleTriggers(['npm'], new Set([]), 'npm install packages'),
+        'Expected short trigger "npm" to match at start of context.',
+    );
+
+    // Short trigger matches at end of context
+    assert.ok(
+        matchesRuleTriggers(['ci'], new Set([]), 'watching the ci'),
+        'Expected short trigger "ci" to match at end of context.',
+    );
+
+    // Short trigger "pr" matches as standalone word
+    assert.ok(
+        matchesRuleTriggers(['pr'], new Set([]), 'create a pr for this change'),
+        'Expected short trigger "pr" to match as standalone word.',
+    );
+
+    // Short trigger "pr" does not match inside "print"
+    assert.ok(
+        !matchesRuleTriggers(['pr'], new Set([]), 'print the output'),
+        'Expected short trigger "pr" NOT to match inside "print".',
+    );
+
     // ─── formatMatchedUserRules ─────────────────────────────────────────────
 
     const softRule: MatchedUserRule = {

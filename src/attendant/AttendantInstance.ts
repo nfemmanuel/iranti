@@ -793,8 +793,15 @@ export function matchesRuleTriggers(triggers: string[], contextTokens: Set<strin
     return triggers.some((trigger) => {
         // Multi-word triggers: check phrase match
         if (trigger.includes(' ')) return contextLower.includes(trigger);
-        // Single-word triggers: check token membership
-        return contextTokens.has(trigger);
+        // Single-word triggers: check token membership first, then substring fallback
+        // for short triggers (≤4 chars) that tokenizePresenceText would filter out
+        if (contextTokens.has(trigger)) return true;
+        if (trigger.length <= 4) {
+            // Word-boundary substring match for short triggers like "git", "npm", "ci", "pr"
+            const pattern = new RegExp(`(?:^|[^a-z0-9])${trigger.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:[^a-z0-9]|$)`);
+            return pattern.test(contextLower);
+        }
+        return false;
     });
 }
 

@@ -484,8 +484,8 @@ accepted as an alias for latestMessage. When phase='post-response', pass the
 assistant response so Iranti can persist strict continuity facts and shared
 checkpoint state before closing the turn.`,
         inputSchema: {
-            latestMessage: z.string().min(1).optional().describe('The latest user or assistant message.'),
-            message: z.string().min(1).optional().describe('Alias for latestMessage, accepted for host compatibility.'),
+            latestMessage: z.string().min(1).optional().describe("The full text of the latest user or assistant message — pass the complete response text, not a summary. When phase='post-response', this must be the full assistant response so Iranti can extract and persist durable facts (drafts, decisions, findings) from it."),
+            message: z.string().min(1).optional().describe('Alias for latestMessage, accepted for host compatibility. Must be the full message text, not a summary.'),
             currentContext: z.string().optional().describe('Current visible context window.'),
             entityHints: z.array(z.string()).optional().describe('Optional entity hints in entityType/entityId format.'),
             maxFacts: z.number().int().min(1).max(20).optional().describe('Maximum facts to inject.'),
