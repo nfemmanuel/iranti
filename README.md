@@ -66,8 +66,8 @@ Facts persist across sessions, context resets, and tool switches. When you resta
 - **Conflict resolution** — concurrent writes from multiple agents are detected and resolved
 - **Per-fact confidence** — every fact carries a confidence score; low-confidence facts age out
 - **Session recovery** — checkpoint/resume for interrupted work
-- **User operating rules** — define rules that surface only when relevant (v0.3.20)
-- **File-change recall** — agents remember which files changed and why (v0.3.20)
+- **User operating rules** — define trigger-based rules that surface only when relevant
+- **File-change recall** — agents remember which files changed and why
 
 ---
 
@@ -201,15 +201,35 @@ const fact = await client.query("project/my-app", "status");
 
 ---
 
+## User Operating Rules
+
+Rules are trigger-based instructions that surface only when the agent is about to do a relevant task (e.g. releasing, pushing to CI). Unlike project policies which are always injected, rules match against the current context using keyword triggers.
+
+```bash
+# Create a rule via MCP (iranti_write_rule tool) or the API
+# Example: remind the agent to use GitHub Releases instead of npm publish
+#   triggers: ["publish", "release", "npm"]
+#   enforcement: "hard" (required) or "soft" (guidance)
+
+# List all rules
+iranti list-rules
+
+# Remove a rule
+iranti delete-rule no_npm_publish
+```
+
+Rules are stored as `rule/*` entities. During `iranti_attend`, triggers are matched against the current conversation context — single-word triggers match as tokens, multi-word triggers match as phrases.
+
+---
+
 ## Diagnostics
 
 ```bash
 iranti doctor              # Validate database, API key, and provider
 iranti status              # Show known instances and project bindings
+iranti chat                # Interactive chat shell for sanity checking
 iranti upgrade --check     # Check for available updates
 iranti upgrade --yes       # Apply updates
-iranti list-rules          # Show all operating rules
-iranti delete-rule <id>    # Remove an operating rule
 ```
 
 Operator-facing CLI help now includes short "what it does" and "use this when" guidance for every command — run `iranti --help` or `iranti <command> --help` for details.
@@ -241,12 +261,15 @@ iranti uninstall --all --yes  # Remove runtime + project bindings
 
 ## Guides
 
+- [Quickstart](docs/guides/quickstart.md)
 - [Claude Code setup](docs/guides/claude-code.md)
 - [Codex CLI setup](docs/guides/codex.md)
+- [GitHub Copilot setup](docs/guides/copilot.md)
 - [Python client](docs/guides/python-client.md)
 - [Security quickstart](docs/guides/security-quickstart.md)
 - [Operator manual](docs/guides/manual.md)
 - [Conflict resolution](docs/guides/conflict-resolution.md)
+- [Cross-tool handoffs](docs/guides/cross-tool-handoffs.md)
 - [Vector backends](docs/guides/vector-backends.md)
 
 ## Links
