@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.19 - Unreleased
+
+### Improved
+
+- **Compliance context-awareness for chatter turns.** `turnsWithoutWrite` no longer escalates on pure chatter turns (pre-response → post-response with no mid-turn activity). Only turns where the agent performed tool work count toward the write compliance threshold.
+- **Search suggestion stopword filtering.** Added `tokenizeForSearch()` with ~80 stopwords. Conversational turns like "Give me possible ideas" no longer produce search suggestions with generic terms.
+- **Attend reason clarity.** Renamed `memory_needed_no_facts` to `memory_checked_no_match`. Added `memorySearchPerformed` and `memoryResultsConsidered` fields to `AttendResult` for transparent search reporting.
+- **Auto-capture observability.** Post-response attend now surfaces `PostResponseCaptureInfo` showing how many facts were extracted, written, and skipped by `rememberAssistantResponseFacts`.
+- **Semantic tag-aware retrieval.** `observe()` now accepts an optional `semanticFilter` (domains, intents, scopes, tags) and boosts matching facts during ranking via `semanticMatchScore()`.
+
 ## 0.3.11 - 2026-04-06
 
 ### Added

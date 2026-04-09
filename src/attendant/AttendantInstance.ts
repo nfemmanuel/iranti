@@ -22,7 +22,8 @@ import {
     isPersonalEntityType,
     isPersonalMemoryKey,
 } from '../lib/autoRemember';
-import { buildSemanticFactTags } from '../lib/semanticFactTags';
+import { buildSemanticFactTags, semanticMatchScore } from '../lib/semanticFactTags';
+import type { SemanticFilter } from '../lib/semanticFactTags';
 import {
     buildSessionLedgerLearningProfile,
     summarizeSessionLedgerLearnings,
@@ -143,6 +144,27 @@ const MEMORY_NEED_NEGATIVE_PATTERNS: RegExp[] = [
     /^\s*(thanks|thank you|cool|great|nice)\b[!.?\s]*$/i,
 ];
 
+const SEARCH_SUGGESTION_STOPWORDS = new Set([
+    'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+    'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing',
+    'will', 'would', 'could', 'should', 'may', 'might', 'shall', 'can',
+    'you', 'your', 'yours', 'me', 'my', 'mine', 'we', 'our', 'ours',
+    'they', 'them', 'their', 'theirs', 'he', 'she', 'his', 'her', 'its',
+    'this', 'that', 'these', 'those', 'it',
+    'and', 'but', 'or', 'nor', 'not', 'so', 'yet', 'for', 'with',
+    'from', 'into', 'about', 'after', 'before', 'between', 'under', 'over',
+    'some', 'any', 'all', 'each', 'every', 'other', 'more', 'most',
+    'very', 'much', 'just', 'also', 'too', 'still', 'own',
+    'what', 'how', 'when', 'where', 'which', 'who', 'why',
+    'get', 'got', 'let', 'put', 'say', 'tell', 'ask', 'use', 'try',
+    'give', 'take', 'make', 'come', 'see', 'look', 'think', 'know',
+    'want', 'need', 'keep', 'turn', 'run',
+    'way', 'now', 'here', 'there', 'then', 'than',
+    'yes', 'no', 'nice', 'okay', 'sure', 'like',
+    'new', 'old', 'possible', 'ideas', 'idea',
+    'hey', 'per',
+]);
+
 const MEMORY_PARSE_FAILURE_PROJECT_CUE_PATTERNS: RegExp[] = [
     /\b(?:status|progress|summary|summar(?:y|ize)|recap|overview|state)\b/i,
     /\b(?:decision|decisions|findings?|artifacts?|changes?|work|implementation|architecture|code(?:base)?|repo|repository)\b/i,
@@ -247,6 +269,7 @@ export interface SessionComplianceState {
     counters: {
         attendsWithoutPersist: number;
         turnsWithoutWrite: number;
+        midTurnAttendsThisTurn: number;
         consecutivePreResponseWithoutPost: number;
         consecutiveUnusedMemoryInjections: number;
         pendingPostResponse: boolean;
@@ -364,6 +387,7 @@ export interface ObserveInput {
     priorityKeys?: string[];    // exact keys to prioritize within resolved entities
     skipContextFilter?: boolean; // when true, skip already-in-context filtering (used by forceInject)
     recoveryKeys?: string[];    // entity keys to bypass context filter — used for post-compaction re-injection of facts that were in context just before the compact
+    semanticFilter?: import('../lib/semanticFactTags').SemanticFilter;
     ledgerContext?: AgentContext['ledgerContext'];
 }
 
@@ -446,7 +470,8 @@ export interface AttendResult extends ObserveResult {
     reason:
         | 'forced'
         | 'memory_not_needed'
-        | 'memory_needed_no_facts'
+        | 'memory_needed_no_facts'        // deprecated: use memory_checked_no_match
+        | 'memory_checked_no_match'
         | 'memory_needed_but_in_context'
         | 'memory_needed_injected';
     decision: AttendDecision;
@@ -455,6 +480,16 @@ export interface AttendResult extends ObserveResult {
     complianceWarning?: string;
     compliance: SessionComplianceState;
     memoryAttributions?: MemoryAttributionResult[];
+    memorySearchPerformed?: boolean;
+    memoryResultsConsidered?: number;
+    postResponseCapture?: PostResponseCaptureInfo;
+}
+
+export interface PostResponseCaptureInfo {
+    factsExtracted: number;
+    factsWritten: number;
+    checkpointExtracted: boolean;
+    skipped: Array<{ key: string; reason: string }>;
 }
 
 export type MemoryAttributionEvidenceKind =
@@ -995,6 +1030,7 @@ function buildCheckpointSummary(checkpoint: SessionCheckpointRecord | null): Ses
 function buildSessionComplianceState(input: {
     attendsWithoutPersist: number;
     turnsWithoutWrite: number;
+    midTurnAttendsThisTurn: number;
     consecutivePreResponseWithoutPost: number;
     consecutiveUnusedMemoryInjections: number;
     lastAttendPhase?: 'pre-response' | 'post-response' | 'mid-turn';
@@ -1030,7 +1066,7 @@ function buildSessionComplianceState(input: {
             code: 'missing_writes_across_turns',
             severity,
             count: input.turnsWithoutWrite,
-            message: `${input.turnsWithoutWrite} completed turns without a single iranti_write or iranti_checkpoint call. Knowledge discovered during these turns is not being persisted.`,
+            message: `${input.turnsWithoutWrite} active turns with tool use completed without iranti_write or iranti_checkpoint calls. Findings from these turns are not being persisted.`,
             requiredAction: 'Call iranti_write for each durable finding — file edits, confirmed facts, environment state, subagent results. Every turn that discovers something should write it.',
         });
     }
@@ -1077,6 +1113,7 @@ function buildSessionComplianceState(input: {
         counters: {
             attendsWithoutPersist: input.attendsWithoutPersist,
             turnsWithoutWrite: input.turnsWithoutWrite,
+            midTurnAttendsThisTurn: input.midTurnAttendsThisTurn,
             consecutivePreResponseWithoutPost: input.consecutivePreResponseWithoutPost,
             consecutiveUnusedMemoryInjections: input.consecutiveUnusedMemoryInjections,
             pendingPostResponse,
@@ -1277,6 +1314,10 @@ function tokenize(text: string | undefined): string[] {
         .split(' ')
         .map((part) => part.trim())
         .filter((part) => part.length > 2);
+}
+
+function tokenizeForSearch(text: string | undefined): string[] {
+    return tokenize(text).filter((token) => !SEARCH_SUGGESTION_STOPWORDS.has(token));
 }
 
 function fingerprintTask(task: string, recentMessages: string[] = []): string {
@@ -1871,6 +1912,8 @@ export class AttendantInstance {
     private contextCallCount: number = 0;
     private attendsWithoutPersist: number = 0;
     private turnsWithoutWrite: number = 0;
+    private midTurnAttendsThisTurn: number = 0;
+    private writeOccurredThisTurn: boolean = false;
     private consecutivePreResponseWithoutPost: number = 0;
     private consecutiveUnusedMemoryInjections: number = 0;
     private lastAttendPhase: 'pre-response' | 'post-response' | 'mid-turn' | undefined = undefined;
@@ -2445,6 +2488,7 @@ export class AttendantInstance {
         return buildSessionComplianceState({
             attendsWithoutPersist: this.attendsWithoutPersist,
             turnsWithoutWrite: this.turnsWithoutWrite,
+            midTurnAttendsThisTurn: this.midTurnAttendsThisTurn,
             consecutivePreResponseWithoutPost: this.consecutivePreResponseWithoutPost,
             consecutiveUnusedMemoryInjections: this.consecutiveUnusedMemoryInjections,
             lastAttendPhase: this.lastAttendPhase,
@@ -2455,6 +2499,7 @@ export class AttendantInstance {
     async notifyWriteOccurred(): Promise<void> {
         this.attendsWithoutPersist = 0;
         this.turnsWithoutWrite = 0;
+        this.writeOccurredThisTurn = true;
         this.lastAttendPhase = undefined;
         this.consecutivePreResponseWithoutPost = 0;
         this.complianceUpdatedAt = new Date().toISOString();
@@ -2738,8 +2783,15 @@ export class AttendantInstance {
         if (phase === 'post-response') {
             // Correct post-response call — reset attend counters but NOT turnsWithoutWrite
             // turnsWithoutWrite only resets on actual writes/checkpoints
+            // Only count active turns (with mid-turn attends) toward turnsWithoutWrite.
+            // Chatter-only turns (pre-response → post-response with nothing in between) are exempt.
+            // Turns where a write already occurred are also exempt.
             this.attendsWithoutPersist = 0;
-            this.turnsWithoutWrite++;
+            if (this.midTurnAttendsThisTurn > 0 && !this.writeOccurredThisTurn) {
+                this.turnsWithoutWrite++;
+            }
+            this.midTurnAttendsThisTurn = 0;
+            this.writeOccurredThisTurn = false;
             this.lastAttendPhase = 'post-response';
             this.consecutivePreResponseWithoutPost = 0;
         } else if (phase === 'pre-response') {
@@ -2749,9 +2801,15 @@ export class AttendantInstance {
             } else {
                 this.consecutivePreResponseWithoutPost = 0;
             }
+            this.midTurnAttendsThisTurn = 0;
+            this.writeOccurredThisTurn = false;
             this.lastAttendPhase = 'pre-response';
+        } else if (phase === 'mid-turn') {
+            this.midTurnAttendsThisTurn++;
+            this.lastAttendPhase = 'mid-turn';
         } else {
-            // No phase provided — fall back to heuristic counter
+            // No phase provided — count as mid-turn activity
+            this.midTurnAttendsThisTurn++;
             if (this.attendsWithoutPersist >= 3) {
                 complianceWarning = `COMPLIANCE: iranti_attend has been called ${this.attendsWithoutPersist} times since the last iranti_write or iranti_checkpoint. You are likely missing post-response attend calls and durable writes. Call iranti_attend(phase='post-response') after every response, then persist durable findings with iranti_write or iranti_checkpoint before the next turn.`;
             }
@@ -2983,23 +3041,25 @@ export class AttendantInstance {
 
         let reason: AttendResult['reason'] = 'memory_needed_injected';
         const shouldInject = structuredFacts.length > 0;
+        const memorySearchPerformed = true;
+        const memoryResultsConsidered = observed.totalFound;
         let searchSuggestion: AttendSearchSuggestion | undefined;
 
         if (!shouldInject) {
             const allAlreadyInContext = observed.totalFound > 0 && observed.alreadyPresent >= observed.totalFound;
-            reason = allAlreadyInContext ? 'memory_needed_but_in_context' : 'memory_needed_no_facts';
-            if (reason === 'memory_needed_no_facts') {
-                const terms = tokenize(latestMessage).slice(0, 6);
+            reason = allAlreadyInContext ? 'memory_needed_but_in_context' : 'memory_checked_no_match';
+            if (reason === 'memory_checked_no_match') {
+                const terms = tokenizeForSearch(latestMessage).slice(0, 6);
                 const alternativeEntities = (observed.entitiesResolved ?? [])
                     .map((e) => e.canonicalEntity)
                     .filter(Boolean);
-                searchSuggestion = {
-                    hint: terms.length > 0
-                        ? `Iranti found no auto-inject facts for this turn. Call iranti_search(query='${terms.join(' ')}') BEFORE reading the codebase — empty attend facts do NOT mean data is absent; Iranti is the cross-session source of truth.`
-                        : 'Iranti found no auto-inject facts for this turn. Call iranti_search with a relevant query BEFORE reading the codebase — do not conclude absence of data without searching first.',
-                    suggestedTerms: terms,
-                    alternativeEntities,
-                };
+                if (terms.length > 0) {
+                    searchSuggestion = {
+                        hint: `Iranti searched memory but found no matching facts for this turn. Call iranti_search(query='${terms.join(' ')}') BEFORE reading the codebase — empty attend facts do NOT mean data is absent; Iranti is the cross-session source of truth.`,
+                        suggestedTerms: terms,
+                        alternativeEntities,
+                    };
+                }
             }
         } else if (forceInject) {
             reason = 'forced';
@@ -3029,6 +3089,8 @@ export class AttendantInstance {
             complianceWarning,
             compliance,
             memoryAttributions,
+            memorySearchPerformed,
+            memoryResultsConsidered,
             usageGuidance: buildUsageGuidance('attend', this.turnsWithoutWrite),
         };
         if (input.suppressEvents !== true) {
@@ -3293,6 +3355,7 @@ ${detectionWindow}`,
         const maxEntities = policy.maxEntitiesPerObserve ?? 5;
         const maxKeysPerEntity = policy.maxKeysPerEntity ?? 5;
         const allFacts: RetrievedFact[] = [];
+        const entryPropertiesMap = new Map<number, Record<string, unknown>>();
         const entitiesResolved: ObserveResult['entitiesResolved'] = [];
         const entitiesDetected = new Set<string>();
         const resolvedEntities = new Map<string, {
@@ -3416,6 +3479,9 @@ ${detectionWindow}`,
                     lastUpdated: entry.updatedAt.toISOString(),
                     entryId: entry.id,
                 });
+                if (entry.properties && typeof entry.properties === 'object' && !Array.isArray(entry.properties)) {
+                    entryPropertiesMap.set(entry.id, entry.properties as Record<string, unknown>);
+                }
             }
         }
 
@@ -3446,7 +3512,9 @@ ${detectionWindow}`,
         // Step 4 — relevance-weighted fact ranking
         // Profile facts (favorite_city, country_of_origin, etc.) on personal entities
         // are deprioritized unless the context/message shows token overlap with them.
+        // When a semanticFilter is provided, facts matching the filter are boosted.
         const contextTokens = new Set(tokenizePresenceText(currentContext));
+        const activeSemanticFilter = input.semanticFilter;
         const topFacts = newFacts
             .map((fact) => {
                 const parts = fact.entityKey.split('/');
@@ -3459,13 +3527,18 @@ ${detectionWindow}`,
                 const overlap = factTokens.filter((t) => contextTokens.has(t)).length;
                 const relevance = factTokens.length > 0 ? overlap / factTokens.length : 0;
 
+                // Semantic boost: if a filter is active, boost matching facts
+                const properties = entryPropertiesMap.get(fact.entryId);
+                const semanticScore = activeSemanticFilter ? semanticMatchScore(properties, activeSemanticFilter) : 0;
+                const semanticBoost = semanticScore > 0 ? semanticScore * 30 : 0;
+
                 // Profile facts with no relevance to the current context get deprioritized
                 const profilePenalty = isProfile && relevance === 0 ? 50 : 0;
-                const effectiveConfidence = fact.confidence - profilePenalty;
+                const effectiveConfidence = fact.confidence - profilePenalty + semanticBoost;
 
-                return { fact, effectiveConfidence, relevance };
+                return { fact, effectiveConfidence, relevance, semanticScore };
             })
-            .sort((a, b) => b.effectiveConfidence - a.effectiveConfidence || b.relevance - a.relevance)
+            .sort((a, b) => b.effectiveConfidence - a.effectiveConfidence || b.semanticScore - a.semanticScore || b.relevance - a.relevance)
             .slice(0, maxFacts)
             .map(({ fact }) => fact);
 
@@ -4115,6 +4188,7 @@ If nothing is relevant, return: none`,
         this.sharedStateObservedAt = state.briefGeneratedAt;
         this.attendsWithoutPersist = state.compliance?.counters.attendsWithoutPersist ?? 0;
         this.turnsWithoutWrite = state.compliance?.counters.turnsWithoutWrite ?? 0;
+        this.midTurnAttendsThisTurn = state.compliance?.counters.midTurnAttendsThisTurn ?? 0;
         this.consecutivePreResponseWithoutPost = state.compliance?.counters.consecutivePreResponseWithoutPost ?? 0;
         this.consecutiveUnusedMemoryInjections = state.compliance?.counters.consecutiveUnusedMemoryInjections ?? 0;
         this.lastAttendPhase = state.compliance?.counters.lastAttendPhase ?? undefined;

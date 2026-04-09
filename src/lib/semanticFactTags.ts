@@ -176,3 +176,43 @@ export function buildSemanticFactTags(input: {
         ]),
     };
 }
+
+export interface SemanticFilter {
+    domains?: string[];
+    intents?: string[];
+    scopes?: string[];
+    tags?: string[];
+}
+
+export function semanticMatchScore(properties: Record<string, unknown> | null | undefined, filter: SemanticFilter): number {
+    if (!properties || !filter) return 0;
+
+    let matches = 0;
+    let criteria = 0;
+
+    if (filter.domains && filter.domains.length > 0) {
+        criteria++;
+        const domain = typeof properties.semanticDomain === 'string' ? properties.semanticDomain : '';
+        if (filter.domains.includes(domain)) matches++;
+    }
+
+    if (filter.intents && filter.intents.length > 0) {
+        criteria++;
+        const intent = typeof properties.semanticIntent === 'string' ? properties.semanticIntent : '';
+        if (filter.intents.includes(intent)) matches++;
+    }
+
+    if (filter.scopes && filter.scopes.length > 0) {
+        criteria++;
+        const scope = typeof properties.temporalScope === 'string' ? properties.temporalScope : '';
+        if (filter.scopes.includes(scope)) matches++;
+    }
+
+    if (filter.tags && filter.tags.length > 0) {
+        criteria++;
+        const tags = Array.isArray(properties.semanticTags) ? properties.semanticTags as string[] : [];
+        if (filter.tags.some((t) => tags.includes(t))) matches++;
+    }
+
+    return criteria > 0 ? matches / criteria : 0;
+}

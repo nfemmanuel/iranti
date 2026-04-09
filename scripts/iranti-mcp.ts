@@ -429,7 +429,7 @@ async function main(): Promise<void> {
 
     const server = new McpServer({
         name: 'iranti-mcp',
-        version: '0.3.18',
+        version: '0.3.19',
     });
 
     server.registerTool('iranti_handshake', {
@@ -498,8 +498,9 @@ checkpoint state before closing the turn.`,
         syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
         const resolvedLatestMessage = resolveAttendLatestMessage({ latestMessage, message });
         try {
+            let postResponseCapture: { factsExtracted: number; factsWritten: number; checkpointExtracted: boolean; skipped: Array<{ key: string; reason: string }> } | undefined;
             if (phase === 'post-response') {
-                await rememberAssistantResponseFacts({
+                const rememberResult = await rememberAssistantResponseFacts({
                     iranti,
                     response: resolvedLatestMessage,
                     agent: resolvedAgent,
@@ -522,6 +523,12 @@ checkpoint state before closing the turn.`,
                         },
                     });
                 }
+                postResponseCapture = {
+                    factsExtracted: rememberResult.extracted,
+                    factsWritten: rememberResult.written,
+                    checkpointExtracted: checkpoint !== null && checkpoint !== undefined,
+                    skipped: rememberResult.skipped,
+                };
             } else if (isAutoRememberEnabled()) {
                 await autoRememberPromptFacts({
                     iranti,
@@ -549,6 +556,7 @@ checkpoint state before closing the turn.`,
                 ...result,
                 facts: sanitizeFacts(result.facts),
                 injectionBlock,
+                ...(postResponseCapture ? { postResponseCapture } : {}),
             });
         } catch (error) {
             if (error instanceof ProtocolViolationError) {
