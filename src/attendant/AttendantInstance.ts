@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { route } from '../lib/router';
 import { getStaffEventEmitter } from '../lib/staffEventRegistry';
-import { queryEntry, findEntriesByEntity, recordKnowledgeEntryAccess } from '../library/queries';
+import { queryEntry, findEntriesByEntity, findEntriesByEntityType, recordKnowledgeEntryAccess } from '../library/queries';
 import { findEntry } from '../library/queries';
 import { getRelated, getRelatedDeep } from '../library/relationships';
 import { parseEntityString, resolveEntity } from '../library/entity-resolution';
@@ -483,6 +483,7 @@ export interface AttendResult extends ObserveResult {
     memorySearchPerformed?: boolean;
     memoryResultsConsidered?: number;
     postResponseCapture?: PostResponseCaptureInfo;
+    matchedUserRules?: MatchedUserRule[];
 }
 
 export interface PostResponseCaptureInfo {
@@ -761,6 +762,110 @@ function applyAdvisoryOperatingRules(
         }
     }
     return nextRules;
+}
+
+// ─── User Operating Rules ───────────────────────────────────────────────────
+
+export interface MatchedUserRule {
+    entityKey: string;
+    key: string;
+    rule: string;
+    triggers: string[];
+    scope: string;
+    enforcement: 'soft' | 'hard';
+    source: string;
+    lastUpdated: string;
+}
+
+export function extractRuleTriggers(properties: Record<string, unknown> | null | undefined): string[] {
+    if (!properties) return [];
+    const triggers = properties.triggers;
+    if (Array.isArray(triggers)) {
+        return triggers
+            .filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
+            .map((t) => t.trim().toLowerCase());
+    }
+    return [];
+}
+
+export function matchesRuleTriggers(triggers: string[], contextTokens: Set<string>, contextLower: string): boolean {
+    if (triggers.length === 0) return false;
+    return triggers.some((trigger) => {
+        // Multi-word triggers: check phrase match
+        if (trigger.includes(' ')) return contextLower.includes(trigger);
+        // Single-word triggers: check token membership
+        return contextTokens.has(trigger);
+    });
+}
+
+function parseUserOperatingRule(entry: {
+    entityType: string;
+    entityId: string;
+    key: string;
+    valueSummary: string;
+    valueRaw: unknown;
+    source: string;
+    properties: Record<string, unknown> | null;
+    updatedAt: Date;
+}): MatchedUserRule | null {
+    const triggers = extractRuleTriggers(entry.properties);
+    if (triggers.length === 0) return null;
+
+    const raw = entry.valueRaw as Record<string, unknown> | null;
+    const ruleText = entry.valueSummary?.trim()
+        || (typeof raw?.rule === 'string' ? raw.rule.trim() : '');
+    if (!ruleText) return null;
+
+    const enforcement = entry.properties?.enforcement === 'hard' ? 'hard' as const : 'soft' as const;
+    const scope = typeof entry.properties?.scope === 'string' ? entry.properties.scope : 'project';
+
+    return {
+        entityKey: `${entry.entityType}/${entry.entityId}`,
+        key: entry.key,
+        rule: ruleText,
+        triggers,
+        scope: String(scope),
+        enforcement,
+        source: entry.source,
+        lastUpdated: entry.updatedAt.toISOString(),
+    };
+}
+
+export function formatMatchedUserRules(rules: MatchedUserRule[]): string {
+    if (rules.length === 0) return '';
+    return rules.map((r) => {
+        const prefix = r.enforcement === 'hard' ? 'REQUIRED RULE' : 'USER RULE';
+        return `- ${prefix} (${r.key}): ${r.rule}`;
+    }).join('\n');
+}
+
+// ─── File-Path Entity Hints ─────────────────────────────────────────────────
+
+const FILE_PATH_PATTERN = /(?:^|[\s"'`(])([a-zA-Z]:\\(?:[^\s"'`<>|*?]+\\)*[^\s"'`<>|*?]+\.\w+|(?:\.\/|\.\.\/|\/)?(?:[a-zA-Z0-9_.-]+\/)+[a-zA-Z0-9_.-]+\.\w+)/g;
+
+export function extractFilePathEntityHints(text: string, projectEntity: string | null): string[] {
+    if (!text || !projectEntity) return [];
+    const parsed = parseEntityString(projectEntity);
+    const projectId = parsed.entityId;
+    const seen = new Set<string>();
+    const hints: string[] = [];
+
+    let match: RegExpExecArray | null;
+    FILE_PATH_PATTERN.lastIndex = 0;
+    while ((match = FILE_PATH_PATTERN.exec(text)) !== null) {
+        const filePath = match[1].trim();
+        // Extract just the filename without extension
+        const basename = filePath.replace(/\\/g, '/').split('/').pop() ?? '';
+        const nameWithoutExt = basename.replace(/\.\w+$/, '').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+        if (!nameWithoutExt || nameWithoutExt.length < 2) continue;
+
+        const entityHint = `project/${projectId}/file/${nameWithoutExt}`;
+        if (!seen.has(entityHint)) {
+            seen.add(entityHint);
+            hints.push(entityHint);
+        }
+    }
+    return hints;
 }
 
 function advisoryTaskTokens(taskType: string | null | undefined): string[] {
@@ -2836,7 +2941,21 @@ export class AttendantInstance {
             };
         }
 
-        const effectiveEntityHints = this.resolveAttendEntityHints(input.entityHints, latestMessage);
+        const baseEntityHints = this.resolveAttendEntityHints(input.entityHints, latestMessage);
+        // File-change demand-driven recall: extract file path mentions and add as entity hints
+        const filePathHints = extractFilePathEntityHints(
+            `${latestMessage}\n${currentContext}`,
+            getProjectMemoryEntity() ?? null,
+        );
+        const effectiveEntityHints = filePathHints.length > 0
+            ? [...new Set([...baseEntityHints, ...filePathHints])]
+            : baseEntityHints;
+
+        // User operating rules: load rules whose triggers match the current context
+        const matchedUserRules = phase !== 'post-response'
+            ? await this.loadMatchingUserRules(`${latestMessage}\n${currentContext}`)
+            : [];
+
         let watchedEntitiesChanged = this.updateWatchedEntities(effectiveEntityHints);
         const freshState = await this.detectRelevantFreshState(effectiveEntityHints, latestMessage);
         const observationContext = currentContext.trim().length > 0 ? currentContext : latestMessage;
@@ -2958,13 +3077,14 @@ export class AttendantInstance {
             }
             timeEnd('attendant.attend_ms', t0);
             return {
-                shouldInject: false,
+                shouldInject: matchedUserRules.length > 0,
                 reason: 'memory_not_needed',
                 decision,
                 bootstrap,
                 complianceWarning,
                 compliance,
                 memoryAttributions: [],
+                matchedUserRules: matchedUserRules.length > 0 ? matchedUserRules : undefined,
                 usageGuidance: buildUsageGuidance('attend', this.turnsWithoutWrite),
                 facts: [],
                 entitiesDetected: [],
@@ -3081,7 +3201,7 @@ export class AttendantInstance {
         const attendResult = {
             ...observed,
             facts: structuredFacts,
-            shouldInject: structuredFacts.length > 0,
+            shouldInject: structuredFacts.length > 0 || matchedUserRules.length > 0,
             reason,
             decision,
             bootstrap,
@@ -3091,6 +3211,7 @@ export class AttendantInstance {
             memoryAttributions,
             memorySearchPerformed,
             memoryResultsConsidered,
+            matchedUserRules: matchedUserRules.length > 0 ? matchedUserRules : undefined,
             usageGuidance: buildUsageGuidance('attend', this.turnsWithoutWrite),
         };
         if (input.suppressEvents !== true) {
@@ -3582,6 +3703,43 @@ ${detectionWindow}`,
                 dropped: droppedCandidates,
             },
         };
+    }
+
+    // ── User Operating Rules ────────────────────────────────────────────────
+
+    private async loadMatchingUserRules(context: string): Promise<MatchedUserRule[]> {
+        try {
+            const entries = await findEntriesByEntityType('rule');
+            if (entries.length === 0) return [];
+
+            const contextLower = context.toLowerCase();
+            const contextTokens = new Set(tokenizePresenceText(context));
+            const matched: MatchedUserRule[] = [];
+
+            for (const entry of entries) {
+                const props = entry.properties && typeof entry.properties === 'object' && !Array.isArray(entry.properties)
+                    ? entry.properties as Record<string, unknown>
+                    : null;
+                const rule = parseUserOperatingRule({
+                    entityType: entry.entityType,
+                    entityId: entry.entityId,
+                    key: entry.key,
+                    valueSummary: entry.valueSummary,
+                    valueRaw: entry.valueRaw,
+                    source: entry.source,
+                    properties: props,
+                    updatedAt: entry.updatedAt,
+                });
+                if (rule && matchesRuleTriggers(rule.triggers, contextTokens, contextLower)) {
+                    matched.push(rule);
+                }
+            }
+
+            return matched;
+        } catch (err) {
+            console.error('[attendant] failed to load user operating rules:', err);
+            return [];
+        }
     }
 
     // ── Private ──────────────────────────────────────────────────────────────

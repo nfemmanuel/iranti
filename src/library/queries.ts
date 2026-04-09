@@ -213,6 +213,17 @@ export async function findEntriesByEntity(
     });
 }
 
+export async function findEntriesByEntityType(
+    entityType: string,
+    db?: DbClient
+): Promise<KnowledgeEntry[]> {
+    const client = db ?? getDb();
+    return client.knowledgeEntry.findMany({
+        where: { entityType },
+        orderBy: [{ entityId: 'asc' }, { key: 'asc' }],
+    });
+}
+
 export async function listAttendantStateEntries(
     filters?: { agentId?: string },
     db?: DbClient

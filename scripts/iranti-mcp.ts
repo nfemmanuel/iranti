@@ -14,6 +14,7 @@ import { disconnectDb } from '../src/library/client';
 import { activeAttendants, clearAttendant, getAttendant } from '../src/attendant';
 import { extractAssistantCheckpointPayload } from '../src/lib/assistantCheckpoint';
 import { formatStructuredFactBlock } from '../src/lib/hostMemoryFormatting';
+import { formatMatchedUserRules } from '../src/attendant/AttendantInstance';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -546,11 +547,17 @@ checkpoint state before closing the turn.`,
                 forceInject,
                 phase,
             });
-            const injectionBlock = result.shouldInject
+            const factsBlock = result.facts.length > 0
                 ? formatStructuredFactBlock(result.facts, {
                     title: 'Iranti Retrieved Memory',
                     includeValues: false,
                 })
+                : '';
+            const rulesBlock = result.matchedUserRules?.length
+                ? `\n[User Operating Rules]\nThese rules were triggered by keywords in your current context. Follow them for this task.\n${formatMatchedUserRules(result.matchedUserRules)}`
+                : '';
+            const injectionBlock = factsBlock || rulesBlock
+                ? `${factsBlock}${rulesBlock}`
                 : '';
             return textResult({
                 ...result,
@@ -830,6 +837,51 @@ such as issueStatus=open|resolved, severity, or resolution notes.`,
                 summaryCompleteness: completeness?.score,
                 originalSummary: summary,
             } : {}),
+        });
+    });
+
+    server.registerTool('iranti_write_rule', {
+        description: `Write a task-scoped user operating rule with trigger keywords.
+Rules surface during iranti_attend only when the current context matches
+one or more trigger keywords. Use this for recurring guidelines that should
+be applied to specific task types (e.g. "always use GitHub Releases, not
+npm publish" triggered by "release", "publish", "npm"). Rules are stored
+as rule/<rule_id> entities and persist across sessions.`,
+        inputSchema: {
+            ruleId: z.string().min(1).describe('Stable rule identifier (becomes entityId under rule/ type).'),
+            rule: z.string().min(1).describe('The rule text — what the agent should do or avoid.'),
+            triggers: z.array(z.string().min(1)).min(1).describe('Keyword triggers. The rule surfaces when any trigger matches the attend context.'),
+            scope: z.enum(['project', 'user', 'global']).optional().describe('Scope of the rule. Defaults to project.'),
+            enforcement: z.enum(['soft', 'hard']).optional().describe('Enforcement level. soft=reminder, hard=required. Defaults to soft.'),
+            source: z.string().optional().describe('Source label for provenance.'),
+            agent: z.string().optional().describe('Override the default agent id.'),
+            agentId: z.string().optional().describe('Alias for agent. Override the default agent id.'),
+        },
+    }, async ({ ruleId, rule, triggers, scope, enforcement, source, agent, agentId }) => {
+        const resolvedAgent = resolveToolAgent(agent, agentId);
+        syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
+        const normalizedId = ruleId.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+        const result = await iranti.write({
+            entity: `rule/${normalizedId}`,
+            key: 'definition',
+            value: { rule, triggers, scope: scope ?? 'project', enforcement: enforcement ?? 'soft' },
+            summary: rule,
+            confidence: 100,
+            source: source?.trim() || defaultWriteSource(),
+            agent: resolvedAgent,
+            properties: {
+                triggers,
+                scope: scope ?? 'project',
+                enforcement: enforcement ?? 'soft',
+                durableClass: 'operating_rule',
+            },
+        });
+        return textResult({
+            ...toStructuredContent(result),
+            ruleId: normalizedId,
+            triggers,
+            scope: scope ?? 'project',
+            enforcement: enforcement ?? 'soft',
         });
     });
 
