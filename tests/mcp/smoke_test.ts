@@ -381,7 +381,7 @@ the exact key, use this before saying you do not know.`,
             iranti_attend: `Ask Iranti whether memory should be injected before the next LLM turn.
 REQUIRED CALL SEQUENCE — follow this every turn, regardless of host:
 1. Call with phase='pre-response' BEFORE replying to the user.
-2. Call BEFORE any lookup tool (Read, Grep, Glob, Bash, WebSearch, WebFetch) where Iranti might already hold the answer.
+2. Call BEFORE any lookup tool (Read, Grep, Glob, Bash, WebSearch, WebFetch) where Iranti might already hold the answer. When you do, pass the pendingToolCall field so Iranti can derive entity hints from the tool target (file, URL, query) and preempt the lookup with stored facts.
 3. If you just ran Edit/Write/Bash/WebSearch/WebFetch since your last iranti_write, call iranti_write FIRST — then attend.
 4. Call with phase='post-response' AFTER every reply, without exception.
 
