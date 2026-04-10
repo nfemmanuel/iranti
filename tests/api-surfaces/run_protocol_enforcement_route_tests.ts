@@ -280,9 +280,9 @@ async function main(): Promise<void> {
 
         await iranti.write({
             entity: ignoredMemoryEntity,
-            key: 'next_step',
-            value: { instruction: 'rerun the runtime validation and capture the result.' },
-            summary: 'Next step is rerun the runtime validation and capture the result.',
+            key: 'enforcement_status',
+            value: { instruction: 'rerun the injected memory enforcement validation and capture the result.' },
+            summary: 'Injected memory enforcement validation must be rerun to confirm strict compliance.',
             confidence: 94,
             source: 'protocol_route_test',
             agent: ignoredMemoryAgentId,
@@ -359,7 +359,7 @@ async function main(): Promise<void> {
         });
         assert.equal(ignoredMemoryNewTurn.status, 200, `Expected attend to start a new turn after ignored injections, got ${ignoredMemoryNewTurn.status}.`);
 
-        const blockedIgnoredMemoryQuery = await fetch(`${baseUrl}/kb/query/project/${ignoredMemoryEntityId}/next_step?agentId=${encodeURIComponent(ignoredMemoryAgentId)}`);
+        const blockedIgnoredMemoryQuery = await fetch(`${baseUrl}/kb/query/project/${ignoredMemoryEntityId}/enforcement_status?agentId=${encodeURIComponent(ignoredMemoryAgentId)}`);
         assert.equal(blockedIgnoredMemoryQuery.status, 428, `Expected /kb/query after repeated ignored injections to return 428, got ${blockedIgnoredMemoryQuery.status}.`);
         const blockedIgnoredMemoryQueryBody = await blockedIgnoredMemoryQuery.json() as { code?: string };
         assert.equal(
@@ -402,15 +402,15 @@ async function main(): Promise<void> {
         });
         assert.equal(ignoredMemoryClearedAttend.status, 200, `Expected pre-response attend after checkpoint to succeed, got ${ignoredMemoryClearedAttend.status}.`);
 
-        const ignoredMemoryRecoveredQuery = await fetch(`${baseUrl}/kb/query/project/${ignoredMemoryEntityId}/next_step?agentId=${encodeURIComponent(ignoredMemoryAgentId)}`);
+        const ignoredMemoryRecoveredQuery = await fetch(`${baseUrl}/kb/query/project/${ignoredMemoryEntityId}/enforcement_status?agentId=${encodeURIComponent(ignoredMemoryAgentId)}`);
         assert.equal(ignoredMemoryRecoveredQuery.status, 200, `Expected /kb/query after checkpoint acknowledgement to succeed, got ${ignoredMemoryRecoveredQuery.status}.`);
         const ignoredMemoryRecoveredQueryBody = await ignoredMemoryRecoveredQuery.json() as { found?: boolean; value?: { instruction?: string } };
         assert.equal(ignoredMemoryRecoveredQueryBody.found, true, 'Expected recovery query after checkpoint acknowledgement to return the fact.');
-        // next_step is now a clean replace (no accumulation of prior steps).
+        // enforcement_status is now a clean replace (no accumulation of prior steps).
         assert.equal(
             ignoredMemoryRecoveredQueryBody.value?.instruction,
             'perform a fresh validation after acknowledging the limitation',
-            'Expected recovery query after checkpoint acknowledgement to return the latest next step (clean replace).',
+            'Expected recovery query after checkpoint acknowledgement to return the latest enforcement status (clean replace).',
         );
 
         console.log('protocol enforcement route tests passed');
