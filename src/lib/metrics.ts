@@ -8,6 +8,7 @@ type CounterName =
   | "librarian.updated"
   | "librarian.rejected"
   | "librarian.escalated"
+  | "librarian.conflict_multi_step"
   | "archivist.processed"
   | "archivist.resolutions_applied";
 

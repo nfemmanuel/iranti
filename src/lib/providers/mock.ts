@@ -474,6 +474,75 @@ const UNRELIABLE_FAILURE_ROTATION: MockFailureMode[] = [
     'throw',
 ];
 
+/**
+ * S3: deterministic prompt kinds the mock knows how to answer. Every Staff
+ * prompt gets classified into exactly one of these kinds before any response
+ * is computed. The flat substring-based if/else chain that used to drive
+ * complete() is now a single switch on the classifier output. Benefits:
+ *
+ * - The classifier is a pure function: easy to unit-test in isolation, no
+ *   provider state required. Tests can assert which kind a given Staff
+ *   prompt classifies to WITHOUT running the mock.
+ * - Kind counts are tracked so tests can verify that a scenario exercised
+ *   every expected branch instead of guessing from fallthrough counts alone.
+ * - Adding a new Staff prompt means adding one kind + one case, not hunting
+ *   for a spot in a regex chain.
+ *
+ * 'unknown' is the deliberate fallthrough — a prompt the classifier did not
+ * recognize. The existing fallthrough machinery (strictFallthrough,
+ * onFallthrough, canned researcher JSON) still handles this case so behavior
+ * is exactly preserved across the refactor.
+ */
+export type PromptKind =
+    | 'memory_need'
+    | 'entity_extraction'
+    | 'task_inference'
+    | 'relevance_filter'
+    | 'conflict_resolution'
+    | 'fact_extraction'
+    | 'compression'
+    | 'unknown';
+
+/**
+ * S3: classify a Staff prompt into its deterministic kind. Pure function —
+ * no side effects, no provider state, no randomness. The matching rules are
+ * intentionally the same substrings the flat dispatch used, so this refactor
+ * preserves behavior bit-for-bit; only the structure changes.
+ */
+export function classifyPromptKind(message: string): PromptKind {
+    const lower = message.toLowerCase();
+    if (
+        lower.includes('return only valid json with this exact shape:')
+        && lower.includes('"needsmemory"')
+    ) {
+        return 'memory_need';
+    }
+    if (lower.includes('extract explicitly named entities from the text')) {
+        return 'entity_extraction';
+    }
+    if (lower.includes('specific type of task')) {
+        return 'task_inference';
+    }
+    if (lower.includes('return only the numbers of entries that are directly relevant')) {
+        return 'relevance_filter';
+    }
+    if (lower.includes('genuinely contradictory') || lower.includes('keep_existing')) {
+        return 'conflict_resolution';
+    }
+    if (
+        lower.includes('extract only distinct facts')
+        || lower.includes('extract every distinct')
+        || lower.includes('extracting structured facts')
+        || lower.includes('atomic facts')
+    ) {
+        return 'fact_extraction';
+    }
+    if (lower.includes('compress') || lower.includes('summarize')) {
+        return 'compression';
+    }
+    return 'unknown';
+}
+
 class MockProvider implements LLMProvider {
     private config: MockConfig;
     private rand: () => number;
@@ -484,6 +553,18 @@ class MockProvider implements LLMProvider {
     private lastFailureMode: MockFailureEvent | null = null;
     private scheduledFailuresRemaining = 0;
     private unreliableRotationIndex = 0;
+    // S3: counter per prompt kind. Tests can assert specific scenarios
+    // exercised specific branches instead of guessing from fallthrough counts.
+    private kindCounts: Record<PromptKind, number> = {
+        memory_need: 0,
+        entity_extraction: 0,
+        task_inference: 0,
+        relevance_filter: 0,
+        conflict_resolution: 0,
+        fact_extraction: 0,
+        compression: 0,
+        unknown: 0,
+    };
 
     constructor(config: MockConfig = { scenario: 'default' }) {
         this.config = config;
@@ -500,14 +581,32 @@ class MockProvider implements LLMProvider {
         this.lastFailureMode = null;
         this.scheduledFailuresRemaining = this.config.failBeforeSuccessCount ?? 0;
         this.unreliableRotationIndex = 0;
+        this.resetKindCounts();
+    }
+
+    private resetKindCounts(): void {
+        this.kindCounts = {
+            memory_need: 0,
+            entity_extraction: 0,
+            task_inference: 0,
+            relevance_filter: 0,
+            conflict_resolution: 0,
+            fact_extraction: 0,
+            compression: 0,
+            unknown: 0,
+        };
     }
 
     async complete(messages: LLMMessage[], options?: CompleteOptions): Promise<LLMResponse> {
         this.callCount += 1;
         const lastMessage = messages[messages.length - 1].content;
-        const lower = lastMessage.toLowerCase();
         const scenario = this.config.scenario;
         const model = options?.model ?? 'mock';
+        // S3: classify the prompt exactly once and record the kind. All
+        // branch decisions below dispatch on this value instead of re-scanning
+        // the message with substring checks.
+        const kind = classifyPromptKind(lastMessage);
+        this.kindCounts[kind] += 1;
 
         const delayRange = this.config.responseDelayRangeMs;
         if (delayRange && delayRange[1] > 0) {
@@ -540,51 +639,52 @@ class MockProvider implements LLMProvider {
             throw new Error(`[mock] Simulated failure mode: throw (call #${this.callCount})`);
         }
 
-        if (lower.includes('return only valid json with this exact shape:') && lower.includes('"needsmemory"')) {
-            const latestMessage = extractBlock(lastMessage, 'Latest user message:', ['Recent context excerpt:']);
-            return this.respond(JSON.stringify(classifyMemoryNeed(latestMessage)), model, activeFailure);
-        }
-
-        if (lower.includes('extract explicitly named entities from the text')) {
-            const text = extractBlock(lastMessage, 'Text:');
-            return this.respond(JSON.stringify(detectEntities(text)), model, activeFailure);
-        }
-
-        if (lower.includes('specific type of task')) {
-            const options = TASK_INFERENCES[scenario] ?? TASK_INFERENCES.default;
-            const idx = Math.floor(this.rand() * options.length);
-            return this.respond(options[idx], model, activeFailure);
-        }
-
-        if (lower.includes('return only the numbers of entries that are directly relevant')) {
-            const task = extractBlock(lastMessage, 'Agent task:', ['Available knowledge entries:']);
-            const entries = extractBlock(lastMessage, 'Available knowledge entries:');
-            return this.respond(chooseRelevantEntries(task, entries), model, activeFailure);
-        }
-
-        if (lower.includes('genuinely contradictory') || lower.includes('keep_existing')) {
-            if (scenario === 'disagreement') {
-                const r = this.rand();
-                if (r < 0.4) return this.respond(CONFLICT_RESOLUTIONS.KEEP_EXISTING, model, activeFailure);
-                if (r < 0.7) return this.respond(CONFLICT_RESOLUTIONS.KEEP_INCOMING, model, activeFailure);
-                return this.respond(CONFLICT_RESOLUTIONS.ESCALATE, model, activeFailure);
+        // S3: deterministic dispatch. Every branch reads exactly the same
+        // blocks of lastMessage it used to read in the flat if/else chain,
+        // so behavior is unchanged — but the structure is now a single
+        // exhaustive switch keyed on the classifier output, and each case
+        // is independently testable via the exported kind counts.
+        switch (kind) {
+            case 'memory_need': {
+                const latestMessage = extractBlock(lastMessage, 'Latest user message:', ['Recent context excerpt:']);
+                return this.respond(JSON.stringify(classifyMemoryNeed(latestMessage)), model, activeFailure);
             }
-            return this.respond(CONFLICT_RESOLUTIONS.KEEP_EXISTING, model, activeFailure);
-        }
-
-        if (
-            lower.includes('extract only distinct facts')
-            || lower.includes('extract every distinct')
-            || lower.includes('extracting structured facts')
-            || lower.includes('atomic facts')
-        ) {
-            const text = extractBlock(lastMessage, 'Text to chunk:', ['Extract only distinct facts', 'Return ONLY a valid JSON array', 'If no facts can be extracted']);
-            const facts = extractFactsFromText(text);
-            return this.respond(JSON.stringify(facts), model, activeFailure);
-        }
-
-        if (lower.includes('compress') || lower.includes('summarize')) {
-            return this.respond('Compressed working memory summary for current task context.', model, activeFailure);
+            case 'entity_extraction': {
+                const text = extractBlock(lastMessage, 'Text:');
+                return this.respond(JSON.stringify(detectEntities(text)), model, activeFailure);
+            }
+            case 'task_inference': {
+                const opts = TASK_INFERENCES[scenario] ?? TASK_INFERENCES.default;
+                const idx = Math.floor(this.rand() * opts.length);
+                return this.respond(opts[idx], model, activeFailure);
+            }
+            case 'relevance_filter': {
+                const task = extractBlock(lastMessage, 'Agent task:', ['Available knowledge entries:']);
+                const entries = extractBlock(lastMessage, 'Available knowledge entries:');
+                return this.respond(chooseRelevantEntries(task, entries), model, activeFailure);
+            }
+            case 'conflict_resolution': {
+                if (scenario === 'disagreement') {
+                    const r = this.rand();
+                    if (r < 0.4) return this.respond(CONFLICT_RESOLUTIONS.KEEP_EXISTING, model, activeFailure);
+                    if (r < 0.7) return this.respond(CONFLICT_RESOLUTIONS.KEEP_INCOMING, model, activeFailure);
+                    return this.respond(CONFLICT_RESOLUTIONS.ESCALATE, model, activeFailure);
+                }
+                return this.respond(CONFLICT_RESOLUTIONS.KEEP_EXISTING, model, activeFailure);
+            }
+            case 'fact_extraction': {
+                const text = extractBlock(lastMessage, 'Text to chunk:', ['Extract only distinct facts', 'Return ONLY a valid JSON array', 'If no facts can be extracted']);
+                const facts = extractFactsFromText(text);
+                return this.respond(JSON.stringify(facts), model, activeFailure);
+            }
+            case 'compression': {
+                return this.respond('Compressed working memory summary for current task context.', model, activeFailure);
+            }
+            case 'unknown':
+                // Fall through to the canned fallthrough handling below so the
+                // strictFallthrough + onFallthrough + canned researcher JSON
+                // path is preserved bit-for-bit across the refactor.
+                break;
         }
 
         this.fallthroughCount += 1;
@@ -767,6 +867,18 @@ class MockProvider implements LLMProvider {
         this.scheduledFailuresRemaining = this.config.failBeforeSuccessCount ?? 0;
         this.unreliableRotationIndex = 0;
     }
+
+    // S3: externally observable kind-count snapshots. Tests can call
+    // getKindCounts() to assert which classifier branches were exercised
+    // by a run. resetKindCountsExternal() clears counts between test cases
+    // without touching call/fallthrough/failure counters.
+    getKindCounts(): Record<PromptKind, number> {
+        return { ...this.kindCounts };
+    }
+
+    resetKindCountsExternal(): void {
+        this.resetKindCounts();
+    }
 }
 
 const mockProvider = new MockProvider();
@@ -801,6 +913,16 @@ export function getMockScheduledFailuresRemaining(): number {
 
 export function resetMockFailureModeTracking(): void {
     mockProvider.resetFailureModeTracking();
+}
+
+// S3: module-level accessors for the prompt-kind counts. Tests can import
+// these directly without touching the singleton.
+export function getMockKindCounts(): Record<PromptKind, number> {
+    return mockProvider.getKindCounts();
+}
+
+export function resetMockKindCounts(): void {
+    mockProvider.resetKindCountsExternal();
 }
 
 export default mockProvider;

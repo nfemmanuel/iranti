@@ -1,6 +1,6 @@
 {
   "name": "iranti",
-  "version": "0.3.24",
+  "version": "0.3.25",
   "description": "Memory infrastructure for multi-agent AI systems",
   "main": "dist/src/sdk/index.js",
   "files": [
@@ -65,6 +65,7 @@
     "test:router": "ts-node scripts/test_router_enforcement.ts",
     "test:mock-provider": "ts-node tests/mock-provider/run_mock_fallthrough_tests.ts",
     "test:mock-failure-modes": "ts-node tests/mock-provider/run_mock_failure_modes_tests.ts",
+    "test:b2-mock-classifier": "ts-node tests/mock-provider/run_b2_classifier_tests.ts",
     "test:verify-authoritative": "ts-node scripts/verify_authoritative_resolution_parsing.ts",
     "test:mcp-smoke": "ts-node tests/mcp/smoke_test.ts",
     "test:mcp-protocol-enforcement": "ts-node tests/mcp/run_protocol_enforcement_regressions.ts",

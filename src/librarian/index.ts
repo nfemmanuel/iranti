@@ -898,6 +898,55 @@ async function resolveConflict(
     return resolveWithReasoning(existing, candidate, existingScore, incomingScore, tx);
 }
 
+// S4: multi-step Librarian conflict resolution. Before the single-call LLM
+// arbitration runs, gather sibling facts at the same entity (excluding the
+// conflicting key itself) so the model can reason about which value is more
+// consistent with the rest of the entity's known state. "examine -> gather
+// -> decide" per the S-series design memo. The gather step is bounded so
+// token budget stays predictable — at most MAX_CONFLICT_EVIDENCE_FACTS
+// siblings are sent, ranked by confidence descending, and each summary is
+// truncated to 200 chars.
+const MAX_CONFLICT_EVIDENCE_FACTS = 5;
+const CONFLICT_EVIDENCE_SUMMARY_MAX = 200;
+
+async function gatherConflictEvidence(
+    existing: KnowledgeEntry,
+    tx: any,
+): Promise<Array<{ key: string; summary: string; confidence: number }>> {
+    try {
+        const siblings = await tx.knowledgeEntry.findMany({
+            where: {
+                entityType: existing.entityType,
+                entityId: existing.entityId,
+                NOT: { key: existing.key },
+            },
+            orderBy: [{ confidence: 'desc' }, { key: 'asc' }],
+            take: MAX_CONFLICT_EVIDENCE_FACTS,
+        });
+        return siblings.map((sibling: KnowledgeEntry) => ({
+            key: sibling.key,
+            summary: (sibling.valueSummary ?? '').slice(0, CONFLICT_EVIDENCE_SUMMARY_MAX),
+            confidence: sibling.confidence,
+        }));
+    } catch {
+        // Evidence gathering is a best-effort enhancement. If the query
+        // fails (db shape unexpected, stub tx in tests, etc.), fall back
+        // to the original single-call behavior so conflicts still resolve.
+        return [];
+    }
+}
+
+function formatConflictEvidence(
+    evidence: Array<{ key: string; summary: string; confidence: number }>,
+): string {
+    if (evidence.length === 0) {
+        return 'None found (entity has no other facts on record).';
+    }
+    return evidence
+        .map((fact) => `- ${fact.key} (confidence ${fact.confidence}): ${fact.summary}`)
+        .join('\n');
+}
+
 async function resolveWithReasoning(
     existing: KnowledgeEntry,
     incoming: EntryInput,
@@ -905,6 +954,10 @@ async function resolveWithReasoning(
     incomingScore: number,
     tx: any
 ): Promise<WriteResultInternal> {
+    // S4: gather sibling context BEFORE the LLM call. Counted for metrics
+    // so dashboards can observe how often multi-step arbitration runs.
+    const evidence = await gatherConflictEvidence(existing, tx);
+    inc('librarian.conflict_multi_step');
     try {
         const response = await route('conflict_resolution', [
             {
@@ -924,11 +977,15 @@ Incoming entry:
 - Confidence: ${incoming.confidence}
 - Source: ${incoming.source}
 
+Related facts on this entity (evidence to reason with):
+${formatConflictEvidence(evidence)}
+
 Consider:
 1. Which source is more authoritative for this type of data?
 2. Which entry is more recent?
 3. Are these values genuinely contradictory or measuring different things?
-4. Can you determine a clear winner?
+4. Which value is more consistent with the related facts above?
+5. Can you determine a clear winner?
 
 Respond with exactly one of these decisions and a one-sentence reason:
 KEEP_EXISTING: <reason>
