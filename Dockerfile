@@ -1,7 +1,7 @@
 # Multi-stage build for Iranti API server
 
 # Stage 1: Build
-FROM node:18-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
@@ -14,13 +14,15 @@ RUN npm ci
 
 # Copy source code
 COPY src ./src
+COPY scripts ./scripts
 COPY prisma ./prisma
+COPY prisma.config.ts ./
 
 # Build TypeScript
 RUN npm run build
 
 # Stage 2: Production
-FROM node:18-alpine
+FROM node:22-alpine
 
 WORKDIR /app
 
@@ -38,8 +40,12 @@ RUN npm ci --omit=dev && npm cache clean --force
 # Copy built artifacts from builder
 COPY --from=builder /app/dist ./dist
 
+# Copy CLI entrypoint so `iranti` CLI works inside the container (for key management via SSH)
+COPY bin ./bin
+
 # Copy Prisma schema/migrations
 COPY prisma ./prisma
+COPY prisma.config.ts ./
 
 # Set environment variables
 ENV NODE_ENV=production
@@ -59,4 +65,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 ENTRYPOINT ["dumb-init", "--"]
 
 # Start server
-CMD ["node", "dist/api/server.js"]
+CMD ["node", "dist/src/api/server.js"]
