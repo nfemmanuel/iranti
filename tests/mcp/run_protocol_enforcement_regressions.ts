@@ -247,8 +247,8 @@ async function main(): Promise<void> {
             arguments: {
                 entity: ignoredMemoryEntity,
                 key: 'next_step',
-                valueJson: JSON.stringify({ instruction: 'rerun the runtime validation and capture the result.' }),
-                summary: 'Next step is rerun the runtime validation and capture the result.',
+                valueJson: JSON.stringify({ instruction: 'rerun the strict blocking validation for injected memory compliance.' }),
+                summary: 'Next step is rerun the strict blocking validation for injected memory compliance.',
                 confidence: 94,
                 agent: ignoredMemoryAgentId,
             },
