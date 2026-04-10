@@ -498,7 +498,8 @@ export type MemoryAttributionEvidenceKind =
     | 'checkpoint'
     | 'rediscovery'
     | 'response_reference'
-    | 'response_recovery';
+    | 'response_recovery'
+    | 'task_irrelevant';
 
 export interface MemoryAttributionResult {
     injectionId: string;
@@ -514,6 +515,7 @@ export interface MemoryAttributionResult {
     injectedEntryIds: number[];
     injectedSummaries?: string[];
     evidenceKinds: MemoryAttributionEvidenceKind[];
+    taskContext?: string;
 }
 
 export interface AttendBootstrapInfo {
@@ -1428,6 +1430,42 @@ function tokenize(text: string | undefined): string[] {
         .filter((part) => part.length > 2);
 }
 
+/**
+ * Determine whether injected facts are relevant to the current task context.
+ * Uses token overlap between the task description and fact keys/summaries.
+ * Exported for unit testing.
+ */
+export function injectedFactsAreTaskRelevant(
+    taskContext: string | undefined,
+    injectedKeys: string[],
+    injectedSummaries: string[] | undefined,
+): boolean {
+    if (!taskContext) return true;
+    const taskTokens = new Set(tokenize(taskContext));
+    if (taskTokens.size === 0) return true;
+
+    for (const entityKey of injectedKeys) {
+        const key = entityKey.split('/').slice(2).join('/');
+        for (const token of tokenize(key.replace(/[_/.-]+/g, ' '))) {
+            if (taskTokens.has(token)) return true;
+        }
+    }
+
+    if (injectedSummaries && injectedSummaries.length > 0) {
+        const contentTokens = injectedSummaries
+            .flatMap((s) => tokenize(s).filter((t) => t.length > 5));
+        let contentMatches = 0;
+        for (const token of contentTokens) {
+            if (taskTokens.has(token)) {
+                contentMatches++;
+                if (contentMatches >= 2) return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 function tokenizeForSearch(text: string | undefined): string[] {
     return tokenize(text).filter((token) => !SEARCH_SUGGESTION_STOPWORDS.has(token));
 }
@@ -2081,6 +2119,7 @@ export class AttendantInstance {
         injectedKeys: string[];
         injectedEntryIds: number[];
         injectedSummaries?: string[];
+        taskContext?: string;
     }): MemoryAttributionResult {
         const attribution: MemoryAttributionResult = {
             injectionId: randomUUID(),
@@ -2095,6 +2134,7 @@ export class AttendantInstance {
             injectedEntryIds: [...input.injectedEntryIds],
             injectedSummaries: input.injectedSummaries ? [...input.injectedSummaries] : undefined,
             evidenceKinds: [],
+            taskContext: input.taskContext,
         };
         this.pendingMemoryAttributions.push(attribution);
         this.updateBriefPendingMemoryAttributions();
@@ -2171,6 +2211,14 @@ export class AttendantInstance {
         });
     }
 
+    private checkInjectedFactsTaskRelevant(attribution: MemoryAttributionResult): boolean {
+        return injectedFactsAreTaskRelevant(
+            attribution.taskContext,
+            attribution.injectedKeys,
+            attribution.injectedSummaries,
+        );
+    }
+
     private scorePendingMemoryAttributions(response: string): MemoryAttributionResult[] {
         if (this.pendingMemoryAttributions.length === 0) {
             return [];
@@ -2186,19 +2234,29 @@ export class AttendantInstance {
             if (!rediscoveredManually && this.responseShowsRecoveryValue(response, entry) && !evidenceKinds.includes('response_recovery')) {
                 evidenceKinds.push('response_recovery');
             }
+            // Check task-relevance: if facts are not relevant to the current task,
+            // mark as task_irrelevant so the compliance scorer does not penalize.
+            const taskRelevant = this.checkInjectedFactsTaskRelevant(entry);
+            if (!taskRelevant && !evidenceKinds.includes('task_irrelevant')) {
+                evidenceKinds.push('task_irrelevant');
+            }
+
             const used = evidenceKinds.includes('write')
                 || evidenceKinds.includes('checkpoint')
                 || evidenceKinds.includes('response_reference')
-                || evidenceKinds.includes('response_recovery');
+                || evidenceKinds.includes('response_recovery')
+                || evidenceKinds.includes('task_irrelevant');
             const helpful = evidenceKinds.includes('checkpoint')
                 || evidenceKinds.includes('write')
                 || evidenceKinds.includes('response_recovery');
 
             const reason = helpful
                 ? 'response_or_action_confirmed_memory_helpfulness'
-                : used
-                    ? 'response_referenced_injected_memory'
-                    : 'memory_was_only_surfaced';
+                : evidenceKinds.includes('task_irrelevant')
+                    ? 'injected_facts_not_relevant_to_current_task'
+                    : used
+                        ? 'response_referenced_injected_memory'
+                        : 'memory_was_only_surfaced';
 
             const scoredEntry: MemoryAttributionResult = {
                 ...entry,
@@ -3201,6 +3259,7 @@ export class AttendantInstance {
                         .map((fact) => fact.knowledgeEntryId)
                         .filter((value): value is number => typeof value === 'number'),
                     injectedSummaries: structuredFacts.map((fact) => fact.summary).filter(Boolean),
+                    taskContext: this.brief?.inferredTaskType,
                 }),
             ]
             : [];
