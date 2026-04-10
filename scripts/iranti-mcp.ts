@@ -495,10 +495,22 @@ checkpoint state before closing the turn.`,
                 name: z.enum(['Read', 'Grep', 'Glob', 'Bash', 'WebSearch', 'WebFetch']).describe('The name of the read-only tool the agent is about to run.'),
                 args: z.record(z.string(), z.unknown()).optional().describe('The tool arguments (e.g. {file_path: "src/foo.ts"} for Read, {pattern: "src/**/*.ts"} for Glob, {command: "cat scripts/bar.ts"} for Bash, {url: "https://example.com"} for WebFetch, {query: "vector backend"} for WebSearch).'),
             }).optional().describe('Describe the read-only tool call the agent is about to make. Iranti derives entity hints from the tool target (file path, URL, query) and surfaces any stored facts BEFORE the tool runs, so you can preempt redundant Read/Grep/Bash/WebFetch/WebSearch calls with stored memory. The result includes a toolCallGuidance field summarising what was derived.'),
+            toolResult: z.object({
+                toolName: z.enum(['Read', 'Grep', 'Glob', 'Bash', 'WebSearch', 'WebFetch']).describe('The name of the read-only tool whose output you are passing.'),
+                status: z.enum(['success', 'error']).describe("Whether the tool call returned a successful result or an error. Only 'success' will be extracted."),
+                content: z.string().describe('The raw tool output text. Truncated internally at 8000 chars. Large file reads and grep dumps are fine — Iranti takes the head.'),
+                metadata: z.object({
+                    path: z.string().optional().describe('The file path the tool operated on, if any (for Read/Grep/Glob).'),
+                    url: z.string().optional().describe('The URL fetched, if any (for WebFetch).'),
+                    query: z.string().optional().describe('The search query, if any (for WebSearch/Grep).'),
+                    command: z.string().optional().describe('The bash command that was run, if any.'),
+                    durationMs: z.number().optional().describe('How long the tool call took in ms, for telemetry.'),
+                }).optional().describe('Optional structured metadata describing what the tool touched. Helps Iranti target the extracted facts to the right entity.'),
+            }).optional().describe('M2: pass the raw output of a read-only tool call the agent just completed (Read/Grep/Bash/WebFetch/WebSearch). Iranti auto-extracts durable facts from the output and writes them with source="attendant_autowrite" so the next session does not need to re-run the same tool call. All autowrites share an autowriteBatchId and can be reverted as a group via `iranti revert-autowrite`. The response includes a toolResultExtraction field summarising what was extracted and written.'),
             agent: z.string().optional().describe('Override the default agent id.'),
             agentId: z.string().optional().describe('Alias for agent. Override the default agent id.'),
         },
-    }, async ({ latestMessage, message, currentContext, entityHints, maxFacts, forceInject, phase, pendingToolCall, agent, agentId }) => {
+    }, async ({ latestMessage, message, currentContext, entityHints, maxFacts, forceInject, phase, pendingToolCall, toolResult, agent, agentId }) => {
         const resolvedAgent = resolveToolAgent(agent, agentId);
         syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
         const resolvedLatestMessage = resolveAttendLatestMessage({ latestMessage, message });
@@ -551,6 +563,7 @@ checkpoint state before closing the turn.`,
                 forceInject,
                 phase,
                 pendingToolCall,
+                toolResult,
             });
             const factsBlock = result.facts.length > 0
                 ? formatStructuredFactBlock(result.facts, {

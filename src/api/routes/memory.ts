@@ -342,7 +342,7 @@ export function memoryRoutes(iranti: Iranti): Router {
     // POST /attend
     router.post('/attend', validateInput('attend'), async (req: Request, res: Response) => {
         try {
-            const { currentContext, maxFacts, latestMessage, forceInject, suppressEvents, phase } = req.body;
+            const { currentContext, maxFacts, latestMessage, forceInject, suppressEvents, phase, pendingToolCall, toolResult } = req.body;
             const agent = resolveProtocolAgent(req);
             const normalizedContext = typeof currentContext === 'string' ? currentContext : '';
             const normalizedLatestMessage = typeof latestMessage === 'string' ? latestMessage : undefined;
@@ -362,6 +362,8 @@ export function memoryRoutes(iranti: Iranti): Router {
                 forceInject: forceInject === true,
                 suppressEvents: suppressEvents === true,
                 phase,
+                pendingToolCall,
+                toolResult,
             });
             res.json(result);
         } catch (err) {

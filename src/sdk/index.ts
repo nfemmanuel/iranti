@@ -304,12 +304,30 @@ export interface PendingToolCall {
     args?: Record<string, unknown>;
 }
 
+// M2: tool-result extraction payload. Mirrors ToolResultPayload in
+// src/attendant/AttendantInstance.ts so SDK consumers can type-safely pass
+// the content of a just-completed read-only tool call to iranti.attend() and
+// have durable facts extracted and written automatically.
+export interface ToolResultPayload {
+    toolName: PendingToolCallName;
+    status: 'success' | 'error';
+    content: string;
+    metadata?: {
+        path?: string;
+        url?: string;
+        query?: string;
+        command?: string;
+        durationMs?: number;
+    };
+}
+
 export interface AttendInput extends ObserveInput {
     latestMessage?: string;
     forceInject?: boolean;
     suppressEvents?: boolean;
     phase?: 'pre-response' | 'post-response' | 'mid-turn';
     pendingToolCall?: PendingToolCall;
+    toolResult?: ToolResultPayload;
 }
 
 type SessionLedgerContext = {
@@ -1497,6 +1515,7 @@ export class Iranti {
             suppressEvents: input.suppressEvents,
             phase: input.phase,
             pendingToolCall: input.pendingToolCall,
+            toolResult: input.toolResult,
             ledgerContext: this.buildSessionLedgerContext(),
         });
         if (result.bootstrap?.handshakePerformed) {

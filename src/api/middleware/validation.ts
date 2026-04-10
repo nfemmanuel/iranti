@@ -70,7 +70,12 @@ const schemas = {
     entityHints: { type: 'array', required: false, maxLength: 100 },
     forceInject: { type: 'boolean', required: false },
     suppressEvents: { type: 'boolean', required: false },
-    phase: { type: 'string', required: false, maxLength: 20 }
+    phase: { type: 'string', required: false, maxLength: 20 },
+    // M2: tool-result extraction. The host passes the content of a just-completed
+    // read-only tool call (Read/Grep/Bash/etc.) and Iranti extracts durable facts
+    // from it automatically. Capped generously — raw file reads can be large.
+    pendingToolCall: { type: 'object', required: false, maxSize: 5000 },
+    toolResult: { type: 'object', required: false, maxSize: 200000 }
   },
   relate: {
     fromEntity: { type: 'string', required: true, pattern: /^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_/-]+$/, maxLength: 200 },

@@ -74,6 +74,23 @@ const ENTITY_DETECTION_WINDOW_CHARS = 1500;
 // of a mid-turn attend is to surface 1-3 NEW facts on a topic shift, not to
 // re-dump the whole briefing.
 const MID_TURN_DEFAULT_MAX_FACTS = 3;
+// M2: tool-result extraction bounds. Cap the amount of tool output we send to
+// the extraction LLM so huge reads (e.g. a 2000-line file) do not blow the
+// prompt budget. The head covers imports, types, and top declarations which
+// are where durable facts tend to live.
+const TOOL_RESULT_EXTRACTION_HEAD_CHARS = 8000;
+const TOOL_RESULT_EXTRACTION_MIN_CHARS = 40;
+const TOOL_RESULT_EXTRACTION_MAX_FACTS = 8;
+const TOOL_RESULT_EXTRACTION_DEFAULT_CONFIDENCE = 70;
+// M3: force a write nudge after this many tool calls with autowrite activity
+// and no intervening host-initiated durable write. Threshold chosen low
+// enough to catch "read five files and move on" but high enough that normal
+// single-file reads do not trigger it.
+const TOOL_COST_WRITE_NUDGE_THRESHOLD = 5;
+// Keep a bounded buffer of recent autowrite batches so the nudge can surface
+// concrete draft facts instead of a vague "write something" reminder.
+const RECENT_AUTOWRITE_BUFFER_LIMIT = 12;
+const AUTOWRITE_SOURCE_TAG = 'attendant_autowrite';
 const MIN_ENTITY_CONFIDENCE = 0.75;
 const MEMORY_DECISION_CONTEXT_WINDOW_CHARS = 2000;
 const LEDGER_WORKING_MEMORY_PREFIX = 'system/session_ledger/recent_learning_';
@@ -458,12 +475,30 @@ export interface PendingToolCall {
     args?: Record<string, unknown>;
 }
 
+// M2: tool-result extraction. The host passes the content of a just-completed
+// read-only tool call and Iranti extracts durable facts from it automatically,
+// writing them with source='attendant_autowrite' so they are distinguishable
+// from host-initiated writes and can be reverted as a batch.
+export interface ToolResultPayload {
+    toolName: PendingToolCallName;
+    status: 'success' | 'error';
+    content: string;
+    metadata?: {
+        path?: string;
+        url?: string;
+        query?: string;
+        command?: string;
+        durationMs?: number;
+    };
+}
+
 export interface AttendInput extends ObserveInput {
     latestMessage?: string;
     forceInject?: boolean;
     suppressEvents?: boolean;
     phase?: 'pre-response' | 'post-response' | 'mid-turn';
     pendingToolCall?: PendingToolCall;
+    toolResult?: ToolResultPayload;
 }
 
 export interface SessionCheckpointInput extends AgentContext {
@@ -513,6 +548,14 @@ export interface AttendResult extends ObserveResult {
     // Reports which entity hints were derived from the tool call so the agent
     // (and tests) can see which stored facts preempted the lookup.
     toolCallGuidance?: ToolCallGuidance;
+    // M2: only populated when the caller passed toolResult.
+    // Reports the outcome of automatic fact extraction from a tool's output —
+    // how many facts were extracted, how many were written, which were skipped,
+    // and the batch id assigned so they can be reverted as a group.
+    toolResultExtraction?: ToolResultExtractionOutcome;
+    // M3: only populated when the mid-turn pressure gauge triggers a forced
+    // write nudge (too many tool calls without a matching durable write).
+    writeNudge?: WriteNudge;
 }
 
 export interface ToolCallGuidance {
@@ -520,6 +563,36 @@ export interface ToolCallGuidance {
     derivedEntities: string[];
     factCount: number;
     note: string;
+}
+
+export interface ToolResultExtractionOutcome {
+    toolName: PendingToolCallName;
+    autowriteBatchId: string;
+    factsExtracted: number;
+    factsWritten: number;
+    skipped: Array<{ reason: string; detail?: string }>;
+    writtenEntries: Array<{
+        entity: string;
+        key: string;
+        summary: string;
+    }>;
+    targetEntity: string;
+    durationMs: number;
+    extractorError?: string;
+}
+
+export interface WriteNudge {
+    reason: 'tool_cost_threshold';
+    toolCallsSinceLastWrite: number;
+    threshold: number;
+    draftFacts: Array<{
+        entity: string;
+        key: string;
+        summary: string;
+        fromTool: PendingToolCallName;
+        autowriteBatchId: string;
+    }>;
+    message: string;
 }
 
 export interface PostResponseCaptureInfo {
@@ -987,6 +1060,122 @@ function extractBasenameFromGlobPattern(pattern: string): string | null {
  * *after* text-derived hints so text signals still take precedence when a hint
  * appears in both places.
  */
+// M2: resolve the best target entity for autowriting facts extracted from a
+// tool result. For file-backed tools (Read/Grep/Glob/Bash with a path) we
+// prefer a file-scoped entity so that retrieval can narrow to the specific
+// file. For WebFetch we use a host-scoped entity. Fallback is the project
+// memory entity, and finally a system bucket if no project context exists.
+export function resolveAutowriteTargetEntity(
+    toolResult: ToolResultPayload,
+    projectEntity: string | null,
+): string {
+    const projectId = projectEntity ? parseEntityString(projectEntity).entityId : null;
+
+    if (toolResult.toolName === 'Read' || toolResult.toolName === 'Grep' || toolResult.toolName === 'Glob') {
+        const metadataPath = toolResult.metadata?.path;
+        if (projectId && metadataPath) {
+            const seen = new Set<string>();
+            const hints: string[] = [];
+            deriveFileEntityFromPath(metadataPath, projectId, seen, hints);
+            if (hints.length > 0) return hints[0];
+        }
+    }
+    if (toolResult.toolName === 'Bash') {
+        const command = toolResult.metadata?.command;
+        if (projectId && command) {
+            const seen = new Set<string>();
+            const hints: string[] = [];
+            scanStringForPathEntities(command, projectId, seen, hints);
+            if (hints.length > 0) return hints[0];
+        }
+    }
+    if (toolResult.toolName === 'WebFetch') {
+        const url = toolResult.metadata?.url;
+        if (url) {
+            try {
+                const parsed = new URL(url);
+                const host = normalizeWebToken(parsed.hostname);
+                if (host) return `web/${host}`;
+            } catch {
+                // ignore, fall through to project/system
+            }
+        }
+    }
+    if (toolResult.toolName === 'WebSearch') {
+        const query = toolResult.metadata?.query;
+        const token = query ? normalizeWebToken(query) : null;
+        if (token) return `web/search_${token}`;
+    }
+
+    if (projectEntity) return projectEntity;
+    return 'system/tool_result_autowrite';
+}
+
+// M2: parse an entity string like "project/iranti" or "project/iranti/file/foo"
+// into { entityType, entityId } for librarianWrite. This helper exists because
+// parseEntityString() asserts the string is well-formed and we want safe
+// fallbacks if a caller passes a bare type.
+export function parseAutowriteEntity(entity: string): { entityType: string; entityId: string } {
+    const trimmed = entity.trim();
+    if (!trimmed.includes('/')) {
+        return { entityType: 'system', entityId: trimmed || 'tool_result_autowrite' };
+    }
+    try {
+        const parsed = parseEntityString(trimmed);
+        return { entityType: parsed.entityType, entityId: parsed.entityId };
+    } catch {
+        const [type, ...rest] = trimmed.split('/');
+        return {
+            entityType: type || 'system',
+            entityId: rest.join('/') || 'tool_result_autowrite',
+        };
+    }
+}
+
+// M2: build the per-tool context label that is injected into the extraction
+// prompt. Gives the LLM just enough metadata about the origin of the tool
+// output so it can decide how to scope each extracted fact.
+export function buildToolResultContextLabel(toolResult: ToolResultPayload): string {
+    const metadata = toolResult.metadata ?? {};
+    const parts: string[] = [];
+    if (metadata.path) parts.push(`Path: ${metadata.path}`);
+    if (metadata.url) parts.push(`URL: ${metadata.url}`);
+    if (metadata.query) parts.push(`Query: ${metadata.query}`);
+    if (metadata.command) parts.push(`Command: ${metadata.command}`);
+    if (typeof metadata.durationMs === 'number') parts.push(`Duration: ${metadata.durationMs}ms`);
+    if (parts.length === 0) return 'No metadata provided.';
+    return parts.join('\n');
+}
+
+// M2: normalize a parsed JSON fact from the extraction response into the
+// shape librarianWrite expects. Returns null for malformed facts so the
+// autowrite pipeline can count them as skipped instead of crashing.
+export function normalizeAutowriteFact(raw: unknown): {
+    key: string;
+    value: unknown;
+    summary: string;
+    confidence: number;
+} | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const obj = raw as Record<string, unknown>;
+    const key = typeof obj.key === 'string' ? obj.key.trim() : '';
+    if (!key || !/^[a-zA-Z0-9_]+$/.test(key)) return null;
+    if (key.length > 100) return null;
+    if (!('value' in obj)) return null;
+    const summary = typeof obj.summary === 'string' ? obj.summary.trim() : '';
+    if (!summary) return null;
+    let confidence = typeof obj.confidence === 'number' ? obj.confidence : TOOL_RESULT_EXTRACTION_DEFAULT_CONFIDENCE;
+    if (!Number.isFinite(confidence)) confidence = TOOL_RESULT_EXTRACTION_DEFAULT_CONFIDENCE;
+    if (confidence < 0) confidence = 0;
+    if (confidence > 100) confidence = 100;
+    return {
+        key,
+        value: obj.value,
+        summary,
+        confidence,
+    };
+}
+
 export function derivePendingToolCallEntityHints(
     toolCall: PendingToolCall | undefined,
     projectEntity: string | null,
@@ -2293,6 +2482,22 @@ export class AttendantInstance {
     private pendingMemoryAttributions: MemoryAttributionResult[] = [];
     private rulesDelivered = false;
     private postCompactionPending = false;
+    // M3: tool-cost counter — incremented every time M2 extraction runs on a
+    // mid-turn attend, reset every time a durable write is recorded. When it
+    // crosses TOOL_COST_WRITE_NUDGE_THRESHOLD we force-inject a write nudge.
+    private toolCallsSinceLastWrite: number = 0;
+    // M3: recent extractions buffer. Populated by M2 autowrites, consumed by
+    // M3 nudges. Bounded to keep the nudge block under a single screenful.
+    private recentAutowriteBatches: Array<{
+        autowriteBatchId: string;
+        toolName: PendingToolCallName;
+        occurredAt: string;
+        factCount: number;
+        writtenEntries: Array<{ entity: string; key: string; summary: string }>;
+    }> = [];
+    // M3: tracks whether the current turn has already forced a nudge so we do
+    // not nag repeatedly within the same turn.
+    private writeNudgeEmittedThisTurn: boolean = false;
 
     constructor(agentId: string) {
         this.agentId = agentId;
@@ -2882,12 +3087,287 @@ export class AttendantInstance {
         });
     }
 
+    // M2: run fact extraction on the content of a just-completed read-only
+    // tool call and persist the extracted facts to the knowledge library with
+    // source='attendant_autowrite' and properties.autowriteBatchId set to the
+    // shared batch identifier, so they are distinguishable from host writes
+    // and reversible as a group.
+    //
+    // This helper is intentionally isolated from the main attend pipeline:
+    // extraction failures (malformed JSON, mock returning nothing, downstream
+    // write errors) MUST NOT abort the attend call. On failure we return a
+    // zero-fact outcome with extractorError set and the attend response is
+    // otherwise unaffected.
+    private async runToolResultAutowrite(
+        toolResult: ToolResultPayload,
+        autowriteBatchId: string,
+    ): Promise<ToolResultExtractionOutcome> {
+        const extractionStart = Date.now();
+        const skipped: Array<{ reason: string; detail?: string }> = [];
+
+        const projectEntity = getProjectMemoryEntity() ?? null;
+        const targetEntityString = resolveAutowriteTargetEntity(toolResult, projectEntity);
+        const targetEntity = parseAutowriteEntity(targetEntityString);
+
+        const baseOutcome: ToolResultExtractionOutcome = {
+            toolName: toolResult.toolName,
+            autowriteBatchId,
+            factsExtracted: 0,
+            factsWritten: 0,
+            skipped,
+            writtenEntries: [],
+            targetEntity: targetEntityString,
+            durationMs: 0,
+        };
+
+        if (toolResult.status !== 'success') {
+            skipped.push({ reason: 'tool_result_not_success', detail: toolResult.status });
+            baseOutcome.durationMs = Date.now() - extractionStart;
+            return baseOutcome;
+        }
+
+        const rawContent = typeof toolResult.content === 'string' ? toolResult.content : '';
+        if (rawContent.trim().length < TOOL_RESULT_EXTRACTION_MIN_CHARS) {
+            skipped.push({ reason: 'tool_result_too_short' });
+            baseOutcome.durationMs = Date.now() - extractionStart;
+            return baseOutcome;
+        }
+
+        const excerpt = rawContent.length > TOOL_RESULT_EXTRACTION_HEAD_CHARS
+            ? `${rawContent.slice(0, TOOL_RESULT_EXTRACTION_HEAD_CHARS)}\n...[truncated at ${TOOL_RESULT_EXTRACTION_HEAD_CHARS} chars of ${rawContent.length}]`
+            : rawContent;
+
+        const contextLabel = buildToolResultContextLabel(toolResult);
+
+        let parsed: unknown;
+        let providerUsed = 'unknown';
+        let modelUsed = 'unknown';
+        try {
+            const response = await route('extraction', [
+                {
+                    role: 'user',
+                    content: `You are extracting structured facts from the output of a read-only tool call that an agent just executed.
+
+Tool: ${toolResult.toolName}
+${contextLabel}
+Target entity: ${targetEntityString}
+
+Tool output:
+"""
+${excerpt}
+"""
+
+Extract up to ${TOOL_RESULT_EXTRACTION_MAX_FACTS} distinct durable facts that would help a future agent avoid re-running this same tool call. Focus on:
+- What the file or resource IS (purpose, role, exports, key types)
+- Concrete line ranges for interesting declarations
+- Configuration values that look canonical
+- Public API shapes surfaced by the output
+- For Bash output: environment state, versions, command results that describe durable reality
+- For WebFetch/WebSearch: confirmed external facts only (not transient snippets)
+
+Rules:
+- Discard vague impressions, recommendations, and unsupported inferences
+- Each fact must be concrete enough that another agent reading it could skip re-running the tool
+- If the output is a test run or log, extract only durable signal (what passed, what failed, what is now known), not transient progress
+- Do not invent keys or values
+
+Return ONLY a valid JSON array. No explanation, no markdown, no backticks.
+Each fact must have:
+- key: a short snake_case identifier (e.g. "exports", "line_ranges", "config_port", "test_result")
+- value: a concrete JSON value (string, number, boolean, array, or object)
+- summary: a one-sentence natural-language summary
+- confidence: integer 0-100 based on how explicitly the fact appears in the tool output
+
+Example:
+[
+  {"key": "purpose", "value": "HTTP route registration for /attend endpoint", "summary": "File defines the POST /attend Express route with validation middleware.", "confidence": 92},
+  {"key": "line_range_attend_handler", "value": {"start": 343, "end": 371}, "summary": "Attend handler lives at lines 343-371.", "confidence": 95}
+]
+
+If no durable facts can be extracted, return an empty array: [].`,
+                },
+            ], 1024);
+            providerUsed = response.providerUsed;
+            modelUsed = response.model;
+            const clean = response.text.replace(/```json|```/g, '').trim();
+            parsed = JSON.parse(clean);
+        } catch (err) {
+            baseOutcome.extractorError = err instanceof Error ? err.message : String(err);
+            baseOutcome.durationMs = Date.now() - extractionStart;
+            skipped.push({ reason: 'extractor_failure', detail: baseOutcome.extractorError });
+            return baseOutcome;
+        }
+
+        if (!Array.isArray(parsed) || parsed.length === 0) {
+            skipped.push({ reason: 'no_facts_extracted' });
+            baseOutcome.durationMs = Date.now() - extractionStart;
+            return baseOutcome;
+        }
+
+        const capped = parsed.slice(0, TOOL_RESULT_EXTRACTION_MAX_FACTS);
+        baseOutcome.factsExtracted = capped.length;
+
+        const writtenEntries: Array<{ entity: string; key: string; summary: string }> = [];
+        for (const rawFact of capped) {
+            const fact = normalizeAutowriteFact(rawFact);
+            if (!fact) {
+                skipped.push({ reason: 'fact_shape_invalid' });
+                continue;
+            }
+
+            const ingestMetadata = {
+                method: 'tool_result_extraction',
+                provider: providerUsed,
+                model: modelUsed,
+                originalSource: `tool:${toolResult.toolName}`,
+                extractedAt: new Date().toISOString(),
+                toolMetadata: toolResult.metadata ?? null,
+            };
+
+            try {
+                await librarianWrite({
+                    entityType: targetEntity.entityType,
+                    entityId: targetEntity.entityId,
+                    key: fact.key,
+                    valueRaw: fact.value,
+                    valueSummary: fact.summary.slice(0, 500),
+                    confidence: fact.confidence,
+                    source: AUTOWRITE_SOURCE_TAG,
+                    createdBy: `attendant:${this.agentId}`,
+                    properties: {
+                        memoryScope: 'project',
+                        capturePhase: 'tool_result_autowrite',
+                        autowriteBatchId,
+                        autowriteToolName: toolResult.toolName,
+                        autowriteOccurredAt: new Date().toISOString(),
+                        ingest: ingestMetadata,
+                        ...buildSemanticFactTags({
+                            memoryScope: 'project',
+                            durableClass: 'tool_result_fact',
+                            mergeStrategy: 'replace',
+                            extraTags: ['autowrite', `tool:${toolResult.toolName.toLowerCase()}`],
+                        }),
+                    } as Record<string, unknown>,
+                });
+                writtenEntries.push({
+                    entity: targetEntityString,
+                    key: fact.key,
+                    summary: fact.summary.slice(0, 220),
+                });
+            } catch (writeErr) {
+                skipped.push({
+                    reason: 'librarian_write_failed',
+                    detail: writeErr instanceof Error ? writeErr.message : String(writeErr),
+                });
+            }
+        }
+
+        baseOutcome.factsWritten = writtenEntries.length;
+        baseOutcome.writtenEntries = writtenEntries;
+        baseOutcome.durationMs = Date.now() - extractionStart;
+
+        // M3: track this batch in the recent-autowrite buffer so a later
+        // forced nudge can surface concrete draft facts from these reads.
+        if (writtenEntries.length > 0) {
+            this.recentAutowriteBatches.push({
+                autowriteBatchId,
+                toolName: toolResult.toolName,
+                occurredAt: new Date().toISOString(),
+                factCount: writtenEntries.length,
+                writtenEntries,
+            });
+            while (this.recentAutowriteBatches.length > RECENT_AUTOWRITE_BUFFER_LIMIT) {
+                this.recentAutowriteBatches.shift();
+            }
+        }
+
+        // Every tool-result extraction counts against the write-cost gauge,
+        // whether or not the extraction actually produced facts. The point of
+        // the counter is to pressure the host to checkpoint after N expensive
+        // tool calls; a barren read still consumed budget.
+        this.toolCallsSinceLastWrite += 1;
+
+        // Autowrites are durable persistence — reset persistence counters and
+        // notify write observers so compliance state reflects the write.
+        this.attendsWithoutPersist = 0;
+        this.turnsWithoutWrite = 0;
+        this.writeOccurredThisTurn = true;
+        this.recordMemoryEvidence('write');
+
+        if (this.eventSource && writtenEntries.length > 0) {
+            getStaffEventEmitter().emit({
+                staffComponent: 'Attendant',
+                actionType: 'attendant_autowrite',
+                agentId: this.agentId,
+                source: this.eventSource,
+                reason: `tool_result_extraction:${toolResult.toolName}`,
+                level: 'audit',
+                metadata: this.buildEventMetadata({
+                    autowriteBatchId,
+                    toolName: toolResult.toolName,
+                    targetEntity: targetEntityString,
+                    factsExtracted: baseOutcome.factsExtracted,
+                    factsWritten: baseOutcome.factsWritten,
+                    durationMs: baseOutcome.durationMs,
+                }),
+            });
+        }
+
+        return baseOutcome;
+    }
+
+    // M3: build a forced write-nudge payload when tool-cost pressure crosses
+    // TOOL_COST_WRITE_NUDGE_THRESHOLD and the nudge has not already been
+    // emitted this turn. Returns null when no nudge should fire. The nudge
+    // surfaces draft facts from the recent autowrite buffer so the host has
+    // something concrete to confirm or edit instead of a vague "write
+    // something" reminder.
+    private maybeBuildWriteNudge(): WriteNudge | null {
+        if (this.writeNudgeEmittedThisTurn) return null;
+        if (this.toolCallsSinceLastWrite < TOOL_COST_WRITE_NUDGE_THRESHOLD) return null;
+        if (this.recentAutowriteBatches.length === 0) return null;
+
+        const draftFacts: WriteNudge['draftFacts'] = [];
+        for (const batch of this.recentAutowriteBatches) {
+            for (const entry of batch.writtenEntries) {
+                draftFacts.push({
+                    entity: entry.entity,
+                    key: entry.key,
+                    summary: entry.summary,
+                    fromTool: batch.toolName,
+                    autowriteBatchId: batch.autowriteBatchId,
+                });
+                if (draftFacts.length >= 6) break;
+            }
+            if (draftFacts.length >= 6) break;
+        }
+
+        if (draftFacts.length === 0) return null;
+
+        this.writeNudgeEmittedThisTurn = true;
+
+        return {
+            reason: 'tool_cost_threshold',
+            toolCallsSinceLastWrite: this.toolCallsSinceLastWrite,
+            threshold: TOOL_COST_WRITE_NUDGE_THRESHOLD,
+            draftFacts,
+            message: `COMPLIANCE NUDGE: ${this.toolCallsSinceLastWrite} expensive tool calls have run without a host-initiated iranti_write. Iranti has auto-extracted the draft facts below via attendant_autowrite (source='${AUTOWRITE_SOURCE_TAG}'). Review, edit, or confirm them with iranti_write, or call iranti_checkpoint to record progress. To revert the autowrites, run: iranti revert-autowrite --since <duration> [--dry-run].`,
+        };
+    }
+
     async notifyWriteOccurred(): Promise<void> {
         this.attendsWithoutPersist = 0;
         this.turnsWithoutWrite = 0;
         this.writeOccurredThisTurn = true;
         this.lastAttendPhase = undefined;
         this.consecutivePreResponseWithoutPost = 0;
+        // M3: a real host-initiated (or autowrite-initiated) write closes out
+        // any accumulated tool-cost pressure. Note autowrites also call this
+        // path, which is intentional — once M2 writes something, the nudge
+        // has served its purpose for this batch of reads.
+        this.toolCallsSinceLastWrite = 0;
+        this.writeNudgeEmittedThisTurn = false;
+        this.recentAutowriteBatches = [];
         this.complianceUpdatedAt = new Date().toISOString();
         this.recordMemoryEvidence('write');
         if (!this.brief) {
@@ -2906,6 +3386,12 @@ export class AttendantInstance {
         this.turnsWithoutWrite = 0;
         this.lastAttendPhase = undefined;
         this.consecutivePreResponseWithoutPost = 0;
+        // M3: a checkpoint is a strong durable signal. Clear tool-cost
+        // pressure so we don't nag the host right after they already flushed
+        // progress to the shared ledger.
+        this.toolCallsSinceLastWrite = 0;
+        this.writeNudgeEmittedThisTurn = false;
+        this.recentAutowriteBatches = [];
         this.complianceUpdatedAt = new Date().toISOString();
         this.recordMemoryEvidence('checkpoint');
         this.setLedgerContext(input.ledgerContext);
@@ -3180,6 +3666,9 @@ export class AttendantInstance {
             this.writeOccurredThisTurn = false;
             this.lastAttendPhase = 'post-response';
             this.consecutivePreResponseWithoutPost = 0;
+            // M3: turn-scoped nudge suppression resets on post-response so a
+            // fresh turn can emit a nudge again if the pressure persists.
+            this.writeNudgeEmittedThisTurn = false;
         } else if (phase === 'pre-response') {
             if (this.lastAttendPhase === 'pre-response') {
                 this.consecutivePreResponseWithoutPost++;
@@ -3190,6 +3679,7 @@ export class AttendantInstance {
             this.midTurnAttendsThisTurn = 0;
             this.writeOccurredThisTurn = false;
             this.lastAttendPhase = 'pre-response';
+            this.writeNudgeEmittedThisTurn = false;
         } else if (phase === 'mid-turn') {
             this.midTurnAttendsThisTurn++;
             this.lastAttendPhase = 'mid-turn';
@@ -3250,6 +3740,30 @@ export class AttendantInstance {
         const matchedUserRules = (phase !== 'post-response' && phase !== 'mid-turn')
             ? await this.loadMatchingUserRules(`${latestMessage}\n${currentContext}`)
             : [];
+
+        // M2: tool-result extraction. If the host passed a completed tool result,
+        // extract durable facts from it and autowrite them BEFORE the main attend
+        // flow runs, so the extracted content can surface as draft facts in any
+        // M3 write nudge this turn. Skip on post-response — that phase is the
+        // closeout for the reply and has its own capture path. Isolated failures
+        // never abort the attend call; runToolResultAutowrite swallows its own
+        // errors and reports them via the extractorError field.
+        let toolResultExtraction: ToolResultExtractionOutcome | undefined;
+        if (input.toolResult && phase !== 'post-response') {
+            const autowriteBatchId = Date.now().toString();
+            toolResultExtraction = await this.runToolResultAutowrite(input.toolResult, autowriteBatchId);
+        }
+
+        // M3: compute the forced write nudge ONCE, right after the autowrite pass,
+        // so the counter bumps from M2 feed straight into the nudge threshold check.
+        // maybeBuildWriteNudge has a once-per-turn guard (writeNudgeEmittedThisTurn)
+        // so calling it here and then reusing the stored value across return paths
+        // is both correct and lighter than calling it three times. If the nudge is
+        // present, we force-upgrade the final decision below so the host cannot
+        // miss the cue — the draft facts in the nudge are the agent's own work
+        // captured via autowrite, and the host should review them before
+        // proceeding with any more tool calls.
+        const writeNudge = this.maybeBuildWriteNudge() ?? undefined;
 
         let watchedEntitiesChanged = this.updateWatchedEntities(effectiveEntityHints);
         const freshState = await this.detectRelevantFreshState(effectiveEntityHints, latestMessage);
@@ -3314,6 +3828,14 @@ export class AttendantInstance {
                     hintsResolved: 0,
                     dropped: [{ name: latestMessage || '(none)', reason: 'post_response_closeout' }],
                 },
+                // M2: extraction is gated out on post-response (see guard above),
+                // so this will always be undefined here, but we include the field
+                // for shape consistency with the main return path.
+                toolResultExtraction,
+                // M3: nudge surfaces even on closeout — if the turn ran many tool
+                // calls without a host-initiated write, the agent should see the
+                // draft facts before compliance is persisted.
+                writeNudge,
             };
         }
 
@@ -3329,6 +3851,19 @@ export class AttendantInstance {
                 confidence: 0.92,
                 method: 'heuristic',
                 explanation: 'relevant_shared_state_changed',
+            };
+        }
+        // M3: if a write nudge is present, force memory needed. The nudge carries
+        // the agent's own autowrite drafts — the host must surface them, even if
+        // entity/recall heuristics would otherwise skip injection. We leave the
+        // existing method='heuristic' rather than inventing a new enum to keep
+        // telemetry stable; the explanation disambiguates the origin.
+        if (writeNudge && !decision.needed) {
+            decision = {
+                needed: true,
+                confidence: 0.98,
+                method: 'heuristic',
+                explanation: 'write_nudge_forced',
             };
         }
 
@@ -3408,6 +3943,18 @@ export class AttendantInstance {
                     dropped: [{ name: latestMessage || '(none)', reason: 'memory_not_needed' }],
                 },
                 toolCallGuidance: skipGuidance,
+                // M2: report tool-result extraction even when attend decided no
+                // memory was needed — the autowrites already happened and the
+                // caller should see what was persisted so they can verify or revert.
+                toolResultExtraction,
+                // M3: surface the forced-write nudge even on the not-needed path.
+                // The whole point of the nudge is to fire when the agent is doing
+                // lookup work without persisting; that's the exact shape of a
+                // "no memory needed" turn after several Read/Grep/Bash calls.
+                // Note: when the nudge is set, the decision was force-upgraded to
+                // needed:true above and this branch is skipped. This field stays
+                // wired for shape consistency and for tests that simulate state.
+                writeNudge,
             };
         }
 
@@ -3497,7 +4044,16 @@ export class AttendantInstance {
         this.markSharedStateObserved(observeEntityHints.length > 0 ? observeEntityHints : freshState.entities);
 
         let reason: AttendResult['reason'] = 'memory_needed_injected';
-        const shouldInject = structuredFacts.length > 0;
+        // M3: when a write nudge forced the decision, the host MUST see the
+        // nudge regardless of whether observe() surfaced facts. Treat it like
+        // an injection path (shouldInject=true) so the guidance rides out in
+        // the standard response shape. The nudge carries the draft facts.
+        // Also include matchedUserRules so rule-only injections don't fall
+        // into the !shouldInject branch below which would mark them as
+        // memory_checked_no_match.
+        const shouldInject = structuredFacts.length > 0
+            || writeNudge !== undefined
+            || matchedUserRules.length > 0;
         const memorySearchPerformed = true;
         const memoryResultsConsidered = observed.totalFound;
         let searchSuggestion: AttendSearchSuggestion | undefined;
@@ -3525,6 +4081,11 @@ export class AttendantInstance {
                 }
             }
         } else if (forceInject) {
+            reason = 'forced';
+        } else if (writeNudge && structuredFacts.length === 0) {
+            // M3: nudge-only injection — no observed facts matched, but the
+            // compliance nudge is the entire point of this injection. Mark as
+            // forced so the host treats it as an intentional surfacing.
             reason = 'forced';
         }
 
@@ -3569,7 +4130,9 @@ export class AttendantInstance {
             ...observed,
             debug: debugWithMidTurn,
             facts: structuredFacts,
-            shouldInject: structuredFacts.length > 0 || matchedUserRules.length > 0,
+            // M3: use the centralized shouldInject const so writeNudge-only
+            // injections surface. Recomputing here would drop the nudge path.
+            shouldInject,
             reason,
             decision,
             bootstrap,
@@ -3582,6 +4145,18 @@ export class AttendantInstance {
             matchedUserRules: matchedUserRules.length > 0 ? matchedUserRules : undefined,
             usageGuidance: buildUsageGuidance('attend', this.turnsWithoutWrite),
             toolCallGuidance,
+            // M2: surface the outcome of tool-result extraction (or undefined if
+            // no toolResult was passed). Populated BEFORE decideMemoryNeed so
+            // extracted facts can influence that decision via counter updates.
+            toolResultExtraction,
+            // M3: forced write nudge — computed once near the top of attend()
+            // so the same instance is reused on every return path without
+            // double-tripping the once-per-turn guard. Non-null only when
+            // toolCallsSinceLastWrite crossed TOOL_COST_WRITE_NUDGE_THRESHOLD
+            // and no nudge has been emitted this turn yet. Carries up to 6
+            // draft facts from recentAutowriteBatches so the agent can review
+            // them before the next tool call.
+            writeNudge,
         };
         if (input.suppressEvents !== true) {
             getStaffEventEmitter().emit({

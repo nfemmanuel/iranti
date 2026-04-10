@@ -240,6 +240,12 @@ export const DIAGNOSTICS_HELP: HelpEntry[] = [
         useWhen: 'a rule is outdated, wrong, or no longer needed.',
         scenario: 'Removing a stale rule after the workflow it guarded has changed.',
     },
+    {
+        command: 'iranti revert-autowrite --since <duration> [--until <duration>] [--commit] [--json] [--instance <name>] [--project-env <path>]',
+        description: 'Dry-run or delete attendant autowrites (source="attendant_autowrite") in a time window.',
+        useWhen: 'an attend() call extracted bad or low-quality facts from a tool result and you need to roll them back cleanly.',
+        scenario: 'After a noisy Read/Grep autowrite batch, run with --since 15m to preview, then add --commit to delete.',
+    },
 ];
 
 export const INTEGRATIONS_HELP: HelpEntry[] = [

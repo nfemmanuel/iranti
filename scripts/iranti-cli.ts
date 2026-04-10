@@ -54,7 +54,7 @@ import { startChatSession } from '../src/chat';
 import { createVectorBackend, resolveVectorBackendName } from '../src/library/backends';
 import { InstanceRuntimeState, RuntimeInspection, inspectRuntimeState, isPidRunning, resolveRuntimeAuthorityFromEnv, waitForPidExit } from '../src/lib/runtimeLifecycle';
 import type { Iranti } from '../src/sdk';
-import { auditVectorIndexConsistency, findEntriesByEntityType, deleteEntryById } from '../src/library/queries';
+import { auditVectorIndexConsistency, findEntriesByEntityType, deleteEntryById, findEntriesBySourceAndWindow, deleteEntriesBySourceAndWindow } from '../src/library/queries';
 import { backfillChatHistory, parseBackfillChatTranscript } from '../src/lib/autoRemember';
 import { buildSemanticFactTags } from '../src/lib/semanticFactTags';
 import { flushStaffEventEmitter } from '../src/lib/staffEventRegistry';
@@ -10171,6 +10171,151 @@ async function deleteRuleCommand(args: ParsedArgs): Promise<void> {
     }
 }
 
+/**
+ * A2: revert-autowrite CLI — pair for M2 tool-result extraction. Every
+ * attendant_autowrite stamps the knowledge entry with source=attendant_autowrite
+ * plus an autowriteBatchId in properties, so we can find and revoke all the
+ * autowrites in a time window with just two columns. Defaults to --dry-run so
+ * a mistaken invocation previews targets instead of destroying them.
+ */
+function printRevertAutowriteHelp(): void {
+    console.log([
+        'Revert attendant autowrites performed in a recent time window.',
+        'Every fact written by iranti_attend via tool-result extraction is stamped',
+        'with source="attendant_autowrite" plus an autowriteBatchId. This command',
+        'lists (or, with --commit, deletes) every such entry whose createdAt is in',
+        'the given window.',
+        '',
+        'Usage:',
+        '  iranti revert-autowrite --since <duration> [--until <duration>] [--commit] [--json]',
+        '                          [--instance <name>] [--project-env <path>]',
+        '',
+        'Flags:',
+        '  --since <duration>    Required. How far back to look (e.g. 15m, 2h, 1d).',
+        '  --until <duration>    Optional. How recent the window should end (default: now).',
+        '  --commit              Actually delete. WITHOUT this flag, runs as a dry-run preview.',
+        '  --json                Print machine-readable output.',
+        '  --instance <name>     Use a named Iranti instance instead of the bound project.',
+        '  --project-env <path>  Point at a specific project env file.',
+        '',
+        'Examples:',
+        '  iranti revert-autowrite --since 15m                 # dry-run preview of the last 15m',
+        '  iranti revert-autowrite --since 2h --commit         # actually delete last 2h of autowrites',
+        '  iranti revert-autowrite --since 1d --until 1h       # window from 1d ago to 1h ago (dry-run)',
+        '',
+        'Notes:',
+        '  - Only entries with source="attendant_autowrite" are affected. Host writes,',
+        '    librarian writes, and every other source are untouched.',
+        '  - Deletion is by knowledge entry id, not by entity. Non-autowrite facts on',
+        '    the same entity remain in place.',
+    ].join('\n'));
+}
+
+/** Parse human durations like `15m`, `2h`, `1d` into milliseconds. */
+function parseDurationFlag(value: string, flagName: string): number {
+    const match = /^(\d+)\s*(ms|s|m|h|d)?$/i.exec(value.trim());
+    if (!match) {
+        throw cliError(
+            'IRANTI_DURATION_INVALID',
+            `Invalid duration for --${flagName}: '${value}'. Expected formats: 500ms, 30s, 15m, 2h, 1d.`,
+            [`Try: iranti revert-autowrite --${flagName} 15m`],
+        );
+    }
+    const raw = Number.parseInt(match[1], 10);
+    const unit = (match[2] ?? 'ms').toLowerCase();
+    const multiplier = unit === 'ms' ? 1
+        : unit === 's' ? 1_000
+        : unit === 'm' ? 60_000
+        : unit === 'h' ? 3_600_000
+        : unit === 'd' ? 86_400_000
+        : 1;
+    return raw * multiplier;
+}
+
+async function revertAutowriteCommand(args: ParsedArgs): Promise<void> {
+    try {
+        const json = hasFlag(args, 'json');
+        const commit = hasFlag(args, 'commit');
+        const sinceFlag = getFlag(args, 'since');
+        const untilFlag = getFlag(args, 'until');
+
+        if (!sinceFlag) {
+            throw cliError(
+                'IRANTI_REVERT_AUTOWRITE_SINCE_REQUIRED',
+                'Missing required flag --since. Usage: iranti revert-autowrite --since <duration>',
+                ['Try: iranti revert-autowrite --since 15m'],
+            );
+        }
+
+        const sinceMs = parseDurationFlag(sinceFlag, 'since');
+        const untilMs = untilFlag ? parseDurationFlag(untilFlag, 'until') : 0;
+        const now = Date.now();
+        const since = new Date(now - sinceMs);
+        const until = untilFlag ? new Date(now - untilMs) : undefined;
+
+        // Reuse the rule command env/db resolver — same prerequisites: a bound
+        // project or an --instance flag so DATABASE_URL can be resolved.
+        await resolveDbForRuleCommands(args);
+
+        const AUTOWRITE_SOURCE = 'attendant_autowrite';
+        const targets = await findEntriesBySourceAndWindow(AUTOWRITE_SOURCE, since, until);
+
+        if (json) {
+            const payload = {
+                mode: commit ? 'commit' : 'dry-run',
+                source: AUTOWRITE_SOURCE,
+                since: since.toISOString(),
+                until: (until ?? new Date(now)).toISOString(),
+                matched: targets.length,
+                targets: targets.map((entry) => ({
+                    id: entry.id,
+                    entityType: entry.entityType,
+                    entityId: entry.entityId,
+                    key: entry.key,
+                    summary: entry.valueSummary ?? '',
+                    createdAt: entry.createdAt.toISOString(),
+                })),
+                deleted: 0 as number,
+            };
+            if (commit && targets.length > 0) {
+                payload.deleted = await deleteEntriesBySourceAndWindow(AUTOWRITE_SOURCE, since, until);
+            }
+            console.log(JSON.stringify(payload, null, 2));
+            process.exit(0);
+        }
+
+        const header = commit ? 'Revert autowrites (COMMIT)' : 'Revert autowrites (dry-run)';
+        console.log(sectionTitle(header));
+        console.log(`  source:   ${AUTOWRITE_SOURCE}`);
+        console.log(`  since:    ${since.toISOString()}`);
+        console.log(`  until:    ${(until ?? new Date(now)).toISOString()}`);
+        console.log(`  matched:  ${targets.length}`);
+
+        if (targets.length === 0) {
+            console.log(`${infoLabel()} No attendant autowrites in this window.`);
+            return;
+        }
+
+        for (const entry of targets) {
+            console.log(`  - ${entry.entityType}/${entry.entityId} ${entry.key}`);
+            if (entry.valueSummary) {
+                console.log(`      ${entry.valueSummary.slice(0, 160)}`);
+            }
+            console.log(`      id=${entry.id} createdAt=${entry.createdAt.toISOString()}`);
+        }
+
+        if (!commit) {
+            console.log(`${infoLabel()} Dry-run only. Re-run with --commit to delete these entries.`);
+            return;
+        }
+
+        const deleted = await deleteEntriesBySourceAndWindow(AUTOWRITE_SOURCE, since, until);
+        console.log(`${okLabel()} Deleted ${deleted} attendant autowrite ${deleted === 1 ? 'entry' : 'entries'}.`);
+    } finally {
+        await disconnectDb().catch(() => undefined);
+    }
+}
+
 async function main(): Promise<void> {
     const args = parseArgs(process.argv.slice(2));
     ACTIVE_PARSED_ARGS = args;
@@ -10497,6 +10642,15 @@ async function main(): Promise<void> {
             return;
         }
         await deleteRuleCommand(args);
+        return;
+    }
+
+    if (args.command === 'revert-autowrite') {
+        if (hasFlag(args, 'help')) {
+            printRevertAutowriteHelp();
+            return;
+        }
+        await revertAutowriteCommand(args);
         return;
     }
 

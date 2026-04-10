@@ -247,6 +247,69 @@ export async function listAttendantStateEntries(
     });
 }
 
+/**
+ * A2: reverse-index query used by `iranti revert-autowrite`. Finds all
+ * knowledge entries written with a specific `source` tag inside a
+ * time window. The Attendant stamps every autowrite with
+ * source='attendant_autowrite' and an autowriteBatchId in properties, so
+ * this pair (source, createdAt window) is enough to list every autowrite
+ * the agent performed in the last N minutes/hours.
+ *
+ * Returned entries include their id so the caller can call deleteEntryById
+ * on each one — we intentionally do NOT delete here, because the CLI
+ * defaults to --dry-run and should print targets before destroying them.
+ *
+ * @param source The source label to match (e.g. 'attendant_autowrite').
+ * @param since  Lower bound (inclusive) on createdAt. Entries created at or
+ *               after this timestamp are eligible.
+ * @param until  Optional upper bound (inclusive). Defaults to now — callers
+ *               can narrow to a specific window for deterministic rollback.
+ */
+export async function findEntriesBySourceAndWindow(
+    source: string,
+    since: Date,
+    until?: Date,
+    db?: DbClient
+): Promise<KnowledgeEntry[]> {
+    const client = db ?? getDb();
+    return client.knowledgeEntry.findMany({
+        where: {
+            source,
+            createdAt: {
+                gte: since,
+                ...(until ? { lte: until } : {}),
+            },
+        },
+        orderBy: [{ createdAt: 'desc' }],
+    });
+}
+
+/**
+ * A2: destructive counterpart to findEntriesBySourceAndWindow. Deletes
+ * every knowledge entry matching (source, createdAt window) and returns
+ * the count deleted. Meant to be called only from the CLI after the
+ * dry-run preview has been shown to the user. Uses a single deleteMany
+ * query so it is atomic at the Prisma level.
+ */
+export async function deleteEntriesBySourceAndWindow(
+    source: string,
+    since: Date,
+    until?: Date,
+    db?: DbClient
+): Promise<number> {
+    const client = db ?? getDb();
+    const result = await client.knowledgeEntry.deleteMany({
+        where: {
+            source,
+            createdAt: {
+                gte: since,
+                ...(until ? { lte: until } : {}),
+            },
+        },
+    });
+    return result.count;
+}
+
 export async function findArchiveAsOf(
     query: EntryQuery,
     asOf: Date,
