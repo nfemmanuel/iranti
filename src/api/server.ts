@@ -10,6 +10,7 @@ import { agentRoutes } from './routes/agents';
 import { devRouter } from './routes/dev';
 import { batchRouter } from './routes/batch';
 import { authenticate } from './middleware/auth';
+import { createOrRotateApiKey, listApiKeys } from '../security/apiKeys';
 import { requireAnyScope, requireScopeByMethod, requireScopeFamilyByMethod } from './middleware/authorization';
 import { rateLimitMiddleware } from './middleware/rateLimit';
 import { snapshot, reset } from '../lib/metrics';
@@ -56,7 +57,7 @@ const RUNTIME_AUTHORITY = resolveRuntimeAuthorityFromEnv(process.env);
 const INSTANCE_DIR = RUNTIME_AUTHORITY.instanceDir;
 const INSTANCE_RUNTIME_FILE = RUNTIME_AUTHORITY.runtimeFile;
 const INSTANCE_NAME = process.env.IRANTI_INSTANCE_NAME?.trim() || (INSTANCE_DIR ? path.basename(INSTANCE_DIR) : 'adhoc');
-const VERSION = '0.3.21';
+const VERSION = '0.3.22';
 const PORT_RAW = (process.env.IRANTI_PORT ?? '3001').trim();
 const PORT = Number.parseInt(PORT_RAW, 10);
 
@@ -348,12 +349,39 @@ app.post(['/v1/chat/completions', '/chat/completions'], authenticate, rateLimitM
     }
 });
 
+// Bootstrap: if IRANTI_BOOTSTRAP=true and no keys exist yet, create one and log it.
+// The provision script reads the token from fly logs and then unsets IRANTI_BOOTSTRAP.
+async function maybeBootstrapApiKey(): Promise<void> {
+    if (process.env.IRANTI_BOOTSTRAP !== 'true') return;
+    try {
+        const existing = await listApiKeys();
+        const activeKeys = existing.filter((k) => k.isActive);
+        if (activeKeys.length > 0) {
+            console.log('[bootstrap] Keys already exist — skipping bootstrap.');
+            return;
+        }
+        const { token } = await createOrRotateApiKey({
+            keyId: 'bootstrap',
+            owner: process.env.IRANTI_INSTANCE_NAME ?? 'cloud-tenant',
+            scopes: [],
+            description: 'Bootstrap key created at first startup. Rotate or revoke after setup.',
+        });
+        // Log the token so the provision script can extract it via fly logs.
+        // Format is stable — provision.sh greps for this exact prefix.
+        console.log(`[bootstrap] IRANTI_API_KEY=${token}`);
+        console.log('[bootstrap] ⚠  Save this key — it will not appear again. Rotate via: iranti add api-key');
+    } catch (err) {
+        console.error('[bootstrap] Failed to create bootstrap key:', err instanceof Error ? err.message : String(err));
+    }
+}
+
 server = app.listen(PORT, () => {
     console.log(`\nIranti API running on port ${PORT}`);
     console.log(`Health: http://localhost:${PORT}/health`);
     console.log(`Provider: ${process.env.LLM_PROVIDER ?? 'mock'}\n`);
     console.log(`Escalation root: ${getEscalationPaths().root}`);
     console.log(`Request log file: ${REQUEST_LOG_FILE}\n`);
+    void maybeBootstrapApiKey();
     if (RUNTIME_AUTHORITY.managed && INSTANCE_RUNTIME_FILE) {
         void persistRuntimeState('running').then(() => {
             markRuntimeMetadataHealth(true, 'runtime metadata written successfully');
