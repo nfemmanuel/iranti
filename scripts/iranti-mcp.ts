@@ -472,7 +472,7 @@ Do not use this as a per-turn retrieval tool; use iranti_attend.`,
         description: `Ask Iranti whether memory should be injected before the next LLM turn.
 REQUIRED CALL SEQUENCE — follow this every turn, regardless of host:
 1. Call with phase='pre-response' BEFORE replying to the user.
-2. Call BEFORE any lookup tool (Read, Grep, Glob, Bash, WebSearch, WebFetch) where Iranti might already hold the answer.
+2. Call BEFORE any lookup tool (Read, Grep, Glob, Bash, WebSearch, WebFetch) where Iranti might already hold the answer. When you do, pass the pendingToolCall field so Iranti can derive entity hints from the tool target (file, URL, query) and preempt the lookup with stored facts.
 3. If you just ran Edit/Write/Bash/WebSearch/WebFetch since your last iranti_write, call iranti_write FIRST — then attend.
 4. Call with phase='post-response' AFTER every reply, without exception.
 
@@ -491,10 +491,14 @@ checkpoint state before closing the turn.`,
             maxFacts: z.number().int().min(1).max(20).optional().describe('Maximum facts to inject.'),
             forceInject: z.boolean().optional().describe('Force a memory injection decision.'),
             phase: z.enum(['pre-response', 'post-response', 'mid-turn']).optional().describe("Call phase: 'pre-response' before replying, 'post-response' after replying, 'mid-turn' for discovery-triggered re-attends within the same turn (e.g. after reading a new file or hitting a new entity). Mid-turn attends dedup facts already injected this turn, default to a smaller fact budget (3), and skip user-rule re-scans."),
+            pendingToolCall: z.object({
+                name: z.enum(['Read', 'Grep', 'Glob', 'Bash', 'WebSearch', 'WebFetch']).describe('The name of the read-only tool the agent is about to run.'),
+                args: z.record(z.string(), z.unknown()).optional().describe('The tool arguments (e.g. {file_path: "src/foo.ts"} for Read, {pattern: "src/**/*.ts"} for Glob, {command: "cat scripts/bar.ts"} for Bash, {url: "https://example.com"} for WebFetch, {query: "vector backend"} for WebSearch).'),
+            }).optional().describe('Describe the read-only tool call the agent is about to make. Iranti derives entity hints from the tool target (file path, URL, query) and surfaces any stored facts BEFORE the tool runs, so you can preempt redundant Read/Grep/Bash/WebFetch/WebSearch calls with stored memory. The result includes a toolCallGuidance field summarising what was derived.'),
             agent: z.string().optional().describe('Override the default agent id.'),
             agentId: z.string().optional().describe('Alias for agent. Override the default agent id.'),
         },
-    }, async ({ latestMessage, message, currentContext, entityHints, maxFacts, forceInject, phase, agent, agentId }) => {
+    }, async ({ latestMessage, message, currentContext, entityHints, maxFacts, forceInject, phase, pendingToolCall, agent, agentId }) => {
         const resolvedAgent = resolveToolAgent(agent, agentId);
         syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
         const resolvedLatestMessage = resolveAttendLatestMessage({ latestMessage, message });
@@ -546,6 +550,7 @@ checkpoint state before closing the turn.`,
                 maxFacts,
                 forceInject,
                 phase,
+                pendingToolCall,
             });
             const factsBlock = result.facts.length > 0
                 ? formatStructuredFactBlock(result.facts, {

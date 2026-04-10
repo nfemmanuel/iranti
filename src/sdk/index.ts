@@ -288,11 +288,28 @@ export interface ObserveInput {
     entityHints?: string[];
 }
 
+// A2: re-export the pending tool call shape from the attendant layer so
+// SDK consumers can build type-safe pendingToolCall payloads without
+// reaching into src/attendant internals.
+export type PendingToolCallName =
+    | 'Read'
+    | 'Grep'
+    | 'Glob'
+    | 'Bash'
+    | 'WebSearch'
+    | 'WebFetch';
+
+export interface PendingToolCall {
+    name: PendingToolCallName;
+    args?: Record<string, unknown>;
+}
+
 export interface AttendInput extends ObserveInput {
     latestMessage?: string;
     forceInject?: boolean;
     suppressEvents?: boolean;
     phase?: 'pre-response' | 'post-response' | 'mid-turn';
+    pendingToolCall?: PendingToolCall;
 }
 
 type SessionLedgerContext = {
@@ -1479,6 +1496,7 @@ export class Iranti {
             forceInject: input.forceInject,
             suppressEvents: input.suppressEvents,
             phase: input.phase,
+            pendingToolCall: input.pendingToolCall,
             ledgerContext: this.buildSessionLedgerContext(),
         });
         if (result.bootstrap?.handshakePerformed) {

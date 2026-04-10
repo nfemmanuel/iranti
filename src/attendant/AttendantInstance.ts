@@ -440,11 +440,30 @@ export interface ObserveResult {
     };
 }
 
+// A2: tool-call triggered retrieval — the caller can tell attend() that the
+// agent is about to invoke a specific read-only tool. Attend derives entity
+// hints from the tool's arguments (file_path, glob pattern, bash command,
+// fetched URL, etc.) and surfaces any stored facts BEFORE the tool runs, so
+// the agent can preempt redundant filesystem/web lookups with memory.
+export type PendingToolCallName =
+    | 'Read'
+    | 'Grep'
+    | 'Glob'
+    | 'Bash'
+    | 'WebSearch'
+    | 'WebFetch';
+
+export interface PendingToolCall {
+    name: PendingToolCallName;
+    args?: Record<string, unknown>;
+}
+
 export interface AttendInput extends ObserveInput {
     latestMessage?: string;
     forceInject?: boolean;
     suppressEvents?: boolean;
     phase?: 'pre-response' | 'post-response' | 'mid-turn';
+    pendingToolCall?: PendingToolCall;
 }
 
 export interface SessionCheckpointInput extends AgentContext {
@@ -490,6 +509,17 @@ export interface AttendResult extends ObserveResult {
     memoryResultsConsidered?: number;
     postResponseCapture?: PostResponseCaptureInfo;
     matchedUserRules?: MatchedUserRule[];
+    // A2: only populated when the caller passed pendingToolCall.
+    // Reports which entity hints were derived from the tool call so the agent
+    // (and tests) can see which stored facts preempted the lookup.
+    toolCallGuidance?: ToolCallGuidance;
+}
+
+export interface ToolCallGuidance {
+    toolName: PendingToolCallName;
+    derivedEntities: string[];
+    factCount: number;
+    note: string;
 }
 
 export interface PostResponseCaptureInfo {
@@ -880,6 +910,186 @@ export function extractFilePathEntityHints(text: string, projectEntity: string |
             hints.push(entityHint);
         }
     }
+    return hints;
+}
+
+// ─── A2: Pending Tool-Call Entity Hints ─────────────────────────────────────
+//
+// Derive entity hints from a structured tool call that the agent is about to
+// make. This lets attend() preempt redundant read-only tool calls by surfacing
+// stored facts keyed to the target of the tool call (a file, a URL, a query).
+//
+// We deliberately keep this a PURE function so it is trivially unit-testable
+// and so the caller can exercise different tool shapes without spinning up an
+// attendant. It returns entity hints in `entityType/entityId` form.
+
+function normalizeWebToken(value: string, maxLen = 48): string {
+    return value
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, maxLen);
+}
+
+function deriveFileEntityFromPath(
+    rawPath: string,
+    projectId: string,
+    seen: Set<string>,
+    hints: string[],
+): void {
+    const trimmed = rawPath.trim();
+    if (!trimmed) return;
+    const basename = trimmed.replace(/\\/g, '/').split('/').pop() ?? '';
+    // Strip trailing args like "foo.ts:42" or "foo.ts,bar.ts"
+    const stripped = basename.split(/[,:()]/)[0] ?? basename;
+    const nameWithoutExt = stripped
+        .replace(/\.\w+$/, '')
+        .replace(/[^a-zA-Z0-9]/g, '_')
+        .toLowerCase();
+    if (!nameWithoutExt || nameWithoutExt.length < 2) return;
+    const hint = `project/${projectId}/file/${nameWithoutExt}`;
+    if (!seen.has(hint)) {
+        seen.add(hint);
+        hints.push(hint);
+    }
+}
+
+function scanStringForPathEntities(
+    text: string,
+    projectId: string,
+    seen: Set<string>,
+    hints: string[],
+): void {
+    if (!text) return;
+    FILE_PATH_PATTERN.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = FILE_PATH_PATTERN.exec(text)) !== null) {
+        deriveFileEntityFromPath(match[1], projectId, seen, hints);
+    }
+}
+
+function extractBasenameFromGlobPattern(pattern: string): string | null {
+    // A glob like "src/**/*.ts" has no meaningful basename; one like
+    // "tests/attendant/run_mid_turn_attend_tests.ts" does. We only derive a
+    // file entity from the last segment if it looks like a literal filename.
+    const segments = pattern.replace(/\\/g, '/').split('/');
+    for (let i = segments.length - 1; i >= 0; i--) {
+        const seg = segments[i];
+        if (!seg || seg.includes('*') || seg.includes('?') || seg === '.' || seg === '..') continue;
+        if (/\.\w+$/.test(seg)) return seg;
+    }
+    return null;
+}
+
+/**
+ * Derive entity hints from a pending tool call. Pure, stateless, safe to call
+ * from tests. Callers should merge the result into `effectiveEntityHints`
+ * *after* text-derived hints so text signals still take precedence when a hint
+ * appears in both places.
+ */
+export function derivePendingToolCallEntityHints(
+    toolCall: PendingToolCall | undefined,
+    projectEntity: string | null,
+): string[] {
+    if (!toolCall || !projectEntity) return [];
+    const parsed = parseEntityString(projectEntity);
+    const projectId = parsed.entityId;
+    if (!projectId) return [];
+
+    const args = (toolCall.args ?? {}) as Record<string, unknown>;
+    const seen = new Set<string>();
+    const hints: string[] = [];
+
+    switch (toolCall.name) {
+        case 'Read': {
+            const filePath = typeof args.file_path === 'string' ? args.file_path : '';
+            if (filePath) {
+                deriveFileEntityFromPath(filePath, projectId, seen, hints);
+            }
+            break;
+        }
+        case 'Grep': {
+            // Grep has pattern + optional path + optional glob. Only path/glob
+            // can yield file-level entities; the regex pattern itself is
+            // content-level and gets surfaced via the existing text hints from
+            // latestMessage/currentContext.
+            if (typeof args.path === 'string') {
+                deriveFileEntityFromPath(args.path, projectId, seen, hints);
+            }
+            if (typeof args.glob === 'string') {
+                const base = extractBasenameFromGlobPattern(args.glob);
+                if (base) deriveFileEntityFromPath(base, projectId, seen, hints);
+            }
+            break;
+        }
+        case 'Glob': {
+            if (typeof args.pattern === 'string') {
+                const base = extractBasenameFromGlobPattern(args.pattern);
+                if (base) deriveFileEntityFromPath(base, projectId, seen, hints);
+                // If the pattern has no literal basename, fall through to the
+                // project entity so stored project-level facts still surface.
+            }
+            if (typeof args.path === 'string') {
+                deriveFileEntityFromPath(args.path, projectId, seen, hints);
+            }
+            break;
+        }
+        case 'Bash': {
+            // Scan the command string for embedded paths. This covers
+            // `cat src/foo.ts`, `rm ./dist/bar.js`, `node scripts/baz.ts`, etc.
+            const command = typeof args.command === 'string' ? args.command : '';
+            scanStringForPathEntities(command, projectId, seen, hints);
+            break;
+        }
+        case 'WebSearch': {
+            const query = typeof args.query === 'string' ? args.query : '';
+            const token = normalizeWebToken(query);
+            if (token) {
+                const hint = `web/search_${token}`;
+                if (!seen.has(hint)) {
+                    seen.add(hint);
+                    hints.push(hint);
+                }
+            }
+            break;
+        }
+        case 'WebFetch': {
+            const url = typeof args.url === 'string' ? args.url : '';
+            if (url) {
+                try {
+                    const parsedUrl = new URL(url);
+                    const host = normalizeWebToken(parsedUrl.hostname);
+                    if (host) {
+                        const hostHint = `web/${host}`;
+                        if (!seen.has(hostHint)) {
+                            seen.add(hostHint);
+                            hints.push(hostHint);
+                        }
+                    }
+                    const path = normalizeWebToken(parsedUrl.pathname);
+                    if (host && path && path.length >= 2) {
+                        const pathHint = `web/${host}_${path}`;
+                        if (!seen.has(pathHint)) {
+                            seen.add(pathHint);
+                            hints.push(pathHint);
+                        }
+                    }
+                } catch {
+                    // Non-URL string — fall back to a normalized token entity.
+                    const token = normalizeWebToken(url);
+                    if (token) {
+                        const hint = `web/${token}`;
+                        if (!seen.has(hint)) {
+                            seen.add(hint);
+                            hints.push(hint);
+                        }
+                    }
+                }
+            }
+            break;
+        }
+    }
+
     return hints;
 }
 
@@ -3018,9 +3228,20 @@ export class AttendantInstance {
             `${latestMessage}\n${currentContext}`,
             getProjectMemoryEntity() ?? null,
         );
-        const effectiveEntityHints = filePathHints.length > 0
-            ? [...new Set([...baseEntityHints, ...filePathHints])]
-            : baseEntityHints;
+        // A2: tool-call triggered retrieval. If the caller says "I'm about to
+        // run Read(file_path=X) / Grep / Bash / WebFetch / WebSearch", derive
+        // structured entity hints from the tool arguments BEFORE the tool
+        // runs, so stored facts can preempt the lookup.
+        const toolCallHints = derivePendingToolCallEntityHints(
+            input.pendingToolCall,
+            getProjectMemoryEntity() ?? null,
+        );
+        const allExtraHints = filePathHints.length === 0 && toolCallHints.length === 0
+            ? null
+            : [...filePathHints, ...toolCallHints];
+        const effectiveEntityHints = allExtraHints === null
+            ? baseEntityHints
+            : [...new Set([...baseEntityHints, ...allExtraHints])];
 
         // User operating rules: load rules whose triggers match the current context.
         // Mid-turn attends skip this — rules were already surfaced at pre-response,
@@ -3150,6 +3371,17 @@ export class AttendantInstance {
                 await this.persistState();
             }
             timeEnd('attendant.attend_ms', t0);
+            // A2: even on the "memory not needed" early return, if the caller
+            // passed pendingToolCall, echo the derived entities so the agent
+            // can see that attend() was tool-call-aware on this call.
+            const skipGuidance: ToolCallGuidance | undefined = input.pendingToolCall
+                ? {
+                    toolName: input.pendingToolCall.name,
+                    derivedEntities: toolCallHints,
+                    factCount: 0,
+                    note: `Memory was not deemed necessary for this ${input.pendingToolCall.name} call. Proceed.`,
+                }
+                : undefined;
             return {
                 shouldInject: matchedUserRules.length > 0,
                 reason: 'memory_not_needed',
@@ -3175,6 +3407,7 @@ export class AttendantInstance {
                     hintsResolved: 0,
                     dropped: [{ name: latestMessage || '(none)', reason: 'memory_not_needed' }],
                 },
+                toolCallGuidance: skipGuidance,
             };
         }
 
@@ -3315,6 +3548,23 @@ export class AttendantInstance {
             ? { ...observed.debug, midTurnFilteredKeys: [...midTurnFilteredKeys] }
             : observed.debug;
 
+        // A2: if the caller supplied pendingToolCall, surface a guidance block
+        // so the agent can see what entities were derived and how many stored
+        // facts preempted the lookup. Only populated when a tool call was
+        // actually passed — no allocation overhead for the common path.
+        const toolCallGuidance: ToolCallGuidance | undefined = input.pendingToolCall
+            ? {
+                toolName: input.pendingToolCall.name,
+                derivedEntities: toolCallHints,
+                factCount: structuredFacts.length,
+                note: toolCallHints.length === 0
+                    ? `No entity hints derived from ${input.pendingToolCall.name} args. Memory check ran on message/context only.`
+                    : structuredFacts.length > 0
+                        ? `Iranti surfaced ${structuredFacts.length} stored fact(s) for this ${input.pendingToolCall.name} call. Read them before running the tool — you may not need to run it.`
+                        : `No stored facts matched the ${input.pendingToolCall.name} target. Proceed with the tool call.`,
+            }
+            : undefined;
+
         const attendResult = {
             ...observed,
             debug: debugWithMidTurn,
@@ -3331,6 +3581,7 @@ export class AttendantInstance {
             memoryResultsConsidered,
             matchedUserRules: matchedUserRules.length > 0 ? matchedUserRules : undefined,
             usageGuidance: buildUsageGuidance('attend', this.turnsWithoutWrite),
+            toolCallGuidance,
         };
         if (input.suppressEvents !== true) {
             getStaffEventEmitter().emit({

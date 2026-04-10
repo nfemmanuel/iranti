@@ -90,6 +90,7 @@
     "test:user-operating-rules": "ts-node tests/attendant/run_user_operating_rules_tests.ts",
     "test:compliance-task-relevance": "ts-node tests/attendant/run_compliance_task_relevance_tests.ts",
     "test:mid-turn-attend": "ts-node tests/attendant/run_mid_turn_attend_tests.ts",
+    "test:tool-call-retrieval": "ts-node tests/attendant/run_tool_call_retrieval_tests.ts",
     "test:file-change-recall": "ts-node tests/attendant/run_file_change_recall_tests.ts",
     "test:copilot-setup": "ts-node tests/runtime-lifecycle/run_copilot_setup_tests.ts",
     "test:setup-upgrade-lifecycle": "ts-node tests/runtime-lifecycle/run_setup_upgrade_tests.ts",
