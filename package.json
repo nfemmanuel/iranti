@@ -64,6 +64,7 @@
     "test:connection-string": "ts-node scripts/test_connection_string.ts",
     "test:router": "ts-node scripts/test_router_enforcement.ts",
     "test:mock-provider": "ts-node tests/mock-provider/run_mock_fallthrough_tests.ts",
+    "test:mock-failure-modes": "ts-node tests/mock-provider/run_mock_failure_modes_tests.ts",
     "test:verify-authoritative": "ts-node scripts/verify_authoritative_resolution_parsing.ts",
     "test:mcp-smoke": "ts-node tests/mcp/smoke_test.ts",
     "test:mcp-protocol-enforcement": "ts-node tests/mcp/run_protocol_enforcement_regressions.ts",

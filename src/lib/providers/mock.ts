@@ -14,6 +14,33 @@ export interface MockFallthroughEvent {
     at: number;
 }
 
+/**
+ * Post-dispatch failure modes used to simulate a misbehaving LLM. These fire
+ * AFTER a prompt branch has computed its normal answer, then corrupt it on the
+ * way out. Staff code paths (Librarian, Attendant, Archivist) should degrade
+ * gracefully when they see these shapes.
+ *
+ * - 'malformed_json': Returns truncated/invalid JSON where valid JSON is expected.
+ *   Exercises JSON.parse try/catch fallback paths in Staff prompt consumers.
+ * - 'wrong_shape': Returns syntactically valid JSON with the wrong schema.
+ *   Exercises schema validation / type-guard fallbacks.
+ * - 'truncated': Returns the first half of the normal response. Exercises
+ *   incomplete-output handling for both JSON and free-text responses.
+ * - 'empty': Returns an empty string. Exercises the "LLM gave us nothing"
+ *   fallback paths which are often missing entirely.
+ * - 'throw': Throws a provider error. Stronger than 'failureRate' because it
+ *   can be scheduled (see failBeforeSuccessCount) instead of random.
+ */
+export type MockFailureMode = 'malformed_json' | 'wrong_shape' | 'truncated' | 'empty' | 'throw';
+
+export interface MockFailureEvent {
+    mode: MockFailureMode;
+    callCount: number;
+    at: number;
+    /** Whether this failure was scheduled (failBeforeSuccessCount) or sampled (failureModeRate). */
+    scheduled: boolean;
+}
+
 export interface MockConfig {
     scenario: MockScenario;
     agentId?: string;
@@ -21,6 +48,12 @@ export interface MockConfig {
     confidenceRange?: [number, number];
     seed?: number;
     responseDelayMs?: number;
+    /**
+     * When set, each call sleeps a random duration in this [min, max] ms range
+     * BEFORE dispatch. Takes precedence over responseDelayMs. Useful for
+     * simulating a flaky provider where latency varies wildly call to call.
+     */
+    responseDelayRangeMs?: [number, number];
     /**
      * When true, the mock throws instead of returning the canned researcher-profile
      * JSON when no prompt-branch matches. Use this in tests to catch silently
@@ -33,6 +66,31 @@ export interface MockConfig {
      * expected vs. unexpected fallthroughs in tests.
      */
     onFallthrough?: (event: MockFallthroughEvent) => void;
+    /**
+     * Primary failure mode applied to the normal response on the way out.
+     * If omitted, no failure mode is applied and the mock behaves exactly as
+     * S1 specified. Combined with failureModeRate (probabilistic) or
+     * failBeforeSuccessCount (scheduled) to decide when it fires.
+     */
+    failureMode?: MockFailureMode;
+    /**
+     * Probability (0..1) of firing failureMode on any given call. Ignored
+     * when failBeforeSuccessCount > 0 — scheduled failures win over random ones
+     * until the schedule is exhausted.
+     */
+    failureModeRate?: number;
+    /**
+     * Force the first N calls to fail with failureMode, then succeed from
+     * call N+1 onward. Models the "timeout-then-success" pattern needed to
+     * exercise retry-with-backoff paths in Staff consumers.
+     */
+    failBeforeSuccessCount?: number;
+    /**
+     * Optional callback invoked every time a failure mode fires. Fires for
+     * both scheduled and sampled failures. Useful for asserting failure
+     * counts and shapes in tests.
+     */
+    onFailureMode?: (event: MockFailureEvent) => void;
 }
 
 type ExtractedFact = {
@@ -408,12 +466,24 @@ const CONFLICT_RESOLUTIONS = {
     ESCALATE: 'ESCALATE: Both sources have comparable authority and the values are genuinely contradictory.',
 };
 
+const UNRELIABLE_FAILURE_ROTATION: MockFailureMode[] = [
+    'malformed_json',
+    'truncated',
+    'wrong_shape',
+    'empty',
+    'throw',
+];
+
 class MockProvider implements LLMProvider {
     private config: MockConfig;
     private rand: () => number;
     private callCount = 0;
     private fallthroughCount = 0;
     private lastFallthrough: MockFallthroughEvent | null = null;
+    private failureModeCount = 0;
+    private lastFailureMode: MockFailureEvent | null = null;
+    private scheduledFailuresRemaining = 0;
+    private unreliableRotationIndex = 0;
 
     constructor(config: MockConfig = { scenario: 'default' }) {
         this.config = config;
@@ -426,6 +496,10 @@ class MockProvider implements LLMProvider {
         this.callCount = 0;
         this.fallthroughCount = 0;
         this.lastFallthrough = null;
+        this.failureModeCount = 0;
+        this.lastFailureMode = null;
+        this.scheduledFailuresRemaining = this.config.failBeforeSuccessCount ?? 0;
+        this.unreliableRotationIndex = 0;
     }
 
     async complete(messages: LLMMessage[], options?: CompleteOptions): Promise<LLMResponse> {
@@ -435,9 +509,21 @@ class MockProvider implements LLMProvider {
         const scenario = this.config.scenario;
         const model = options?.model ?? 'mock';
 
-        const responseDelayMs = this.config.responseDelayMs ?? 0;
-        if (responseDelayMs > 0) {
-            await sleep(responseDelayMs);
+        const delayRange = this.config.responseDelayRangeMs;
+        if (delayRange && delayRange[1] > 0) {
+            const [min, max] = delayRange;
+            const lo = Math.max(0, Math.min(min, max));
+            const hi = Math.max(0, Math.max(min, max));
+            const span = hi - lo;
+            const ms = span > 0 ? lo + Math.floor(this.rand() * (span + 1)) : lo;
+            if (ms > 0) {
+                await sleep(ms);
+            }
+        } else {
+            const responseDelayMs = this.config.responseDelayMs ?? 0;
+            if (responseDelayMs > 0) {
+                await sleep(responseDelayMs);
+            }
         }
 
         const failureRate = this.config.failureRate ?? 0;
@@ -445,36 +531,45 @@ class MockProvider implements LLMProvider {
             throw new Error(`[mock] Simulated provider failure (rate: ${failureRate})`);
         }
 
+        // Resolve whether this call should fire a failure mode. Scheduled
+        // failures (failBeforeSuccessCount) win over probabilistic ones so
+        // tests can deterministically exercise retry paths.
+        const activeFailure = this.resolveActiveFailureMode();
+        if (activeFailure && activeFailure.mode === 'throw') {
+            this.recordFailureMode('throw', activeFailure.scheduled);
+            throw new Error(`[mock] Simulated failure mode: throw (call #${this.callCount})`);
+        }
+
         if (lower.includes('return only valid json with this exact shape:') && lower.includes('"needsmemory"')) {
             const latestMessage = extractBlock(lastMessage, 'Latest user message:', ['Recent context excerpt:']);
-            return this.respond(JSON.stringify(classifyMemoryNeed(latestMessage)), model);
+            return this.respond(JSON.stringify(classifyMemoryNeed(latestMessage)), model, activeFailure);
         }
 
         if (lower.includes('extract explicitly named entities from the text')) {
             const text = extractBlock(lastMessage, 'Text:');
-            return this.respond(JSON.stringify(detectEntities(text)), model);
+            return this.respond(JSON.stringify(detectEntities(text)), model, activeFailure);
         }
 
         if (lower.includes('specific type of task')) {
             const options = TASK_INFERENCES[scenario] ?? TASK_INFERENCES.default;
             const idx = Math.floor(this.rand() * options.length);
-            return this.respond(options[idx], model);
+            return this.respond(options[idx], model, activeFailure);
         }
 
         if (lower.includes('return only the numbers of entries that are directly relevant')) {
             const task = extractBlock(lastMessage, 'Agent task:', ['Available knowledge entries:']);
             const entries = extractBlock(lastMessage, 'Available knowledge entries:');
-            return this.respond(chooseRelevantEntries(task, entries), model);
+            return this.respond(chooseRelevantEntries(task, entries), model, activeFailure);
         }
 
         if (lower.includes('genuinely contradictory') || lower.includes('keep_existing')) {
             if (scenario === 'disagreement') {
                 const r = this.rand();
-                if (r < 0.4) return this.respond(CONFLICT_RESOLUTIONS.KEEP_EXISTING, model);
-                if (r < 0.7) return this.respond(CONFLICT_RESOLUTIONS.KEEP_INCOMING, model);
-                return this.respond(CONFLICT_RESOLUTIONS.ESCALATE, model);
+                if (r < 0.4) return this.respond(CONFLICT_RESOLUTIONS.KEEP_EXISTING, model, activeFailure);
+                if (r < 0.7) return this.respond(CONFLICT_RESOLUTIONS.KEEP_INCOMING, model, activeFailure);
+                return this.respond(CONFLICT_RESOLUTIONS.ESCALATE, model, activeFailure);
             }
-            return this.respond(CONFLICT_RESOLUTIONS.KEEP_EXISTING, model);
+            return this.respond(CONFLICT_RESOLUTIONS.KEEP_EXISTING, model, activeFailure);
         }
 
         if (
@@ -485,11 +580,11 @@ class MockProvider implements LLMProvider {
         ) {
             const text = extractBlock(lastMessage, 'Text to chunk:', ['Extract only distinct facts', 'Return ONLY a valid JSON array', 'If no facts can be extracted']);
             const facts = extractFactsFromText(text);
-            return this.respond(JSON.stringify(facts), model);
+            return this.respond(JSON.stringify(facts), model, activeFailure);
         }
 
         if (lower.includes('compress') || lower.includes('summarize')) {
-            return this.respond('Compressed working memory summary for current task context.', model);
+            return this.respond('Compressed working memory summary for current task context.', model, activeFailure);
         }
 
         this.fallthroughCount += 1;
@@ -527,11 +622,110 @@ class MockProvider implements LLMProvider {
             `  "confidence": 85\n` +
             `}`,
             model,
+            activeFailure,
         );
     }
 
-    private respond(text: string, model: string): LLMResponse {
+    private respond(
+        text: string,
+        model: string,
+        activeFailure?: { mode: MockFailureMode; scheduled: boolean } | null,
+    ): LLMResponse {
+        if (activeFailure && activeFailure.mode !== 'throw') {
+            const corrupted = this.applyFailureMode(text, activeFailure.mode);
+            this.recordFailureMode(activeFailure.mode, activeFailure.scheduled);
+            return { text: corrupted, model, provider: 'mock' };
+        }
         return { text, model, provider: 'mock' };
+    }
+
+    private resolveActiveFailureMode(): { mode: MockFailureMode; scheduled: boolean } | null {
+        // Scheduled failures (failBeforeSuccessCount) take priority so retry
+        // tests can rely on deterministic sequencing.
+        if (this.scheduledFailuresRemaining > 0) {
+            this.scheduledFailuresRemaining -= 1;
+            const scheduledMode = this.config.failureMode
+                ?? (this.config.scenario === 'unreliable' ? this.nextUnreliableMode() : 'throw');
+            return { mode: scheduledMode, scheduled: true };
+        }
+
+        // Unreliable scenario: rotate through failure modes at a steady rate
+        // so Staff consumers see every shape over a handful of calls.
+        if (this.config.scenario === 'unreliable') {
+            const rate = this.config.failureModeRate ?? 0.6;
+            if (rate > 0 && this.rand() < rate) {
+                return { mode: this.nextUnreliableMode(), scheduled: false };
+            }
+            return null;
+        }
+
+        // Explicit probabilistic failure mode.
+        if (this.config.failureMode) {
+            const rate = this.config.failureModeRate ?? 0;
+            if (rate > 0 && this.rand() < rate) {
+                return { mode: this.config.failureMode, scheduled: false };
+            }
+        }
+
+        return null;
+    }
+
+    private nextUnreliableMode(): MockFailureMode {
+        const mode = UNRELIABLE_FAILURE_ROTATION[this.unreliableRotationIndex % UNRELIABLE_FAILURE_ROTATION.length];
+        this.unreliableRotationIndex += 1;
+        return mode;
+    }
+
+    private recordFailureMode(mode: MockFailureMode, scheduled: boolean): void {
+        this.failureModeCount += 1;
+        const event: MockFailureEvent = {
+            mode,
+            callCount: this.callCount,
+            at: Date.now(),
+            scheduled,
+        };
+        this.lastFailureMode = event;
+        if (this.config.onFailureMode) {
+            try {
+                this.config.onFailureMode(event);
+            } catch {
+                // Observer errors must not destabilize the provider itself.
+            }
+        }
+    }
+
+    private applyFailureMode(text: string, mode: MockFailureMode): string {
+        switch (mode) {
+            case 'empty':
+                return '';
+            case 'truncated': {
+                if (text.length === 0) return '';
+                const half = Math.max(1, Math.floor(text.length / 2));
+                return text.slice(0, half);
+            }
+            case 'malformed_json': {
+                // If the text was meant to be JSON, drop the closing bracket.
+                // Otherwise, wrap it in a broken JSON envelope so Staff JSON
+                // parsers still fail loudly.
+                const trimmed = text.trim();
+                if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+                    // Strip the final closing bracket and append a stray comma
+                    // so JSON.parse will reject it.
+                    const withoutLast = trimmed.slice(0, -1);
+                    return `${withoutLast},`;
+                }
+                return `{"partial": ${JSON.stringify(trimmed)}, "truncated": tru`;
+            }
+            case 'wrong_shape': {
+                // Return syntactically valid JSON that does not match any
+                // Staff consumer's expected schema. Useful for exercising
+                // schema / type-guard fallbacks rather than parse fallbacks.
+                return JSON.stringify({ unexpected: true, original: text });
+            }
+            case 'throw':
+                // Handled earlier in complete(); if we get here it's a bug.
+                return text;
+        }
     }
 
     getCallCount(): number {
@@ -554,6 +748,25 @@ class MockProvider implements LLMProvider {
         this.fallthroughCount = 0;
         this.lastFallthrough = null;
     }
+
+    getFailureModeCount(): number {
+        return this.failureModeCount;
+    }
+
+    getLastFailureMode(): MockFailureEvent | null {
+        return this.lastFailureMode;
+    }
+
+    getScheduledFailuresRemaining(): number {
+        return this.scheduledFailuresRemaining;
+    }
+
+    resetFailureModeTracking(): void {
+        this.failureModeCount = 0;
+        this.lastFailureMode = null;
+        this.scheduledFailuresRemaining = this.config.failBeforeSuccessCount ?? 0;
+        this.unreliableRotationIndex = 0;
+    }
 }
 
 const mockProvider = new MockProvider();
@@ -572,6 +785,22 @@ export function getLastMockFallthrough(): MockFallthroughEvent | null {
 
 export function resetMockFallthroughTracking(): void {
     mockProvider.resetFallthroughTracking();
+}
+
+export function getMockFailureModeCount(): number {
+    return mockProvider.getFailureModeCount();
+}
+
+export function getLastMockFailureMode(): MockFailureEvent | null {
+    return mockProvider.getLastFailureMode();
+}
+
+export function getMockScheduledFailuresRemaining(): number {
+    return mockProvider.getScheduledFailuresRemaining();
+}
+
+export function resetMockFailureModeTracking(): void {
+    mockProvider.resetFailureModeTracking();
 }
 
 export default mockProvider;
