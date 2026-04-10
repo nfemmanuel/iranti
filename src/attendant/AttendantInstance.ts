@@ -69,6 +69,11 @@ const SESSION_INTERRUPTION_TTL_MS = 5 * 60 * 1000;
 const PERSISTENCE_WARNING_THRESHOLD = 3;
 const PERSISTENCE_NON_COMPLIANT_THRESHOLD = 5;
 const ENTITY_DETECTION_WINDOW_CHARS = 1500;
+// A1: mid-turn attends default to a smaller fact budget than pre-response.
+// The agent is already deep in the task with a working memory frame; the point
+// of a mid-turn attend is to surface 1-3 NEW facts on a topic shift, not to
+// re-dump the whole briefing.
+const MID_TURN_DEFAULT_MAX_FACTS = 3;
 const MIN_ENTITY_CONFIDENCE = 0.75;
 const MEMORY_DECISION_CONTEXT_WINDOW_CHARS = 2000;
 const LEDGER_WORKING_MEMORY_PREFIX = 'system/session_ledger/recent_learning_';
@@ -431,6 +436,7 @@ export interface ObserveResult {
         hintsProvided?: number;
         hintsResolved?: number;
         dropped: Array<{ name: string; reason: string }>;
+        midTurnFilteredKeys?: string[];
     };
 }
 
@@ -3016,8 +3022,11 @@ export class AttendantInstance {
             ? [...new Set([...baseEntityHints, ...filePathHints])]
             : baseEntityHints;
 
-        // User operating rules: load rules whose triggers match the current context
-        const matchedUserRules = phase !== 'post-response'
+        // User operating rules: load rules whose triggers match the current context.
+        // Mid-turn attends skip this — rules were already surfaced at pre-response,
+        // and reloading them on every mid-turn call would duplicate context and burn
+        // an LLM call on the trigger match.
+        const matchedUserRules = (phase !== 'post-response' && phase !== 'mid-turn')
             ? await this.loadMatchingUserRules(`${latestMessage}\n${currentContext}`)
             : [];
 
@@ -3173,14 +3182,19 @@ export class AttendantInstance {
         // just before the compact) without blocking them on the already-in-context filter.
         // The flag is set by handshake(postCompaction:true) and consumed exactly once here.
         const postCompactionRecoveryKeys: string[] = [];
-        let postCompactionMaxFacts = input.maxFacts;
+        let effectiveMaxFacts = input.maxFacts;
         if (this.postCompactionPending) {
             const recentInjections = this.pendingMemoryAttributions.slice(-5);
             for (const attr of recentInjections) {
                 postCompactionRecoveryKeys.push(...attr.injectedKeys);
             }
-            postCompactionMaxFacts = Math.min((input.maxFacts ?? 5) * 2, 10);
+            effectiveMaxFacts = Math.min((input.maxFacts ?? 5) * 2, 10);
             this.postCompactionPending = false;
+        } else if (phase === 'mid-turn' && input.maxFacts === undefined) {
+            // A1: mid-turn attends default to a smaller fact budget than pre-response.
+            // The agent already has a working-memory frame from the pre-response attend;
+            // mid-turn is about surfacing 1-3 NEW facts on a topic shift, not re-dumping briefs.
+            effectiveMaxFacts = MID_TURN_DEFAULT_MAX_FACTS;
         }
         const observeEntityHints = effectiveEntityHints.length > 0 ? effectiveEntityHints : freshState.entities;
         const allObserveEntityHints = postCompactionRecoveryKeys.length > 0
@@ -3194,7 +3208,7 @@ export class AttendantInstance {
             : observeEntityHints;
         const observed = await this.observe({
             currentContext: observationContext,
-            maxFacts: postCompactionMaxFacts,
+            maxFacts: effectiveMaxFacts,
             entityHints: allObserveEntityHints,
             priorityKeys: expandContinuityPriorityKeys(Array.from(new Set([
                 ...(mandatoryRecall.key ? [mandatoryRecall.key] : []),
@@ -3220,7 +3234,32 @@ export class AttendantInstance {
             const remainder = slashIdx2 === -1 ? '' : fact.entityKey.slice(slashIdx2);
             return { ...fact, entityKey: `${canonicalPersonalType}/${canonicalPersonalId}${remainder}` };
         });
-        const structuredFacts = assignStructuredFactIds(remappedFacts);
+
+        // A1: mid-turn dedup — drop facts whose entityKey was already injected earlier
+        // in the SAME turn. pendingMemoryAttributions is reset at post-response, so any
+        // entry in that list belongs to the current turn. This prevents mid-turn attends
+        // from spamming the agent with facts it already has in working memory from a
+        // previous pre-response or mid-turn attend call.
+        const midTurnFilteredKeys: string[] = [];
+        let factsAfterDedup = remappedFacts;
+        if (phase === 'mid-turn' && this.pendingMemoryAttributions.length > 0) {
+            const alreadyInjectedThisTurn = new Set<string>();
+            for (const attr of this.pendingMemoryAttributions) {
+                for (const key of attr.injectedKeys) {
+                    alreadyInjectedThisTurn.add(key);
+                }
+            }
+            if (alreadyInjectedThisTurn.size > 0) {
+                factsAfterDedup = remappedFacts.filter((fact) => {
+                    if (alreadyInjectedThisTurn.has(fact.entityKey)) {
+                        midTurnFilteredKeys.push(fact.entityKey);
+                        return false;
+                    }
+                    return true;
+                });
+            }
+        }
+        const structuredFacts = assignStructuredFactIds(factsAfterDedup);
         watchedEntitiesChanged = this.updateWatchedEntities(observed.entitiesResolved?.map((entry) => entry.canonicalEntity) ?? []) || watchedEntitiesChanged;
         this.markSharedStateObserved(observeEntityHints.length > 0 ? observeEntityHints : freshState.entities);
 
@@ -3231,8 +3270,14 @@ export class AttendantInstance {
         let searchSuggestion: AttendSearchSuggestion | undefined;
 
         if (!shouldInject) {
+            // A1: if mid-turn dedup ate everything observe returned, treat it as
+            // "already in context" — the agent has these facts from an earlier attend.
+            const allDroppedByMidTurnDedup = phase === 'mid-turn'
+                && midTurnFilteredKeys.length > 0
+                && remappedFacts.length > 0
+                && factsAfterDedup.length === 0;
             const allAlreadyInContext = observed.totalFound > 0 && observed.alreadyPresent >= observed.totalFound;
-            reason = allAlreadyInContext ? 'memory_needed_but_in_context' : 'memory_checked_no_match';
+            reason = (allAlreadyInContext || allDroppedByMidTurnDedup) ? 'memory_needed_but_in_context' : 'memory_checked_no_match';
             if (reason === 'memory_checked_no_match') {
                 const terms = tokenizeForSearch(latestMessage).slice(0, 6);
                 const alternativeEntities = (observed.entitiesResolved ?? [])
@@ -3264,8 +3309,15 @@ export class AttendantInstance {
             ]
             : [];
 
+        // A1: when mid-turn dedup filtered keys, surface them in debug so the
+        // caller (and tests) can reason about which facts were suppressed.
+        const debugWithMidTurn = (midTurnFilteredKeys.length > 0 && observed.debug)
+            ? { ...observed.debug, midTurnFilteredKeys: [...midTurnFilteredKeys] }
+            : observed.debug;
+
         const attendResult = {
             ...observed,
+            debug: debugWithMidTurn,
             facts: structuredFacts,
             shouldInject: structuredFacts.length > 0 || matchedUserRules.length > 0,
             reason,
