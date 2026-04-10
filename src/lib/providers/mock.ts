@@ -7,6 +7,13 @@ export type MockScenario =
     | 'collaborative'
     | 'noisy';
 
+export interface MockFallthroughEvent {
+    prompt: string;
+    promptSnippet: string;
+    callCount: number;
+    at: number;
+}
+
 export interface MockConfig {
     scenario: MockScenario;
     agentId?: string;
@@ -14,6 +21,18 @@ export interface MockConfig {
     confidenceRange?: [number, number];
     seed?: number;
     responseDelayMs?: number;
+    /**
+     * When true, the mock throws instead of returning the canned researcher-profile
+     * JSON when no prompt-branch matches. Use this in tests to catch silently
+     * unhandled Staff prompt shapes. Default: false (backward compatible).
+     */
+    strictFallthrough?: boolean;
+    /**
+     * Optional callback invoked every time the mock falls through to its canned
+     * response. Fires regardless of strictFallthrough. Useful for asserting
+     * expected vs. unexpected fallthroughs in tests.
+     */
+    onFallthrough?: (event: MockFallthroughEvent) => void;
 }
 
 type ExtractedFact = {
@@ -393,6 +412,8 @@ class MockProvider implements LLMProvider {
     private config: MockConfig;
     private rand: () => number;
     private callCount = 0;
+    private fallthroughCount = 0;
+    private lastFallthrough: MockFallthroughEvent | null = null;
 
     constructor(config: MockConfig = { scenario: 'default' }) {
         this.config = config;
@@ -403,6 +424,8 @@ class MockProvider implements LLMProvider {
         Object.assign(this.config, config);
         this.rand = seededRandom(this.config.seed ?? 42);
         this.callCount = 0;
+        this.fallthroughCount = 0;
+        this.lastFallthrough = null;
     }
 
     async complete(messages: LLMMessage[], options?: CompleteOptions): Promise<LLMResponse> {
@@ -469,6 +492,30 @@ class MockProvider implements LLMProvider {
             return this.respond('Compressed working memory summary for current task context.', model);
         }
 
+        this.fallthroughCount += 1;
+        const fallthroughEvent: MockFallthroughEvent = {
+            prompt: lastMessage,
+            promptSnippet: lastMessage.length > 240 ? `${lastMessage.slice(0, 240)}…` : lastMessage,
+            callCount: this.callCount,
+            at: Date.now(),
+        };
+        this.lastFallthrough = fallthroughEvent;
+        if (this.config.onFallthrough) {
+            try {
+                this.config.onFallthrough(fallthroughEvent);
+            } catch {
+                // Intentionally swallow observer errors so the mock cannot be
+                // destabilized by a misbehaving test hook.
+            }
+        }
+        if (this.config.strictFallthrough) {
+            throw new Error(
+                `[mock] Unmatched prompt on call #${this.callCount}. `
+                + `Enable a specific branch in MockProvider.complete() or remove strictFallthrough to allow the canned researcher JSON. `
+                + `Prompt snippet: ${fallthroughEvent.promptSnippet}`,
+            );
+        }
+
         return this.respond(
             `I have completed my analysis.\n\n` +
             `{\n` +
@@ -494,12 +541,37 @@ class MockProvider implements LLMProvider {
     resetCallCount(): void {
         this.callCount = 0;
     }
+
+    getFallthroughCount(): number {
+        return this.fallthroughCount;
+    }
+
+    getLastFallthrough(): MockFallthroughEvent | null {
+        return this.lastFallthrough;
+    }
+
+    resetFallthroughTracking(): void {
+        this.fallthroughCount = 0;
+        this.lastFallthrough = null;
+    }
 }
 
 const mockProvider = new MockProvider();
 
 export function configureMock(config: Partial<MockConfig>): void {
     mockProvider.configure(config);
+}
+
+export function getMockFallthroughCount(): number {
+    return mockProvider.getFallthroughCount();
+}
+
+export function getLastMockFallthrough(): MockFallthroughEvent | null {
+    return mockProvider.getLastFallthrough();
+}
+
+export function resetMockFallthroughTracking(): void {
+    mockProvider.resetFallthroughTracking();
 }
 
 export default mockProvider;
