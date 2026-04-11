@@ -1,6 +1,6 @@
 {
   "name": "iranti",
-  "version": "0.3.25",
+  "version": "0.3.26",
   "description": "Memory infrastructure for multi-agent AI systems",
   "main": "dist/src/sdk/index.js",
   "files": [
@@ -93,6 +93,7 @@
     "test:mid-turn-attend": "ts-node tests/attendant/run_mid_turn_attend_tests.ts",
     "test:tool-call-retrieval": "ts-node tests/attendant/run_tool_call_retrieval_tests.ts",
     "test:m2-tool-result-autowrite": "ts-node tests/attendant/run_m2_tool_result_autowrite_tests.ts",
+    "test:a4-plan-proposal": "ts-node tests/attendant/run_a4_plan_proposal_tests.ts",
     "test:file-change-recall": "ts-node tests/attendant/run_file_change_recall_tests.ts",
     "test:copilot-setup": "ts-node tests/runtime-lifecycle/run_copilot_setup_tests.ts",
     "test:setup-upgrade-lifecycle": "ts-node tests/runtime-lifecycle/run_setup_upgrade_tests.ts",

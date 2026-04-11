@@ -249,6 +249,7 @@ export interface WorkingMemoryBrief {
     briefGeneratedAt: string;
     contextCallCount: number;
     backfillSuggestion?: BackfillSuggestion | null;
+    planProposal?: PlanProposal | null;
     sessionLedgerLearnings?: SessionLedgerLearning[];
     sessionCheckpoint?: SessionCheckpointRecord | null;
     sessionRecovery?: SessionRecoveryInfo | null;
@@ -263,6 +264,40 @@ export interface BackfillSuggestion {
     candidateFacts: number;
     sampleKeys: string[];
     suggestedCommand: string;
+}
+
+// A4: plan proposal surfaced on handshake.
+//
+// When the task string or inferred task type contains a high-complexity verb
+// (ship / implement / refactor / fix / audit / migrate / deploy / debug),
+// the attendant builds a short structured plan that the host can surface to
+// the user before the agent begins tool use. Purely heuristic — no LLM call,
+// deterministic — so handshakes stay fast and snapshot-testable.
+//
+// When the agent has an interrupted session checkpoint, the plan switches to
+// a `checkpoint_continuation` source that leads with `checkpoint.nextStep`
+// instead of the keyword-template plan.
+//
+// The field is optional on WorkingMemoryBrief so older hosts that don't know
+// about `planProposal` can ignore it safely.
+export type PlanProposalSource =
+    | 'heuristic_keyword'
+    | 'checkpoint_continuation'
+    | 'skipped';
+
+export interface PlanProposalStep {
+    n: number;
+    description: string;
+    rationale?: string;
+}
+
+export interface PlanProposal {
+    suggested: boolean;
+    reason: string;
+    source: PlanProposalSource;
+    steps: PlanProposalStep[];
+    taskSignals: string[];
+    note?: string;
 }
 
 export type SessionStatus = 'active' | 'interrupted' | 'completed' | 'abandoned';
@@ -1378,6 +1413,214 @@ function buildBackfillSuggestion(
         candidateFacts: missingCandidates.length,
         sampleKeys: missingCandidates.slice(0, 5).map((candidate) => candidate.key),
         suggestedCommand: 'iranti handshake --backfill <chat-file>',
+    };
+}
+
+// ─── A4: plan proposal heuristic ────────────────────────────────────────────
+//
+// Pure functions used by handshake() to build a short structured plan. These
+// are exported for test access and intentionally contain no LLM calls so the
+// handshake stays fast, deterministic, and snapshot-testable. The templates
+// below are deliberately terse and align with the standing Iranti protocol
+// (e.g. "write after every edit", "verify CI after push").
+
+const PLAN_MIN_TASK_CHARS = 24;
+
+export type PlanSignal =
+    | 'ship_release'
+    | 'implement_add'
+    | 'refactor_rewrite'
+    | 'fix_debug'
+    | 'audit_review'
+    | 'migrate'
+    | 'test_author'
+    | 'deploy';
+
+interface PlanSignalMatch {
+    signal: PlanSignal;
+    matchedKeyword: string;
+}
+
+const PLAN_SIGNAL_KEYWORDS: Record<PlanSignal, string[]> = {
+    ship_release: ['ship', 'release', 'cut v', 'tag v', 'publish'],
+    implement_add: ['implement', 'add', 'build', 'create', 'introduce', 'wire'],
+    refactor_rewrite: ['refactor', 'rewrite', 'restructure', 'rename', 'extract'],
+    fix_debug: ['fix', 'debug', 'bug', 'repair', 'broken'],
+    audit_review: ['audit', 'review', 'inspect', 'check', 'verify'],
+    migrate: ['migrate', 'port', 'upgrade', 'backfill'],
+    test_author: ['test', 'cover', 'regression', 'assert'],
+    deploy: ['deploy', 'rollout', 'promote'],
+};
+
+const PLAN_TEMPLATES: Record<PlanSignal, PlanProposalStep[]> = {
+    ship_release: [
+        { n: 1, description: 'Run tsc --noEmit and the relevant targeted test suite.', rationale: 'Catch type errors and regressions before the commit.' },
+        { n: 2, description: 'Run backward-compat regression suites.', rationale: 'Make sure adjacent features still behave.' },
+        { n: 3, description: 'Bump version across package.json, clients, and server.ts.', rationale: 'Keep the 5-file version pattern consistent.' },
+        { n: 4, description: 'Commit, tag, push, create GitHub Release.', rationale: 'Never npm publish manually — Releases drive publish via CI.' },
+        { n: 5, description: 'Watch CI with gh run watch --exit-status and verify all 3 jobs green.', rationale: 'Do not trust the push until Secret Scan + Contract Checks + Release Quality are confirmed green.' },
+    ],
+    implement_add: [
+        { n: 1, description: 'Search Iranti and read existing patterns before writing new code.', rationale: 'Prefer extending established patterns over reinventing.' },
+        { n: 2, description: 'Draft the minimum type + data plumbing first.', rationale: 'Shapes force the design before the logic.' },
+        { n: 3, description: 'Implement in a single focused edit, iranti_write after each change.', rationale: 'Every edit should leave a durable trail for future sessions.' },
+        { n: 4, description: 'Write unit + integration tests, run them locally.', rationale: 'Prove the new surface area before committing.' },
+        { n: 5, description: 'Run backward-compat regressions, then commit.', rationale: 'Catch cross-feature breakage before review.' },
+    ],
+    refactor_rewrite: [
+        { n: 1, description: 'Map the current call sites of the symbol or module being changed.', rationale: 'Know the blast radius before editing.' },
+        { n: 2, description: 'Sketch the target shape and document the invariant being preserved.', rationale: 'Refactors without a stated invariant drift.' },
+        { n: 3, description: 'Perform the refactor in small, compiling increments.', rationale: 'Keep tsc green at every step.' },
+        { n: 4, description: 'Run the existing test suite unmodified first.', rationale: 'If old tests still pass, behavior is preserved.' },
+        { n: 5, description: 'Add a regression test that locks in the new structural contract.', rationale: 'Prevents silent regression of the refactor goal.' },
+    ],
+    fix_debug: [
+        { n: 1, description: 'Reproduce the bug locally with the minimal repro.', rationale: 'You cannot fix what you cannot reproduce.' },
+        { n: 2, description: 'Isolate the failing component with targeted reads and grep.', rationale: 'Narrow the surface before editing.' },
+        { n: 3, description: 'Make the smallest change that restores correctness.', rationale: 'Scope creep masks root cause.' },
+        { n: 4, description: 'Add a regression test that would have caught the original bug.', rationale: 'Prevents the same bug re-landing later.' },
+        { n: 5, description: 'iranti_write the finding, the fix, and the root cause.', rationale: 'Future sessions should not have to rediscover this.' },
+    ],
+    audit_review: [
+        { n: 1, description: 'Enumerate the audit scope: files, subsystems, or issue list.', rationale: 'Audits without scope miss half the surface area.' },
+        { n: 2, description: 'For each item, read the current state and iranti_write the finding.', rationale: 'Durable findings are how audits compound across sessions.' },
+        { n: 3, description: 'Classify each finding (open / resolved / wontfix) with evidence.', rationale: 'Unclassified findings bit-rot.' },
+        { n: 4, description: 'Run the relevant test suites to validate assumptions.', rationale: 'Tests are how assertions become facts.' },
+        { n: 5, description: 'Checkpoint the audit summary with open risks and next step.', rationale: 'Hand off cleanly, even if incomplete.' },
+    ],
+    migrate: [
+        { n: 1, description: 'Document the source shape and target shape side by side.', rationale: 'Migrations without a diff have no finish line.' },
+        { n: 2, description: 'Write a dry-run path that produces target without mutating source.', rationale: 'Dry runs catch 80% of migration bugs before real data moves.' },
+        { n: 3, description: 'Run the dry run, compare against expected, iranti_write the diff.', rationale: 'Evidence for the real run.' },
+        { n: 4, description: 'Perform the real migration behind a reversible flag or tx.', rationale: 'Always leave a rollback path.' },
+        { n: 5, description: 'Verify + checkpoint + write a post-mortem fact.', rationale: 'Durable record of what changed and why.' },
+    ],
+    test_author: [
+        { n: 1, description: 'Identify the code under test and the contract being locked in.', rationale: 'Tests without a contract are noise.' },
+        { n: 2, description: 'Read nearby test files to match conventions.', rationale: 'Consistency reduces review friction.' },
+        { n: 3, description: 'Write failing tests first where practical.', rationale: 'TDD catches misaligned assumptions.' },
+        { n: 4, description: 'Run the new suite, iterate until green.', rationale: 'Green-on-first-run often means mis-assertion.' },
+        { n: 5, description: 'Register the new suite in package.json and iranti_write.', rationale: 'Untracked suites do not run in CI.' },
+    ],
+    deploy: [
+        { n: 1, description: 'Verify CI is green on the target commit before promoting.', rationale: 'Never promote a red build.' },
+        { n: 2, description: 'Confirm environment variables and secrets are present.', rationale: 'Most rollouts fail on config, not code.' },
+        { n: 3, description: 'Promote, then watch logs and health checks for the first N minutes.', rationale: 'Early rollback is cheap, late rollback is expensive.' },
+        { n: 4, description: 'Verify the canary metric crosses the success threshold.', rationale: 'Objective signal beats subjective feeling.' },
+        { n: 5, description: 'iranti_write the rollout + any anomalies.', rationale: 'Future deploys inherit this learning.' },
+    ],
+};
+
+export function detectPlanSignals(task: string): PlanSignalMatch[] {
+    const lower = task.toLowerCase();
+    const matches: PlanSignalMatch[] = [];
+    const seen = new Set<PlanSignal>();
+    for (const signal of Object.keys(PLAN_SIGNAL_KEYWORDS) as PlanSignal[]) {
+        for (const keyword of PLAN_SIGNAL_KEYWORDS[signal]) {
+            if (lower.includes(keyword) && !seen.has(signal)) {
+                matches.push({ signal, matchedKeyword: keyword });
+                seen.add(signal);
+                break;
+            }
+        }
+    }
+    return matches;
+}
+
+export function buildPlanProposal(
+    task: string,
+    inferredTaskType: string,
+    sessionCheckpoint?: SessionCheckpointRecord | null,
+): PlanProposal {
+    const combined = [task, inferredTaskType].filter(Boolean).join(' ').trim();
+
+    // Checkpoint continuation takes precedence. If a prior interrupted session
+    // exists, the plan leads with "resume from checkpoint" so the agent can
+    // pick up in place instead of re-deriving a plan from scratch.
+    if (sessionCheckpoint?.status === 'interrupted' && sessionCheckpoint.checkpoint) {
+        const nextStep = sessionCheckpoint.checkpoint.nextStep?.trim() ?? '';
+        const currentStep = sessionCheckpoint.checkpoint.currentStep?.trim() ?? '';
+        const steps: PlanProposalStep[] = [];
+        if (nextStep) {
+            steps.push({
+                n: 1,
+                description: `Resume: ${nextStep}`,
+                rationale: 'Interrupted session — continue from the recorded next step.',
+            });
+        }
+        if (currentStep) {
+            steps.push({
+                n: steps.length + 1,
+                description: `Re-confirm prior state: ${currentStep}`,
+                rationale: 'Verify the recorded current step is still accurate before acting.',
+            });
+        }
+        steps.push({
+            n: steps.length + 1,
+            description: 'After completing the resumed step, iranti_checkpoint with updated current/next/risks.',
+            rationale: 'Close the loop so the next interruption resumes cleanly.',
+        });
+        return {
+            suggested: true,
+            reason: 'interrupted_session_checkpoint_found',
+            source: 'checkpoint_continuation',
+            steps,
+            taskSignals: ['resume_from_checkpoint'],
+            note: 'This plan was derived from the persisted session checkpoint, not the current task string.',
+        };
+    }
+
+    // Keyword heuristic for normal (non-resume) tasks.
+    const tooShort = combined.length < PLAN_MIN_TASK_CHARS;
+    const signals = detectPlanSignals(combined);
+
+    if (tooShort && signals.length === 0) {
+        return {
+            suggested: false,
+            reason: 'task_too_short_and_no_plan_signals_detected',
+            source: 'skipped',
+            steps: [],
+            taskSignals: [],
+        };
+    }
+
+    if (signals.length === 0) {
+        return {
+            suggested: false,
+            reason: 'no_complexity_keywords_detected',
+            source: 'skipped',
+            steps: [],
+            taskSignals: [],
+        };
+    }
+
+    // Pick the highest-priority signal (ship > migrate > deploy > refactor >
+    // fix > audit > implement > test) when multiple match, then emit that
+    // template. Priority captures "what matters most to plan around" when a
+    // single task hits several verbs.
+    const priority: PlanSignal[] = [
+        'ship_release',
+        'migrate',
+        'deploy',
+        'refactor_rewrite',
+        'fix_debug',
+        'audit_review',
+        'implement_add',
+        'test_author',
+    ];
+    const topSignal = priority.find((sig) => signals.some((s) => s.signal === sig))
+        ?? signals[0]!.signal;
+    const template = PLAN_TEMPLATES[topSignal];
+
+    return {
+        suggested: true,
+        reason: `matched_signal_${topSignal}`,
+        source: 'heuristic_keyword',
+        steps: template.map((step) => ({ ...step })),
+        taskSignals: signals.map((s) => s.signal),
+        note: signals.length > 1
+            ? `Multiple plan signals detected (${signals.map((s) => s.signal).join(', ')}); surfaced ${topSignal} template by priority.`
+            : undefined,
     };
 }
 
@@ -2857,6 +3100,9 @@ export class AttendantInstance {
             briefGeneratedAt: new Date().toISOString(),
             contextCallCount: this.contextCallCount,
             backfillSuggestion: buildBackfillSuggestion(context, workingMemoryWithLedger),
+            // A4: plan proposal derived from the task + inferred task type + any
+            // prior interrupted checkpoint. Pure + fast, never calls the LLM.
+            planProposal: buildPlanProposal(context.task, inferredTaskType, this.sessionCheckpoint),
             sessionLedgerLearnings,
             sessionCheckpoint: this.sessionCheckpoint,
             sessionRecovery: isFirstDelivery ? recoveryResult.recovery : null,
