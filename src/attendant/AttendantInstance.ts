@@ -33,6 +33,7 @@ import {
 } from '../lib/sessionLedger';
 import { registerSharedStateInvalidationObserver } from '../lib/sharedStateInvalidation';
 import { assignStructuredFactIds } from '../lib/hostMemoryFormatting';
+import { planCouncilConsultation, type CouncilConsultationPlan } from '../staff/council';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -651,6 +652,11 @@ export interface AttendResult extends ObserveResult {
     // scoring ("did the host run any of the suggested tools?"). Gated
     // off on post-response.
     attendantToolPlan?: AttendantToolPlan;
+    // B7 S6: council consultation plan — describes which other Staff
+    // members the Attendant would consult for relevance/reliability if
+    // council mode were executed. Proposal only, never executed here.
+    // Absent on post-response.
+    councilConsultationPlan?: CouncilConsultationPlan;
 }
 
 export interface ToolCallGuidance {
@@ -4966,6 +4972,14 @@ If no durable facts can be extracted, return an empty array: [].`,
                     basis: 'empty',
                     note: 'Attendant tool plan is gated off on post-response attends.',
                 },
+                // B7 S6: council consultation plan is also gated off on
+                // post-response. Surface as empty shell for parity.
+                councilConsultationPlan: {
+                    consultations: [],
+                    note: 'Council consultation plan is gated off on post-response attends.',
+                    outcome: 'no_context',
+                    budgetMax: 0,
+                },
             };
         }
 
@@ -5134,6 +5148,18 @@ If no durable facts can be extracted, return an empty array: [].`,
                     drift,
                     briefHasEntities: (this.brief?.watchedEntities?.length ?? 0) > 0,
                 }),
+                // B7 S6: council consultation plan populated even on the
+                // not-needed path — the Attendant can still decide to consult
+                // a peer (e.g. Librarian for source-reliability) when drift
+                // is present or entity hints suggest a topic.
+                councilConsultationPlan: planCouncilConsultation({
+                    from: 'Attendant',
+                    task: (latestMessage ?? '').trim() || 'relevance_check_no_retrieval',
+                    context: {
+                        relevanceCheckTopic: effectiveEntityHints[0] ?? null,
+                        lowConfidenceCount: 0,
+                    },
+                }),
             };
         }
 
@@ -5275,6 +5301,23 @@ If no durable facts can be extracted, return an empty array: [].`,
             sessionObjective: this.brief?.sessionObjective ?? null,
             drift,
             briefHasEntities: (this.brief?.watchedEntities?.length ?? 0) > 0,
+        });
+
+        // B7 S6: council consultation plan. Proposes which peer Staff
+        // members the Attendant would consult for this turn — Librarian
+        // for source-reliability on clear topics, Archivist when the
+        // injection surface has multiple low-confidence facts. Pure,
+        // deterministic, never executed here.
+        const lowConfidenceInjectionCount = augmentedObservedFacts.filter((f) =>
+            typeof f.confidence === 'number' && f.confidence < 60
+        ).length;
+        const councilConsultationPlan: CouncilConsultationPlan = planCouncilConsultation({
+            from: 'Attendant',
+            task: (latestMessage ?? '').trim() || (drift ? 'drift_observed' : 'pre_response_relevance_check'),
+            context: {
+                relevanceCheckTopic: allObserveEntityHints[0] ?? null,
+                lowConfidenceCount: lowConfidenceInjectionCount,
+            },
         });
 
         // Replace observed.facts in the downstream pipeline with the
@@ -5485,6 +5528,10 @@ If no durable facts can be extracted, return an empty array: [].`,
             // budget. Deterministic, not executed. Hosts can surface the
             // plan to the user or feed it to compliance scoring.
             attendantToolPlan,
+            // B7 S6: council consultation plan — which peer Staff members
+            // the Attendant would consult if council mode were live.
+            // Pure, deterministic, never executed here.
+            councilConsultationPlan,
         };
         if (input.suppressEvents !== true) {
             getStaffEventEmitter().emit({

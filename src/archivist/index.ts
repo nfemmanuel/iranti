@@ -7,10 +7,18 @@ import { complete } from '../lib/llm';
 import { ensureEscalationFolders } from '../lib/escalationPaths';
 import { ArchivedReason, ResolutionOutcome, ResolutionState, type PrismaClient } from '../generated/prisma/client';
 import { calculateDecayedConfidence, getDecayConfig, readOriginalConfidence } from '../lib/decay';
+import {
+    planArchivistReasoningPass,
+    ARCHIVIST_REASONING_DEFAULT_BUDGET,
+    type ArchivistReasoningCandidate,
+    type ArchivistReasoningProposal,
+} from '../staff/archivistReasoning';
+import { planCouncilConsultation, type CouncilConsultation } from '../staff/council';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const LOW_CONFIDENCE_THRESHOLD = 30;
+const ARCHIVIST_REASONING_SCAN_LIMIT = 200;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -20,6 +28,9 @@ interface ArchivistReport {
     duplicatesMerged: number;
     escalationsProcessed: number;
     errors: string[];
+    reasoningProposals?: ArchivistReasoningProposal[];
+    reasoningOutcome?: string;
+    councilConsultations?: CouncilConsultation[];
 }
 
 type AuthoritativeResolution = {
@@ -86,6 +97,8 @@ export async function runArchivist(): Promise<ArchivistReport> {
     await archiveLowConfidence(report);
     await applyMemoryDecay(report);
     await processEscalations(report);
+    // B7 S5: bounded, deterministic reasoning pass — emits proposals only.
+    await runReasoningPass(report);
 
     getStaffEventEmitter().emit({
         staffComponent: 'Archivist',
@@ -100,10 +113,105 @@ export async function runArchivist(): Promise<ArchivistReport> {
             escalationsProcessed: report.escalationsProcessed,
             errors: report.errors.length,
             entriesScanned: report.expiredArchived + report.lowConfidenceArchived,
+            reasoningProposals: report.reasoningProposals?.length ?? 0,
+            reasoningOutcome: report.reasoningOutcome ?? 'skipped',
+            councilConsultations: report.councilConsultations?.length ?? 0,
         },
     });
 
     return report;
+}
+
+// ─── B7 S5: Archivist reasoning pass ─────────────────────────────────────────
+
+async function runReasoningPass(report: ArchivistReport): Promise<void> {
+    let rows;
+    try {
+        rows = await getDb().knowledgeEntry.findMany({
+            where: {
+                isProtected: false,
+                confidence: { gt: 0 },
+            },
+            take: ARCHIVIST_REASONING_SCAN_LIMIT,
+            orderBy: { updatedAt: 'desc' },
+        });
+    } catch (err) {
+        report.errors.push(`Reasoning pass: failed to load candidates: ${err}`);
+        return;
+    }
+
+    const candidates: ArchivistReasoningCandidate[] = rows
+        .filter((row) => row.valueSummary !== '[ARCHIVED]')
+        .map((row) => ({
+            id: row.id,
+            entityType: row.entityType,
+            entityId: row.entityId,
+            key: row.key,
+            confidence: row.confidence,
+            source: row.source,
+            lastAccessedAt: row.lastAccessedAt ?? null,
+            updatedAt: row.updatedAt ?? null,
+            createdAt: row.createdAt ?? null,
+            valueSummary: row.valueSummary ?? null,
+        }));
+
+    const plan = planArchivistReasoningPass({
+        candidates,
+        reasoningBudget: ARCHIVIST_REASONING_DEFAULT_BUDGET,
+    });
+
+    report.reasoningProposals = plan.proposals;
+    report.reasoningOutcome = plan.outcome;
+
+    for (const proposal of plan.proposals) {
+        getStaffEventEmitter().emit({
+            staffComponent: 'Archivist',
+            actionType: 'reasoning_proposal_emitted',
+            agentId: 'archivist',
+            source: 'internal',
+            reason: proposal.reason,
+            level: 'debug',
+            metadata: {
+                action: proposal.action,
+                primaryEntityKey: proposal.primaryEntityKey,
+                targetCount: proposal.targetIds.length,
+                confidence: proposal.confidence,
+                snapshot: proposal.snapshot,
+            },
+        });
+    }
+
+    // B7 S6: council mode — propose follow-up consultations when the
+    // reasoning pass produced proposals. Emitted as observability only;
+    // never executed here.
+    if (plan.proposals.length > 0) {
+        const topProposal = plan.proposals[0];
+        const council = planCouncilConsultation({
+            from: 'Archivist',
+            task: `reasoning_pass_${topProposal.action}`,
+            context: {
+                reasoningProposalAction: topProposal.action,
+            },
+        });
+        report.councilConsultations = council.consultations;
+        for (const consultation of council.consultations) {
+            getStaffEventEmitter().emit({
+                staffComponent: 'Archivist',
+                actionType: 'council_consultation_proposed',
+                agentId: 'archivist',
+                source: 'internal',
+                reason: consultation.question,
+                level: 'debug',
+                metadata: {
+                    from: consultation.from,
+                    to: consultation.to,
+                    basis: consultation.basis,
+                    confidence: consultation.confidence,
+                    topicHint: consultation.topicHint,
+                },
+            });
+        }
+    }
 }
 
 // ─── Expired Entries ─────────────────────────────────────────────────────────
