@@ -96,6 +96,7 @@ The Attendant runs in three phases — `pre-response`, `mid-turn`, and `post-res
 - **`councilConsultationPlan`** — proposes which peer Staff members the Attendant would consult for this turn (e.g. Librarian for source-reliability on a clear topic, Archivist when the injection surface has multiple low-confidence facts). Proposal only.
 - **`writeNudge`** — reminds the host to write a fact after substantial activity without a durable write.
 - **`toolResultExtraction`** — on mid-turn/post-response, the Attendant extracts candidate facts from the tool result so the host can autowrite them.
+- **`responseFileCapture`** — on `post-response`, the Attendant scans the assistant's reply for file paths, infers the action (`edited`/`created`/`read`) from the ±150-character context window around each match, and auto-writes `project/{id}/file/{basename}` facts so file-scoped memory is populated without host involvement. Result carries `autowriteBatchId`, `filesDetected`, `factsWritten`, `entities`, `skipped`, and `durationMs`. Only present on post-response attend calls.
 
 ### Archivist reasoning budget
 
