@@ -71,6 +71,48 @@ Facts persist across sessions, context resets, and tool switches. When you resta
 
 ---
 
+## Staff agents
+
+Iranti is built around four internal Staff components that run alongside the host AI tool. Each Staff member has a specific job, and together they turn the memory layer into an active participant in the session — not just a dictionary the agent reads from.
+
+| Staff | Role | What it does |
+|---|---|---|
+| **Librarian** | Writes and conflict resolution | Normalizes facts before storage, runs multi-step conflict resolution with cited evidence, enforces schema and confidence rules |
+| **Attendant** | Turn-time context | Pre-response memory injection, mid-turn tool-call guidance, post-response autowrite nudges, drift detection, session objective tracking |
+| **Archivist** | Background maintenance | Decays stale facts, archives expired entries, processes escalations, runs a bounded reasoning pass that proposes compressions and demotions |
+| **Resolutionist** | Human-in-the-loop | Consumes escalation files for conflicts the Librarian could not auto-resolve |
+
+### Attendant agency (what the Attendant surfaces on every turn)
+
+The Attendant runs in three phases — `pre-response`, `mid-turn`, and `post-response` — and returns a structured result each time. Beyond raw fact injection, every `attend` response carries:
+
+- **`toolCallGuidance`** — when the host passes a pending tool call (`Read`, `Grep`, `Glob`, `Bash`, `WebSearch`, `WebFetch`), the Attendant derives entity hints from the tool args and emits a `shouldSkip` verdict when stored facts already cover the target. Hosts can gate tool execution on the verdict instead of string-matching notes.
+- **`drift`** — detects when the latest message has diverged from the declared task topic. Emits the driving tokens so the host can surface a confirmation prompt.
+- **`sessionObjective`** — derived from the task description or checkpoint continuation, threaded through every attend call as a stable anchor.
+- **`autoCheckpointSignal`** — fires when pressure has built up (drift, turns-without-write, tool-cost threshold) so the host can checkpoint before the next risky step.
+- **`refinementPass`** — when the first retrieval pass comes back empty, the Attendant runs a bounded widened-hint retry (max 1 extra observe call) and reports the outcome.
+- **`attendantToolPlan`** — up to three planned follow-up tool calls (search_related, observe_entity, query) derived from brief entities, drift tokens, or the session objective. Deterministic and surfaced, never executed.
+- **`councilConsultationPlan`** — proposes which peer Staff members the Attendant would consult for this turn (e.g. Librarian for source-reliability on a clear topic, Archivist when the injection surface has multiple low-confidence facts). Proposal only.
+- **`writeNudge`** — reminds the host to write a fact after substantial activity without a durable write.
+- **`toolResultExtraction`** — on mid-turn/post-response, the Attendant extracts candidate facts from the tool result so the host can autowrite them.
+
+### Archivist reasoning budget
+
+Each Archivist scan cycle ends with a bounded, deterministic reasoning pass that emits proposals (never mutations) for the Resolutionist to consider:
+
+- **compress** — clusters of duplicate entries at the same `entityType/entityId/key`
+- **flag_drift** — clusters with high confidence spread suggesting disagreement
+- **demote** — stale low-confidence single entries
+- **review_stale** — very old single entries regardless of confidence
+
+Proposals fire as `reasoning_proposal_emitted` staff events and travel on the `ArchivistReport` so callers can ship them onward.
+
+### Council mode
+
+Staff members can propose consultations with each other before finalising a decision. The Librarian can ask the Attendant for relevance when resolving a conflict; the Attendant can ask the Librarian for source-reliability context on a topic; the Resolutionist can ask the Archivist for pending reasoning-proposal context on an escalation. Consultations are proposed, bounded, and fired as `council_consultation_proposed` staff events — they are not executed automatically today.
+
+---
+
 ## MCP Tools
 
 When connected via MCP, Iranti exposes these tools to your AI tool:
