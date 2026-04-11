@@ -330,7 +330,7 @@ app.post(['/v1/chat/completions', '/chat/completions'], authenticate, rateLimitM
             return res.status(400).json({ error: 'messages must be an array.' });
         }
 
-        const messages = (req.body.messages ?? []).map((m: any) => ({
+        const messages = (req.body.messages ?? []).map((m: Record<string, unknown>) => ({
             role: m.role as 'user' | 'assistant',
             content: String(m.content),
         }));

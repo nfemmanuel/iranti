@@ -1314,7 +1314,7 @@ export function canWriteToStaffNamespace(createdBy: string, entityType: string):
 }
 
 // Conflict Log
-export async function appendConflictLog(entryId: number, event: any, db?: DbClient) {
+export async function appendConflictLog(entryId: number, event: unknown, db?: DbClient) {
     const client = db ?? getDb();
     const eventJson = JSON.stringify(event);
     await client.$executeRaw`

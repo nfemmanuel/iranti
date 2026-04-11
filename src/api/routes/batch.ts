@@ -77,7 +77,7 @@ batchRouter.post("/", async (req: Request, res: Response) => {
     );
 
     return res.json({ results });
-  } catch (e: any) {
-    return res.status(500).json({ error: e?.message ?? "batchQuery failed" });
+  } catch (e) {
+    return res.status(500).json({ error: e instanceof Error ? e.message : "batchQuery failed" });
   }
 });
