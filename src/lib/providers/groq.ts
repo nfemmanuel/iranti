@@ -1,3 +1,15 @@
+/**
+ * Groq LLM provider for Iranti.
+ *
+ * Implements the LLMProvider interface using Groq's OpenAI-compatible REST API.
+ * Groq offers high-throughput inference for open-weight models (Llama 4, etc.)
+ * with very low latency, making it useful as a fallback for fast task types.
+ *
+ * Configuration env vars:
+ *   GROQ_API_KEY  — required
+ *   GROQ_MODEL    — default model (default: meta-llama/llama-4-scout-17b-16e-instruct)
+ */
+
 import { LLMProvider, LLMMessage, LLMResponse, CompleteOptions, normalizeProviderApiError } from '../llm';
 
 interface GroqResponse {

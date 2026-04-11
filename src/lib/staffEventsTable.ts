@@ -1,3 +1,17 @@
+/**
+ * Bootstrap helper for the staff_events PostgreSQL table.
+ *
+ * The staff_events table is an append-only audit log for all Iranti staff
+ * component actions (Librarian decisions, Attendant scans, conflict resolutions,
+ * etc.). It is created on first use via `ensureStaffEventsTable()`, which runs
+ * all DDL statements idempotently and coalesces concurrent calls into a single
+ * in-flight promise so the table is never bootstrapped twice in the same process.
+ *
+ * Key exports:
+ *   - ensureStaffEventsTable()          — idempotent table + index creation
+ *   - resetStaffEventsTableBootstrap()  — reset ensured flag (test use only)
+ */
+
 import { getDb } from '../library/client';
 
 const STAFF_EVENTS_BOOTSTRAP_STATEMENTS = [

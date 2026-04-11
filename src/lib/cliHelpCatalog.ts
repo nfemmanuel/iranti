@@ -1,3 +1,20 @@
+/**
+ * CLI help text catalog for the Iranti CLI.
+ *
+ * Stores all help content as plain data — command strings, descriptions,
+ * use-when conditions, and scenario examples. The renderer (cliHelpRenderer.ts)
+ * consumes this data and formats it for output.
+ *
+ * Adding a new command: export a new HelpEntry[] constant and import it in
+ * cliHelpRenderer.ts. Adding to an existing command: extend the relevant array.
+ *
+ * Key exports:
+ *   - START_HERE_HELP, SETUP_AND_RUNTIME_HELP, CONFIGURATION_HELP, ...  — command arrays
+ *   - COMMON_FLOWS                                                        — multi-step flow sequences
+ *   - SETUP_OPTION_GUIDE, UNINSTALL_OPTION_GUIDE                         — option reference arrays
+ *   - HelpEntry, OptionGuideEntry                                         — shared entry types
+ */
+
 export type HelpEntry = {
     command: string;
     description: string;

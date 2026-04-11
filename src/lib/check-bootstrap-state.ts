@@ -1,3 +1,13 @@
+/**
+ * Development script: check attendant_state bootstrap entries in the DB.
+ *
+ * Quick diagnostic to verify that attendant_state records exist and show
+ * the most recently updated entries. Useful when debugging cross-process
+ * bootstrap scenarios or confirming that handshake state is being persisted.
+ *
+ * Run directly: ts-node src/lib/check-bootstrap-state.ts
+ */
+
 import { getDb, initDb } from '../library/client';
 
 async function main() {

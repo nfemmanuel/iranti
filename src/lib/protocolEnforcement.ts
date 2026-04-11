@@ -1,3 +1,25 @@
+/**
+ * Protocol enforcement tracker for the Iranti agent compliance system.
+ *
+ * Tracks per-agent protocol state (last handshake, last attend phase, discovery
+ * budget, pending post-response) and checks whether a requested operation is
+ * permitted. Violations are returned as ProtocolViolation objects; the Iranti
+ * SDK converts them to errors or warnings depending on the enforcement mode.
+ *
+ * Protocol rules enforced:
+ *   - Operations gated by `handshake` require a prior iranti_handshake call.
+ *   - Operations gated by `postResponse` block if a pre-response attend is
+ *     outstanding (previous turn not closed).
+ *   - Operations gated by `attend` require a pre-response attend with budget.
+ *   - `memory_use_required` blocks rediscovery until injected memory is acknowledged.
+ *
+ * Key exports:
+ *   - AgentProtocolTracker    — the per-agent state machine
+ *   - ProtocolViolationError  — thrown in strict mode
+ *   - ProtocolViolation       — structured violation object (code, message, requiredAction)
+ *   - ProtocolEnforcementMode — 'off' | 'warn' | 'strict'
+ */
+
 export type ProtocolEnforcementMode = 'off' | 'warn' | 'strict';
 
 export type ProtocolOperation =

@@ -1,3 +1,16 @@
+/**
+ * OpenAI LLM provider for Iranti.
+ *
+ * Implements the LLMProvider interface for OpenAI models. Automatically selects
+ * between the Chat Completions API (legacy models) and the Responses API
+ * (GPT-5+, o1, o3, o4) based on the requested model name.
+ *
+ * Configuration env vars:
+ *   OPENAI_API_KEY   — required
+ *   OPENAI_MODEL     — default model (default: gpt-5-mini)
+ *   OPENAI_BASE_URL  — override endpoint for custom deployments (default: https://api.openai.com/v1)
+ */
+
 import { LLMProvider, LLMMessage, LLMResponse, CompleteOptions, normalizeProviderApiError } from '../llm';
 
 interface OpenAIChatResponse {
@@ -41,18 +54,21 @@ class OpenAIProvider implements LLMProvider {
         }));
     }
 
-    private extractResponsesText(data: any): string {
-        if (typeof data?.output_text === 'string' && data.output_text.length > 0) {
-            return data.output_text;
+    private extractResponsesText(data: unknown): string {
+        const record = data as Record<string, unknown>;
+        if (typeof record?.output_text === 'string' && (record.output_text as string).length > 0) {
+            return record.output_text as string;
         }
 
         const chunks: string[] = [];
-        const outputs = Array.isArray(data?.output) ? data.output : [];
+        const outputs = Array.isArray(record?.output) ? (record.output as unknown[]) : [];
         for (const out of outputs) {
-            const content = Array.isArray(out?.content) ? out.content : [];
+            const outRecord = out as Record<string, unknown>;
+            const content = Array.isArray(outRecord?.content) ? (outRecord.content as unknown[]) : [];
             for (const item of content) {
-                if (typeof item?.text === 'string' && (item.type === 'output_text' || item.type === 'text')) {
-                    chunks.push(item.text);
+                const itemRecord = item as Record<string, unknown>;
+                if (typeof itemRecord?.text === 'string' && (itemRecord.type === 'output_text' || itemRecord.type === 'text')) {
+                    chunks.push(itemRecord.text as string);
                 }
             }
         }
@@ -93,7 +109,7 @@ class OpenAIProvider implements LLMProvider {
             await this.parseErrorResponse(response);
         }
 
-        const data = await response.json() as OpenAIChatResponse | any;
+        const data = await response.json() as unknown;
         const text = useResponsesApi
             ? this.extractResponsesText(data)
             : (data as OpenAIChatResponse).choices[0]?.message?.content ?? '';

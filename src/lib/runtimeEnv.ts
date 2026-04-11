@@ -1,3 +1,21 @@
+/**
+ * Runtime environment loader for the Iranti CLI and MCP server.
+ *
+ * Resolves and applies env vars from up to three sources in priority order:
+ *   1. Base .env file (lowest priority — general app config, not overridden)
+ *   2. Instance .env file (IRANTI_INSTANCE_ENV — overrides all vars it defines)
+ *   3. Project .env.iranti (IRANTI_PROJECT_ENV or ancestor walk — project binding
+ *      keys always override; other keys only if no instance env is present)
+ *
+ * The resulting `authorityMode` indicates which source is in control:
+ *   - 'environment-only'       — no .env files found, process.env governs
+ *   - 'instance-authoritative' — instance env file loaded and takes precedence
+ *   - 'project-only'           — project binding file found, no instance override
+ *
+ * Key export:
+ *   - loadRuntimeEnv() — load and apply env vars, return loaded file paths and authority mode
+ */
+
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';

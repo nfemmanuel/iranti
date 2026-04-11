@@ -1,3 +1,15 @@
+/**
+ * Mistral AI LLM provider for Iranti.
+ *
+ * Implements the LLMProvider interface using Mistral's OpenAI-compatible REST
+ * API at api.mistral.ai. Provides access to Mistral's efficient small models
+ * well-suited to the classification and filtering tasks Iranti routes to them.
+ *
+ * Configuration env vars:
+ *   MISTRAL_API_KEY  — required
+ *   MISTRAL_MODEL    — default model (default: mistral-small-latest)
+ */
+
 import { LLMProvider, LLMMessage, LLMResponse, CompleteOptions, normalizeProviderApiError } from '../llm';
 
 interface MistralResponse {

@@ -1,3 +1,30 @@
+/**
+ * Auto-remember engine for Iranti's Attendant post-response scan.
+ *
+ * Handles two memory paths:
+ *
+ * 1. Explicit assistant memory: scans the assistant's response for
+ *    `<iranti:scope:key>...</iranti:scope:key>` structured tags and extracts
+ *    them into ExtractedMemoryFact objects ready for iranti_write. Used by
+ *    the post-response attend scan to persist facts the agent explicitly flagged.
+ *
+ * 2. User-prompt auto-remember: scans user messages for imperative "remember X"
+ *    and "my X is Y" patterns and writes them as personal facts automatically,
+ *    without requiring the agent to tag them explicitly.
+ *
+ * 3. Backfill detection: identifies whether prior conversation turns contain
+ *    durable facts that should have been persisted but weren't, and surfaces
+ *    a backfill suggestion in the handshake response.
+ *
+ * Key exports:
+ *   - extractExplicitAssistantMemory()  — parse iranti tags from an assistant response
+ *   - runAutoRemember()                 — write auto-remembered facts from a user prompt
+ *   - detectMandatoryRecall()           — detect if a turn requires recall before responding
+ *   - detectBackfillOpportunity()       — find un-persisted facts in a conversation
+ *   - canonicalizeMemoryKey()           — normalize a key string (British → American spellings)
+ *   - isPersonalEntityType()            — check if an entity type maps to personal memory
+ */
+
 type IrantiQueryClient = {
     query(entity: string, key: string): Promise<{ found: boolean; value?: unknown }>;
     write(input: {

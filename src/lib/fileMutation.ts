@@ -1,3 +1,22 @@
+/**
+ * Locked file mutation utilities for Iranti.
+ *
+ * Provides cross-process exclusive write locking via PID-stamped .lock sidecar
+ * files. Lock acquisition uses O_EXCL (atomic create) to prevent races.
+ * Stale locks are detected by checking file age against `staleMs` and whether
+ * the holder PID is still alive — both conditions release the lock automatically.
+ *
+ * Write pattern: acquire lock → read existing → build new content → write to
+ * .tmp → fsync rename over target → release lock. The tmp+rename avoids partial
+ * writes visible to readers.
+ *
+ * Key exports:
+ *   - writeTextFileLocked()            — exclusively write a file via a builder callback
+ *   - ensureFileContainsLinesLocked()  — append missing lines without duplicates
+ *   - DEFAULT_FILE_LOCK_TIMEOUT_MS     — default lock acquisition timeout (5 s)
+ *   - DEFAULT_FILE_LOCK_STALE_MS       — default stale lock age threshold (30 s)
+ */
+
 import fs from 'fs';
 import fsPromises from 'fs/promises';
 import os from 'os';

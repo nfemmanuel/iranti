@@ -1,3 +1,15 @@
+/**
+ * Docker CLI output parsers.
+ *
+ * Lightweight, regex-based parsers for Docker CLI output strings.
+ * Used when Iranti reads `docker ps` / `docker inspect` output and needs to
+ * extract published host ports or container names without shelling out again.
+ *
+ * Key exports:
+ *   - parsePublishedDockerHostPorts()  — extract host port numbers from `docker ps` port column
+ *   - parseDockerContainerNames()      — split newline-delimited container name output into an array
+ */
+
 export function parsePublishedDockerHostPorts(output: string): Set<number> {
     const ports = new Set<number>();
     for (const line of output.split(/\r?\n/)) {

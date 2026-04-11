@@ -1,3 +1,20 @@
+/**
+ * Assistant checkpoint payload extractor for Iranti's shared checkpoint system.
+ *
+ * Reads `<iranti:project:*>` structured tags from an assistant response and
+ * assembles them into an AssistantCheckpointPayload. The payload captures the
+ * current step, next step, open risks, recent outputs, recent actions, and
+ * file changes that the Attendant should persist to the shared checkpoint.
+ *
+ * This module is intentionally read-only — it extracts and normalizes, it
+ * does not write to the database. The caller (Attendant post-response scan)
+ * owns the write.
+ *
+ * Key exports:
+ *   - extractAssistantCheckpointPayload()  — parse a response string into a checkpoint payload
+ *   - AssistantCheckpointPayload           — the structured payload type
+ */
+
 import { extractExplicitAssistantMemory } from './autoRemember';
 
 export type AssistantCheckpointPayload = {

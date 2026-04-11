@@ -1,3 +1,20 @@
+/**
+ * CLI error rewriting for the Iranti CLI.
+ *
+ * Maps low-level errors (Prisma schema mismatches, ECONNREFUSED, missing flags)
+ * to structured RewrittenCommandError values with human-readable messages and
+ * actionable hint arrays. Each rule has a regex test and a builder; the first
+ * matching rule wins. Errors already carrying an IRANTI_* code pass through
+ * unchanged to preserve previously rewritten errors.
+ *
+ * Adding a new CLI error: append a new entry to REWRITE_RULES with a unique
+ * IRANTI_* code, a test() function, and a build() function.
+ *
+ * Key exports:
+ *   - rewriteCommandError()    — the main error transform used by every CLI command handler
+ *   - RewrittenCommandError    — extended Error type with code and hints
+ */
+
 export type RewrittenCommandError = Error & {
     code?: string;
     hints?: string[];

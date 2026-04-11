@@ -1,3 +1,15 @@
+/**
+ * Ollama LLM provider for Iranti.
+ *
+ * Implements the LLMProvider interface for locally-served Ollama models. Useful
+ * for fully offline / air-gapped deployments or development without API keys.
+ * Calls Ollama's /api/chat endpoint with streaming disabled.
+ *
+ * Configuration env vars:
+ *   OLLAMA_MODEL     — default model (default: llama3.2)
+ *   OLLAMA_BASE_URL  — Ollama server URL (default: http://localhost:11434)
+ */
+
 import { LLMProvider, LLMMessage, LLMResponse, CompleteOptions } from '../llm';
 
 interface OllamaResponse {

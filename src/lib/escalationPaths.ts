@@ -1,3 +1,19 @@
+/**
+ * Escalation directory path resolution for Iranti.
+ *
+ * Escalations are conflict cases where the Librarian cannot confidently
+ * resolve a knowledge conflict and writes a file for human review.
+ * The root directory defaults to ~/.iranti/escalation but can be overridden
+ * via IRANTI_ESCALATION_DIR. Subdirectories follow a three-state lifecycle:
+ *   active/    — pending human review
+ *   resolved/  — resolution provided
+ *   archived/  — closed/historical
+ *
+ * Key exports:
+ *   - getEscalationPaths()      — compute path object without touching disk
+ *   - ensureEscalationFolders() — mkdir all subdirs and return the path object
+ */
+
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';

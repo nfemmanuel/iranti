@@ -1,3 +1,15 @@
+/**
+ * Google Gemini LLM provider for Iranti.
+ *
+ * Implements the LLMProvider interface for Gemini models via the
+ * Generative Language REST API. Converts Iranti's role format
+ * (user/assistant) to Gemini's role format (user/model).
+ *
+ * Configuration env vars:
+ *   GEMINI_API_KEY  — required
+ *   GEMINI_MODEL    — default model (default: gemini-2.5-flash)
+ */
+
 import { LLMProvider, LLMMessage, LLMResponse, CompleteOptions, normalizeProviderApiError } from '../llm';
 
 interface GeminiResponse {

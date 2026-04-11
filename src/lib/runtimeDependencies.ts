@@ -1,3 +1,21 @@
+/**
+ * Instance dependency manager for Iranti's dev-mode startup.
+ *
+ * When an Iranti instance is configured with `dependencies`, this module
+ * checks that each required Docker container exists, starts it if it is
+ * stopped, and waits for a TCP health port to become accepting before
+ * allowing the MCP server to proceed.
+ *
+ * Only Docker container dependencies are currently supported. Docker CLI
+ * availability is verified before any container operations; errors are surfaced
+ * with clear messages rather than silently skipped.
+ *
+ * Key exports:
+ *   - parseInstanceDependencies()          — validate and parse a raw JSON dependencies array
+ *   - describeInstanceDependency()         — human-readable one-liner for a dependency
+ *   - ensureInstanceDependenciesHealthy()  — start + health-check all dependencies
+ */
+
 import net from 'net';
 import { spawnSync } from 'child_process';
 

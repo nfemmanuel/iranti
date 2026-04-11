@@ -1,3 +1,12 @@
+/**
+ * Core shared type definitions for Iranti's knowledge entry model.
+ *
+ * This module is the single source of truth for the data shapes that flow
+ * between the Library, Librarian, Attendant, and API layers. Changing a type
+ * here has downstream consequences in every layer — treat this file as a
+ * public contract surface.
+ */
+
 // ─── Entity Types ────────────────────────────────────────────────────────────
 
 export type EntityType =

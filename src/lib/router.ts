@@ -1,3 +1,23 @@
+/**
+ * LLM task router for Iranti's Librarian and Attendant.
+ *
+ * Maps each semantic task type (classification, conflict_resolution, etc.) to
+ * an appropriate model based on the active LLM_PROVIDER and optional per-task
+ * model overrides via env vars (CLASSIFICATION_MODEL, CONFLICT_MODEL, etc.).
+ * Provider compatibility is validated before applying an override — incompatible
+ * overrides are logged and the default model is used instead.
+ *
+ * Task routing rationale:
+ *   - conflict_resolution → strongest model (requires careful reasoning)
+ *   - all other task types → fast/cheap model (classification, filtering, extraction)
+ *
+ * Key exports:
+ *   - route()            — execute an LLM call with the correct model for the task
+ *   - getModelProfile()  — inspect which model would be used for a given task
+ *   - getAllProfiles()    — full provider/model map for all task types
+ *   - TaskType           — union of supported task type strings
+ */
+
 import { LLMMessage, LLMResponse, completeWithFallback } from './llm';
 
 // Task Types
@@ -75,33 +95,33 @@ function buildModelProfiles(): Record<TaskType, ModelProfile> {
     return {
         classification: {
             provider: routerProvider,
-        model: modelForTask('classification', 'CLASSIFICATION_MODEL'),
-        reason: 'Fast and cheap - classification does not need deep reasoning',
+            model: modelForTask('classification', 'CLASSIFICATION_MODEL'),
+            reason: 'Fast and cheap - classification does not need deep reasoning',
         },
         relevance_filtering: {
             provider: routerProvider,
-        model: modelForTask('relevance_filtering', 'RELEVANCE_MODEL'),
-        reason: 'Fast enough for filtering, does not need full reasoning capacity',
+            model: modelForTask('relevance_filtering', 'RELEVANCE_MODEL'),
+            reason: 'Fast enough for filtering, does not need full reasoning capacity',
         },
         conflict_resolution: {
             provider: routerProvider,
-        model: modelForTask('conflict_resolution', 'CONFLICT_MODEL'),
-        reason: 'Conflict resolution requires careful reasoning about sources and credibility',
+            model: modelForTask('conflict_resolution', 'CONFLICT_MODEL'),
+            reason: 'Conflict resolution requires careful reasoning about sources and credibility',
         },
         summarization: {
             provider: routerProvider,
-        model: modelForTask('summarization', 'SUMMARIZATION_MODEL'),
-        reason: 'Summarization is well within fast model capabilities',
+            model: modelForTask('summarization', 'SUMMARIZATION_MODEL'),
+            reason: 'Summarization is well within fast model capabilities',
         },
         task_inference: {
             provider: routerProvider,
-        model: modelForTask('task_inference', 'TASK_INFERENCE_MODEL'),
-        reason: 'Task inference is a lightweight classification task',
+            model: modelForTask('task_inference', 'TASK_INFERENCE_MODEL'),
+            reason: 'Task inference is a lightweight classification task',
         },
         extraction: {
             provider: routerProvider,
-        model: modelForTask('extraction', 'EXTRACTION_MODEL'),
-        reason: 'Extraction needs structured output capability, fast model is sufficient',
+            model: modelForTask('extraction', 'EXTRACTION_MODEL'),
+            reason: 'Extraction needs structured output capability, fast model is sufficient',
         },
     };
 }

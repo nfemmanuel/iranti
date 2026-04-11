@@ -1,3 +1,17 @@
+/**
+ * Semantic tagging for Iranti knowledge facts.
+ *
+ * Assigns structured metadata (domain, intent, temporal scope, tags) to facts
+ * at write time so retrieval can filter by semantic properties beyond pure
+ * vector similarity. Every call to iranti_write that passes a durableClass
+ * routes through buildSemanticFactTags() to enrich the stored properties.
+ *
+ * Key exports:
+ *   - buildSemanticFactTags()  — produce the semantic properties block for a write
+ *   - semanticMatchScore()     — score a stored fact against a SemanticFilter at retrieval
+ *   - SemanticFilter           — structured filter passed to observe/attend for targeted injection
+ */
+
 type SemanticMemoryScope = 'personal' | 'project';
 type MergeStrategy = 'replace' | 'append_dedupe';
 
@@ -20,142 +34,41 @@ function dedupeTags(tags: string[]): string[] {
     return deduped;
 }
 
+// Static profile table for all known durable classes.
+// Add a new entry here when a new durableClass is introduced — the default
+// fallback below handles unknown classes gracefully.
+const DURABLE_CLASS_PROFILES: Record<string, SemanticProfile> = {
+    preference:         { semanticDomain: 'personal',       semanticIntent: 'preference_capture',         temporalScope: 'long_term',       semanticTags: ['personal_memory', 'preference', 'identity'] },
+    profile:            { semanticDomain: 'personal',       semanticIntent: 'profile_capture',            temporalScope: 'long_term',       semanticTags: ['personal_memory', 'profile', 'identity'] },
+    decision:           { semanticDomain: 'planning',       semanticIntent: 'decision_capture',           temporalScope: 'project_durable', semanticTags: ['project_memory', 'decision', 'planning'] },
+    next_step:          { semanticDomain: 'planning',       semanticIntent: 'task_state_tracking',        temporalScope: 'active_work',     semanticTags: ['project_memory', 'next_step', 'planning', 'actionable'] },
+    current_step:       { semanticDomain: 'planning',       semanticIntent: 'task_state_tracking',        temporalScope: 'active_work',     semanticTags: ['project_memory', 'current_step', 'planning', 'status'] },
+    blocker:            { semanticDomain: 'risk',           semanticIntent: 'risk_tracking',              temporalScope: 'active_work',     semanticTags: ['project_memory', 'blocker', 'risk', 'blocking'] },
+    owner:              { semanticDomain: 'coordination',   semanticIntent: 'owner_tracking',             temporalScope: 'active_work',     semanticTags: ['project_memory', 'ownership', 'coordination'] },
+    open_risks:         { semanticDomain: 'risk',           semanticIntent: 'risk_tracking',              temporalScope: 'active_work',     semanticTags: ['project_memory', 'risk', 'tracking', 'list_fact'] },
+    artifact:           { semanticDomain: 'artifact',       semanticIntent: 'artifact_tracking',          temporalScope: 'project_durable', semanticTags: ['project_memory', 'artifact', 'reference', 'list_fact'] },
+    file_change:        { semanticDomain: 'artifact',       semanticIntent: 'change_tracking',            temporalScope: 'active_work',     semanticTags: ['project_memory', 'artifact', 'file_change', 'tracking', 'list_fact'] },
+    action_log:         { semanticDomain: 'execution',      semanticIntent: 'activity_tracking',          temporalScope: 'active_work',     semanticTags: ['project_memory', 'activity', 'execution', 'tracking', 'list_fact'] },
+    issue_status:       { semanticDomain: 'issue_tracking', semanticIntent: 'issue_status_tracking',      temporalScope: 'project_durable', semanticTags: ['project_memory', 'issue', 'status', 'tracking'] },
+    failed_path:        { semanticDomain: 'execution',      semanticIntent: 'execution_learning',         temporalScope: 'active_work',     semanticTags: ['project_memory', 'failure', 'execution_learning', 'list_fact'] },
+    alternative_route:  { semanticDomain: 'execution',      semanticIntent: 'execution_learning',         temporalScope: 'active_work',     semanticTags: ['project_memory', 'recovery', 'execution_learning', 'list_fact'] },
+    checkpoint_summary: { semanticDomain: 'coordination',   semanticIntent: 'checkpoint_handoff',         temporalScope: 'active_work',     semanticTags: ['project_memory', 'checkpoint', 'summary', 'recovery'] },
+    scaffold_status:    { semanticDomain: 'integration',    semanticIntent: 'integration_state_tracking', temporalScope: 'project_durable', semanticTags: ['project_memory', 'integration', 'scaffold', 'status'] },
+    handoff_status:     { semanticDomain: 'coordination',   semanticIntent: 'handoff_tracking',           temporalScope: 'active_work',     semanticTags: ['project_memory', 'handoff', 'status', 'coordination'] },
+    handoff_task:       { semanticDomain: 'coordination',   semanticIntent: 'handoff_tracking',           temporalScope: 'active_work',     semanticTags: ['project_memory', 'handoff', 'task_reference', 'coordination'] },
+};
+
 function deriveSemanticProfile(memoryScope: SemanticMemoryScope, durableClass: string): SemanticProfile {
-    switch (durableClass) {
-        case 'preference':
-            return {
-                semanticDomain: 'personal',
-                semanticIntent: 'preference_capture',
-                temporalScope: 'long_term',
-                semanticTags: ['personal_memory', 'preference', 'identity'],
-            };
-        case 'profile':
-            return {
-                semanticDomain: 'personal',
-                semanticIntent: 'profile_capture',
-                temporalScope: 'long_term',
-                semanticTags: ['personal_memory', 'profile', 'identity'],
-            };
-        case 'decision':
-            return {
-                semanticDomain: 'planning',
-                semanticIntent: 'decision_capture',
-                temporalScope: 'project_durable',
-                semanticTags: ['project_memory', 'decision', 'planning'],
-            };
-        case 'next_step':
-            return {
-                semanticDomain: 'planning',
-                semanticIntent: 'task_state_tracking',
-                temporalScope: 'active_work',
-                semanticTags: ['project_memory', 'next_step', 'planning', 'actionable'],
-            };
-        case 'current_step':
-            return {
-                semanticDomain: 'planning',
-                semanticIntent: 'task_state_tracking',
-                temporalScope: 'active_work',
-                semanticTags: ['project_memory', 'current_step', 'planning', 'status'],
-            };
-        case 'blocker':
-            return {
-                semanticDomain: 'risk',
-                semanticIntent: 'risk_tracking',
-                temporalScope: 'active_work',
-                semanticTags: ['project_memory', 'blocker', 'risk', 'blocking'],
-            };
-        case 'owner':
-            return {
-                semanticDomain: 'coordination',
-                semanticIntent: 'owner_tracking',
-                temporalScope: 'active_work',
-                semanticTags: ['project_memory', 'ownership', 'coordination'],
-            };
-        case 'open_risks':
-            return {
-                semanticDomain: 'risk',
-                semanticIntent: 'risk_tracking',
-                temporalScope: 'active_work',
-                semanticTags: ['project_memory', 'risk', 'tracking', 'list_fact'],
-            };
-        case 'artifact':
-            return {
-                semanticDomain: 'artifact',
-                semanticIntent: 'artifact_tracking',
-                temporalScope: 'project_durable',
-                semanticTags: ['project_memory', 'artifact', 'reference', 'list_fact'],
-            };
-        case 'file_change':
-            return {
-                semanticDomain: 'artifact',
-                semanticIntent: 'change_tracking',
-                temporalScope: 'active_work',
-                semanticTags: ['project_memory', 'artifact', 'file_change', 'tracking', 'list_fact'],
-            };
-        case 'action_log':
-            return {
-                semanticDomain: 'execution',
-                semanticIntent: 'activity_tracking',
-                temporalScope: 'active_work',
-                semanticTags: ['project_memory', 'activity', 'execution', 'tracking', 'list_fact'],
-            };
-        case 'issue_status':
-            return {
-                semanticDomain: 'issue_tracking',
-                semanticIntent: 'issue_status_tracking',
-                temporalScope: 'project_durable',
-                semanticTags: ['project_memory', 'issue', 'status', 'tracking'],
-            };
-        case 'failed_path':
-            return {
-                semanticDomain: 'execution',
-                semanticIntent: 'execution_learning',
-                temporalScope: 'active_work',
-                semanticTags: ['project_memory', 'failure', 'execution_learning', 'list_fact'],
-            };
-        case 'alternative_route':
-            return {
-                semanticDomain: 'execution',
-                semanticIntent: 'execution_learning',
-                temporalScope: 'active_work',
-                semanticTags: ['project_memory', 'recovery', 'execution_learning', 'list_fact'],
-            };
-        case 'checkpoint_summary':
-            return {
-                semanticDomain: 'coordination',
-                semanticIntent: 'checkpoint_handoff',
-                temporalScope: 'active_work',
-                semanticTags: ['project_memory', 'checkpoint', 'summary', 'recovery'],
-            };
-        case 'scaffold_status':
-            return {
-                semanticDomain: 'integration',
-                semanticIntent: 'integration_state_tracking',
-                temporalScope: 'project_durable',
-                semanticTags: ['project_memory', 'integration', 'scaffold', 'status'],
-            };
-        case 'handoff_status':
-            return {
-                semanticDomain: 'coordination',
-                semanticIntent: 'handoff_tracking',
-                temporalScope: 'active_work',
-                semanticTags: ['project_memory', 'handoff', 'status', 'coordination'],
-            };
-        case 'handoff_task':
-            return {
-                semanticDomain: 'coordination',
-                semanticIntent: 'handoff_tracking',
-                temporalScope: 'active_work',
-                semanticTags: ['project_memory', 'handoff', 'task_reference', 'coordination'],
-            };
-        default:
-            return {
-                semanticDomain: memoryScope === 'personal' ? 'personal' : 'project',
-                semanticIntent: 'fact_capture',
-                temporalScope: memoryScope === 'personal' ? 'long_term' : 'active_work',
-                semanticTags: [memoryScope === 'personal' ? 'personal_memory' : 'project_memory'],
-            };
-    }
+    const known = DURABLE_CLASS_PROFILES[durableClass];
+    if (known) return known;
+
+    // Unknown durable class: fall back to a generic profile scoped to memoryScope.
+    return {
+        semanticDomain: memoryScope === 'personal' ? 'personal' : 'project',
+        semanticIntent: 'fact_capture',
+        temporalScope: memoryScope === 'personal' ? 'long_term' : 'active_work',
+        semanticTags: [memoryScope === 'personal' ? 'personal_memory' : 'project_memory'],
+    };
 }
 
 export function buildSemanticFactTags(input: {

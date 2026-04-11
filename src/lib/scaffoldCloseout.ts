@@ -1,3 +1,16 @@
+/**
+ * Scaffold closeout writer for Iranti's integrate commands.
+ *
+ * After `iranti integrate claude/codex/copilot` creates or updates the host
+ * integration files, this module writes a `scaffold_status` fact and a shared
+ * checkpoint to the project's Iranti memory. This persists what the scaffold
+ * created and what the user's next step is, so subsequent sessions start with
+ * accurate context.
+ *
+ * Key export:
+ *   - writeProjectScaffoldCloseout()  — write scaffold fact + checkpoint, return status
+ */
+
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
@@ -41,29 +54,14 @@ async function readEnvFile(filePath: string): Promise<Record<string, string>> {
     return out;
 }
 
-function toolDisplayName(tool: 'claude' | 'codex' | 'copilot'): string {
-    switch (tool) {
-        case 'claude': return 'Claude';
-        case 'codex': return 'Codex';
-        case 'copilot': return 'Copilot';
-    }
-}
+type Tool = 'claude' | 'codex' | 'copilot';
 
-function closeoutKey(tool: 'claude' | 'codex' | 'copilot'): string {
-    switch (tool) {
-        case 'claude': return 'claude_setup_scaffold_status';
-        case 'codex': return 'codex_setup_scaffold_status';
-        case 'copilot': return 'copilot_setup_scaffold_status';
-    }
-}
-
-function closeoutSource(tool: 'claude' | 'codex' | 'copilot'): string {
-    switch (tool) {
-        case 'claude': return 'ClaudeSetupScaffold';
-        case 'codex': return 'CodexSetupScaffold';
-        case 'copilot': return 'CopilotSetupScaffold';
-    }
-}
+// All tool-specific metadata in one place. Add a new row here when supporting a new integration tool.
+const TOOL_METADATA: Record<Tool, { displayName: string; key: string; source: string }> = {
+    claude:  { displayName: 'Claude',  key: 'claude_setup_scaffold_status',  source: 'ClaudeSetupScaffold' },
+    codex:   { displayName: 'Codex',   key: 'codex_setup_scaffold_status',   source: 'CodexSetupScaffold' },
+    copilot: { displayName: 'Copilot', key: 'copilot_setup_scaffold_status', source: 'CopilotSetupScaffold' },
+};
 
 export async function writeProjectScaffoldCloseout(input: ScaffoldCloseoutInput): Promise<ScaffoldCloseoutStatus> {
     const projectEnvFile = input.projectEnvFile?.trim();
@@ -95,9 +93,7 @@ export async function writeProjectScaffoldCloseout(input: ScaffoldCloseoutInput)
             return { status: 'skipped', detail: 'instance env is missing DATABASE_URL', entity: null, key: null, sessionId: null };
         }
 
-        const toolName = toolDisplayName(input.tool);
-        const key = closeoutKey(input.tool);
-        const source = closeoutSource(input.tool);
+        const { displayName: toolName, key, source } = TOOL_METADATA[input.tool];
         const projectLabel = path.basename(path.resolve(input.projectPath));
         const fileOutputs = input.files.map((file) => `${path.basename(file.path)}:${file.status}`);
         const iranti = createFirstPartyIranti({

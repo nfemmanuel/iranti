@@ -1,3 +1,19 @@
+/**
+ * PostgreSQL-backed Staff event emitter for Iranti.
+ *
+ * Persists Staff events to the `staff_events` table via Prisma raw SQL.
+ * Handles the table-not-yet-created race by attempting DDL bootstrap on the
+ * first `relation does not exist` error, then retrying the insert. Bootstrap
+ * is attempted at most once per emitter instance to prevent retry storms.
+ *
+ * All writes are fire-and-forget: emit() returns immediately and the insert
+ * runs in a tracked Promise. Call flush() before process shutdown to drain
+ * any in-flight writes.
+ *
+ * Key export:
+ *   - DbStaffEventEmitter  — concrete IStaffEventEmitter backed by staff_events
+ */
+
 import { Prisma } from '../generated/prisma/client';
 import { getDb } from '../library/client';
 import { buildStaffEvent, IStaffEventEmitter, StaffEvent } from './staffEventEmitter';

@@ -1,3 +1,21 @@
+/**
+ * Issue fact builders for Iranti's structured issue tracking.
+ *
+ * Constructs normalized fact values and property blocks for `issue_status`
+ * durable class entries. Issue facts carry lifecycle state (open/resolved),
+ * severity, and semantic tags so retrieval can filter by issue status.
+ *
+ * The `issueId` is normalized (trim → lowercase → snake_case) when building
+ * the canonical key, so callers can pass human-readable IDs like "DB Migration
+ * Failing" and receive a stable key like `issue_db_migration_failing`.
+ *
+ * Key exports:
+ *   - buildIssueFactWrite()       — full write payload for iranti_write_issue
+ *   - buildIssueFactValue()       — the raw fact value object
+ *   - buildIssueFactProperties()  — the properties block with semantic tags
+ *   - issueFactKey()              — normalize an issueId to "issue_{token}" key
+ */
+
 import { buildSemanticFactTags } from './semanticFactTags';
 
 export type IssueStatus = 'open' | 'resolved';
