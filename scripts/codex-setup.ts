@@ -1,3 +1,10 @@
+/**
+ * Configures a project directory for Codex (OpenAI agent) integration with iranti.
+ *
+ * Writes AGENTS.md, .vscode/mcp.json, and hooks configuration so the Codex CLI
+ * automatically connects to this project's iranti instance.
+ * Run: `iranti codex-setup [project-dir]`.
+ */
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSyncResolved } from '../src/lib/commandInvocation';

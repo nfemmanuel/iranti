@@ -1,10 +1,17 @@
+/**
+ * Dev utility: tests AUTHORITATIVE_JSON parsing against a local escalation file.
+ *
+ * Reads the file at the path given as the first CLI argument, extracts the
+ * AUTHORITATIVE_JSON section, and prints the parsed result to stdout.
+ * Used to debug archivist escalation parsing without running the full server.
+ */
 import fs from 'fs/promises';
 
 type AuthoritativeResolution = {
     entityType: string;
     entityId: string;
     key: string;
-    value: any;
+    value: unknown;
     summary: string;
     validUntil?: string | null;
     notes?: string;
@@ -31,20 +38,21 @@ function extractAuthoritativeJson(fileText: string): AuthoritativeResolution {
 
     const jsonText = afterFence.slice(0, fenceEnd).trim();
 
-    let payload: any;
+    let payload: unknown;
     try {
         payload = JSON.parse(jsonText);
     } catch {
         throw new Error('Invalid JSON in AUTHORITATIVE_JSON.');
     }
 
+    const record = payload as Record<string, unknown>;
     for (const field of ['entityType', 'entityId', 'key', 'value', 'summary']) {
-        if (payload[field] === undefined || payload[field] === null) {
+        if (record[field] === undefined || record[field] === null) {
             throw new Error(`AUTHORITATIVE_JSON missing required field: ${field}`);
         }
     }
 
-    return payload as AuthoritativeResolution;
+    return record as unknown as AuthoritativeResolution;
 }
 
 // Test with sample file

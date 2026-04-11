@@ -1,3 +1,7 @@
+/**
+ * Integration test: idempotent writes -- verifies that duplicate writes with the
+ * same requestId are deduplicated and do not create extra entries.
+ */
 import 'dotenv/config';
 import { librarianWrite } from '../src/librarian/index';
 import { randomUUID } from 'crypto';

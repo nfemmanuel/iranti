@@ -1,3 +1,10 @@
+/**
+ * Configures a project directory for GitHub Copilot integration with iranti.
+ *
+ * Writes .github/copilot-instructions.md and hook scripts so Copilot
+ * automatically uses this project's iranti instance for shared memory.
+ * Run: `iranti copilot-setup [project-dir]`.
+ */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

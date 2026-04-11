@@ -1,3 +1,10 @@
+/**
+ * Version bump utility for iranti releases.
+ *
+ * Updates the version string consistently across package.json,
+ * TypeScript/Python client files, and schema version references.
+ * Run: `npm run release:bump -- <semver>` (e.g. `-- 0.3.21`).
+ */
 import fs from 'node:fs';
 import path from 'node:path';
 

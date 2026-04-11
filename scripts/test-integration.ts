@@ -1,3 +1,7 @@
+/**
+ * Integration test: full write-query-resolve cycle with two mock agents sharing
+ * memory via the Librarian pipeline. Requires DATABASE_URL.
+ */
 import 'dotenv/config';
 import { librarianWrite } from '../src/librarian';
 import { handshake, reconvene } from '../src/attendant';

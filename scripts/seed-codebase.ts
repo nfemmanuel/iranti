@@ -1,3 +1,9 @@
+/**
+ * Seeds iranti with static codebase metadata facts (packages, database schema,
+ * architecture overview) to pre-populate a fresh instance with project context.
+ *
+ * Requires DATABASE_URL.
+ */
 import 'dotenv/config';
 import { Iranti } from '../src/sdk';
 

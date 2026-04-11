@@ -1,3 +1,10 @@
+/**
+ * Seeds the Librarian conflict-resolution policy into the iranti knowledge base.
+ *
+ * Writes the ConflictPolicy entry (confidence thresholds, source reliability
+ * weights) as a protected system entry. Run after setup.ts when the default
+ * policy needs to be overridden or refreshed. Requires DATABASE_URL.
+ */
 import { initDb } from '../src/library/client';
 import { librarianWrite } from '../src/librarian';
 

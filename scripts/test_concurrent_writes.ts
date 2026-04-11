@@ -1,3 +1,8 @@
+/**
+ * Stress/integration test: concurrent same-key writes -- verifies serialisation,
+ * idempotency, and absence of lost updates under parallel load.
+ * Env: IRANTI_CONCURRENCY_STRESS_WRITES controls the write count.
+ */
 import { randomUUID } from 'crypto';
 import { librarianWrite } from '../src/librarian';
 import { findEntry, findEntriesByEntity } from '../src/library/queries';

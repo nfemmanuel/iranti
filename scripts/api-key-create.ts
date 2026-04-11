@@ -1,3 +1,10 @@
+/**
+ * CLI utility to create or rotate an iranti API key.
+ *
+ * Args: --key-id <id>, --owner <owner>, --scopes <csv>, --description <text>.
+ * Run: `npm run api-key:create -- --key-id <id> --owner <owner>`.
+ * Requires DATABASE_URL.
+ */
 import 'dotenv/config';
 import { initDb } from '../src/library/client';
 import { createOrRotateApiKey } from '../src/security/apiKeys';

@@ -1,4 +1,24 @@
 #!/usr/bin/env node
+/**
+ * Main CLI entry point for the iranti binary.
+ *
+ * Provides commands: install, setup, configure, auth, doctor, run, attend,
+ * handshake, resolve, integrate, project-init, instance, status, upgrade,
+ * uninstall, issues, list-rules, delete-rule, and more.
+ *
+ * Run via `npx iranti <command>` or `iranti <command>` after global install.
+ * Requires DATABASE_URL or a project/instance binding for most commands.
+ */
+/**
+ * Main CLI entry point for the iranti binary.
+ *
+ * Provides commands: install, setup, configure, auth, doctor, run, attend,
+ * handshake, resolve, integrate, project-init, instance, status, upgrade,
+ * uninstall, issues, list-rules, delete-rule, and more.
+ *
+ * Run via `npx iranti <command>` or `iranti <command>` after global install.
+ * Requires DATABASE_URL or a project/instance binding for most commands.
+ */
 import fs from 'fs';
 import fsp from 'fs/promises';
 import os from 'os';
@@ -3858,7 +3878,7 @@ async function parseSetupConfig(filePath: string): Promise<SetupExecutionPlan> {
     if (!fs.existsSync(resolved)) {
         throw new Error(`Setup config file not found: ${resolved}`);
     }
-    const raw = JSON.parse(fs.readFileSync(resolved, 'utf-8')) as any;
+    const raw = JSON.parse(fs.readFileSync(resolved, 'utf-8')) as Record<string, unknown>;
     const mode: 'shared' | 'isolated' = raw?.mode === 'shared' ? 'shared' : 'isolated';
     const scope: Scope = raw?.scope === 'system' ? 'system' : 'user';
     const root = path.resolve(String(raw?.root ?? defaultInstallRoot(scope)));
@@ -3903,7 +3923,7 @@ async function parseSetupConfig(filePath: string): Promise<SetupExecutionPlan> {
         : makeLegacyInstanceApiKey(instanceName);
 
     const projectsInput = Array.isArray(raw?.projects) ? raw.projects : [];
-    const projects: SetupProjectPlan[] = projectsInput.map((item: any) => ({
+    const projects: SetupProjectPlan[] = projectsInput.map((item) => ({
         path: path.resolve(String(item?.path ?? process.cwd())),
         agentId: sanitizeIdentifier(String(item?.agentId ?? projectAgentDefault(String(item?.path ?? process.cwd()))), 'project_main'),
         memoryEntity: String(item?.memoryEntity ?? 'user/main'),

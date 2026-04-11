@@ -1,3 +1,7 @@
+/**
+ * Integration test: staff namespace write-guard -- verifies that external agents
+ * cannot write to system/* and staff/* reserved namespaces.
+ */
 import 'dotenv/config';
 import { librarianWrite } from '../src/librarian/index';
 import { bootstrapHarness, errorMatches } from './harness';
@@ -21,11 +25,11 @@ async function testStaffNamespaceProtection() {
         });
         console.log('  ✗ FAILED: Write should have been blocked\n');
         process.exit(1);
-    } catch (err: any) {
-        if (err.message.includes('system namespace is staff-only')) {
+    } catch (err) {
+        if (err instanceof Error && err.message.includes('system namespace is staff-only')) {
             console.log('  ✓ PASSED: Write blocked correctly\n');
         } else {
-            console.log(`  ✗ FAILED: Wrong error: ${err.message}\n`);
+            console.log(`  ✗ FAILED: Wrong error: ${err instanceof Error ? err.message : String(err)}\n`);
             process.exit(1);
         }
     }
@@ -45,14 +49,14 @@ async function testStaffNamespaceProtection() {
         });
         console.log('  ✗ FAILED: Write should have been blocked\n');
         process.exit(1);
-    } catch (err: any) {
+    } catch (err) {
         if (errorMatches(err, [
             /key 'attendant_state' is reserved/i,
             /attendant_state is reserved for staff/i,
         ])) {
             console.log('  ✓ PASSED: Write blocked correctly\n');
         } else {
-            console.log(`  ✗ FAILED: Wrong error: ${err.message}\n`);
+            console.log(`  ✗ FAILED: Wrong error: ${err instanceof Error ? err.message : String(err)}\n`);
             process.exit(1);
         }
     }
@@ -76,8 +80,8 @@ async function testStaffNamespaceProtection() {
             console.log(`  ✗ FAILED: Write rejected: ${result.reason}\n`);
             process.exit(1);
         }
-    } catch (err: any) {
-        console.log(`  ✗ FAILED: Unexpected error: ${err.message}\n`);
+    } catch (err) {
+        console.log(`  ✗ FAILED: Unexpected error: ${err instanceof Error ? err.message : String(err)}\n`);
         process.exit(1);
     }
 
@@ -100,8 +104,8 @@ async function testStaffNamespaceProtection() {
             console.log(`  ✗ FAILED: Write rejected: ${result.reason}\n`);
             process.exit(1);
         }
-    } catch (err: any) {
-        console.log(`  ✗ FAILED: Unexpected error: ${err.message}\n`);
+    } catch (err) {
+        console.log(`  ✗ FAILED: Unexpected error: ${err instanceof Error ? err.message : String(err)}\n`);
         process.exit(1);
     }
 

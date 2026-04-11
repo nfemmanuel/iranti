@@ -1,3 +1,13 @@
+/**
+ * Claude Code session lifecycle hook for iranti auto-memory.
+ *
+ * Called by the Claude Code harness on SessionStart, UserPromptSubmit,
+ * Stop, and PreCompact events via settings.json hooks configuration.
+ * Reads the event JSON from stdin, injects memory into context, and
+ * persists durable facts extracted from assistant responses.
+ *
+ * Requires DATABASE_URL or IRANTI_PROJECT_ENV / IRANTI_INSTANCE_ENV binding.
+ */
 import 'dotenv/config';
 import path from 'path';
 import type { Iranti } from '../src/sdk';

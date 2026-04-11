@@ -1,3 +1,7 @@
+/**
+ * Integration test: Librarian chunker -- LLM-based fact extraction from free-form
+ * text, sentence-level fallback, and confidence-blended deduplication.
+ */
 import 'dotenv/config';
 import { librarianIngest } from '../src/librarian';
 import { bootstrapHarness } from './harness';

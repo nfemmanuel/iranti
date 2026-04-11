@@ -1,3 +1,7 @@
+/**
+ * Integration test: agent registry -- profile upsert, whoKnows queries,
+ * listAgents, and team assignment.
+ */
 import 'dotenv/config';
 import { Iranti } from '../src/sdk';
 import { bootstrapHarness } from './harness';

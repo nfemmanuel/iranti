@@ -1,3 +1,10 @@
+/**
+ * Shared test bootstrap harness for iranti integration test scripts.
+ *
+ * Call bootstrapHarness() at the top of each test script to initialise the
+ * DB connection and set IRANTI_ESCALATION_DIR to a local escalation/ path.
+ * Exports: bootstrapHarness, ensureHarnessStaffEventsTable.
+ */
 import 'dotenv/config';
 import path from 'path';
 import { getDb, initDb } from '../src/library/client';

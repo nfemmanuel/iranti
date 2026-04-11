@@ -1,3 +1,11 @@
+/**
+ * Extracts persistent facts from a development conversation transcript
+ * and writes them into iranti shared memory.
+ *
+ * Reads a conversation from a file or stdin, uses the LLM router to classify
+ * facts (decisions, commands, blockers), then writes each via the Iranti SDK.
+ * Requires DATABASE_URL and LLM_PROVIDER.
+ */
 import 'dotenv/config';
 import * as fs from 'fs/promises';
 import * as path from 'path';
