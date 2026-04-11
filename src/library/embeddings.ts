@@ -1,3 +1,30 @@
+/**
+ * Local embedding generation for iranti's vector search layer.
+ *
+ * Produces dense float vectors from free-form text without requiring an
+ * external model API. The algorithm is intentionally simple and fast:
+ *  - Tokenise + lowercase the input
+ *  - Expand tokens with a `TOKEN_SYNONYMS` table (e.g. "hq" → ["headquarters",
+ *    "location", "city"]) so semantically equivalent queries surface matches
+ *  - Hash each token with two FNV1a seeds into a fixed-dimension vector using
+ *    the random-projection / feature-hashing trick (dimension defaults to 256,
+ *    capped at 1024 via `IRANTI_EMBEDDING_DIM`)
+ *  - Apply length-based token weighting (`1 + log(len)`) so rare long tokens
+ *    outweigh stopwords
+ *  - L2-normalise the final vector for cosine-distance comparisons
+ *
+ * This is intentionally NOT a neural embedding. It trades recall accuracy for
+ * zero-latency, zero-cost, fully deterministic generation. The synonym table
+ * is the primary quality lever — extend it as new domain vocabulary emerges.
+ *
+ * Key exports:
+ *  - `generateEmbedding(text, dims?)`  — produce a vector
+ *  - `cosineSimilarity(left, right)`   — compute similarity
+ *  - `buildEmbeddingText(input)`       — canonical text from an EntryInput
+ *  - `toPgVectorLiteral(vector)`       — format for pgvector `::vector` cast
+ *  - `EMBEDDING_DIMENSIONS`            — active dimension count
+ */
+
 const DEFAULT_DIMENSIONS = 256;
 const TOKEN_SYNONYMS: Record<string, string[]> = {
     hq: ['headquarters', 'location', 'city'],

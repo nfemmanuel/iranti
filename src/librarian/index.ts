@@ -1,3 +1,36 @@
+/**
+ * Librarian — the knowledge write arbiter for iranti.
+ *
+ * All mutations to the knowledge store flow through `librarianWrite`. The
+ * function enforces a multi-layer conflict resolution pipeline before any row
+ * is created, updated, or escalated:
+ *
+ *  1. Input validation — clamp confidence, block future `validFrom`, enforce
+ *     write permissions (`guards.ts`), and check the `attendant_state` guard.
+ *  2. Idempotency (M-2) — claim a `writeReceipt` slot before executing; replay
+ *     if the requestId was already processed.
+ *  3. Identity lock — advisory Postgres xact lock + in-process queue per
+ *     `(entityType, entityId, key)` so concurrent writers serialise.
+ *  4. Conflict resolution (in priority order):
+ *     a. No existing entry → contextual conflict check then create.
+ *     b. Direct user personal-memory correction → always replaces.
+ *     c. Checkpoint continuity keys → replace without scoring.
+ *     d. Equal confidence + same source → accept latest.
+ *     e. Temporal tiebreak (validFrom) → newer wins.
+ *     f. Authoritative source overrides → per-key policy.
+ *     g. Score gap ≥ threshold → higher score wins.
+ *     h. Close scores → LLM arbitration with sibling evidence (S4) or escalate.
+ *  5. Escalation — unresolvable conflicts write a markdown file to the active
+ *     escalation folder for human review; the Archivist later consumes
+ *     `**Status:** RESOLVED` files.
+ *  6. Post-write verification — immediate read-back check; emits staff event.
+ *  7. Shared-state invalidation broadcast — notifies other processes that the
+ *     entity has changed.
+ *
+ * `librarianIngest` is the bulk ingestion path: it calls the chunker to
+ * extract structured facts from raw text, then writes each fact via `librarianWrite`.
+ */
+
 import { createHash } from 'crypto';
 import { route } from '../lib/router';
 import { getStaffEventEmitter } from '../lib/staffEventRegistry';
@@ -19,9 +52,12 @@ import { EntryInput } from '../types';
 import {
     ArchivedReason,
     KnowledgeEntry,
+    PrismaClient,
     ResolutionOutcome,
     ResolutionState,
 } from '../generated/prisma/client';
+
+type TransactionClient = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
 import { ChunkInput } from './chunker';
 import { updateStats } from '../library/agent-registry';
 import { enforceWritePermissions } from './guards';
@@ -154,7 +190,7 @@ async function saveReceipt(
     input: EntryInput,
     outcome: string,
     entryId: number | null,
-    tx: any,
+    tx: TransactionClient,
     escalationFile?: string
 ) {
     if (!input.requestId) return;
@@ -182,7 +218,7 @@ async function logDecision(
     incomingScore: number,
     reason: string,
     usedLLM: boolean,
-    tx: any
+    tx: TransactionClient
 ) {
     await appendConflictLog(entryId, {
         type,
@@ -200,7 +236,7 @@ async function logDecision(
     }, tx);
 }
 
-async function replaceEntry(existing: KnowledgeEntry, incoming: EntryInput, tx: any): Promise<KnowledgeEntry> {
+async function replaceEntry(existing: KnowledgeEntry, incoming: EntryInput, tx: TransactionClient): Promise<KnowledgeEntry> {
     await archiveEntry(existing, ArchivedReason.superseded, {
         entityType: incoming.entityType,
         entityId: incoming.entityId,
@@ -214,7 +250,7 @@ async function replaceEntry(existing: KnowledgeEntry, incoming: EntryInput, tx: 
     }, tx);
 }
 
-async function refetchCurrentRow(existing: KnowledgeEntry, tx: any): Promise<KnowledgeEntry> {
+async function refetchCurrentRow(existing: KnowledgeEntry, tx: TransactionClient): Promise<KnowledgeEntry> {
     const refreshed = await tx.knowledgeEntry.findUnique({
         where: { id: existing.id },
     });
@@ -509,7 +545,7 @@ export async function librarianWrite(input: EntryInput): Promise<{
 async function resolveConflict(
     existing: KnowledgeEntry,
     incoming: EntryInput,
-    tx: any
+    tx: TransactionClient
 ): Promise<WriteResultInternal> {
     const policy = await getConflictPolicy(tx);
     const candidate: EntryInput = { ...incoming, validUntil: null };
@@ -911,7 +947,7 @@ const CONFLICT_EVIDENCE_SUMMARY_MAX = 200;
 
 async function gatherConflictEvidence(
     existing: KnowledgeEntry,
-    tx: any,
+    tx: TransactionClient,
 ): Promise<Array<{ key: string; summary: string; confidence: number }>> {
     try {
         const siblings = await tx.knowledgeEntry.findMany({
@@ -952,7 +988,7 @@ async function resolveWithReasoning(
     incoming: EntryInput,
     existingScore: number,
     incomingScore: number,
-    tx: any
+    tx: TransactionClient
 ): Promise<WriteResultInternal> {
     // S4: gather sibling context BEFORE the LLM call. Counted for metrics
     // so dashboards can observe how often multi-step arbitration runs.
@@ -1064,7 +1100,7 @@ ESCALATE: <reason>`,
 async function escalateConflict(
     existing: KnowledgeEntry,
     incoming: EntryInput,
-    tx: any
+    tx: TransactionClient
 ): Promise<{ action: 'escalated'; reason: string }> {
     const fs = await import('fs/promises');
     const path = await import('path');
@@ -1106,7 +1142,7 @@ async function escalateConflict(
     try {
         await fs.writeFile(filePath, content, { encoding: 'utf-8', flag: 'wx' });
     } catch (err) {
-        if ((err as any).code !== 'EEXIST') {
+        if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
             throw err;
         }
 

@@ -1,3 +1,20 @@
+/**
+ * Qdrant vector backend for iranti.
+ *
+ * Implements the `VectorBackend` interface against a Qdrant HTTP API server.
+ * Suitable for deployments that need high-throughput vector search separate
+ * from the primary Postgres database.
+ *
+ * Configuration (via `QdrantConfig` or env vars in the factory):
+ *  - `url`        — Qdrant server base URL (e.g. http://localhost:6333)
+ *  - `apiKey`     — optional API key header (`api-key`)
+ *  - `collection` — collection name (default: iranti_facts)
+ *
+ * The collection is created lazily on the first upsert with `EMBEDDING_DIMENSIONS`
+ * dimensions and cosine distance. Subsequent calls skip collection creation
+ * via the `collectionReady` flag.
+ */
+
 import { EMBEDDING_DIMENSIONS } from '../embeddings';
 import { VectorBackend, VectorConsistencyFilter, VectorMutationDbClient, VectorSearchResult, VectorUpsertParams } from '../vectorBackend';
 

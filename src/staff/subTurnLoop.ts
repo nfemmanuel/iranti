@@ -1,28 +1,28 @@
-// src/staff/subTurnLoop.ts
-//
-// B8 M6 — Sub-turn reasoning loop.
-//
-// Pure helper. Given a mid-turn attend input that carries a partial assistant
-// response, decides whether the Attendant should re-score its own in-progress
-// output against memory and re-run retrieval with new entity hints harvested
-// from the partial text. Never executes observe() itself — the caller fires at
-// most one extra retrieval when the plan says `attempted=true`.
-//
-// This is A3's iterative refinement pattern re-applied on response progress
-// rather than initial-pass emptiness. Gates follow the same shape as
-// planRefinementPass: post-response closeout is gated off, pre-response is
-// rejected (pre-response is the initial pass, not a sub-turn loop), empty or
-// short partial responses are declined, and a no-new-tokens verdict declines
-// the retry so we don't thrash on text the caller already searched for.
-//
-// When the plan does propose a retry it surfaces `rescoreTokens` (novel
-// lowercase tokens from the partial) + `proposedHints` (novel type/id
-// patterns extracted by regex). The caller UNIONs those proposed hints with
-// the original entity hints before firing observe() again — same fix pattern
-// as B6's refinement retry (see the union-of-original+widened comment in
-// AttendantInstance.ts around line 5228).
-//
-// Pure function. No LLM. No I/O. Deterministic. Fully unit-testable.
+/**
+ * B8 M6 — Sub-turn reasoning loop.
+ *
+ * Pure helper. Given a mid-turn attend input that carries a partial assistant
+ * response, decides whether the Attendant should re-score its own in-progress
+ * output against memory and re-run retrieval with new entity hints harvested
+ * from the partial text. Never executes observe() itself — the caller fires at
+ * most one extra retrieval when the plan says `attempted=true`.
+ *
+ * This is A3's iterative refinement pattern re-applied on response progress
+ * rather than initial-pass emptiness. Gates follow the same shape as
+ * planRefinementPass: post-response closeout is gated off, pre-response is
+ * rejected (pre-response is the initial pass, not a sub-turn loop), empty or
+ * short partial responses are declined, and a no-new-tokens verdict declines
+ * the retry so we don't thrash on text the caller already searched for.
+ *
+ * When the plan does propose a retry it surfaces `rescoreTokens` (novel
+ * lowercase tokens from the partial) + `proposedHints` (novel type/id
+ * patterns extracted by regex). The caller UNIONs those proposed hints with
+ * the original entity hints before firing observe() again — same fix pattern
+ * as B6's refinement retry (see the union-of-original+widened comment in
+ * AttendantInstance.ts around line 5228).
+ *
+ * Pure function. No LLM. No I/O. Deterministic. Fully unit-testable.
+ */
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

@@ -1,6 +1,31 @@
-import { KnowledgeEntry } from '../generated/prisma/client';
+/**
+ * Librarian contextual conflict detector — cross-entity semantic consistency
+ * checks run before every knowledge write.
+ *
+ * Goes beyond simple key-collision detection by checking whether an incoming
+ * entry is semantically inconsistent with existing facts about the same entity
+ * or about related entities in the knowledge graph.
+ *
+ * Two detection passes (called by `detectContextualConflict`):
+ *  1. Same-entity conflicts — compare incoming fact against sibling keys on the
+ *     same entity (e.g. `launch_date` in the future while `status` is "launched").
+ *  2. Relationship conflicts — walk the `entityRelationship` graph to check
+ *     cross-entity invariants (e.g. active project lead whose `employment_status`
+ *     is "departed").
+ *
+ * All checks are implemented as specific named rules in `sameEntityConflict`
+ * and `relationshipConflict`. Rules return `null` when satisfied and a human-
+ * readable `reason` string when violated. Adding a new rule is additive.
+ *
+ * Requires a Prisma transaction client (`tx`) so checks run within the same
+ * transaction as the write they are guarding.
+ */
+
+import { KnowledgeEntry, PrismaClient } from '../generated/prisma/client';
 import { findEntriesByEntity, findEntry } from '../library/queries';
 import { EntryInput } from '../types';
+
+type TransactionClient = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
 
 type ContextualConflict = {
     matchedEntries: KnowledgeEntry[];
@@ -151,7 +176,7 @@ function sameEntityConflict(candidate: EntryInput, sibling: KnowledgeEntry): str
     return null;
 }
 
-async function getRelationshipsForEntity(entityType: string, entityId: string, tx: any): Promise<RelationshipRow[]> {
+async function getRelationshipsForEntity(entityType: string, entityId: string, tx: TransactionClient): Promise<RelationshipRow[]> {
     const [outbound, inbound] = await Promise.all([
         tx.entityRelationship.findMany({
             where: { fromType: entityType, fromId: entityId },
@@ -164,7 +189,7 @@ async function getRelationshipsForEntity(entityType: string, entityId: string, t
     return [...outbound, ...inbound] as RelationshipRow[];
 }
 
-async function relationshipConflict(candidate: EntryInput, tx: any): Promise<ContextualConflict | null> {
+async function relationshipConflict(candidate: EntryInput, tx: TransactionClient): Promise<ContextualConflict | null> {
     if (candidate.key === 'status' && hasState(candidate.valueRaw, 'active') && candidate.entityType === 'team') {
         const relationships = await getRelationshipsForEntity(candidate.entityType, candidate.entityId, tx);
         const membership = relationships.find((row) =>
@@ -286,7 +311,7 @@ async function relationshipConflict(candidate: EntryInput, tx: any): Promise<Con
     return null;
 }
 
-export async function detectContextualConflict(candidate: EntryInput, tx: any): Promise<ContextualConflict | null> {
+export async function detectContextualConflict(candidate: EntryInput, tx: TransactionClient): Promise<ContextualConflict | null> {
     const siblingEntries = (await findEntriesByEntity(candidate.entityType, candidate.entityId, tx))
         .filter((entry) => entry.key !== candidate.key);
 

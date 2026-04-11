@@ -1,20 +1,20 @@
-// src/staff/archivistReasoning.ts
-//
-// B7 S5 — Archivist reasoning budget.
-//
-// Adds a deterministic "reasoning pass" over a snapshot of knowledge entries
-// that emits PROPOSALS (compress, demote, flag_drift) for the Resolutionist
-// to consider. Never mutates knowledge directly. Never calls an LLM. Pure
-// function over a snapshot — safe to run in the Archivist scan loop and
-// fully testable without a database.
-//
-// Proposals are inert until a Resolutionist acts on them. They land on the
-// staff event bus as `actionType: 'reasoning_proposal_emitted'` and are
-// included in the ArchivistReport so the caller can ship them as-is.
-//
-// Shape:
-//   planArchivistReasoningPass({ candidates, now, reasoningBudget })
-//     → { proposals, budgetUsed, note }
+/**
+ * B7 S5 — Archivist reasoning budget.
+ *
+ * Adds a deterministic "reasoning pass" over a snapshot of knowledge entries
+ * that emits PROPOSALS (compress, demote, flag_drift) for the Resolutionist
+ * to consider. Never mutates knowledge directly. Never calls an LLM. Pure
+ * function over a snapshot — safe to run in the Archivist scan loop and
+ * fully testable without a database.
+ *
+ * Proposals are inert until a Resolutionist acts on them. They land on the
+ * staff event bus as `actionType: 'reasoning_proposal_emitted'` and are
+ * included in the ArchivistReport so the caller can ship them as-is.
+ *
+ * Shape:
+ *   planArchivistReasoningPass({ candidates, now, reasoningBudget })
+ *     → { proposals, budgetUsed, note }
+ */
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

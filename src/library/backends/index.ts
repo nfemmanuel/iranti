@@ -1,3 +1,18 @@
+/**
+ * Vector backend factory for iranti.
+ *
+ * Selects and instantiates the correct `VectorBackend` implementation based on
+ * `IRANTI_VECTOR_BACKEND` (env var) or the `config.vectorBackend` override.
+ * Supported values: `pgvector` (default), `qdrant`, `chroma`.
+ *
+ *  - `pgvector` — uses the primary Postgres connection; zero additional infra
+ *  - `qdrant`   — requires `IRANTI_QDRANT_URL`; optional API key + collection
+ *  - `chroma`   — defaults to `http://localhost:8000`; optional tenant/db/token
+ *
+ * `resolveVectorBackendName` is exported separately so callers can log or
+ * display the active backend name without instantiating it.
+ */
+
 import { ChromaBackend } from './chromaBackend';
 import { PgvectorBackend } from './pgvectorBackend';
 import { QdrantBackend } from './qdrantBackend';

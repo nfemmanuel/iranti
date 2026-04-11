@@ -1,3 +1,23 @@
+/**
+ * Librarian conflict policy — defines the rules that govern how conflicting
+ * knowledge entries are resolved.
+ *
+ * `ConflictPolicy` is the primary configuration object for the Librarian.
+ * `DEFAULT_POLICY` provides sensible defaults that work out of the box;
+ * deployments can override fields by storing a `conflict_policy` entry under
+ * `system/librarian` in the knowledge store (see `getPolicy.ts`).
+ *
+ * Key policy fields:
+ *  - `minConfidenceToOverwrite` — incoming entry must exceed this to replace an existing one
+ *  - `minConfidenceToAccept`    — minimum confidence for any entry to be written at all
+ *  - `minResolutionCertainty`   — floor for the resolution certainty score (0-1)
+ *  - `sourceReliability`        — per-source trust multiplier (0-1), merged with learned scores
+ *  - `ttlDefaultsByKey`         — default TTL in seconds per key name
+ *  - `authoritativeSourcesByKey`— sources that always win for a given key
+ *  - `maxKeysPerEntity`         — soft cap on how many keys the observe path injects per entity
+ *  - `maxEntitiesPerObserve`    — soft cap on how many entities observe injects per call
+ */
+
 export type ConflictPolicy = {
   minConfidenceToOverwrite: number;
   minConfidenceToAccept: number;

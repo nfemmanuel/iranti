@@ -1,3 +1,23 @@
+/**
+ * Attendant public API barrel for iranti.
+ *
+ * Exports two layers:
+ *
+ * **Class-based API (current)** — the preferred surface since the refactor:
+ *  - `AttendantInstance`    — the stateful per-agent class
+ *  - `getAttendant()`       — registry factory (singleton per agentId)
+ *  - `clearAttendant()`     — evict a singleton (tests / restarts)
+ *  - `activeAttendants()`   — list live agentIds
+ *  - All type exports from AttendantInstance
+ *
+ * **Legacy functional API (backward-compat)** — thin wrappers around the
+ * class-based API that accept the old `LegacyAgentContext` shape. Kept to
+ * avoid breaking callers that haven't migrated yet; emits `initDb` internally
+ * so callers don't need to manage the DB connection.
+ *  - `handshake(context)`          → WorkingMemoryBrief
+ *  - `reconvene(brief, context)`   → WorkingMemoryBrief
+ */
+
 // Re-export new class-based API
 export { AttendantInstance } from './AttendantInstance';
 export { getAttendant, clearAttendant, activeAttendants } from './registry';

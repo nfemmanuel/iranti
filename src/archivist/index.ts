@@ -1,3 +1,25 @@
+/**
+ * Archivist — scheduled maintenance daemon for iranti's knowledge store.
+ *
+ * Runs a full scan cycle on demand (typically via cron or `iranti archivist` CLI):
+ *  1. Archive entries whose `validUntil` is in the past.
+ *  2. Archive entries whose `confidence` has fallen below the low-confidence
+ *     threshold (currently 30).
+ *  3. Apply memory decay — recalculate confidence for every live entry based on
+ *     time-since-last-access and stability; archive anything that decays below
+ *     `getDecayConfig().threshold`.
+ *  4. Process escalation files — read `*.md` files from the active escalation
+ *     folder, consume any marked `**Status:** RESOLVED`, apply the
+ *     `### AUTHORITATIVE_JSON` payload, and move the file to resolved/.
+ *  5. Bounded reasoning pass (B7 S5) — calls `planArchivistReasoningPass`
+ *     over a snapshot of live entries and emits proposals; never mutates.
+ *  6. Council mode (B7 S6) — if reasoning proposals were emitted, proposes
+ *     cross-staff consultations via `planCouncilConsultation`.
+ *
+ * All mutations are emitted as staff events. The full cycle result is returned
+ * as `ArchivistReport`.
+ */
+
 import fs from 'fs/promises';
 import path from 'path';
 import { getStaffEventEmitter } from '../lib/staffEventRegistry';
@@ -37,7 +59,7 @@ type AuthoritativeResolution = {
     entityType: string;
     entityId: string;
     key: string;
-    value: any;
+    value: unknown;
     summary: string;
     notes?: string;
 };
@@ -65,20 +87,21 @@ function extractAuthoritativeJson(fileText: string): AuthoritativeResolution {
 
     const jsonText = afterFence.slice(0, fenceEnd).trim();
 
-    let payload: any;
+    let payload: unknown;
     try {
         payload = JSON.parse(jsonText);
     } catch {
         throw new Error('Invalid JSON in AUTHORITATIVE_JSON.');
     }
 
+    const record = payload as Record<string, unknown>;
     for (const field of ['entityType', 'entityId', 'key', 'value', 'summary']) {
-        if (payload[field] === undefined || payload[field] === null) {
+        if (record[field] === undefined || record[field] === null) {
             throw new Error(`AUTHORITATIVE_JSON missing required field: ${field}`);
         }
     }
 
-    return payload as AuthoritativeResolution;
+    return record as unknown as AuthoritativeResolution;
 }
 
 // ─── Main Cycle ──────────────────────────────────────────────────────────────

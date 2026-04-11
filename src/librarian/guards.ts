@@ -1,3 +1,25 @@
+/**
+ * Librarian write-permission enforcement for iranti.
+ *
+ * Defines which callers (`createdBy`) are permitted to write to sensitive
+ * namespaces, reserved keys, and cross-agent entity IDs. All writes that
+ * flow through the Librarian path call `enforceWritePermissions` before
+ * touching the database.
+ *
+ * Protection rules (in evaluation order):
+ *  1. `system` namespace — staff-only (`STAFF_WRITERS` set).
+ *  2. Reserved keys (e.g. `attendant_state`, `schema_version`) — per-key
+ *     allow-lists in `RESERVED_KEY_WRITERS`.
+ *  3. `agent` namespace cross-write — non-staff agents may only write to
+ *     their own `entityId`.
+ *  4. Underscore-prefixed keys — staff-only.
+ *
+ * Exports:
+ *  - `STAFF_WRITERS`          — Set of privileged component names
+ *  - `RESERVED_KEY_WRITERS`   — Per-key writer allow-lists
+ *  - `enforceWritePermissions` — throws on any violation
+ */
+
 export const STAFF_WRITERS = new Set([
   "librarian",
   "archivist",

@@ -1,3 +1,19 @@
+/**
+ * Librarian source-reliability tracker — online learning for per-source trust.
+ *
+ * Maintains a `ReliabilityMap` (source name → 0-1 score) persisted as a
+ * protected knowledge entry at `system/librarian/source_reliability`. Scores
+ * start at `DEFAULT_SCORE = 0.5` and update whenever the Librarian resolves a
+ * conflict:
+ *  - Winner's score nudges up by `WIN_DELTA` (or `HUMAN_DELTA` for human overrides)
+ *  - Loser's score nudges down by `LOSS_DELTA`
+ *  - All scores decay slowly toward `DEFAULT_SCORE` each update cycle to
+ *    prevent stale reputations from persisting indefinitely
+ *
+ * Scores feed into `getConflictPolicy()` (merged as the highest-priority layer)
+ * and into `weightedConfidence()` (used by the Attendant injection path).
+ */
+
 import { getDb } from '../library/client';
 import { Prisma } from '../generated/prisma/client';
 
