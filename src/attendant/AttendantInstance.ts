@@ -638,6 +638,19 @@ export interface AttendResult extends ObserveResult {
     // strong recommendation to call iranti_checkpoint before taking on more
     // work. Absent in the healthy case. Gated off on post-response.
     autoCheckpointSignal?: AutoCheckpointSignal;
+    // A3: only populated when attend decided memory was needed AND the
+    // initial retrieval pass returned zero facts. Describes the bounded
+    // refinement pass (at most one extra observe call) and whether it
+    // added anything. Absent when the first pass was sufficient or when
+    // attend decided no memory was needed. Gated off on post-response.
+    refinementPass?: RefinementPass;
+    // A5: only populated when attend has enough signal to suggest
+    // follow-up tool calls the host could run autonomously. Deterministic,
+    // descriptive — the Attendant does NOT execute these in this release.
+    // Hosts can surface the plan to the user or use it for compliance
+    // scoring ("did the host run any of the suggested tools?"). Gated
+    // off on post-response.
+    attendantToolPlan?: AttendantToolPlan;
 }
 
 export interface ToolCallGuidance {
@@ -714,6 +727,55 @@ export interface AutoCheckpointSignal {
     draftNextStep: string | null;
     // Canned human-readable message the host can surface verbatim.
     message: string;
+}
+
+// A3: iterative exploration — when the first retrieval pass comes back
+// empty but the attend decision said memory was needed, the Attendant
+// runs ONE bounded refinement pass with broadened entity hints and
+// fallback search terms derived from the latest message. The pass is
+// bounded (max 1 extra observe() call) to keep latency predictable.
+// Populated when either the refinement was attempted or declined with a
+// reason so the host can log why retrieval was not re-tried.
+export type RefinementPassOutcome =
+    | 'not_needed'           // initial pass returned facts OR decision.needed=false
+    | 'attempted_added'      // second pass ran and returned extra facts
+    | 'attempted_empty'      // second pass ran and returned no extra facts
+    | 'declined_no_hints'    // no entity hints and no usable fallback terms — retry would be blind
+    | 'declined_post_response'; // gated off on post-response closeouts
+
+export interface RefinementPass {
+    outcome: RefinementPassOutcome;
+    attempted: boolean;
+    initialFactCount: number;
+    addedFactCount: number;
+    widenedEntityHints: string[];
+    fallbackTerms: string[];
+    reason: string;
+    note: string;
+}
+
+// A5: tool-using Attendant (planned). The Attendant derives a small list
+// of tools it WOULD call if it had an execution budget — search_related,
+// observe_entity, query — based on the current brief, recent messages,
+// and retrieval state. Purely descriptive in this release: the host sees
+// the plan and can choose to execute one, or the plan can be compared to
+// actual host tool calls for compliance scoring. Deterministic, no LLM.
+export type AttendantProposedToolName =
+    | 'search_related'   // follow-up relatedness walk from an existing entity
+    | 'observe_entity'   // deeper fact-set dump for one entity
+    | 'query';           // structured query by key or entity type
+
+export interface AttendantProposedToolCall {
+    name: AttendantProposedToolName;
+    args: Record<string, string>;
+    reason: string;
+    confidence: number; // 0..1
+}
+
+export interface AttendantToolPlan {
+    proposed: AttendantProposedToolCall[];
+    basis: 'brief_entities' | 'drift_tokens' | 'objective_signals' | 'empty';
+    note: string;
 }
 
 export interface ToolResultExtractionOutcome {
@@ -2109,6 +2171,266 @@ export function detectAutoCheckpointTrigger(options: {
     }
 
     return undefined;
+}
+
+// ----------------------------------------------------------------------------
+// A3: iterative exploration — bounded refinement pass planning
+// ----------------------------------------------------------------------------
+// When initial retrieval returns empty but memory was wanted, produce a
+// deterministic refinement plan: broaden entity hints (strip the key
+// segment, keeping only the entity type + id), and pick fallback search
+// terms from the latest user message (action verbs + content tokens
+// minus stopwords). The plan is bounded to one retry so latency stays
+// predictable. Pure: no instance state access, no LLM, snapshot-testable.
+// ----------------------------------------------------------------------------
+
+const REFINEMENT_STOPWORDS = new Set<string>([
+    'the', 'a', 'an', 'and', 'or', 'but', 'if', 'then', 'else', 'of', 'for',
+    'to', 'in', 'on', 'at', 'by', 'with', 'from', 'as', 'is', 'are', 'was',
+    'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did',
+    'will', 'would', 'should', 'could', 'may', 'might', 'must', 'can', 'this',
+    'that', 'these', 'those', 'i', 'you', 'he', 'she', 'it', 'we', 'they',
+    'me', 'him', 'her', 'us', 'them', 'my', 'your', 'his', 'its', 'our',
+    'their', 'what', 'which', 'who', 'whom', 'whose', 'when', 'where', 'why',
+    'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other',
+    'some', 'such', 'no', 'not', 'only', 'own', 'same', 'so', 'than', 'too',
+    'very', 'just', 'also', 'please', 'thanks', 'thank',
+]);
+
+const REFINEMENT_MAX_FALLBACK_TERMS = 6;
+const REFINEMENT_MIN_TERM_LENGTH = 3;
+
+export function planRefinementPass(options: {
+    initialFactCount: number;
+    decisionNeeded: boolean;
+    phase?: 'pre-response' | 'mid-turn' | 'post-response';
+    entityHints: readonly string[];
+    latestMessage: string;
+}): RefinementPass {
+    const { initialFactCount, decisionNeeded, phase, entityHints, latestMessage } = options;
+
+    // Gate 1: post-response never refines — it's a closeout path.
+    if (phase === 'post-response') {
+        return {
+            outcome: 'declined_post_response',
+            attempted: false,
+            initialFactCount,
+            addedFactCount: 0,
+            widenedEntityHints: [],
+            fallbackTerms: [],
+            reason: 'post_response_closeout',
+            note: 'Refinement is gated off on post-response attends.',
+        };
+    }
+
+    // Gate 2: if memory was not needed at all, there's nothing to refine.
+    // Same if the first pass returned facts — skip cheaply.
+    if (!decisionNeeded || initialFactCount > 0) {
+        return {
+            outcome: 'not_needed',
+            attempted: false,
+            initialFactCount,
+            addedFactCount: 0,
+            widenedEntityHints: [],
+            fallbackTerms: [],
+            reason: initialFactCount > 0 ? 'initial_pass_returned_facts' : 'memory_not_needed',
+            note: 'No refinement pass required.',
+        };
+    }
+
+    // Gate 3: widen entity hints by keeping only the first two segments
+    // (entityType/entityId) so downstream retrieval matches siblings of
+    // the originally targeted key. A hint that already has only two
+    // segments is kept as-is.
+    const widened: string[] = [];
+    const seenWidened = new Set<string>();
+    for (const hint of entityHints) {
+        if (typeof hint !== 'string') continue;
+        const trimmed = hint.trim();
+        if (!trimmed) continue;
+        const parts = trimmed.split('/').filter((p) => p.length > 0);
+        const widenedHint = parts.length >= 2 ? `${parts[0]}/${parts[1]}` : trimmed;
+        if (!seenWidened.has(widenedHint)) {
+            seenWidened.add(widenedHint);
+            widened.push(widenedHint);
+        }
+    }
+
+    // Gate 4: extract fallback search terms from the latest message.
+    // Lowercase, strip punctuation, filter stopwords and short tokens,
+    // dedupe, cap.
+    const fallbackTerms: string[] = [];
+    const seenTerms = new Set<string>();
+    const normalized = (latestMessage || '').toLowerCase().replace(/[^a-z0-9_\-\s]/g, ' ');
+    for (const token of normalized.split(/\s+/)) {
+        if (!token) continue;
+        if (token.length < REFINEMENT_MIN_TERM_LENGTH) continue;
+        if (REFINEMENT_STOPWORDS.has(token)) continue;
+        if (seenTerms.has(token)) continue;
+        seenTerms.add(token);
+        fallbackTerms.push(token);
+        if (fallbackTerms.length >= REFINEMENT_MAX_FALLBACK_TERMS) break;
+    }
+
+    // Gate 5: if we have neither widened hints nor fallback terms, the
+    // retry would be blind. Decline so the attend returns empty cleanly
+    // rather than thrashing.
+    if (widened.length === 0 && fallbackTerms.length === 0) {
+        return {
+            outcome: 'declined_no_hints',
+            attempted: false,
+            initialFactCount,
+            addedFactCount: 0,
+            widenedEntityHints: [],
+            fallbackTerms: [],
+            reason: 'no_widened_hints_and_no_fallback_terms',
+            note: 'Initial retrieval was empty but refinement has no entities to widen and no fallback terms to search — refusing a blind retry.',
+        };
+    }
+
+    return {
+        outcome: 'attempted_empty', // filled to attempted_added by caller if retry returned facts
+        attempted: true,
+        initialFactCount,
+        addedFactCount: 0,
+        widenedEntityHints: widened,
+        fallbackTerms,
+        reason: 'initial_pass_empty_retry_planned',
+        note: `Initial retrieval returned 0 facts. Retrying with ${widened.length} widened entity hint(s) and ${fallbackTerms.length} fallback term(s).`,
+    };
+}
+
+// ----------------------------------------------------------------------------
+// A5: tool-using Attendant — planned (not executed) tool-call surface
+// ----------------------------------------------------------------------------
+// Given the brief, the latest message, the current entity hints, and the
+// initial retrieval fact count, derive a small list of follow-up tool
+// calls the host COULD run autonomously. Pure, deterministic — no LLM,
+// no execution. This is the A4 plan-proposal pattern applied to tool
+// invocations: the Attendant describes what it would do next given more
+// budget, and the host decides whether to honor the plan or not.
+//
+// Priority of proposals:
+//  1. search_related on the top detected entity when brief has entities
+//     but retrieval returned nothing — walk the relatedness graph.
+//  2. observe_entity on the first entity hint when the brief is present
+//     but the host supplied no hints for the latest message.
+//  3. query using the session objective's top signal when one exists.
+// ----------------------------------------------------------------------------
+
+const ATTENDANT_TOOL_PLAN_MAX_PROPOSALS = 3;
+
+export function planAttendantToolCalls(options: {
+    phase?: 'pre-response' | 'mid-turn' | 'post-response';
+    entityHints: readonly string[];
+    initialFactCount: number;
+    sessionObjective?: SessionObjective | null;
+    drift?: DriftSignal | undefined;
+    briefHasEntities: boolean;
+}): AttendantToolPlan {
+    const {
+        phase,
+        entityHints,
+        initialFactCount,
+        sessionObjective,
+        drift,
+        briefHasEntities,
+    } = options;
+
+    // Gate 1: post-response is a closeout — no planned tool use.
+    if (phase === 'post-response') {
+        return {
+            proposed: [],
+            basis: 'empty',
+            note: 'Attendant tool plan is gated off on post-response attends.',
+        };
+    }
+
+    const proposed: AttendantProposedToolCall[] = [];
+    let basis: AttendantToolPlan['basis'] = 'empty';
+
+    // Proposal 1: search_related when the host gave us a concrete entity
+    // hint but the first retrieval pass came back empty. Walk the graph.
+    if (entityHints.length > 0 && initialFactCount === 0) {
+        proposed.push({
+            name: 'search_related',
+            args: { entity: entityHints[0], depth: '1' },
+            reason: 'initial_retrieval_empty_walk_relatedness_graph',
+            confidence: 0.75,
+        });
+        basis = 'brief_entities';
+    }
+
+    // Proposal 2: observe_entity on the top hint when we haven't dumped
+    // its full fact set yet. Useful when the attend bounds kept facts to
+    // a small maxFacts budget but the host could benefit from the full
+    // entity view.
+    if (entityHints.length > 0 && proposed.length < ATTENDANT_TOOL_PLAN_MAX_PROPOSALS) {
+        proposed.push({
+            name: 'observe_entity',
+            args: { entity: entityHints[0], limit: '10' },
+            reason: 'enumerate_all_known_facts_for_top_entity',
+            confidence: 0.6,
+        });
+        if (basis === 'empty') basis = 'brief_entities';
+    }
+
+    // Proposal 3: query by the session objective's strongest signal token
+    // when one exists — drives cross-entity recall that a pure
+    // entity-hint lookup would miss.
+    if (
+        sessionObjective?.taskSignals?.length
+        && proposed.length < ATTENDANT_TOOL_PLAN_MAX_PROPOSALS
+    ) {
+        const topSignal = sessionObjective.taskSignals[0];
+        if (typeof topSignal === 'string' && topSignal.length >= REFINEMENT_MIN_TERM_LENGTH) {
+            proposed.push({
+                name: 'query',
+                args: { key: topSignal },
+                reason: 'session_objective_top_signal_structured_query',
+                confidence: 0.55,
+            });
+            basis = 'objective_signals';
+        }
+    }
+
+    // If drift fired and we still have budget, propose a drift-driven
+    // search so the host can surface facts on the NEW direction quickly.
+    if (
+        drift?.detected
+        && drift.drivingTokens.length > 0
+        && proposed.length < ATTENDANT_TOOL_PLAN_MAX_PROPOSALS
+    ) {
+        proposed.push({
+            name: 'query',
+            args: { key: drift.drivingTokens[0] },
+            reason: 'drift_detected_query_new_driving_topic',
+            confidence: 0.65,
+        });
+        basis = 'drift_tokens';
+    }
+
+    if (proposed.length === 0) {
+        if (!briefHasEntities && entityHints.length === 0) {
+            return {
+                proposed: [],
+                basis: 'empty',
+                note: 'No brief entities and no hints — Attendant has nothing to propose without more signal.',
+            };
+        }
+        return {
+            proposed: [],
+            basis: 'empty',
+            note: 'Attendant found no gap worth proposing extra tool calls for this turn.',
+        };
+    }
+
+    const proposalNames = proposed.map((p) => p.name).join(', ');
+    return {
+        proposed,
+        basis,
+        note: `Attendant proposes ${proposed.length} follow-up tool call(s): ${proposalNames}. Host may execute any subset.`,
+    };
 }
 
 function buildAttendBootstrapTask(latestMessage: string, currentContext: string): string {
@@ -4623,6 +4945,27 @@ If no durable facts can be extracted, return an empty array: [].`,
                 // so it's always undefined here. Field echoed for shape parity
                 // so downstream consumers can safely destructure.
                 autoCheckpointSignal,
+                // A3: refinement pass is gated off on post-response — the
+                // closeout path never runs retrieval so there is nothing to
+                // refine. Field present for shape parity.
+                refinementPass: {
+                    outcome: 'declined_post_response',
+                    attempted: false,
+                    initialFactCount: 0,
+                    addedFactCount: 0,
+                    widenedEntityHints: [],
+                    fallbackTerms: [],
+                    reason: 'post_response_closeout',
+                    note: 'Refinement is gated off on post-response attends.',
+                },
+                // A5: attendant tool plan is gated off on post-response for
+                // the same reason. Surfaced as an empty plan so hosts can
+                // safely destructure the field on every attend response.
+                attendantToolPlan: {
+                    proposed: [],
+                    basis: 'empty',
+                    note: 'Attendant tool plan is gated off on post-response attends.',
+                },
             };
         }
 
@@ -4767,6 +5110,30 @@ If no durable facts can be extracted, return an empty array: [].`,
                 // coincides with "no new memory needed, just keep working"
                 // turns, which is exactly when the host needs the nudge.
                 autoCheckpointSignal,
+                // A3: memory not needed → no retrieval ran → refinement is
+                // "not_needed" by definition. Field echoed for shape parity.
+                refinementPass: {
+                    outcome: 'not_needed',
+                    attempted: false,
+                    initialFactCount: 0,
+                    addedFactCount: 0,
+                    widenedEntityHints: [],
+                    fallbackTerms: [],
+                    reason: 'memory_not_needed',
+                    note: 'Attend declined memory injection; no refinement pass required.',
+                },
+                // A5: attendant tool plan can still populate on the not-needed
+                // path when entity hints exist — the host might still benefit
+                // from a follow-up walk even when attend didn't inject facts.
+                // Pure helper so no latency concern.
+                attendantToolPlan: planAttendantToolCalls({
+                    phase,
+                    entityHints: effectiveEntityHints,
+                    initialFactCount: 0,
+                    sessionObjective: this.brief?.sessionObjective ?? null,
+                    drift,
+                    briefHasEntities: (this.brief?.watchedEntities?.length ?? 0) > 0,
+                }),
             };
         }
 
@@ -4811,6 +5178,111 @@ If no durable facts can be extracted, return an empty array: [].`,
             recoveryKeys: postCompactionRecoveryKeys.length > 0 ? postCompactionRecoveryKeys : undefined,
             ledgerContext: input.ledgerContext,
         });
+
+        // A3: iterative exploration — bounded refinement pass when initial
+        // retrieval came back empty but attend decided memory was needed.
+        // Widens entity hints by stripping the key segment (keeping entity
+        // type + id), then runs one extra observe() call. Pure-helper plan
+        // is computed first so we can record the decline reason when we
+        // choose not to retry. Gated off on post-response above via the
+        // post-response return. Max 1 extra retrieval call.
+        let refinementPass: RefinementPass | undefined;
+        let augmentedObservedFacts = observed.facts;
+        let augmentedObservedTotalFound = observed.totalFound;
+        const initialObservedCount = observed.facts.length;
+        if (initialObservedCount === 0) {
+            const refinementPlan = planRefinementPass({
+                initialFactCount: initialObservedCount,
+                decisionNeeded: decision.needed,
+                phase,
+                entityHints: allObserveEntityHints,
+                latestMessage,
+            });
+            refinementPass = refinementPlan;
+            if (refinementPlan.attempted && refinementPlan.widenedEntityHints.length > 0) {
+                // Retry uses the UNION of the original hints and widened hints.
+                // This preserves any specific entity hint supplied by the host
+                // (including pendingToolCall-derived entities) while adding
+                // broader prefixes so the vector search can hit a wider set.
+                const refinementRetryHints = Array.from(new Set([
+                    ...allObserveEntityHints,
+                    ...refinementPlan.widenedEntityHints,
+                ]));
+                try {
+                    const refined = await this.observe({
+                        currentContext: observationContext,
+                        maxFacts: effectiveMaxFacts,
+                        entityHints: refinementRetryHints,
+                        priorityKeys: expandContinuityPriorityKeys(Array.from(new Set([
+                            ...(mandatoryRecall.key ? [mandatoryRecall.key] : []),
+                            ...(this.advisoryLearningProfile?.priorityKeys ?? []),
+                            ...freshState.priorityKeys,
+                        ]))),
+                        skipContextFilter: forceInject,
+                        recoveryKeys: postCompactionRecoveryKeys.length > 0 ? postCompactionRecoveryKeys : undefined,
+                        ledgerContext: input.ledgerContext,
+                    });
+                    if (refined.facts.length > 0) {
+                        augmentedObservedFacts = refined.facts;
+                        augmentedObservedTotalFound = refined.totalFound;
+                        refinementPass = {
+                            ...refinementPlan,
+                            outcome: 'attempted_added',
+                            addedFactCount: refined.facts.length,
+                            note: `Refinement pass added ${refined.facts.length} fact(s) via widened entity hints (${refinementPlan.widenedEntityHints.join(', ')}).`,
+                        };
+                    } else {
+                        refinementPass = {
+                            ...refinementPlan,
+                            outcome: 'attempted_empty',
+                            addedFactCount: 0,
+                            note: `Refinement pass with widened entity hints (${refinementPlan.widenedEntityHints.join(', ')}) still returned 0 facts.`,
+                        };
+                    }
+                } catch (err) {
+                    // Refinement must never crash the attend call. If the
+                    // retry observe blows up, record the decline and press on.
+                    refinementPass = {
+                        ...refinementPlan,
+                        outcome: 'declined_no_hints',
+                        attempted: false,
+                        addedFactCount: 0,
+                        reason: `refinement_retry_threw: ${err instanceof Error ? err.message : String(err)}`,
+                        note: 'Refinement pass aborted due to retry error; initial empty result stands.',
+                    };
+                }
+            }
+        } else {
+            refinementPass = {
+                outcome: 'not_needed',
+                attempted: false,
+                initialFactCount: initialObservedCount,
+                addedFactCount: 0,
+                widenedEntityHints: [],
+                fallbackTerms: [],
+                reason: 'initial_pass_returned_facts',
+                note: 'No refinement pass required.',
+            };
+        }
+
+        // A5: tool-using Attendant (planned). Derive the proposed follow-up
+        // tool calls from current brief state + retrieval outcome + drift.
+        // Pure and deterministic — the Attendant does not execute them.
+        const attendantToolPlan: AttendantToolPlan = planAttendantToolCalls({
+            phase,
+            entityHints: allObserveEntityHints,
+            initialFactCount: augmentedObservedFacts.length,
+            sessionObjective: this.brief?.sessionObjective ?? null,
+            drift,
+            briefHasEntities: (this.brief?.watchedEntities?.length ?? 0) > 0,
+        });
+
+        // Replace observed.facts in the downstream pipeline with the
+        // augmented (possibly refined) facts. observed.totalFound is only
+        // used for debug metadata, so we substitute both via local aliases
+        // used directly below instead of mutating the upstream object.
+        (observed as { facts: typeof augmentedObservedFacts }).facts = augmentedObservedFacts;
+        (observed as { totalFound: number }).totalFound = augmentedObservedTotalFound;
 
         // Remap facts from personal recall fallback entities to the canonical personal entity.
         // E.g. if person/user is a legacy alias for user/main, surface facts as user/main/<key>.
@@ -5003,6 +5475,16 @@ If no durable facts can be extracted, return an empty array: [].`,
             // the top and threaded here so hosts see it in the same reply
             // as any injected facts.
             autoCheckpointSignal,
+            // A3: refinement pass outcome — describes whether the Attendant
+            // ran a bounded retrieval retry when the initial pass was empty.
+            // Always populated on the main success path so hosts can log why
+            // retrieval was OR was not re-tried. Pure-descriptive metadata.
+            refinementPass,
+            // A5: planned Attendant tool calls — a small list of follow-up
+            // tool calls the Attendant would run if it had an execution
+            // budget. Deterministic, not executed. Hosts can surface the
+            // plan to the user or feed it to compliance scoring.
+            attendantToolPlan,
         };
         if (input.suppressEvents !== true) {
             getStaffEventEmitter().emit({
