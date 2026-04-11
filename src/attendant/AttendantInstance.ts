@@ -34,6 +34,7 @@ import {
 import { registerSharedStateInvalidationObserver } from '../lib/sharedStateInvalidation';
 import { assignStructuredFactIds } from '../lib/hostMemoryFormatting';
 import { planCouncilConsultation, type CouncilConsultationPlan } from '../staff/council';
+import { planSubTurnLoop, type SubTurnLoopPlan } from '../staff/subTurnLoop';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -572,6 +573,11 @@ export interface AttendInput extends ObserveInput {
     phase?: 'pre-response' | 'post-response' | 'mid-turn';
     pendingToolCall?: PendingToolCall;
     toolResult?: ToolResultPayload;
+    // B8 M6: partial assistant response carried on a mid-turn attend so the
+    // Attendant can re-score its own in-progress output against memory and
+    // plan a bounded sub-turn retrieval retry. Only inspected when
+    // phase='mid-turn'; ignored on pre-response and post-response.
+    partialResponse?: string;
 }
 
 export interface SessionCheckpointInput extends AgentContext {
@@ -657,6 +663,13 @@ export interface AttendResult extends ObserveResult {
     // council mode were executed. Proposal only, never executed here.
     // Absent on post-response.
     councilConsultationPlan?: CouncilConsultationPlan;
+    // B8 M6: sub-turn reasoning loop plan — when a mid-turn attend carries
+    // a partial assistant response, the Attendant re-scores that partial
+    // text against the baseline retrieval and decides whether to fire one
+    // bounded extra observe() call with broadened hints harvested from the
+    // partial. Pure plan + at most one retry; deterministic. Always echoed
+    // on mid-turn; decline outcomes echoed on pre-response and post-response.
+    subTurnLoopPlan?: SubTurnLoopPlan;
 }
 
 export interface ToolCallGuidance {
@@ -4980,6 +4993,20 @@ If no durable facts can be extracted, return an empty array: [].`,
                     outcome: 'no_context',
                     budgetMax: 0,
                 },
+                // B8 M6: sub-turn reasoning loop is gated off on post-response.
+                // Field echoed as a declined shell for destructure parity.
+                subTurnLoopPlan: {
+                    outcome: 'declined_post_response',
+                    attempted: false,
+                    partialResponseLength: 0,
+                    initialFactCount: 0,
+                    addedFactCount: 0,
+                    rescoreTokens: [],
+                    proposedHints: [],
+                    budgetMax: 0,
+                    reason: 'post_response_closeout',
+                    note: 'Sub-turn loop is gated off on post-response attends.',
+                },
             };
         }
 
@@ -5160,6 +5187,17 @@ If no durable facts can be extracted, return an empty array: [].`,
                         lowConfidenceCount: 0,
                     },
                 }),
+                // B8 M6: sub-turn loop plan populated even on the not-needed
+                // path — the helper will decline cleanly because no retrieval
+                // ran (initialFactCount=0) and, on non-mid-turn phases, the
+                // phase gate fires first. Pure helper so no latency concern.
+                subTurnLoopPlan: planSubTurnLoop({
+                    phase,
+                    partialResponse: input.partialResponse,
+                    latestMessage,
+                    originalEntityHints: effectiveEntityHints,
+                    initialFactCount: 0,
+                }),
             };
         }
 
@@ -5289,6 +5327,84 @@ If no durable facts can be extracted, return an empty array: [].`,
                 reason: 'initial_pass_returned_facts',
                 note: 'No refinement pass required.',
             };
+        }
+
+        // B8 M6: sub-turn reasoning loop. When the caller passed a partial
+        // assistant response on a mid-turn attend, re-score that partial
+        // against the baseline retrieval and decide whether to fire ONE
+        // bounded extra observe() call with broadened hints harvested from
+        // the partial text. This is A3's refinement pattern re-applied on
+        // response progress rather than initial-pass emptiness. Pure plan
+        // + at most one retry; same union-of-original+proposed hint fix as
+        // B6's refinement retry above. Gates ensure it only fires on
+        // mid-turn with a non-trivial partial response carrying novel
+        // tokens or type/id patterns beyond the baseline.
+        const subTurnInitialCount = augmentedObservedFacts.length;
+        let subTurnLoopPlan: SubTurnLoopPlan = planSubTurnLoop({
+            phase,
+            partialResponse: input.partialResponse,
+            latestMessage,
+            originalEntityHints: allObserveEntityHints,
+            initialFactCount: subTurnInitialCount,
+        });
+        if (subTurnLoopPlan.attempted && subTurnLoopPlan.proposedHints.length > 0) {
+            // Retry uses the UNION of allObserveEntityHints and the
+            // sub-turn proposed hints — same preservation fix as B6 so a
+            // specific host-supplied hint is not dropped when the sub-turn
+            // widens with patterns harvested from the partial response.
+            const subTurnRetryHints = Array.from(new Set([
+                ...allObserveEntityHints,
+                ...subTurnLoopPlan.proposedHints,
+            ]));
+            try {
+                const subTurnObserved = await this.observe({
+                    currentContext: observationContext,
+                    maxFacts: effectiveMaxFacts,
+                    entityHints: subTurnRetryHints,
+                    priorityKeys: expandContinuityPriorityKeys(Array.from(new Set([
+                        ...(mandatoryRecall.key ? [mandatoryRecall.key] : []),
+                        ...(this.advisoryLearningProfile?.priorityKeys ?? []),
+                        ...freshState.priorityKeys,
+                    ]))),
+                    skipContextFilter: forceInject,
+                    recoveryKeys: postCompactionRecoveryKeys.length > 0 ? postCompactionRecoveryKeys : undefined,
+                    ledgerContext: input.ledgerContext,
+                });
+                // Merge new facts that weren't already in augmentedObservedFacts.
+                // Uses entityKey as the dedup key, same as the mid-turn
+                // filter below. A net-new fact count of 0 means the retry
+                // resolved the same facts we already had — treat as empty.
+                const existingKeys = new Set(augmentedObservedFacts.map((f) => f.entityKey));
+                const netNewFacts = subTurnObserved.facts.filter((f) => !existingKeys.has(f.entityKey));
+                if (netNewFacts.length > 0) {
+                    augmentedObservedFacts = [...augmentedObservedFacts, ...netNewFacts];
+                    augmentedObservedTotalFound = augmentedObservedTotalFound + netNewFacts.length;
+                    subTurnLoopPlan = {
+                        ...subTurnLoopPlan,
+                        outcome: 'attempted_added',
+                        addedFactCount: netNewFacts.length,
+                        note: `Sub-turn loop added ${netNewFacts.length} fact(s) via proposed hints (${subTurnLoopPlan.proposedHints.join(', ')}).`,
+                    };
+                } else {
+                    subTurnLoopPlan = {
+                        ...subTurnLoopPlan,
+                        outcome: 'attempted_empty',
+                        addedFactCount: 0,
+                        note: `Sub-turn loop with proposed hints (${subTurnLoopPlan.proposedHints.join(', ')}) returned no net-new facts.`,
+                    };
+                }
+            } catch (err) {
+                // Sub-turn loop must never crash attend. Record a declined
+                // outcome with the error and continue.
+                subTurnLoopPlan = {
+                    ...subTurnLoopPlan,
+                    outcome: 'attempted_empty',
+                    attempted: false,
+                    addedFactCount: 0,
+                    reason: `sub_turn_retry_threw: ${err instanceof Error ? err.message : String(err)}`,
+                    note: 'Sub-turn loop aborted due to retry error; baseline retrieval stands.',
+                };
+            }
         }
 
         // A5: tool-using Attendant (planned). Derive the proposed follow-up
@@ -5532,6 +5648,13 @@ If no durable facts can be extracted, return an empty array: [].`,
             // the Attendant would consult if council mode were live.
             // Pure, deterministic, never executed here.
             councilConsultationPlan,
+            // B8 M6: sub-turn reasoning loop plan — when a mid-turn attend
+            // carries a partial assistant response, the Attendant re-scores
+            // that partial against baseline retrieval and fires at most one
+            // extra observe() call with broadened hints harvested from the
+            // partial text. attempted=false / decline outcomes are echoed
+            // on non-mid-turn phases so hosts can safely destructure.
+            subTurnLoopPlan,
         };
         if (input.suppressEvents !== true) {
             getStaffEventEmitter().emit({
