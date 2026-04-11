@@ -375,39 +375,252 @@ async function maybeBootstrapApiKey(): Promise<void> {
     }
 }
 
-server = app.listen(PORT, () => {
-    console.log(`\nIranti API running on port ${PORT}`);
-    console.log(`Health: http://localhost:${PORT}/health`);
-    console.log(`Provider: ${process.env.LLM_PROVIDER ?? 'mock'}\n`);
-    console.log(`Escalation root: ${getEscalationPaths().root}`);
-    console.log(`Request log file: ${REQUEST_LOG_FILE}\n`);
-    void maybeBootstrapApiKey();
-    if (RUNTIME_AUTHORITY.managed && INSTANCE_RUNTIME_FILE) {
-        void persistRuntimeState('running').then(() => {
-            markRuntimeMetadataHealth(true, 'runtime metadata written successfully');
-            if (runtimeHeartbeat) clearInterval(runtimeHeartbeat);
-            runtimeHeartbeat = setInterval(() => {
-                void persistRuntimeState('running').catch((err) => {
-                    markRuntimeMetadataHealth(false, err instanceof Error ? err.message : String(err));
-                    console.error('[runtime] failed to refresh runtime state:', err);
-                });
-            }, 15000);
-            runtimeHeartbeat.unref();
-        }).catch((err) => {
-            markRuntimeMetadataHealth(false, err instanceof Error ? err.message : String(err));
-            console.error('[runtime] failed to write runtime state:', err);
-            terminateStartup(1);
-        });
+/**
+ * POST the bootstrap callback with the retry schedule from the ICC
+ * tenant-bootstrap-contract: [1s, 2s, 5s, 15s, 60s] — total wall-clock
+ * ceiling ~83s, which sits just under the control plane cron worker's
+ * 120s waitForMachineState('started') timeout.
+ *
+ * Retry policy (per contract):
+ *   - 2xx        → return
+ *   - 4xx        → throw immediately, do NOT retry (control plane made
+ *                   a permanent decision — retrying cannot succeed)
+ *   - 5xx        → retry with backoff
+ *   - network    → retry with backoff
+ *   - retries exhausted → throw the last error
+ */
+async function postCloudBootstrapCallback(
+    callbackUrl: string,
+    body: {
+        workspaceId: string;
+        bootstrapToken: string;
+        apiKey: string;
+        apiKeyPrefix?: string;
+        apiKeyLabel?: string;
+    },
+): Promise<{ status: number; responseBody: unknown }> {
+    const backoffMs = [1_000, 2_000, 5_000, 15_000, 60_000];
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt < backoffMs.length; attempt++) {
+        let status = 0;
+        let responseBody: unknown = null;
+        let networkError: Error | null = null;
+
+        try {
+            const res = await fetch(callbackUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            status = res.status;
+            try {
+                responseBody = await res.json();
+            } catch {
+                try {
+                    responseBody = await res.text();
+                } catch {
+                    responseBody = null;
+                }
+            }
+        } catch (err) {
+            networkError = err instanceof Error ? err : new Error(String(err));
+        }
+
+        // 2xx → success, return immediately
+        if (status >= 200 && status < 300) {
+            return { status, responseBody };
+        }
+
+        // 4xx → terminal. Per contract, retrying cannot succeed.
+        if (status >= 400 && status < 500) {
+            throw new Error(
+                `Cloud bootstrap callback returned ${status}: ${JSON.stringify(responseBody)}. Terminal per contract — will not retry.`,
+            );
+        }
+
+        // 5xx or network error → retry with backoff
+        lastError = networkError ?? new Error(
+            `Cloud bootstrap callback returned ${status}: ${JSON.stringify(responseBody)}`,
+        );
+
+        const delay = backoffMs[attempt];
+        const attemptsLeft = backoffMs.length - attempt - 1;
+        console.error(
+            `[cloud-bootstrap] Attempt ${attempt + 1}/${backoffMs.length} failed: ${lastError.message}. Retrying in ${delay}ms (${attemptsLeft} attempts left).`,
+        );
+        await new Promise((r) => setTimeout(r, delay));
     }
 
-    void vectorBackendMonitor.probe('startup');
-    vectorHealthInterval = vectorBackendMonitor.start();
-});
+    throw lastError ?? new Error('Cloud bootstrap callback failed after exhausting retries');
+}
 
-server.on('error', (err) => {
-    console.error('[runtime] API server failed to start:', err);
-    terminateStartup(1);
-});
+/**
+ * Cloud bootstrap — the Iranti Collaborative Cloud (ICC) path.
+ *
+ * When this iranti-server instance runs inside an ICC-provisioned Fly
+ * machine, the cloud drainer injects three env vars at machine creation
+ * time: IRANTI_WORKSPACE_ID, IRANTI_BOOTSTRAP_TOKEN, IRANTI_CLOUD_CALLBACK_URL.
+ * On first boot we:
+ *
+ *   1. Mint a workspace API key into the LOCAL registry (knowledgeEntry
+ *      table in this tenant's own Postgres). Subsequent authenticated
+ *      requests from the end user will validate against the sha256+pepper
+ *      hash stored locally.
+ *
+ *   2. POST the plaintext key to the control plane's bootstrap-callback
+ *      route, along with the workspaceId + bootstrapToken (one-time
+ *      bearer). The control plane argon2id-hashes it for display in the
+ *      user's dashboard, then marks the TenantInstance row as
+ *      bootstrapped and clears the bootstrapToken.
+ *
+ * Contract spec: iranti-cloud/docs/tenant-bootstrap-contract.md.
+ *
+ * Return value:
+ *   { ran: true }  — cloud mode activated (either freshly bootstrapped
+ *                    OR skipped because a prior attempt already ran on
+ *                    this machine — the "Fly restarted us" case).
+ *   { ran: false } — cloud env vars absent. Caller should fall back to
+ *                    the legacy log-grep path (maybeBootstrapApiKey).
+ *
+ * Throws on:
+ *   - 4xx from the callback (terminal per contract)
+ *   - 5xx/network errors exhausting all retries
+ *   - Any DB error during local key minting
+ *
+ * The caller must exit the process on throw so Fly restarts the machine.
+ * After enough restart attempts the ICC cron worker will mark the
+ * provisioning job FAILED and the user can retry via the dashboard.
+ */
+async function maybeRunCloudBootstrap(): Promise<{ ran: boolean }> {
+    const workspaceId = process.env.IRANTI_WORKSPACE_ID?.trim();
+    const bootstrapToken = process.env.IRANTI_BOOTSTRAP_TOKEN?.trim();
+    const callbackUrl = process.env.IRANTI_CLOUD_CALLBACK_URL?.trim();
+
+    if (!workspaceId || !bootstrapToken || !callbackUrl) {
+        return { ran: false };
+    }
+
+    console.log(`[cloud-bootstrap] Cloud mode detected — workspace=${workspaceId}`);
+
+    // Idempotency guard: if a cloud_bootstrap key already exists in the
+    // local registry, this machine has already been through this flow.
+    // Skip entirely — the control plane's bootstrapToken has been
+    // cleared server-side, so calling it again would 401 us into a
+    // crash loop.
+    //
+    // Using the API key registry itself as the durability signal
+    // (instead of a /data/bootstrap_done marker file) means this works
+    // on Fly machines without a persistent volume mount. The registry
+    // lives in the tenant's own Postgres, which Fly persists across
+    // machine restarts via its managed volume.
+    const existing = await listApiKeys();
+    const prior = existing.find(
+        (k) => k.keyId === 'cloud_bootstrap' && k.isActive,
+    );
+    if (prior) {
+        console.log(
+            `[cloud-bootstrap] cloud_bootstrap key already exists in registry (owner=${prior.owner}) — machine-restart scenario, skipping callback.`,
+        );
+        return { ran: true };
+    }
+
+    console.log(`[cloud-bootstrap] First boot — minting API key for workspace ${workspaceId}`);
+
+    // Mint locally FIRST, then call the control plane. If we crashed
+    // between the control plane acking and the local write, the user's
+    // workspace would be listed as provisioned in their dashboard but
+    // this server would have no key to validate their requests against.
+    // Local-first ordering ensures the tenant side is always at least
+    // as far along as the control plane thinks it is.
+    const { token } = await createOrRotateApiKey({
+        keyId: 'cloud_bootstrap',
+        owner: workspaceId,
+        scopes: [],
+        description: `Bootstrap key minted at first boot for ICC workspace ${workspaceId}.`,
+    });
+
+    console.log(`[cloud-bootstrap] Key minted. POSTing to ${callbackUrl}`);
+
+    const result = await postCloudBootstrapCallback(callbackUrl, {
+        workspaceId,
+        bootstrapToken,
+        apiKey: token,
+        apiKeyPrefix: token.slice(0, 8),
+        apiKeyLabel: 'cloud bootstrap',
+    });
+
+    console.log(
+        `[cloud-bootstrap] ✓ Callback succeeded (status=${result.status}). Workspace ${workspaceId} is live.`,
+    );
+    return { ran: true };
+}
+
+// Wrap startup in an async IIFE so we can await cloud bootstrap BEFORE
+// accepting HTTP traffic. In ICC mode, failing bootstrap must crash the
+// machine so Fly retries and the cron worker eventually marks the
+// provisioning job FAILED — accepting traffic on a partially-bootstrapped
+// machine would leak an orphan workspace that the control plane doesn't
+// know about and has no API key for.
+//
+// In non-ICC mode (cloud env vars absent), maybeRunCloudBootstrap
+// returns { ran: false } immediately and we fall through to the legacy
+// log-grep path inside the listen callback. That path remains
+// fire-and-forget so operator-run deployments (where a human greps the
+// key out of fly logs via provision.sh) behave exactly as before.
+void (async () => {
+    let cloudBootstrapRan = false;
+    try {
+        const cloudResult = await maybeRunCloudBootstrap();
+        cloudBootstrapRan = cloudResult.ran;
+    } catch (err) {
+        console.error('[cloud-bootstrap] ✗ FAILED — cannot start server.');
+        console.error('[cloud-bootstrap]', err instanceof Error ? err.message : String(err));
+        console.error(
+            '[cloud-bootstrap] See iranti-cloud/docs/tenant-bootstrap-contract.md for recovery semantics.',
+        );
+        process.exit(1);
+    }
+
+    server = app.listen(PORT, () => {
+        console.log(`\nIranti API running on port ${PORT}`);
+        console.log(`Health: http://localhost:${PORT}/health`);
+        console.log(`Provider: ${process.env.LLM_PROVIDER ?? 'mock'}\n`);
+        console.log(`Escalation root: ${getEscalationPaths().root}`);
+        console.log(`Request log file: ${REQUEST_LOG_FILE}\n`);
+        // Legacy log-grep bootstrap — only fires when cloud mode didn't
+        // activate, preserving the old IRANTI_BOOTSTRAP=true behaviour
+        // for non-ICC deployments.
+        if (!cloudBootstrapRan) {
+            void maybeBootstrapApiKey();
+        }
+        if (RUNTIME_AUTHORITY.managed && INSTANCE_RUNTIME_FILE) {
+            void persistRuntimeState('running').then(() => {
+                markRuntimeMetadataHealth(true, 'runtime metadata written successfully');
+                if (runtimeHeartbeat) clearInterval(runtimeHeartbeat);
+                runtimeHeartbeat = setInterval(() => {
+                    void persistRuntimeState('running').catch((err) => {
+                        markRuntimeMetadataHealth(false, err instanceof Error ? err.message : String(err));
+                        console.error('[runtime] failed to refresh runtime state:', err);
+                    });
+                }, 15000);
+                runtimeHeartbeat.unref();
+            }).catch((err) => {
+                markRuntimeMetadataHealth(false, err instanceof Error ? err.message : String(err));
+                console.error('[runtime] failed to write runtime state:', err);
+                terminateStartup(1);
+            });
+        }
+
+        void vectorBackendMonitor.probe('startup');
+        vectorHealthInterval = vectorBackendMonitor.start();
+    });
+
+    server.on('error', (err) => {
+        console.error('[runtime] API server failed to start:', err);
+        terminateStartup(1);
+    });
+})();
 
 async function shutdownRuntime(signal: string): Promise<void> {
     if (runtimeHeartbeat) {
