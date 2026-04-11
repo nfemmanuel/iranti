@@ -1,0 +1,162 @@
+name: Publish Container Image
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Builds the iranti-server container image and pushes it to GitHub Container
+# Registry (ghcr.io/nfemmanuel/iranti-server).
+#
+# This is the image that Iranti Collaborative Cloud (ICC) sibling repo pulls
+# to run tenant workspaces on Fly.io. See iranti-cloud's
+# src/lib/provisioning/drainer.ts — specifically `getTenantImage()` — for the
+# consumer side.
+#
+# Triggers:
+#
+#   1. release.published — shipped version tags (v0.3.30 etc). Produces:
+#        ghcr.io/nfemmanuel/iranti-server:latest
+#        ghcr.io/nfemmanuel/iranti-server:<version>    (e.g. 0.3.30)
+#        ghcr.io/nfemmanuel/iranti-server:<major.minor> (e.g. 0.3)
+#
+#   2. workflow_dispatch — manual trigger, useful for:
+#        - shipping the very first image before a release ever happened
+#        - rebuilding after a Dockerfile fix without cutting a new release
+#
+#   3. push to main — every main commit produces an immutable `main` tag
+#      and a `sha-<short>` tag for traceability. This gives ICC a
+#      bleeding-edge channel to pull when doing drainer integration work,
+#      without waiting for a formal release cut.
+#
+# Why ghcr.io and not Docker Hub: GHCR is free for public images, uses the
+# repo's GITHUB_TOKEN for auth (no secret management), and inherits the
+# repo's visibility. Matches the publish-packages.yml provenance pattern we
+# already use for npm/pypi publishing.
+#
+# Why a single ubuntu-latest runner and not a matrix: iranti-server is
+# x86_64-only for now (no native deps that need ARM variants). If we ever
+# want ARM64, swap to `docker/setup-qemu-action` + buildx multi-platform.
+#
+# The image is publicly pullable by default. If that ever changes (private
+# registry, paid tier), ICC will need a registry token in its Fly app env
+# — but right now `docker pull ghcr.io/nfemmanuel/iranti-server:latest`
+# works with no auth.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Optional tag override (e.g. dev, beta). Leave empty for version tag.
+        required: false
+        type: string
+  push:
+    branches:
+      - main
+    # Only rebuild when something touching the image actually changes.
+    # Skipping README, test-only, and client SDK edits keeps the runner
+    # budget sane and ghcr from accruing useless tags.
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - package.json
+      - package-lock.json
+      - tsconfig.json
+      - prisma/schema.prisma
+      - prisma/migrations/**
+      - prisma.config.ts
+      - src/**
+      - scripts/**
+      - bin/**
+      - .github/workflows/publish-container.yml
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: nfemmanuel/iranti-server
+
+jobs:
+  build-and-push:
+    name: Build and push container image
+    runs-on: ubuntu-latest
+    permissions:
+      # `contents: read` — checkout the repo
+      # `packages: write` — push to GHCR (required, not default on push events)
+      # `id-token: write` — cosign/provenance attestation
+      contents: read
+      packages: write
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # Tag strategy:
+          #   - `latest`    on the default branch push and release
+          #   - `main`      on main pushes (bleeding edge)
+          #   - `sha-<7>`   on every push (immutable audit trail)
+          #   - `v0.3.30`   on release events (semver exact)
+          #   - `0.3.30`    on release events (semver exact, no v prefix)
+          #   - `0.3`       on release events (minor — auto-moves on each patch)
+          #   - `<input>`   when workflow_dispatch provides a tag
+          tags: |
+            type=ref,event=branch
+            type=raw,value=latest,enable=${{ github.event_name == 'release' }}
+            type=sha,format=short
+            type=semver,pattern={{version}},event=release
+            type=semver,pattern={{major}}.{{minor}},event=release
+            type=raw,value=${{ inputs.tag }},enable=${{ inputs.tag != '' }}
+          labels: |
+            org.opencontainers.image.title=iranti-server
+            org.opencontainers.image.description=Iranti memory server — tenant image for Iranti Collaborative Cloud
+            org.opencontainers.image.vendor=Iranti
+            org.opencontainers.image.licenses=AGPL-3.0-or-later
+            org.opencontainers.image.source=https://github.com/nfemmanuel/iranti
+            org.opencontainers.image.url=https://iranti.dev
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          # Always push on release + workflow_dispatch. On main pushes,
+          # push is also on (we want `main` and `sha-` tags available for
+          # ICC bleeding-edge pulls).
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Build cache from/to the registry itself — free cache layer,
+          # survives across runs, no separate storage.
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+          provenance: true
+          sbom: true
+
+      - name: Summarize published image
+        run: |
+          echo "### Published image" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.meta.outputs.tags }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Digest:** \`${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Pull with:" >> "$GITHUB_STEP_SUMMARY"
+          echo '```bash' >> "$GITHUB_STEP_SUMMARY"
+          echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
