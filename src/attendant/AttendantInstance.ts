@@ -591,12 +591,52 @@ export interface AttendResult extends ObserveResult {
     // M3: only populated when the mid-turn pressure gauge triggers a forced
     // write nudge (too many tool calls without a matching durable write).
     writeNudge?: WriteNudge;
+    // M4: only populated when the current message/context has drifted away
+    // from the declared (inferred) task by more than DRIFT_JACCARD_MIN.
+    // Absent in the healthy case — hosts should treat presence as a signal
+    // to confirm with the user or to force a reconvene via handshake().
+    drift?: DriftSignal;
 }
 
 export interface ToolCallGuidance {
     toolName: PendingToolCallName;
     derivedEntities: string[];
     factCount: number;
+    note: string;
+    // M1: skipTool with teeth — explicit, actionable skip decision.
+    // A2 surfaced advisory guidance; M1 turns it into a structured verdict
+    // the host can gate on programmatically instead of reading the note text.
+    // shouldSkip is true only when Iranti has stored facts that directly
+    // cover the tool target (factCount > 0 AND derivedEntities.length > 0).
+    // skipConfidence is the mean fact confidence (0..1) scaled from 0..100.
+    // skipReasonCode tags WHY skip was or was not recommended so the host
+    // can log and debug skip misses without string-matching notes.
+    shouldSkip: boolean;
+    skipConfidence: number;
+    skipReasonCode:
+        | 'facts_cover_target'         // shouldSkip=true
+        | 'no_facts_for_target'        // shouldSkip=false, facts empty but entities derived
+        | 'no_entities_derived'        // shouldSkip=false, tool args yielded no hints
+        | 'memory_not_needed';         // shouldSkip=false, early-return path (no memory at all)
+}
+
+// M4: drift detection — compares the current message/context against the
+// declared/inferred task and flags when the agent appears to have wandered
+// off. Hosts can surface this back to the user or force a task-shift
+// reconvene. Pure and optional: only populated when drift is detected.
+export interface DriftSignal {
+    detected: boolean;
+    // jaccard overlap of normalized tokens in (0..1). 1.0 means identical
+    // token sets, 0.0 means completely disjoint. Threshold is DRIFT_JACCARD_MIN.
+    overlap: number;
+    // tokens present in the current message but absent from the declared
+    // task — the likely "driving" topic of the new work.
+    drivingTokens: string[];
+    // tokens present in the declared task but absent from current context —
+    // what the agent has stopped talking about.
+    missingTokens: string[];
+    declaredTaskType: string;
+    // canned human-readable summary the host can forward verbatim.
     note: string;
 }
 
@@ -1621,6 +1661,157 @@ export function buildPlanProposal(
         note: signals.length > 1
             ? `Multiple plan signals detected (${signals.map((s) => s.signal).join(', ')}); surfaced ${topSignal} template by priority.`
             : undefined,
+    };
+}
+
+// ----------------------------------------------------------------------------
+// M1: skipTool with teeth — pure derivation of a structured skip verdict.
+// Inputs: derived entity hints, stored facts that matched those entities,
+// and whether the early-return "memory not needed" branch was taken.
+// Output: { shouldSkip, skipConfidence, skipReasonCode } ready to drop into
+// a ToolCallGuidance record.
+// ----------------------------------------------------------------------------
+
+export interface SkipVerdict {
+    shouldSkip: boolean;
+    skipConfidence: number;
+    skipReasonCode: ToolCallGuidance['skipReasonCode'];
+}
+
+// Confidence on FactInjection is stored 0..100 (see KnowledgeEntry). M1 surfaces
+// 0..1 to keep the field intuitive on the wire; the helper below scales once.
+export function deriveSkipVerdict(options: {
+    derivedEntities: readonly string[];
+    factConfidences: readonly number[];
+    memoryWasSkipped: boolean;
+}): SkipVerdict {
+    const { derivedEntities, factConfidences, memoryWasSkipped } = options;
+
+    if (memoryWasSkipped) {
+        // Early return path: decideMemoryNeed already said "no memory needed".
+        // We intentionally do NOT recommend a skip here — absence of facts is
+        // not evidence the tool call is redundant; it's evidence attend never
+        // looked. Hosts that want to skip on this path should gate on
+        // factCount, not on memoryWasSkipped.
+        return {
+            shouldSkip: false,
+            skipConfidence: 0,
+            skipReasonCode: 'memory_not_needed',
+        };
+    }
+
+    if (derivedEntities.length === 0) {
+        return {
+            shouldSkip: false,
+            skipConfidence: 0,
+            skipReasonCode: 'no_entities_derived',
+        };
+    }
+
+    if (factConfidences.length === 0) {
+        return {
+            shouldSkip: false,
+            skipConfidence: 0,
+            skipReasonCode: 'no_facts_for_target',
+        };
+    }
+
+    const mean = factConfidences.reduce((acc, c) => acc + c, 0) / factConfidences.length;
+    // Clamp to [0..100] before scaling to [0..1]; hostile inputs should not
+    // produce negative or >1 confidences on the wire.
+    const clamped = Math.max(0, Math.min(100, mean));
+    return {
+        shouldSkip: true,
+        skipConfidence: Math.round((clamped / 100) * 1000) / 1000,
+        skipReasonCode: 'facts_cover_target',
+    };
+}
+
+// ----------------------------------------------------------------------------
+// M4: drift detection — pure Jaccard overlap between the current
+// message/context and the declared (inferred) task type. Hosts can use the
+// returned DriftSignal to surface "you set out to do X, you're now doing Y"
+// to the user or to force a task-shift reconvene.
+// ----------------------------------------------------------------------------
+
+const DRIFT_MIN_MESSAGE_CHARS = 20;
+const DRIFT_JACCARD_MIN = 0.15;
+const DRIFT_TOKEN_STOP = new Set<string>([
+    'the', 'and', 'for', 'with', 'that', 'this', 'from', 'into', 'then', 'than',
+    'are', 'was', 'were', 'has', 'had', 'have', 'but', 'not', 'its', 'it\'s',
+    'you', 'your', 'our', 'their', 'them', 'they', 'who', 'what', 'when', 'where',
+    'why', 'how', 'all', 'any', 'each', 'one', 'two', 'new', 'old', 'can', 'will',
+    'should', 'would', 'could', 'just', 'also', 'now', 'still', 'yet', 'off', 'out',
+    'ok', 'okay', 'yeah', 'sure', 'keep', 'going', 'done',
+]);
+const DRIFT_MAX_DRIVING_TOKENS = 6;
+
+function tokenizeForDrift(text: string): Set<string> {
+    if (!text) return new Set();
+    const tokens = text
+        .toLowerCase()
+        .replace(/[^a-z0-9_\s]/g, ' ')
+        .split(/\s+/)
+        .filter((t) => t.length >= 3 && !DRIFT_TOKEN_STOP.has(t));
+    return new Set(tokens);
+}
+
+export function detectTaskDrift(
+    currentMessage: string,
+    currentContext: string,
+    declaredTaskType: string,
+): DriftSignal | undefined {
+    const combinedCurrent = `${currentMessage ?? ''} ${currentContext ?? ''}`.trim();
+    if (combinedCurrent.length < DRIFT_MIN_MESSAGE_CHARS) {
+        // Too little signal to make a judgment — stay silent.
+        return undefined;
+    }
+    if (!declaredTaskType || declaredTaskType.length < 3) {
+        return undefined;
+    }
+
+    const currentTokens = tokenizeForDrift(combinedCurrent);
+    const declaredTokens = tokenizeForDrift(declaredTaskType);
+
+    if (currentTokens.size === 0 || declaredTokens.size === 0) {
+        return undefined;
+    }
+
+    let intersectionSize = 0;
+    for (const t of currentTokens) {
+        if (declaredTokens.has(t)) intersectionSize += 1;
+    }
+    const unionSize = currentTokens.size + declaredTokens.size - intersectionSize;
+    const overlap = unionSize === 0 ? 0 : intersectionSize / unionSize;
+
+    if (overlap >= DRIFT_JACCARD_MIN) {
+        // No drift detected — return undefined so the field is absent on the
+        // wire for the common healthy case.
+        return undefined;
+    }
+
+    const drivingTokens: string[] = [];
+    for (const t of currentTokens) {
+        if (!declaredTokens.has(t)) {
+            drivingTokens.push(t);
+            if (drivingTokens.length >= DRIFT_MAX_DRIVING_TOKENS) break;
+        }
+    }
+    const missingTokens: string[] = [];
+    for (const t of declaredTokens) {
+        if (!currentTokens.has(t)) {
+            missingTokens.push(t);
+            if (missingTokens.length >= DRIFT_MAX_DRIVING_TOKENS) break;
+        }
+    }
+
+    return {
+        detected: true,
+        overlap: Math.round(overlap * 1000) / 1000,
+        drivingTokens,
+        missingTokens,
+        declaredTaskType,
+        note: `Task drift detected: current context overlaps declared task by ${(overlap * 100).toFixed(1)}%. Driving topic tokens: ${drivingTokens.slice(0, 4).join(', ') || '(none)'}.`,
     };
 }
 
@@ -4011,6 +4202,16 @@ If no durable facts can be extracted, return an empty array: [].`,
         // proceeding with any more tool calls.
         const writeNudge = this.maybeBuildWriteNudge() ?? undefined;
 
+        // M4: drift detection — compare the current message/context against
+        // the declared (inferred) task type in the brief. Only fires on
+        // pre-response and mid-turn; post-response is the closeout for a
+        // reply and drift there is less actionable. Computed once near the
+        // top so every return path can echo the same value without re-running
+        // the tokenization. Pure — no instance state reads beyond brief.
+        const drift: DriftSignal | undefined = (phase !== 'post-response' && this.brief?.inferredTaskType)
+            ? detectTaskDrift(latestMessage, currentContext, this.brief.inferredTaskType)
+            : undefined;
+
         let watchedEntitiesChanged = this.updateWatchedEntities(effectiveEntityHints);
         const freshState = await this.detectRelevantFreshState(effectiveEntityHints, latestMessage);
         const observationContext = currentContext.trim().length > 0 ? currentContext : latestMessage;
@@ -4082,6 +4283,9 @@ If no durable facts can be extracted, return an empty array: [].`,
                 // calls without a host-initiated write, the agent should see the
                 // draft facts before compliance is persisted.
                 writeNudge,
+                // M4: drift is gated on phase !== post-response above, so this
+                // will always be undefined here. Field present for shape parity.
+                drift,
             };
         }
 
@@ -4156,12 +4360,27 @@ If no durable facts can be extracted, return an empty array: [].`,
             // passed pendingToolCall, echo the derived entities so the agent
             // can see that attend() was tool-call-aware on this call.
             const skipGuidance: ToolCallGuidance | undefined = input.pendingToolCall
-                ? {
-                    toolName: input.pendingToolCall.name,
-                    derivedEntities: toolCallHints,
-                    factCount: 0,
-                    note: `Memory was not deemed necessary for this ${input.pendingToolCall.name} call. Proceed.`,
-                }
+                ? (() => {
+                    // M1: derive a structured skip verdict. On the "memory not
+                    // needed" early-return path, the verdict is always
+                    // shouldSkip=false/memory_not_needed because we never
+                    // actually looked up facts — absence of retrieval is not
+                    // evidence the tool is redundant.
+                    const verdict = deriveSkipVerdict({
+                        derivedEntities: toolCallHints,
+                        factConfidences: [],
+                        memoryWasSkipped: true,
+                    });
+                    return {
+                        toolName: input.pendingToolCall.name,
+                        derivedEntities: toolCallHints,
+                        factCount: 0,
+                        note: `Memory was not deemed necessary for this ${input.pendingToolCall.name} call. Proceed.`,
+                        shouldSkip: verdict.shouldSkip,
+                        skipConfidence: verdict.skipConfidence,
+                        skipReasonCode: verdict.skipReasonCode,
+                    };
+                })()
                 : undefined;
             return {
                 shouldInject: matchedUserRules.length > 0,
@@ -4201,6 +4420,10 @@ If no durable facts can be extracted, return an empty array: [].`,
                 // needed:true above and this branch is skipped. This field stays
                 // wired for shape consistency and for tests that simulate state.
                 writeNudge,
+                // M4: drift may fire here even when attend decides no memory is
+                // needed — the agent may be drifting off-task without requiring
+                // memory injection. Surface it so the host can reconvene.
+                drift,
             };
         }
 
@@ -4360,16 +4583,40 @@ If no durable facts can be extracted, return an empty array: [].`,
         // facts preempted the lookup. Only populated when a tool call was
         // actually passed — no allocation overhead for the common path.
         const toolCallGuidance: ToolCallGuidance | undefined = input.pendingToolCall
-            ? {
-                toolName: input.pendingToolCall.name,
-                derivedEntities: toolCallHints,
-                factCount: structuredFacts.length,
-                note: toolCallHints.length === 0
-                    ? `No entity hints derived from ${input.pendingToolCall.name} args. Memory check ran on message/context only.`
-                    : structuredFacts.length > 0
-                        ? `Iranti surfaced ${structuredFacts.length} stored fact(s) for this ${input.pendingToolCall.name} call. Read them before running the tool — you may not need to run it.`
-                        : `No stored facts matched the ${input.pendingToolCall.name} target. Proceed with the tool call.`,
-            }
+            ? (() => {
+                // M1: derive structured skip verdict. Scored against only the
+                // facts that actually matched the derived entity hints — not
+                // the wider structuredFacts set — so unrelated context-level
+                // facts don't falsely trigger a skip recommendation.
+                const entityCovered = toolCallHints.length > 0
+                    ? structuredFacts.filter((fact) => {
+                        if (!fact?.entityKey) return false;
+                        return toolCallHints.some((hint) => fact.entityKey.startsWith(`${hint}/`) || fact.entityKey === hint);
+                    })
+                    : [];
+                const factConfidences = entityCovered.map((fact) => fact.confidence ?? 0);
+                const verdict = deriveSkipVerdict({
+                    derivedEntities: toolCallHints,
+                    factConfidences,
+                    memoryWasSkipped: false,
+                });
+                const skipNote = verdict.shouldSkip
+                    ? `Iranti surfaced ${entityCovered.length} stored fact(s) for this ${input.pendingToolCall.name} target. shouldSkip=true (confidence ${verdict.skipConfidence}). Read the facts before running the tool — you may not need to run it.`
+                    : toolCallHints.length === 0
+                        ? `No entity hints derived from ${input.pendingToolCall.name} args. Memory check ran on message/context only.`
+                        : entityCovered.length === 0
+                            ? `No stored facts matched the ${input.pendingToolCall.name} target. Proceed with the tool call.`
+                            : `Facts surfaced but shouldSkip=false (reason=${verdict.skipReasonCode}). Proceed with the tool call.`;
+                return {
+                    toolName: input.pendingToolCall.name,
+                    derivedEntities: toolCallHints,
+                    factCount: entityCovered.length,
+                    note: skipNote,
+                    shouldSkip: verdict.shouldSkip,
+                    skipConfidence: verdict.skipConfidence,
+                    skipReasonCode: verdict.skipReasonCode,
+                };
+            })()
             : undefined;
 
         const attendResult = {
@@ -4403,6 +4650,11 @@ If no durable facts can be extracted, return an empty array: [].`,
             // draft facts from recentAutowriteBatches so the agent can review
             // them before the next tool call.
             writeNudge,
+            // M4: drift signal — populated only when the current message/context
+            // has diverged from the declared (inferred) task by more than
+            // DRIFT_JACCARD_MIN. Computed once near the top and threaded here
+            // so hosts can surface it alongside injected facts in one reply.
+            drift,
         };
         if (input.suppressEvents !== true) {
             getStaffEventEmitter().emit({

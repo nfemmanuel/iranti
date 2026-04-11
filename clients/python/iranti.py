@@ -28,7 +28,7 @@ import requests
 from typing import Any, Optional
 from dataclasses import dataclass, field
 
-__version__ = "0.3.26"
+__version__ = "0.3.27"
 
 
 def _normalize_issue_token(value: str) -> str:
