@@ -93,6 +93,10 @@ const TOOL_COST_WRITE_NUDGE_THRESHOLD = 5;
 // concrete draft facts instead of a vague "write something" reminder.
 const RECENT_AUTOWRITE_BUFFER_LIMIT = 12;
 const AUTOWRITE_SOURCE_TAG = 'attendant_autowrite';
+// M7: response file-change autowrite — constants governing the scan pass
+// that runs at post-response to extract file paths from the agent's reply.
+const RESPONSE_FILE_CAPTURE_MIN_CHARS = 50;
+const RESPONSE_FILE_CAPTURE_MAX_FILES = 20;
 const MIN_ENTITY_CONFIDENCE = 0.75;
 const MEMORY_DECISION_CONTEXT_WINDOW_CHARS = 2000;
 const LEDGER_WORKING_MEMORY_PREFIX = 'system/session_ledger/recent_learning_';
@@ -670,6 +674,13 @@ export interface AttendResult extends ObserveResult {
     // partial. Pure plan + at most one retry; deterministic. Always echoed
     // on mid-turn; decline outcomes echoed on pre-response and post-response.
     subTurnLoopPlan?: SubTurnLoopPlan;
+    // M7: response file-change autowrite — populated at post-response when the
+    // agent's reply contains file paths. The Attendant scans for paths, infers
+    // the most likely action (edited / created / read) from surrounding context,
+    // and writes one fact per file-scoped entity (project/{id}/file/{basename})
+    // so demand-driven recall can surface them in future sessions without any
+    // host-side collection effort. Absent on pre-response and mid-turn.
+    responseFileCapture?: ResponseFileCaptureResult;
 }
 
 export interface ToolCallGuidance {
@@ -832,6 +843,18 @@ export interface PostResponseCaptureInfo {
     factsWritten: number;
     checkpointExtracted: boolean;
     skipped: Array<{ key: string; reason: string }>;
+}
+
+// M7: response file-change autowrite — outcome of the post-response scan pass
+// that detects file paths in the agent's reply and writes file-scoped entity
+// facts so demand-driven recall can surface them in future sessions.
+export interface ResponseFileCaptureResult {
+    autowriteBatchId: string;
+    filesDetected: number;
+    factsWritten: number;
+    entities: string[];
+    skipped: Array<{ reason: string; detail?: string }>;
+    durationMs: number;
 }
 
 export type MemoryAttributionEvidenceKind =
@@ -1271,6 +1294,17 @@ function scanStringForPathEntities(
     while ((match = FILE_PATH_PATTERN.exec(text)) !== null) {
         deriveFileEntityFromPath(match[1], projectId, seen, hints);
     }
+}
+
+// M7: infer whether a file path mention in the agent's response represents
+// an edit, a creation, or a read. Scans the ±150-char context window for
+// action-bearing keywords. Defaults to 'read' when the signal is ambiguous.
+// Exported for direct unit testing.
+export function detectFileAction(contextWindow: string): 'edited' | 'created' | 'read' {
+    const ctx = contextWindow.toLowerCase();
+    if (/\bcreat\w*\b|\bnew file\b|\badded new\b|\bwrote new\b/.test(ctx)) return 'created';
+    if (/\bedit\w*\b|\bupdat\w*\b|\bmodif\w*\b|\bchanged\b|\bwrote\b|\brewrote\b|\brefactor\w*\b/.test(ctx)) return 'edited';
+    return 'read';
 }
 
 function extractBasenameFromGlobPattern(pattern: string): string | null {
@@ -4411,6 +4445,171 @@ If no durable facts can be extracted, return an empty array: [].`,
         return baseOutcome;
     }
 
+    // M7: scan the agent's post-response text for file path mentions, infer
+    // the most likely action (edited / created / read) from surrounding context,
+    // and write one durable fact per file-scoped entity. This populates the
+    // project/{id}/file/{basename} entity namespace so demand-driven recall
+    // (extractFilePathEntityHints + observe) can surface the facts in future
+    // sessions without any host-side collection effort.
+    //
+    // Isolation policy: extraction failures (regex errors, downstream write
+    // errors) MUST NOT abort the attend call. This method swallows its own
+    // errors and reports them via the skipped array.
+    private async runResponseFileCapture(
+        responseText: string,
+        batchId: string,
+    ): Promise<ResponseFileCaptureResult> {
+        const t0 = Date.now();
+        const skipped: Array<{ reason: string; detail?: string }> = [];
+        const baseResult: ResponseFileCaptureResult = {
+            autowriteBatchId: batchId,
+            filesDetected: 0,
+            factsWritten: 0,
+            entities: [],
+            skipped,
+            durationMs: 0,
+        };
+
+        if (!responseText || responseText.trim().length < RESPONSE_FILE_CAPTURE_MIN_CHARS) {
+            skipped.push({ reason: 'response_too_short' });
+            baseResult.durationMs = Date.now() - t0;
+            return baseResult;
+        }
+
+        const projectEntity = getProjectMemoryEntity() ?? null;
+        if (!projectEntity) {
+            skipped.push({ reason: 'no_project_entity' });
+            baseResult.durationMs = Date.now() - t0;
+            return baseResult;
+        }
+        const projectId = parseEntityString(projectEntity).entityId;
+
+        // Scan the response text for file path occurrences. One fact per
+        // distinct basename — first occurrence wins if the same file appears
+        // multiple times in the same response.
+        const seenEntities = new Set<string>();
+        const fileOccurrences: Array<{
+            path: string;
+            entity: string;
+            contextWindow: string;
+        }> = [];
+
+        FILE_PATH_PATTERN.lastIndex = 0;
+        let match: RegExpExecArray | null;
+        while ((match = FILE_PATH_PATTERN.exec(responseText)) !== null) {
+            const filePath = match[1].trim();
+            const basename = filePath.replace(/\\/g, '/').split('/').pop() ?? '';
+            const stripped = basename.split(/[,:()]/)[0] ?? basename;
+            const nameWithoutExt = stripped
+                .replace(/\.\w+$/, '')
+                .replace(/[^a-zA-Z0-9]/g, '_')
+                .toLowerCase();
+            if (!nameWithoutExt || nameWithoutExt.length < 2) continue;
+
+            const entity = `project/${projectId}/file/${nameWithoutExt}`;
+            if (seenEntities.has(entity)) continue;
+            seenEntities.add(entity);
+
+            // Grab a context window around the match for action detection.
+            const matchStart = match.index;
+            const contextStart = Math.max(0, matchStart - 150);
+            const contextEnd = Math.min(
+                responseText.length,
+                matchStart + filePath.length + 150,
+            );
+            const contextWindow = responseText.slice(contextStart, contextEnd);
+
+            fileOccurrences.push({ path: filePath, entity, contextWindow });
+            if (fileOccurrences.length >= RESPONSE_FILE_CAPTURE_MAX_FILES) break;
+        }
+
+        baseResult.filesDetected = fileOccurrences.length;
+        if (fileOccurrences.length === 0) {
+            baseResult.durationMs = Date.now() - t0;
+            return baseResult;
+        }
+
+        const writtenEntities: string[] = [];
+        for (const { path, entity, contextWindow } of fileOccurrences) {
+            const action = detectFileAction(contextWindow);
+            const key = (action === 'edited' || action === 'created') ? 'last_edit' : 'last_access';
+            const confidence = (action === 'edited' || action === 'created') ? 85 : 70;
+            const parsedEntity = parseAutowriteEntity(entity);
+            const displayName = path.replace(/\\/g, '/').split('/').pop() ?? path;
+
+            const value = {
+                action,
+                path,
+                capturedAt: new Date().toISOString(),
+            };
+            const summary = `${displayName} was ${action} — captured from agent response at post-response.`;
+
+            try {
+                await librarianWrite({
+                    entityType: parsedEntity.entityType,
+                    entityId: parsedEntity.entityId,
+                    key,
+                    valueRaw: value,
+                    valueSummary: summary.slice(0, 500),
+                    confidence,
+                    source: AUTOWRITE_SOURCE_TAG,
+                    createdBy: `attendant:${this.agentId}`,
+                    properties: {
+                        memoryScope: 'project',
+                        capturePhase: 'response_file_change_autowrite',
+                        autowriteBatchId: batchId,
+                        fileAction: action,
+                        autowriteOccurredAt: new Date().toISOString(),
+                        ...buildSemanticFactTags({
+                            memoryScope: 'project',
+                            durableClass: 'file_change',
+                            mergeStrategy: 'replace',
+                            extraTags: ['autowrite', 'response_capture', `action:${action}`],
+                        }),
+                    } as Record<string, unknown>,
+                });
+                writtenEntities.push(entity);
+            } catch (err) {
+                skipped.push({
+                    reason: 'librarian_write_failed',
+                    detail: err instanceof Error ? err.message : String(err),
+                });
+            }
+        }
+
+        baseResult.factsWritten = writtenEntities.length;
+        baseResult.entities = writtenEntities;
+        baseResult.durationMs = Date.now() - t0;
+
+        if (writtenEntities.length > 0) {
+            // Autowriting file-change facts counts as durable persistence —
+            // reset pressure counters and notify compliance tracking.
+            this.attendsWithoutPersist = 0;
+            this.turnsWithoutWrite = 0;
+            this.writeOccurredThisTurn = true;
+            this.recordMemoryEvidence('write');
+
+            if (this.eventSource) {
+                getStaffEventEmitter().emit({
+                    staffComponent: 'Attendant',
+                    actionType: 'attendant_autowrite',
+                    agentId: this.agentId,
+                    source: this.eventSource,
+                    reason: 'response_file_change_autowrite',
+                    level: 'audit',
+                    metadata: this.buildEventMetadata({
+                        autowriteBatchId: batchId,
+                        filesDetected: baseResult.filesDetected,
+                        factsWritten: baseResult.factsWritten,
+                        entities: writtenEntities,
+                    }),
+                });
+            }
+        }
+
+        return baseResult;
+    }
+
     // M3: build a forced write-nudge payload when tool-cost pressure crosses
     // TOOL_COST_WRITE_NUDGE_THRESHOLD and the nudge has not already been
     // emitted this turn. Returns null when no nudge should fire. The nudge
@@ -4907,6 +5106,13 @@ If no durable facts can be extracted, return an empty array: [].`,
 
         if (phase === 'post-response') {
             const memoryAttributions = this.scorePendingMemoryAttributions(latestMessage || currentContext);
+            // M7: scan the agent's response for file path mentions and write file-scoped facts.
+            // Must run BEFORE buildComplianceState so that any writes here reset the
+            // pressure counters and are reflected in the compliance snapshot.
+            const responseFileCapture = await this.runResponseFileCapture(
+                latestMessage,
+                `rfca_${Date.now()}`,
+            );
             compliance = this.buildComplianceState(this.complianceUpdatedAt);
             if (memoryAttributions.some((entry) => !entry.used)) {
                 complianceWarning = ignoredMemoryWarning;
@@ -5007,6 +5213,9 @@ If no durable facts can be extracted, return an empty array: [].`,
                     reason: 'post_response_closeout',
                     note: 'Sub-turn loop is gated off on post-response attends.',
                 },
+                // M7: response file-change autowrite — populated at post-response.
+                // Contains the outcome of the scan pass over the agent's reply.
+                responseFileCapture,
             };
         }
 
