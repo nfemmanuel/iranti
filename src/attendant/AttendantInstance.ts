@@ -1,3 +1,44 @@
+/**
+ * AttendantInstance — the per-agent memory orchestrator for iranti.
+ *
+ * One instance lives per `agentId` per process (managed by `registry.ts`).
+ * It is the class that implements the handshake/attend/observe/reconvene
+ * protocol the Claude Code hooks drive. Every MCP tool call from an agent
+ * routes through an `AttendantInstance`.
+ *
+ * Core operations:
+ *  - `handshake(input)`   — session start: load operating rules, build a
+ *    working-memory brief, track compliance state, detect first-party mode.
+ *  - `attend(input)`      — per-turn memory gate. Three phases:
+ *      • pre-response  — initial retrieval + injection before the agent replies
+ *      • mid-turn      — sub-turn loop (B8 M6) for retrieval retries on partial
+ *                        responses when novel entity hints appear in the partial
+ *      • post-response — closeout: extract tool-result autowrites (M2/M3/M7),
+ *                        personal memory corrections, checkpoint continuity keys,
+ *                        session ledger learning injection, compliance scoring
+ *  - `observe(input)`     — retrieval-only, no protocol tracking; used by the
+ *    MCP `iranti_observe` tool for ad-hoc context loading
+ *  - `reconvene(input)`   — post-compaction re-handshake; re-delivers operating
+ *    rules and rebuilds the brief from the current knowledge state
+ *
+ * Memory scoring and injection:
+ *  - Hybrid search (lexical + vector) via `hybridSearch` / `searchWithBridging`
+ *  - Semantic fact tags via `buildSemanticFactTags` — topic-based relevance signals
+ *  - Confidence blending with source-reliability weights
+ *  - Compact-mode injection for high-confidence, recently-accessed facts
+ *
+ * Session compliance:
+ *  - Tracks LLM call count, write count, persist-warning thresholds
+ *  - Emits staff events for every attend, write, compliance gate
+ *  - Protocol enforcement via `AgentProtocolTracker` (B6 A-series gates)
+ *
+ * Council + sub-turn loop integration:
+ *  - At post-response, calls `planCouncilConsultation` to propose cross-staff
+ *    consultations based on low-confidence injection surfaces
+ *  - At mid-turn, calls `planSubTurnLoop` to decide whether to re-run retrieval
+ *    with novel tokens extracted from the partial response
+ */
+
 import { randomUUID } from 'crypto';
 import { route } from '../lib/router';
 import { getStaffEventEmitter } from '../lib/staffEventRegistry';

@@ -1,3 +1,22 @@
+/**
+ * Archivist scheduler — drives periodic and file-watch-triggered maintenance.
+ *
+ * Wraps `iranti.runMaintenance()` in two trigger modes, both optional and
+ * independently enabled via env vars:
+ *  - **Interval** (`IRANTI_ARCHIVIST_INTERVAL_MS`) — runs maintenance on a
+ *    fixed timer. Set to 0 or omit to disable.
+ *  - **Escalation watch** (`IRANTI_ARCHIVIST_WATCH`, default true) — uses
+ *    `fs.watch` on the active escalation folder; fires a debounced maintenance
+ *    run whenever a `.md` file changes (debounce: `IRANTI_ARCHIVIST_DEBOUNCE_MS`,
+ *    default 60 s). Prevents redundant runs when multiple files are written rapidly.
+ *
+ * Maintenance runs are serialised — a `running` flag drops overlapping triggers
+ * into a single `pendingRun` that fires immediately after the current run ends.
+ *
+ * Returns a `SchedulerHandle` with `{ started, stop() }` so the server can
+ * cleanly shut down timers and the file watcher on exit.
+ */
+
 import fs from 'fs';
 import { Iranti } from '../sdk';
 import { ensureEscalationFolders } from '../lib/escalationPaths';

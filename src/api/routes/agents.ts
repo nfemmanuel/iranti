@@ -1,3 +1,15 @@
+/**
+ * Agent registry REST routes for iranti (`/agents`).
+ *
+ *  POST /agents/register       — register or update an agent profile
+ *  GET  /agents                — list all registered agent profiles
+ *  GET  /agents/:agentId       — get profile + stats for one agent
+ *  GET  /agents/:agentId/stats — alias for per-agent stats
+ *  GET  /agents/:agentId/who-knows/:entityType/:entityId
+ *                              — which agents contributed to an entity
+ *  POST /agents/:agentId/team  — assign agent to a team (MEMBER_OF relationship)
+ */
+
 import { Router, Request, Response } from 'express';
 import { Iranti } from '../../sdk';
 

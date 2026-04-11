@@ -1,3 +1,24 @@
+/**
+ * iranti API server — the standalone Express HTTP server.
+ *
+ * Initialises and starts the iranti REST API on `PORT` (default 3500).
+ * Wires together:
+ *  - Express app with trust-proxy configuration (`IRANTI_TRUST_PROXY`)
+ *  - Rate limiting middleware (memory or Postgres-backed)
+ *  - JWT/API-key authentication middleware
+ *  - Scope-based authorization middleware
+ *  - Route groups: `/agents`, `/kb`, `/memory`, `/batch`, `/dev`
+ *  - `/health` endpoint with live DB + vector backend + schema version checks
+ *  - Request logging to `IRANTI_REQUEST_LOG_FILE`
+ *  - Archivist scheduler (interval + escalation file watcher)
+ *  - Graceful shutdown: drains in-flight requests, stops the scheduler,
+ *    disconnects the DB pool, writes a `stopped` runtime state marker
+ *
+ * Runtime authority (`IRANTI_INSTANCE_DIR` / `IRANTI_INSTANCE_NAME`) controls
+ * which runtime.json the server reads and writes for health reporting and
+ * instance discovery by `iranti run`.
+ */
+
 import { config } from 'dotenv';
 config();
 

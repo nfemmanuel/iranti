@@ -1,3 +1,17 @@
+/**
+ * Session memory REST routes for iranti (`/memory`).
+ *
+ * Exposes the session ledger, session list, and attribution surfaces over HTTP.
+ * All routes require an authenticated `agentId` (from body or API key fallback).
+ *
+ * Key routes:
+ *  POST /memory/session-ledger     — query session ledger learnings for an agent
+ *  GET  /memory/sessions           — list recent sessions (paginated)
+ *  GET  /memory/sessions/:id       — get session detail
+ *  POST /memory/attribution        — memory attribution for a set of facts
+ *  POST /memory/session-compliance — session compliance summary for an agent
+ */
+
 import { Router, Request, Response } from 'express';
 import { Iranti, ProtocolViolationError } from '../../sdk';
 import { parseEntityString } from '../../library/entity-resolution';

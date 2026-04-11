@@ -1,3 +1,16 @@
+/**
+ * Batch knowledge query route for iranti (`POST /batch`).
+ *
+ * Accepts up to 200 `{ entity, key }` lookups in a single request and
+ * returns their values in parallel. Useful for warming up context with
+ * a known set of facts without issuing N individual HTTP requests.
+ *
+ * Each item is resolved via a Prisma `findUnique` on the
+ * `(entityType, entityId, key)` composite index. Missing entries return
+ * `{ hit: false }` rather than erroring so callers can distinguish
+ * "not found" from "request failed".
+ */
+
 import { Router, Request, Response } from "express";
 import { getDb } from "../../library/client";
 
