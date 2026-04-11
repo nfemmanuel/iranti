@@ -239,10 +239,47 @@ export interface ProjectPolicyEntry {
     rules: string[];
 }
 
+// A6: objective memory — structured representation of what the user/agent is
+// trying to accomplish in the current session. Pairs with A1 (adaptive
+// surfacing) to become "session executive function". Extends the coarse
+// inferredTaskType label with a richer object the host can render to the user
+// and drift-check against on every turn.
+//
+// Derived purely from the task string + recent messages + any session
+// checkpoint. No LLM call. The objective persists across turns on the
+// WorkingMemoryBrief and is re-derived whenever handshake() or checkpoint()
+// runs so task shifts are captured without any host-side plumbing.
+export type SessionObjectiveSource =
+    | 'task_string'           // derived directly from context.task on handshake
+    | 'checkpoint_continuation' // carried forward from an interrupted session's nextStep
+    | 'skipped';              // task was too short or empty to derive anything
+
+export interface SessionObjective {
+    // Short human-readable "verb phrase" summary of what the agent is doing.
+    // Example: "ship B4 release" or "audit attendant lifecycle".
+    primary: string;
+    // Supporting signals extracted from the task (driving action verbs,
+    // subject nouns) used for drift checks and objective-match scoring.
+    taskSignals: string[];
+    // Confidence 0..1 — how strong the extraction was. 1.0 means the task
+    // string unambiguously produced a verb+noun objective.
+    confidence: number;
+    // Provenance: where the objective came from.
+    source: SessionObjectiveSource;
+    // ISO timestamp: when the objective was derived.
+    derivedAt: string;
+    // Human-readable note for the host to surface verbatim.
+    note: string;
+}
+
 export interface WorkingMemoryBrief {
     agentId: string;
     operatingRules: string;
     inferredTaskType: string;
+    // A6: optional because older hosts that don't know about objective memory
+    // should continue to work unchanged. Populated on handshake and refreshed
+    // on checkpoint.
+    sessionObjective?: SessionObjective | null;
     workingMemory: WorkingMemoryEntry[];
     projectPolicies?: ProjectPolicyEntry[];
     sessionStarted: string;
@@ -596,6 +633,11 @@ export interface AttendResult extends ObserveResult {
     // Absent in the healthy case — hosts should treat presence as a signal
     // to confirm with the user or to force a reconvene via handshake().
     drift?: DriftSignal;
+    // M5: only populated when auto-checkpoint pressure has built up
+    // (tool-cost, turn-cost, or drift). Hosts should treat presence as a
+    // strong recommendation to call iranti_checkpoint before taking on more
+    // work. Absent in the healthy case. Gated off on post-response.
+    autoCheckpointSignal?: AutoCheckpointSignal;
 }
 
 export interface ToolCallGuidance {
@@ -638,6 +680,40 @@ export interface DriftSignal {
     declaredTaskType: string;
     // canned human-readable summary the host can forward verbatim.
     note: string;
+}
+
+// M5: auto-checkpoint signal — NOT an auto-persistence. M5 surfaces a soft
+// recommendation that the host should call iranti_checkpoint now based on
+// tool-cost pressure, turn-cost pressure, or detected drift. The host still
+// authors the checkpoint; M5's job is to make sure the host knows it's time.
+//
+// Pairs with A6 (objective memory): when drift fires, the host can consult
+// the stored sessionObjective to decide whether to reconvene or checkpoint
+// the old objective before taking on the new one.
+export type AutoCheckpointReason =
+    | 'tool_cost_threshold'    // toolCallsSinceLastWrite >= AUTO_CHECKPOINT_TOOL_COST_THRESHOLD
+    | 'turns_without_write'    // turnsWithoutWrite >= AUTO_CHECKPOINT_TURN_THRESHOLD
+    | 'drift_detected'         // M4 drift fired this turn
+    | 'none';                  // no trigger fired — field should be absent on wire
+
+export type AutoCheckpointUrgency = 'suggested' | 'strong' | 'critical';
+
+export interface AutoCheckpointSignal {
+    reason: AutoCheckpointReason;
+    urgency: AutoCheckpointUrgency;
+    // The numeric counters that triggered this signal (echoed so hosts can
+    // log and tests can assert on them without re-reading instance state).
+    toolCallsSinceLastWrite: number;
+    turnsWithoutWrite: number;
+    driftOverlap: number | null;
+    // Draft checkpoint fields the host can start from. These are heuristic
+    // suggestions — the host should refine them before calling
+    // iranti_checkpoint. Pulled from the session objective + drift tokens
+    // + recent work context.
+    draftCurrentStep: string | null;
+    draftNextStep: string | null;
+    // Canned human-readable message the host can surface verbatim.
+    message: string;
 }
 
 export interface ToolResultExtractionOutcome {
@@ -1665,6 +1741,137 @@ export function buildPlanProposal(
 }
 
 // ----------------------------------------------------------------------------
+// A6: objective memory — pure derivation of a SessionObjective from a task
+// string (and optionally an interrupted checkpoint's nextStep). No LLM call.
+// Uses a small action-verb list to anchor the objective; nouns are extracted
+// as supporting signals. Deterministic so handshakes remain fast and
+// snapshot-testable.
+// ----------------------------------------------------------------------------
+
+const OBJECTIVE_MIN_TASK_CHARS = 6;
+// Action verbs that signal "what the agent is DOING". Ordered by priority —
+// the first match wins so "refactor the auth flow" becomes "refactor" not
+// "authenticate" even if both verbs appear in the text.
+const OBJECTIVE_ACTION_VERBS: readonly string[] = [
+    'ship', 'release', 'deploy', 'publish',
+    'implement', 'build', 'add', 'create',
+    'refactor', 'rewrite', 'redesign', 'rework',
+    'fix', 'patch', 'repair', 'resolve',
+    'audit', 'review', 'inspect', 'verify',
+    'migrate', 'port', 'convert',
+    'debug', 'investigate', 'diagnose',
+    'test', 'validate', 'benchmark',
+    'document', 'explain', 'describe',
+    'extend', 'enhance', 'improve',
+    'remove', 'delete', 'retire',
+];
+const OBJECTIVE_NOISE_TOKENS = new Set<string>([
+    'the', 'and', 'for', 'with', 'that', 'this', 'from', 'into', 'then', 'than',
+    'are', 'was', 'were', 'has', 'had', 'have', 'but', 'not', 'its',
+    'you', 'your', 'our', 'their', 'them', 'they',
+    'all', 'any', 'one', 'two', 'can', 'will', 'should', 'would', 'could',
+    'just', 'also', 'now', 'still', 'yet',
+    'task', 'work', 'please', 'help',
+]);
+const OBJECTIVE_MAX_SIGNALS = 8;
+
+function extractObjectiveSignals(task: string): { verb: string | null; signals: string[] } {
+    const lower = task.toLowerCase();
+    const tokens = lower.replace(/[^a-z0-9_\s]/g, ' ').split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) {
+        return { verb: null, signals: [] };
+    }
+    let verb: string | null = null;
+    for (const candidate of OBJECTIVE_ACTION_VERBS) {
+        if (tokens.includes(candidate) || tokens.includes(`${candidate}s`) || tokens.includes(`${candidate}ed`) || tokens.includes(`${candidate}ing`)) {
+            verb = candidate;
+            break;
+        }
+    }
+    const signals: string[] = [];
+    const seen = new Set<string>();
+    for (const t of tokens) {
+        if (t.length < 3) continue;
+        if (OBJECTIVE_NOISE_TOKENS.has(t)) continue;
+        if (verb && (t === verb || t === `${verb}s` || t === `${verb}ed` || t === `${verb}ing`)) continue;
+        if (seen.has(t)) continue;
+        seen.add(t);
+        signals.push(t);
+        if (signals.length >= OBJECTIVE_MAX_SIGNALS) break;
+    }
+    return { verb, signals };
+}
+
+export function deriveSessionObjective(options: {
+    task: string;
+    recentMessages?: readonly string[];
+    checkpointNextStep?: string | null;
+    now?: string;
+}): SessionObjective {
+    const { task, checkpointNextStep, now } = options;
+    const derivedAt = now ?? new Date().toISOString();
+    const trimmed = (task ?? '').trim();
+
+    // Checkpoint continuation wins when the task string is ambiguous or the
+    // session was interrupted. A checkpoint nextStep is always a stronger
+    // signal than a keyword-template on the task string because the agent
+    // chose the wording.
+    if (checkpointNextStep && checkpointNextStep.trim().length >= OBJECTIVE_MIN_TASK_CHARS) {
+        const nextStep = checkpointNextStep.trim();
+        const { signals } = extractObjectiveSignals(nextStep);
+        return {
+            primary: nextStep.length <= 120 ? nextStep : `${nextStep.slice(0, 117)}...`,
+            taskSignals: signals,
+            confidence: 0.95,
+            source: 'checkpoint_continuation',
+            derivedAt,
+            note: `Session objective carried forward from interrupted checkpoint: "${nextStep.length <= 80 ? nextStep : nextStep.slice(0, 77) + '...'}"`,
+        };
+    }
+
+    if (!trimmed || trimmed.length < OBJECTIVE_MIN_TASK_CHARS) {
+        return {
+            primary: trimmed || '(no task stated)',
+            taskSignals: [],
+            confidence: 0,
+            source: 'skipped',
+            derivedAt,
+            note: 'Task string was empty or too short to derive a structured objective.',
+        };
+    }
+
+    const { verb, signals } = extractObjectiveSignals(trimmed);
+    const primaryRaw = verb && signals.length > 0
+        ? `${verb} ${signals.slice(0, 4).join(' ')}`
+        : verb
+            ? verb
+            : signals.length > 0
+                ? signals.slice(0, 4).join(' ')
+                : trimmed.slice(0, 60);
+    const primary = primaryRaw.length <= 120 ? primaryRaw : `${primaryRaw.slice(0, 117)}...`;
+
+    // Confidence scoring: verb present AND signals present -> 1.0; verb or
+    // signals alone -> 0.6; neither -> 0.3 (we still produced a primary from
+    // the raw task string).
+    const confidence = verb && signals.length > 0
+        ? 1
+        : verb || signals.length > 0
+            ? 0.6
+            : 0.3;
+
+    return {
+        primary,
+        taskSignals: signals,
+        confidence,
+        source: 'task_string',
+        derivedAt,
+        note: verb
+            ? `Objective derived from task: action="${verb}", subjects=[${signals.slice(0, 4).join(', ')}].`
+            : `Objective derived from task subjects only: [${signals.slice(0, 4).join(', ')}].`,
+    };
+}
+
+// ----------------------------------------------------------------------------
 // M1: skipTool with teeth — pure derivation of a structured skip verdict.
 // Inputs: derived entity hints, stored facts that matched those entities,
 // and whether the early-return "memory not needed" branch was taken.
@@ -1813,6 +2020,95 @@ export function detectTaskDrift(
         declaredTaskType,
         note: `Task drift detected: current context overlaps declared task by ${(overlap * 100).toFixed(1)}%. Driving topic tokens: ${drivingTokens.slice(0, 4).join(', ') || '(none)'}.`,
     };
+}
+
+// ----------------------------------------------------------------------------
+// M5: auto-checkpoint trigger — pure decision function. Returns undefined
+// when no trigger fires so the field is absent from the attend result shape
+// in the healthy common case. Pairs with A6 (objective memory) so the draft
+// currentStep/nextStep surfaces can use the stored sessionObjective without
+// threading it through every call site.
+// ----------------------------------------------------------------------------
+
+export const AUTO_CHECKPOINT_TOOL_COST_THRESHOLD = 15;
+export const AUTO_CHECKPOINT_TURN_THRESHOLD = 3;
+
+export function detectAutoCheckpointTrigger(options: {
+    toolCallsSinceLastWrite: number;
+    turnsWithoutWrite: number;
+    driftDetected: boolean;
+    driftOverlap?: number | null;
+    sessionObjective?: SessionObjective | null;
+    driftDrivingTokens?: readonly string[];
+}): AutoCheckpointSignal | undefined {
+    const {
+        toolCallsSinceLastWrite,
+        turnsWithoutWrite,
+        driftDetected,
+        driftOverlap,
+        sessionObjective,
+        driftDrivingTokens,
+    } = options;
+
+    // Priority: drift > turns_without_write > tool_cost. Drift is the
+    // highest-urgency signal because it means the agent is solving a
+    // different problem than the one the session was handshaken for.
+    if (driftDetected) {
+        const drivers = driftDrivingTokens && driftDrivingTokens.length > 0
+            ? driftDrivingTokens.slice(0, 4).join(', ')
+            : '(unspecified)';
+        const draftCurrentStep = sessionObjective?.primary
+            ? `Was working on: ${sessionObjective.primary}`
+            : 'Was working on prior task (objective not captured).';
+        const draftNextStep = `New focus appears to be: ${drivers}. Checkpoint the prior objective before continuing.`;
+        return {
+            reason: 'drift_detected',
+            urgency: 'critical',
+            toolCallsSinceLastWrite,
+            turnsWithoutWrite,
+            driftOverlap: typeof driftOverlap === 'number' ? driftOverlap : null,
+            draftCurrentStep,
+            draftNextStep,
+            message: `AUTO-CHECKPOINT SIGNAL: drift detected (overlap ${typeof driftOverlap === 'number' ? (driftOverlap * 100).toFixed(1) + '%' : 'unknown'}). Before switching focus to "${drivers}", call iranti_checkpoint to preserve progress on the prior objective.`,
+        };
+    }
+
+    if (turnsWithoutWrite >= AUTO_CHECKPOINT_TURN_THRESHOLD) {
+        const draftCurrentStep = sessionObjective?.primary
+            ? `In progress: ${sessionObjective.primary} (${turnsWithoutWrite} active turns without a durable write)`
+            : `${turnsWithoutWrite} active turns without a durable write.`;
+        return {
+            reason: 'turns_without_write',
+            urgency: 'strong',
+            toolCallsSinceLastWrite,
+            turnsWithoutWrite,
+            driftOverlap: null,
+            draftCurrentStep,
+            draftNextStep: 'Persist what has been learned so far, then continue.',
+            message: `AUTO-CHECKPOINT SIGNAL: ${turnsWithoutWrite} active turns have elapsed without iranti_checkpoint or iranti_write. Call iranti_checkpoint now so progress on "${sessionObjective?.primary ?? 'current task'}" is durable before the next shift.`,
+        };
+    }
+
+    if (toolCallsSinceLastWrite >= AUTO_CHECKPOINT_TOOL_COST_THRESHOLD) {
+        const draftCurrentStep = sessionObjective?.primary
+            ? `Running exploration for: ${sessionObjective.primary} (${toolCallsSinceLastWrite} tool calls since last write)`
+            : `${toolCallsSinceLastWrite} tool calls since last durable write.`;
+        const objectiveTag = sessionObjective?.primary
+            ? ` on "${sessionObjective.primary}"`
+            : '';
+        return {
+            reason: 'tool_cost_threshold',
+            urgency: 'suggested',
+            toolCallsSinceLastWrite,
+            turnsWithoutWrite,
+            driftOverlap: null,
+            draftCurrentStep,
+            draftNextStep: 'Summarize what has been discovered and continue.',
+            message: `AUTO-CHECKPOINT SIGNAL: ${toolCallsSinceLastWrite} tool calls have run since the last durable write${objectiveTag}. Consider calling iranti_checkpoint to persist discoveries before continuing.`,
+        };
+    }
+
+    return undefined;
 }
 
 function buildAttendBootstrapTask(latestMessage: string, currentContext: string): string {
@@ -3281,10 +3577,22 @@ export class AttendantInstance {
             this.rulesDelivered = true;
         }
 
+        // A6: derive structured session objective from the task string (or
+        // from an interrupted checkpoint's nextStep if one exists). Pure, no
+        // LLM. Stays on the brief across turns so drift/auto-checkpoint can
+        // reason about "what the session was for" without re-parsing the
+        // task every call.
+        const sessionObjective = deriveSessionObjective({
+            task: context.task,
+            recentMessages: context.recentMessages,
+            checkpointNextStep: this.sessionCheckpoint?.checkpoint?.nextStep ?? null,
+        });
+
         this.brief = {
             agentId: this.agentId,
             operatingRules: operatingRulesPayload,
             inferredTaskType,
+            sessionObjective,
             workingMemory: workingMemoryWithLedger,
             projectPolicies,
             sessionStarted: persisted?.sessionStarted ?? this.sessionStarted,
@@ -3394,6 +3702,14 @@ export class AttendantInstance {
 
         // Task has shifted — rebuild working memory
         const workingMemory = await this.buildWorkingMemory(newTaskType);
+        // A6: re-derive the session objective on task shift so drift and
+        // auto-checkpoint logic track against the NEW task, not the one the
+        // session was originally handshaken with.
+        const shiftedObjective = deriveSessionObjective({
+            task: context.task,
+            recentMessages: context.recentMessages,
+            checkpointNextStep: this.sessionCheckpoint?.checkpoint?.nextStep ?? null,
+        });
         this.brief = {
             ...this.brief,
             operatingRules: applyAdvisoryOperatingRules(
@@ -3401,6 +3717,7 @@ export class AttendantInstance {
                 this.advisoryLearningProfile,
             ),
             inferredTaskType: newTaskType,
+            sessionObjective: shiftedObjective,
             workingMemory: mergeWorkingMemoryWithLedger(
                 mergeWorkingMemoryWithProjectPolicies(workingMemory, projectPolicies),
                 ledgerSignals.learnings,
@@ -4212,6 +4529,22 @@ If no durable facts can be extracted, return an empty array: [].`,
             ? detectTaskDrift(latestMessage, currentContext, this.brief.inferredTaskType)
             : undefined;
 
+        // M5: auto-checkpoint signal — gated on phase !== post-response
+        // (post-response has its own closeout) and computed once so every
+        // return path can echo the same value. Pure — uses only the counters
+        // and the drift signal computed above. Pairs with A6 by reading
+        // this.brief.sessionObjective for the draft step labels.
+        const autoCheckpointSignal: AutoCheckpointSignal | undefined = phase !== 'post-response'
+            ? detectAutoCheckpointTrigger({
+                toolCallsSinceLastWrite: this.toolCallsSinceLastWrite,
+                turnsWithoutWrite: this.turnsWithoutWrite,
+                driftDetected: drift?.detected === true,
+                driftOverlap: drift?.overlap ?? null,
+                sessionObjective: this.brief?.sessionObjective ?? null,
+                driftDrivingTokens: drift?.drivingTokens,
+            })
+            : undefined;
+
         let watchedEntitiesChanged = this.updateWatchedEntities(effectiveEntityHints);
         const freshState = await this.detectRelevantFreshState(effectiveEntityHints, latestMessage);
         const observationContext = currentContext.trim().length > 0 ? currentContext : latestMessage;
@@ -4286,6 +4619,10 @@ If no durable facts can be extracted, return an empty array: [].`,
                 // M4: drift is gated on phase !== post-response above, so this
                 // will always be undefined here. Field present for shape parity.
                 drift,
+                // M5: auto-checkpoint signal is gated on phase !== post-response,
+                // so it's always undefined here. Field echoed for shape parity
+                // so downstream consumers can safely destructure.
+                autoCheckpointSignal,
             };
         }
 
@@ -4424,6 +4761,12 @@ If no durable facts can be extracted, return an empty array: [].`,
                 // needed — the agent may be drifting off-task without requiring
                 // memory injection. Surface it so the host can reconvene.
                 drift,
+                // M5: auto-checkpoint signal surfaces on the not-needed path —
+                // the whole point of M5 is to fire when pressure has built up
+                // without a matching durable write. That pressure often
+                // coincides with "no new memory needed, just keep working"
+                // turns, which is exactly when the host needs the nudge.
+                autoCheckpointSignal,
             };
         }
 
@@ -4655,6 +4998,11 @@ If no durable facts can be extracted, return an empty array: [].`,
             // DRIFT_JACCARD_MIN. Computed once near the top and threaded here
             // so hosts can surface it alongside injected facts in one reply.
             drift,
+            // M5: auto-checkpoint signal — populated only when tool-cost,
+            // turn-cost, or drift pressure has built up. Computed once near
+            // the top and threaded here so hosts see it in the same reply
+            // as any injected facts.
+            autoCheckpointSignal,
         };
         if (input.suppressEvents !== true) {
             getStaffEventEmitter().emit({
