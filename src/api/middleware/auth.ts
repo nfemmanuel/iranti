@@ -1,3 +1,19 @@
+/**
+ * iranti API authentication middleware.
+ *
+ * Validates requests against iranti's own API key store (not Auth.js or any
+ * third-party auth system). Accepts the key via two header forms:
+ *  - `X-Iranti-Key: <key>` — preferred
+ *  - `Authorization: Bearer <key>` — compat with standard tooling
+ *
+ * On success, attaches `req.irantiAuth` (`IrantiAuthContext`) with the key's
+ * `keyId`, `owner`, `mode`, and `scopes` so downstream authorization middleware
+ * can gate specific operations without re-querying the key store.
+ *
+ * On failure (missing or invalid key), responds 401. Uses the `Express.Request`
+ * global augmentation so TypeScript sees `req.irantiAuth` without casts.
+ */
+
 import { Request, Response, NextFunction } from 'express';
 import { validateApiKey } from '../../security/apiKeys';
 

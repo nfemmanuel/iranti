@@ -1,3 +1,23 @@
+/**
+ * Librarian chunker — LLM-powered fact extraction for free-form text.
+ *
+ * Accepts a block of raw text about a single entity and returns a list of
+ * structured `EntryInput` facts ready to be written to the knowledge store.
+ * Uses the router's `extraction` task to pick a fast/cheap model.
+ *
+ * Extraction strategy:
+ *  1. Primary pass — send the full `rawContent` to the LLM and parse the JSON
+ *     array of `{ key, value, summary, confidence }` facts.
+ *  2. Sentence-level fallback — if the primary pass returns zero facts AND the
+ *     text splits into multiple sentences/paragraphs, retry each segment
+ *     individually to capture facts that the full-context prompt missed.
+ *  3. Deduplication — merge segments by key, keeping the first occurrence.
+ *
+ * Confidence blending: extracted confidence (0-100) is blended 70/30 with the
+ * caller's `input.confidence` so that low-confidence ingestion paths can't be
+ * inflated by an overconfident LLM extraction.
+ */
+
 import { route } from '../lib/router';
 import { EntryInput, EntityType } from '../types';
 

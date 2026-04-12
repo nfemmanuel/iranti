@@ -1,3 +1,9 @@
+/**
+ * CLI utility to revoke an iranti API key by keyId.
+ *
+ * Args: --key-id <id> (alias: -k). Exits non-zero if the key is not found.
+ * Run: `npm run api-key:revoke -- --key-id <id>`. Requires DATABASE_URL.
+ */
 import 'dotenv/config';
 import { initDb } from '../src/library/client';
 import { revokeApiKey } from '../src/security/apiKeys';

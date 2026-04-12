@@ -1,3 +1,7 @@
+/**
+ * Integration test: Iranti SDK attendant API -- handshake, attend, reconvene,
+ * and checkpoint lifecycle flows with mock provider.
+ */
 import 'dotenv/config';
 import { handshake, reconvene, getAttendant } from '../src/attendant';
 import { clearAttendant } from '../src/attendant/registry';

@@ -1,3 +1,24 @@
+/**
+ * CLI help text renderer for the Iranti CLI.
+ *
+ * Consumes structured help catalog data and renders it to stdout using a
+ * caller-supplied CliHelpStyle object that decouples colour (chalk for TTY)
+ * from plain-text rendering (tests, pipes). Each public print* function
+ * corresponds to one CLI command's `--help` output.
+ *
+ * Separation of concerns:
+ *   - This module: rendering layout (sections, indentation, field labels)
+ *   - cliHelpCatalog: text content (commands, descriptions, use-when text)
+ *   - CLI entry point: the CliHelpStyle object (chalk vs. plain)
+ *
+ * Key exports:
+ *   - printMainHelp()    — top-level iranti --help
+ *   - printSetupHelp()   — iranti setup --help
+ *   - print*Help()       — one print function per command
+ *   - printWizardNotes() — bulleted wizard note block
+ *   - printChoiceGuide() — interactive choice guidance block
+ */
+
 import {
     AUTH_HELP,
     COMMON_FLOWS,

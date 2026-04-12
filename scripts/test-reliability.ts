@@ -1,3 +1,7 @@
+/**
+ * Integration test: source-reliability online learning -- WIN/LOSS/HUMAN delta
+ * updates, DECAY_RATE application, and persistence to system/librarian.
+ */
 import 'dotenv/config';
 import { librarianWrite } from '../src/librarian';
 import { getReliabilityScores, weightedConfidence } from '../src/librarian/source-reliability';

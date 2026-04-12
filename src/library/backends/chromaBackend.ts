@@ -1,3 +1,21 @@
+/**
+ * Chroma vector backend for iranti.
+ *
+ * Implements the `VectorBackend` interface against a Chroma HTTP API server
+ * (v2 tenant/database/collection path). Suitable for deployments that want
+ * an external vector store separate from the primary Postgres database.
+ *
+ * Configuration (via `ChromaConfig` or env vars in the factory):
+ *  - `url`        — Chroma server base URL (e.g. http://localhost:8000)
+ *  - `collection` — collection name (default: iranti_facts)
+ *  - `tenant`     — Chroma tenant (default: default_tenant)
+ *  - `database`   — Chroma database (default: default_database)
+ *  - `token`      — optional Bearer token for auth
+ *
+ * Collection IDs are resolved lazily and cached per instance so the class
+ * can be constructed before the server is reachable.
+ */
+
 import { VectorBackend, VectorConsistencyFilter, VectorMutationDbClient, VectorSearchResult, VectorUpsertParams } from '../vectorBackend';
 
 type ChromaConfig = {

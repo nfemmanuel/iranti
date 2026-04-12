@@ -1,3 +1,21 @@
+/**
+ * Entity relationship graph for iranti.
+ *
+ * Stores and queries directed relationships between entities in the
+ * `entityRelationship` table. Relationships are identified by a 5-tuple
+ * `(fromType, fromId, relationshipType, toType, toId)` and are upserted
+ * idempotently so callers can register the same edge multiple times safely.
+ *
+ * Supports bidirectional traversal: `getRelated` returns both outbound and
+ * inbound edges labelled with `direction`. `getRelatedDeep` walks the graph
+ * up to `depth` hops (default 2), deduplicating visited nodes.
+ *
+ * Used by:
+ *  - `contextual-conflicts.ts` — cross-entity semantic consistency checks
+ *  - `agent-registry.ts`       — MEMBER_OF team assignments
+ *  - MCP `iranti_related` / `iranti_related_deep` tools
+ */
+
 import { getDb } from './client';
 import { Prisma } from '../generated/prisma/client';
 
@@ -80,14 +98,14 @@ export async function getRelated(
     ]);
 
     const results: RelatedEntity[] = [
-        ...outbound.map((r: any) => ({
+        ...outbound.map((r) => ({
             entityType: r.toType,
             entityId: r.toId,
             relationshipType: r.relationshipType,
             direction: 'outbound' as const,
             properties: (r.properties ?? {}) as Record<string, unknown>,
         })),
-        ...inbound.map((r: any) => ({
+        ...inbound.map((r) => ({
             entityType: r.fromType,
             entityId: r.fromId,
             relationshipType: r.relationshipType,

@@ -1,3 +1,20 @@
+/**
+ * In-process metrics store for Iranti.
+ *
+ * Lightweight, zero-dependency counter and timer registry for tracking LLM
+ * call volume, cache effectiveness, DB query counts, and latency percentiles.
+ * All data lives in module-level objects and is reset with reset(). Intended
+ * for request-scoped diagnostics (doctor, debug output) — not persistent
+ * monitoring; use an external metrics system for that.
+ *
+ * Key exports:
+ *   - inc()        — increment a named counter
+ *   - timeStart()  — record a start timestamp (returns ms)
+ *   - timeEnd()    — record a duration sample for a named timer
+ *   - snapshot()   — read current counters and timer stats (count, avg, p95, max)
+ *   - reset()      — clear all counters and timers (call between tests)
+ */
+
 type CounterName =
   | "llm.calls"
   | "llm.failures"

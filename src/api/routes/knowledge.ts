@@ -1,3 +1,30 @@
+/**
+ * Knowledge base REST routes for iranti (`/kb`).
+ *
+ * Handles reads and writes to the knowledge store via the Iranti SDK.
+ * All write routes go through the Librarian conflict resolution pipeline.
+ * All read routes go through the Attendant observe/query layer.
+ *
+ * Key routes:
+ *  POST /kb/write          — write a single knowledge entry
+ *  POST /kb/ingest         — LLM-chunked ingest of raw text
+ *  GET  /kb/query          — structured knowledge query (entity/key lookup)
+ *  POST /kb/search         — hybrid lexical+vector search
+ *  POST /kb/observe        — Attendant retrieval (returns working-memory brief)
+ *  POST /kb/handshake      — Attendant session start
+ *  POST /kb/attend         — Attendant per-turn memory gate
+ *  POST /kb/reconvene      — Attendant post-compaction re-handshake
+ *  POST /kb/checkpoint     — write a structured checkpoint fact
+ *  POST /kb/remember       — explicit assistant memory extraction
+ *  GET  /kb/entity-resolution   — resolve a raw name to canonical entity
+ *  POST /kb/entity-resolution   — same (POST body)
+ *  POST /kb/add-alias      — add an alias to an existing canonical entity
+ *  GET  /kb/list-aliases   — list all aliases for a canonical entity
+ *  GET  /kb/relationships  — get entity relationships
+ *  GET  /kb/related-deep   — traverse relationship graph (multi-hop)
+ *  GET  /kb/archive-history — get archive history for an entry
+ */
+
 import { Router, Request, Response } from 'express';
 import { Iranti, ProtocolViolationError } from '../../sdk';
 import { addAlias, listAliases, parseEntityString, resolveEntity } from '../../library/entity-resolution';

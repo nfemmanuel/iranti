@@ -1,3 +1,20 @@
+/**
+ * pgvector backend for iranti's vector search layer.
+ *
+ * Stores and queries embedding vectors in the `knowledge_base.embedding`
+ * column using the `pgvector` Postgres extension. Falls back gracefully
+ * when the extension is not installed or the `embedding` column is missing
+ * (checked once via `hasVectorSupport()` and cached for the process lifetime).
+ *
+ * Vector writes use raw SQL (`$executeRaw`) so they can run inside a Prisma
+ * transaction alongside knowledge entry mutations. The `VectorMutationDbClient`
+ * type accepts either the full `PrismaClient` or a Prisma transaction client.
+ *
+ * Search uses a cosine-distance `<->` operator order-by with an IVFFLAT or
+ * exact scan depending on what pgvector supports. Results are capped and
+ * filtered by `isProtected = false`.
+ */
+
 import { Prisma } from '../../generated/prisma/client';
 import { getDb } from '../client';
 import { toPgVectorLiteral } from '../embeddings';

@@ -1,3 +1,23 @@
+/**
+ * Health check state and vector backend monitor for iranti's API server.
+ *
+ * Provides lightweight, side-effect-free helpers used by `server.ts` to
+ * build and maintain the `/health` response:
+ *
+ *  - `createHealthCheckState(initial)` — factory for a mutable `HealthCheckState`
+ *    object that `server.ts` updates as probes complete
+ *  - `deriveOperatorStatus(context)` — computes `'ok' | 'degraded'` from the
+ *    combination of runtime authority source, metadata health, and vector backend
+ *    health; degraded when any critical check has failed
+ *  - `createVectorBackendMonitor(options)` — starts an interval-based probe loop
+ *    against the vector backend's `ping()`. Updates a shared `HealthCheckState`
+ *    on each probe result and calls `logError` on failure. Returns `{ probe,
+ *    start, stop }` so the server can control the monitor lifecycle.
+ *
+ * Designed for testability: `setIntervalImpl` / `clearIntervalImpl` overrides
+ * allow tests to inject fake timers without patching globals.
+ */
+
 export type HealthCheckState = {
     checked: boolean;
     ok: boolean;

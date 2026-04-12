@@ -1,5 +1,23 @@
-// src/lib/staffEventEmitter.ts
-// New file — introduced by CP-T025 upstream PR.
+/**
+ * Staff event types and emitter interface for Iranti's internal audit log.
+ *
+ * Staff components (Librarian, Attendant, Archivist, Resolutionist) emit
+ * structured events to record decisions, conflicts, and state transitions.
+ * These events are persisted to `staff_events` when a DbStaffEventEmitter is
+ * registered; they are silently dropped by the default NoopEventEmitter.
+ *
+ * Emitter contract: emit() is synchronous from the caller's perspective.
+ * Async delivery (DB writes, network I/O) happens in fire-and-forget tasks.
+ * Implementations MUST NOT throw — all errors are caught and logged internally.
+ * flush() drains pending writes before process shutdown.
+ *
+ * Key exports:
+ *   - IStaffEventEmitter  — interface all Staff components depend on
+ *   - StaffEvent          — fully-stamped event (eventId + timestamp auto-added)
+ *   - StaffEventInput     — what callers pass to emit() (no auto-generated fields)
+ *   - NoopEventEmitter    — default zero-overhead implementation
+ *   - buildStaffEvent()   — stamp eventId + timestamp onto a StaffEventInput
+ */
 
 import { randomUUID } from 'crypto';
 

@@ -1,3 +1,7 @@
+/**
+ * Integration test: Librarian write pipeline -- conflict detection, policy-based
+ * resolution, escalation path, and post-write verification.
+ */
 import 'dotenv/config';
 import { librarianWrite } from '../src/librarian';
 import { bootstrapHarness } from './harness';

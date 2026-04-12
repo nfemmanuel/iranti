@@ -1,6 +1,17 @@
-// src/lib/staffEventRegistry.ts
-// New file — introduced by CP-T025 upstream PR.
-// Module-level singleton registry for the active IStaffEventEmitter.
+/**
+ * Module-level singleton registry for the active IStaffEventEmitter.
+ *
+ * Holds a single shared emitter instance for the process lifetime. The default
+ * is a NoopEventEmitter (zero overhead). Call setStaffEventEmitter() once at
+ * startup to install a concrete implementation (e.g. DbStaffEventEmitter).
+ * After startup, the emitter should not be replaced in production code.
+ *
+ * Key exports:
+ *   - setStaffEventEmitter()    — install a concrete emitter (call once at startup)
+ *   - getStaffEventEmitter()    — retrieve the current emitter
+ *   - flushStaffEventEmitter()  — drain pending async writes before shutdown
+ *   - resetStaffEventEmitter()  — reset to Noop (test use only)
+ */
 
 import { IStaffEventEmitter, NoopEventEmitter } from './staffEventEmitter';
 

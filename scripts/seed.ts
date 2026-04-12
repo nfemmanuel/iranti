@@ -1,3 +1,10 @@
+/**
+ * Seeds initial operating rules for librarian, attendant, and archivist
+ * staff roles into the iranti knowledge base.
+ *
+ * Safe to re-run -- the Librarian pipeline deduplicates on (entityType, entityId, key).
+ * Must be run after setup.ts on a fresh database. Requires DATABASE_URL.
+ */
 import 'dotenv/config';
 import { initDb } from '../src/library/client';
 import { createEntry } from '../src/library/queries';

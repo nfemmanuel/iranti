@@ -1,3 +1,21 @@
+/**
+ * Agent registry — tracks agent profiles and per-agent write statistics.
+ *
+ * Agents are registered via `registerAgent(profile)` which upserts a
+ * `agent/<agentId>/profile` entry and initialises a `stats` sibling. Stats
+ * are updated by `updateStats()` after every write action and auto-initialised
+ * for agents that write without registering first (so stat tracking never
+ * silently drops events).
+ *
+ * Key exports:
+ *  - `registerAgent(profile)` — upsert profile + init stats
+ *  - `updateStats(agentId, action, confidence)` — increment counters
+ *  - `getAgent(agentId)` — fetch profile + stats together
+ *  - `whoKnows(entityType, entityId)` — list agents that contributed to an entity
+ *  - `listAgents()` — all registered profiles
+ *  - `assignToTeam(agentId, teamId, createdBy)` — add MEMBER_OF relationship
+ */
+
 import { getDb } from './client';
 import { Prisma } from '../generated/prisma/client';
 import { createRelationship } from './relationships';
@@ -228,7 +246,7 @@ export async function listAgents(): Promise<AgentProfile[]> {
         },
     });
 
-    return entries.map((e: any) => e.valueRaw as unknown as AgentProfile);
+    return entries.map((e) => e.valueRaw as unknown as AgentProfile);
 }
 
 // ─── Team Relationships ──────────────────────────────────────────────────────

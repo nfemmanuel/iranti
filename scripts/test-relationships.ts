@@ -1,3 +1,7 @@
+/**
+ * Integration test: entity relationship graph -- directed edge creation,
+ * bidirectional traversal, and getRelatedDeep deduplication.
+ */
 import 'dotenv/config';
 import { Iranti } from '../src/sdk';
 import { bootstrapHarness } from './harness';

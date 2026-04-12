@@ -1,3 +1,10 @@
+/**
+ * End-to-end demo: two agents sharing memory via iranti with conflict resolution.
+ *
+ * Creates two Iranti SDK instances writing to the same entity, triggers a
+ * conflict, and demonstrates the Librarian resolution pipeline in real time.
+ * Requires DATABASE_URL and a configured LLM provider (LLM_PROVIDER env).
+ */
 import 'dotenv/config';
 import { Iranti } from '../src/sdk';
 

@@ -1,3 +1,7 @@
+/**
+ * Integration test: route-level auth scope enforcement -- verifies that each
+ * endpoint rejects requests with insufficient scopes.
+ */
 import 'dotenv/config';
 import { route, getAllProfiles } from '../src/lib/router';
 

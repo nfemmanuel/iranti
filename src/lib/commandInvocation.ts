@@ -1,3 +1,22 @@
+/**
+ * Cross-platform command invocation resolver for the Iranti CLI.
+ *
+ * On non-Windows, most executables (npm, npx, codex, iranti) resolve trivially.
+ * On Windows, tools like npm/npx are .cmd wrappers that need explicit Node.js
+ * invocation, and codex may be installed in multiple forms (.exe, .cmd, .js).
+ * This module centralises that resolution logic so callers can use simple
+ * executable names and always get a valid {executable, args} pair back.
+ *
+ * Test shim support: IRANTI_TEST_TOOL_SHIM, IRANTI_TEST_NPM_CLI,
+ * IRANTI_TEST_NPX_CLI, IRANTI_TEST_WHERE_EXE, and CODEX_CLI_PATH env vars
+ * let the test suite inject mock executables without touching PATH.
+ *
+ * Key exports:
+ *   - resolveCommandInvocation()  — resolve an executable + args to a runnable invocation
+ *   - spawnSyncResolved()         — spawnSync wrapper using resolved invocation
+ *   - spawnResolved()             — async spawn wrapper using resolved invocation
+ */
+
 import fs from 'fs';
 import path from 'path';
 import { spawn, spawnSync, SpawnSyncOptions } from 'child_process';

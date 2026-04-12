@@ -1,3 +1,23 @@
+/**
+ * Session ledger — structured query layer over the staff_events table.
+ *
+ * The session ledger reads from staff_events to reconstruct a session's
+ * activity history (what happened), learning profile (what patterns the
+ * Attendant observed), and compliance state (whether the host is following
+ * the attend/write protocol). These are the building blocks for handshake
+ * operating rules, backfill suggestions, and checkpoint discipline lessons.
+ *
+ * Unlike the emitter (which writes events), this module is read-only except
+ * for the `emitLedgerLearning()` function, which writes synthesized lessons
+ * back into the ledger as new `session_ledger` component events.
+ *
+ * Key exports:
+ *   - querySessionLedger()           — raw event query with filters
+ *   - querySessionLedgerLearnings()  — synthesized learning events query
+ *   - emitLedgerLearning()           — write a synthesized lesson to staff_events
+ *   - buildSessionLearnings()        — derive lessons from raw event history
+ */
+
 import { Prisma } from '../generated/prisma/client';
 import { getDb } from '../library/client';
 import type { EventLevel, StaffComponent } from './staffEventEmitter';

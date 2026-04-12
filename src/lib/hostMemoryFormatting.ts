@@ -1,3 +1,22 @@
+/**
+ * Host memory injection block formatter.
+ *
+ * Converts raw fact objects into structured text blocks that get injected into
+ * an LLM host's context window. The format uses stable F-prefixed fact IDs,
+ * entity/key attribution, and operating instructions so the host knows to
+ * prefer injected facts over re-inference.
+ *
+ * Compact mode: facts with confidence ≥ 90 and age ≤ 7 days are rendered in
+ * a shorter one-line form (omitting confidence, source detail, and lastUpdated)
+ * to reduce token noise for high-signal recent facts.
+ *
+ * Key exports:
+ *   - formatStructuredFactBlock()  — render a fact array into an injection block
+ *   - assignStructuredFactIds()    — stamp F-prefixed IDs onto facts
+ *   - splitEntityKey()             — split "type/id/key" into entity + key parts
+ *   - StructuredHostMemoryFact     — typed fact with guaranteed factId
+ */
+
 type HostMemoryFactInput = {
     factId?: string;
     entityKey: string;

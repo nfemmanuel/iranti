@@ -1,3 +1,29 @@
+/**
+ * Knowledge store query layer for iranti.
+ *
+ * The central CRUD and search interface over the `knowledge_base` (Prisma
+ * `knowledgeEntry`) table and related tables. All reads and writes go through
+ * this module so the vector index, decay metadata, and conflict log stay
+ * consistent with the relational rows.
+ *
+ * Key operations:
+ *  - `findEntry` / `findEntriesByEntity` — point lookups and entity scans
+ *  - `createEntry` — insert + save vector embedding + set initial stability
+ *  - `archiveEntry` / `insertArchiveFromCurrent` — move row to archive table
+ *  - `appendConflictLog` — append a conflict event to the entry's JSONB log
+ *  - `hybridSearch` — lexical (full-text) + vector (cosine) weighted search;
+ *    falls back to pure lexical when the vector backend is unavailable
+ *  - `searchWithBridging` — extends hybrid search by walking the entity
+ *    relationship graph up to `SEARCH_BRIDGE_MAX_HOPS` hops from top results
+ *  - `checkVectorIndexConsistency` / `repairVectorIndex` — audit and repair
+ *    drift between the relational store and the vector backend
+ *  - Write receipt helpers (M-2): `claimWriteReceiptSlot`, `getWriteReceipt`,
+ *    `clearPendingWriteReceiptSlot`
+ *
+ * `DbClient` accepts both the full `PrismaClient` and transaction clients so
+ * callers can pass either `getDb()` or a Prisma transaction `tx`.
+ */
+
 import { getDb } from './client';
 import {
     EntryInput,
@@ -1288,7 +1314,7 @@ export function canWriteToStaffNamespace(createdBy: string, entityType: string):
 }
 
 // Conflict Log
-export async function appendConflictLog(entryId: number, event: any, db?: DbClient) {
+export async function appendConflictLog(entryId: number, event: unknown, db?: DbClient) {
     const client = db ?? getDb();
     const eventJson = JSON.stringify(event);
     await client.$executeRaw`

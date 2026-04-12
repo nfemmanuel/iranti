@@ -1,3 +1,19 @@
+/**
+ * Attendant singleton registry for iranti.
+ *
+ * Ensures at most one `AttendantInstance` is alive per `agentId` per process.
+ * The registry is intentionally process-local — cross-process coordination is
+ * handled by the shared-state invalidation layer
+ * (`unregisterSharedStateInvalidationObserver` is called on `clearAttendant`
+ * so subscriptions don't leak when an instance is evicted).
+ *
+ * Key exports:
+ *  - `getAttendant(agentId)`   — get-or-create the singleton for an agent
+ *  - `clearAttendant(agentId)` — evict and deregister (used in tests / restarts)
+ *  - `activeAttendants()`      — list all agentIds with live instances
+ *  - `AttendantInstance`       — re-exported for convenience
+ */
+
 import { AttendantInstance } from './AttendantInstance';
 import { unregisterSharedStateInvalidationObserver } from '../lib/sharedStateInvalidation';
 

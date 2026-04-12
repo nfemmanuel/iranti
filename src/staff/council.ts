@@ -1,16 +1,16 @@
-// src/staff/council.ts
-//
-// B7 S6 — Cross-Staff consultation (council mode).
-//
-// Pure helper that, given the current Staff member's decision context,
-// proposes which OTHER Staff members should be consulted before finalising.
-// Emits a structured consultation plan — the consultation itself is NOT
-// executed here. Downstream consumers (Librarian conflict path, Attendant
-// relevance filter, Archivist reasoning pass) can choose to act on the plan
-// or record it for observability.
-//
-// Follows the A4/A5 pattern: propose, don't execute. Deterministic, no LLM,
-// no I/O. Fully unit-testable.
+/**
+ * B7 S6 — Cross-Staff consultation (council mode).
+ *
+ * Pure helper that, given the current Staff member's decision context,
+ * proposes which OTHER Staff members should be consulted before finalising.
+ * Emits a structured consultation plan — the consultation itself is NOT
+ * executed here. Downstream consumers (Librarian conflict path, Attendant
+ * relevance filter, Archivist reasoning pass) can choose to act on the plan
+ * or record it for observability.
+ *
+ * Follows the A4/A5 pattern: propose, don't execute. Deterministic, no LLM,
+ * no I/O. Fully unit-testable.
+ */
 
 import type { StaffComponent } from '../lib/staffEventEmitter';
 

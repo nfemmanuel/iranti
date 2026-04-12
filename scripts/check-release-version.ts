@@ -1,3 +1,10 @@
+/**
+ * Pre-release version consistency check for iranti.
+ *
+ * Reads the version from package.json and verifies it matches across the
+ * TypeScript client, Python client/project, and the API server version constant.
+ * Exits non-zero on any mismatch. Run: `npm run check-release-version`.
+ */
 import fs from 'fs';
 import path from 'path';
 
@@ -9,7 +16,7 @@ type VersionSnapshot = {
     apiServer: string;
 };
 
-function readJson(filePath: string): any {
+function readJson(filePath: string): Record<string, unknown> {
     return JSON.parse(fs.readFileSync(filePath, 'utf8'));
 }
 

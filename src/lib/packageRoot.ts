@@ -1,3 +1,14 @@
+/**
+ * Package root resolver for the Iranti CLI.
+ *
+ * Walks up the directory tree from a given starting directory until it finds
+ * a directory containing package.json, which is treated as the package root.
+ * Depth is capped at 6 ancestors to avoid runaway traversal in edge cases.
+ *
+ * Key export:
+ *   - resolvePackageRoot()  — find the nearest package.json ancestor directory
+ */
+
 import fs from 'fs';
 import path from 'path';
 

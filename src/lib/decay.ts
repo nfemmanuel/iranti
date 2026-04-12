@@ -1,3 +1,18 @@
+/**
+ * Memory decay model for Iranti knowledge entries.
+ *
+ * Implements an Ebbinghaus-inspired forgetting curve: confidence decays
+ * exponentially as a function of time since last access and a per-fact
+ * stability value. Decay is opt-in (disabled by default) and controlled
+ * entirely via IRANTI_DECAY_* environment variables.
+ *
+ * Key functions:
+ *   - getDecayConfig()              — read decay settings from env
+ *   - calculateRetention()          — Ebbinghaus retention fraction [0,1]
+ *   - calculateDecayedConfidence()  — apply retention to a confidence score
+ *   - initialStabilityFromReliability() — seed stability from source reliability
+ */
+
 export type DecayConfig = {
     enabled: boolean;
     stabilityBase: number;
@@ -47,9 +62,14 @@ export function calculateDecayedConfidence(
     return Math.max(0, Math.min(100, Math.round(originalConfidence * retention)));
 }
 
+// Stability multiplier bounds: reliability 0 → multiplier 0.75 (minimum stable), reliability 1 → multiplier 1.25 (maximum stable).
+// A mid-range source (0.5 reliability) maps to a 1.0× multiplier == stabilityBase days.
+const STABILITY_MULTIPLIER_BASE = 0.75;
+const STABILITY_MULTIPLIER_RANGE = 0.5;
+
 export function initialStabilityFromReliability(reliability: number, config: DecayConfig = getDecayConfig()): number {
     const boundedReliability = Math.max(0.1, Math.min(1, reliability));
-    const multiplier = 0.75 + (boundedReliability * 0.5);
+    const multiplier = STABILITY_MULTIPLIER_BASE + (boundedReliability * STABILITY_MULTIPLIER_RANGE);
     return Math.min(config.stabilityMax, Math.max(1, Math.round(config.stabilityBase * multiplier * 100) / 100));
 }
 

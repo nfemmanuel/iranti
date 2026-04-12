@@ -1,3 +1,7 @@
+/**
+ * Integration test: archivist scan cycle -- conflict detection, escalation,
+ * and authoritative-resolution processing. Requires DATABASE_URL and LLM_PROVIDER.
+ */
 import 'dotenv/config';
 import { runArchivist } from '../src/archivist';
 import { bootstrapHarness } from './harness';

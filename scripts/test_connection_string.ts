@@ -1,3 +1,7 @@
+/**
+ * Unit test: DATABASE_URL parsing and validation -- ensures malformed or missing
+ * connection strings are detected and reported before DB initialisation.
+ */
 import 'dotenv/config';
 import { Iranti } from '../src/sdk';
 import { bootstrapHarness } from './harness';
@@ -54,8 +58,8 @@ async function testConnectionString() {
             process.exit(1);
         }
 
-    } catch (err: any) {
-        console.log(`  ✗ FAILED: ${err.message}\n`);
+    } catch (err) {
+        console.log(`  ✗ FAILED: ${err instanceof Error ? err.message : String(err)}\n`);
         process.exit(1);
     }
 
@@ -70,19 +74,19 @@ async function testConnectionString() {
             new Iranti({});
             console.log('  ✗ FAILED: Should have thrown error\n');
             process.exit(1);
-        } catch (err: any) {
-            if (err.message.includes('connectionString is required')) {
+        } catch (err) {
+            if (err instanceof Error && err.message.includes('connectionString is required')) {
                 console.log('  ✓ PASSED: Correct error thrown\n');
             } else {
-                console.log(`  ✗ FAILED: Wrong error: ${err.message}\n`);
+                console.log(`  ✗ FAILED: Wrong error: ${err instanceof Error ? err.message : String(err)}\n`);
                 process.exit(1);
             }
         } finally {
             // Restore env var
             process.env.DATABASE_URL = savedUrl;
         }
-    } catch (err: any) {
-        console.log(`  ✗ FAILED: ${err.message}\n`);
+    } catch (err) {
+        console.log(`  ✗ FAILED: ${err instanceof Error ? err.message : String(err)}\n`);
         process.exit(1);
     }
 
@@ -94,8 +98,8 @@ async function testConnectionString() {
             llmProvider: 'mock',
         });
         console.log('  ✓ PASSED: Second initialization with same connection string works\n');
-    } catch (err: any) {
-        console.log(`  ✗ FAILED: ${err.message}\n`);
+    } catch (err) {
+        console.log(`  ✗ FAILED: ${err instanceof Error ? err.message : String(err)}\n`);
         process.exit(1);
     }
 

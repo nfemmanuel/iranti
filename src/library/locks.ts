@@ -1,3 +1,24 @@
+/**
+ * Identity-level advisory locking for iranti knowledge writes.
+ *
+ * Provides `withIdentityLock(identity, fn)` — a two-layer concurrency guard
+ * that ensures at most one write executes at a time for a given
+ * `(entityType, entityId, key)` triple:
+ *
+ *  Layer 1 — in-process queue: a per-identity promise chain serialises
+ *    concurrent callers within the same Node.js process. This avoids the
+ *    overhead of acquiring a Postgres advisory lock when concurrency is local.
+ *
+ *  Layer 2 — Postgres advisory xact lock: `pg_advisory_xact_lock` acquired
+ *    inside the Prisma transaction prevents races across multiple processes or
+ *    replicas sharing the same database. The lock is automatically released
+ *    when the transaction commits or rolls back.
+ *
+ * The lock key is a 63-bit FNV1a-derived bigint from the identity string.
+ * If the transaction is aborted (e.g. due to a prior error in the same tx),
+ * the lock is retried once before surfacing the error.
+ */
+
 import { getDb } from './client';
 import type { PrismaClient } from '../generated/prisma/client';
 

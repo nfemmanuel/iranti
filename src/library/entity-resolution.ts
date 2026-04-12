@@ -1,3 +1,33 @@
+/**
+ * Entity resolution and alias management for iranti.
+ *
+ * Resolves a raw entity reference (name, id, or aliases) to a canonical
+ * `entityType/entityId` stored in the `entity` and `entityAlias` tables.
+ * The resolution strategy (in priority order):
+ *  1. Alias table lookup — normalise all candidate alias strings and check
+ *     for an existing `entityAlias` row pointing to a canonical entity.
+ *  2. Exact entity table lookup — check whether the normalised candidate id
+ *     already exists as a row in the `entity` table.
+ *  3. Knowledge-entry backfill — if knowledge rows exist for the candidate id
+ *     but no entity row yet, create the entity row and link it.
+ *  4. Create — if `createIfMissing` is true (default), create a new canonical
+ *     entity and register all aliases.
+ *
+ * Alias normalisation strips articles ("the", "project"), lowercases,
+ * collapses whitespace, and replaces separators with spaces. Project entities
+ * additionally strip the "project_" prefix during normalisation so
+ * "project/iranti" and "project/project_iranti" resolve to the same entity.
+ *
+ * All alias creation uses upsert to handle concurrent resolution races (M-3).
+ *
+ * Key exports:
+ *  - `resolveEntity(input)` → `ResolveEntityResult`
+ *  - `addAlias(input)`      → adds a single alias to an existing canonical entity
+ *  - `listAliases(entity)`  → all aliases for a canonical entity
+ *  - `normalizeAlias(input, entityType)` — exported for use in search layers
+ *  - `parseEntityString(entity)` — split "type/id" string
+ */
+
 import { randomUUID } from 'crypto';
 import { getDb } from './client';
 

@@ -1,3 +1,7 @@
+/**
+ * Contract test: verifies that iranti server API responses match the expected
+ * shape and status codes for all documented routes.
+ */
 import fs from 'fs';
 import path from 'path';
 import { execFileSync } from 'child_process';

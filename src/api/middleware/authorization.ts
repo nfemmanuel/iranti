@@ -1,3 +1,22 @@
+/**
+ * iranti API authorization middleware — scope-based access control.
+ *
+ * Enforces which operations an API key is allowed to perform based on the
+ * `scopes` array populated by the auth middleware. Scope formats follow the
+ * `family:action` pattern (e.g. `knowledge:read`, `memory:write`).
+ *
+ * Exported middleware factories:
+ *  - `requireAnyScope(scopes)` — passes if the key holds at least one of the
+ *    listed scopes (global or family match)
+ *  - `requireScopeByMethod(readScope, writeScope)` — infers required scope
+ *    from HTTP method (GET/HEAD/OPTIONS → read, else → write)
+ *  - `requireScopeFamilyByMethod(readFamily, writeFamily)` — same but family
+ *    prefix matching (e.g. `knowledge` matches `knowledge:read`)
+ *  - `requireEntityScopeByMethod(extractor, readScope, writeScope)` — combines
+ *    method-based scope inference with entity-level access checks via
+ *    `evaluateEntityScopeAccess` (supports entity-scoped API keys)
+ */
+
 import { NextFunction, Request, Response } from 'express';
 import { evaluateEntityScopeAccess, scopeMatchesFamily, scopeMatchesGlobal } from '../../security/scopes';
 

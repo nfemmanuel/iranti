@@ -1,3 +1,7 @@
+/**
+ * Integration test: Iranti SDK public API -- write, query, search, handshake,
+ * attend, reconvene, and checkpoint via the Iranti class. Requires DATABASE_URL.
+ */
 import 'dotenv/config';
 import { Iranti } from '../src/sdk';
 import { clearAttendant } from '../src/attendant/registry';

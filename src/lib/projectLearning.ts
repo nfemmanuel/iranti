@@ -1,3 +1,26 @@
+/**
+ * Project learning snapshot writer for `iranti project init`.
+ *
+ * When a project is bound to an Iranti instance, this module collects a
+ * lightweight bounded snapshot of the project's structure and writes it to
+ * the `codebase/{name}_{hash}` entity in the Iranti library. The snapshot
+ * is intentionally scoped to manifest files and directory structure — it is
+ * NOT a crawler, watcher, or autonomous full-repo understanding pass.
+ *
+ * Snapshot keys written:
+ *   project_overview  — languages, frameworks, package manager, README summary
+ *   project_scripts   — package.json scripts list
+ *   project_layout    — manifest files present + source directory layout
+ *   project_binding   — entity mapping, agent ID, project mode, instance env reference
+ *
+ * The codebase entity ID is derived as `codebase/{basename}_{sha1_prefix}` so
+ * the same project path always maps to the same entity, even after renames.
+ *
+ * Key exports:
+ *   - writeProjectLearningSnapshot()    — collect + write snapshot; returns status
+ *   - deriveProjectCodebaseEntity()     — compute the stable codebase entity ID for a path
+ */
+
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';

@@ -1,3 +1,16 @@
+/**
+ * Anthropic Claude LLM provider for Iranti.
+ *
+ * Implements the LLMProvider interface for Claude models via the official
+ * Anthropic SDK (rather than raw fetch like the other providers), which
+ * handles retries, streaming, and SDK-level error normalization.
+ *
+ * Configuration env vars:
+ *   ANTHROPIC_API_KEY    — required
+ *   ANTHROPIC_MODEL      — default model (default: claude-sonnet-4-6)
+ *   ANTHROPIC_BASE_URL   — override endpoint (optional)
+ */
+
 import { LLMProvider, LLMMessage, LLMResponse, CompleteOptions, normalizeProviderCaughtError } from '../llm';
 import Anthropic from '@anthropic-ai/sdk';
 

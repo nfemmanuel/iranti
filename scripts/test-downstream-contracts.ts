@@ -1,3 +1,7 @@
+/**
+ * Contract test: verifies that iranti SDK TypeScript types match the shapes
+ * returned by the running server API. Requires DATABASE_URL.
+ */
 import fs from 'fs';
 import path from 'path';
 

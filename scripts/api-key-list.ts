@@ -1,3 +1,9 @@
+/**
+ * CLI utility to list all registered iranti API keys.
+ *
+ * Prints keyId, owner, active status, scopes, and createdAt for each key.
+ * Run: `npm run api-key:list`. Requires DATABASE_URL.
+ */
 import 'dotenv/config';
 import { initDb } from '../src/library/client';
 import { listApiKeys } from '../src/security/apiKeys';

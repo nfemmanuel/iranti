@@ -1,3 +1,13 @@
+/**
+ * MCP (Model Context Protocol) server for iranti.
+ *
+ * Exposes iranti tools (iranti_handshake, iranti_attend, iranti_write, etc.)
+ * over stdio transport. Loaded by Claude Code, Codex, Copilot, and other
+ * MCP-aware agents via their MCP server configuration.
+ *
+ * Env: DATABASE_URL required. Optional: IRANTI_MCP_DEFAULT_AGENT,
+ * IRANTI_PROJECT_ENV, IRANTI_INSTANCE_ENV, IRANTI_MCP_AGENT_NAME.
+ */
 import fs from 'node:fs';
 import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';

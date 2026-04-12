@@ -1,3 +1,11 @@
+/**
+ * Database setup and migration runner for iranti.
+ *
+ * Creates the Prisma DB schema, runs pending migrations, seeds initial
+ * operating-rule data, and ensures escalation folders exist on disk.
+ *
+ * Run: `npm run setup` or `iranti setup`. Requires DATABASE_URL.
+ */
 import 'dotenv/config';
 import { execSync } from 'child_process';
 import fs from 'fs';

@@ -1,3 +1,26 @@
+/**
+ * Cross-process shared-state invalidation for Iranti's Attendant cache.
+ *
+ * When a fact is written, other processes watching the same entity need to
+ * invalidate their in-memory cache. This module uses PostgreSQL LISTEN/NOTIFY
+ * on the `iranti_shared_state_invalidation` channel to broadcast update signals
+ * across all processes sharing the same database.
+ *
+ * Architecture:
+ *   - Listener: one dedicated pg.Client per process for LISTEN (auto-reconnects).
+ *   - Notifier: one dedicated pg.Client per process for pg_notify() sends.
+ *   - In-process: notifySharedEntityUpdated() for writes within the same process.
+ *   - Cross-process: broadcastSharedEntityUpdated() for external writers.
+ *   - Self-filter: messages from the current process are ignored (CROSS_PROCESS_SOURCE).
+ *
+ * Key exports:
+ *   - registerSharedStateInvalidationObserver()    — attach a watcher (starts listener)
+ *   - unregisterSharedStateInvalidationObserver()  — detach; shuts down listener when last
+ *   - notifySharedEntityUpdated()                  — in-process cache invalidation
+ *   - broadcastSharedEntityUpdated()               — cross-process invalidation via pg_notify
+ *   - shutdownSharedStateInvalidationListener()    — clean teardown before process exit
+ */
+
 import { Client } from 'pg';
 
 export interface SharedStateInvalidationObserver {

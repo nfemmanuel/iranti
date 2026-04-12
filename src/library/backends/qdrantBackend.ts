@@ -1,3 +1,20 @@
+/**
+ * Qdrant vector backend for iranti.
+ *
+ * Implements the `VectorBackend` interface against a Qdrant HTTP API server.
+ * Suitable for deployments that need high-throughput vector search separate
+ * from the primary Postgres database.
+ *
+ * Configuration (via `QdrantConfig` or env vars in the factory):
+ *  - `url`        — Qdrant server base URL (e.g. http://localhost:6333)
+ *  - `apiKey`     — optional API key header (`api-key`)
+ *  - `collection` — collection name (default: iranti_facts)
+ *
+ * The collection is created lazily on the first upsert with `EMBEDDING_DIMENSIONS`
+ * dimensions and cosine distance. Subsequent calls skip collection creation
+ * via the `collectionReady` flag.
+ */
+
 import { EMBEDDING_DIMENSIONS } from '../embeddings';
 import { VectorBackend, VectorConsistencyFilter, VectorMutationDbClient, VectorSearchResult, VectorUpsertParams } from '../vectorBackend';
 
@@ -6,6 +23,23 @@ type QdrantConfig = {
     apiKey?: string;
     collection: string;
 };
+
+/** Minimal typed shape for a single Qdrant point returned by search or scroll. */
+interface QdrantPoint {
+    id: string | number;
+    score?: number;
+    payload?: Record<string, unknown>;
+}
+
+/** Response envelope from Qdrant search — result is either a bare array or `{ points }`. */
+interface QdrantSearchResponse {
+    result?: QdrantPoint[] | { points?: QdrantPoint[] };
+}
+
+/** Response envelope from Qdrant scroll — result includes a next_page_offset cursor. */
+interface QdrantScrollResponse {
+    result?: { points?: QdrantPoint[]; next_page_offset?: string | number | null };
+}
 
 function normalizeBaseUrl(url: string): string {
     return url.trim().replace(/\/+$/, '');
@@ -94,20 +128,21 @@ export class QdrantBackend implements VectorBackend {
 
     async search(vector: number[], topK: number, filter?: Record<string, unknown>): Promise<VectorSearchResult[]> {
         await this.ensureCollection();
-        const payload = await this.request<any>('POST', `/collections/${this.collection}/points/query`, {
+        const payload = await this.request<QdrantSearchResponse>('POST', `/collections/${this.collection}/points/query`, {
             query: vector,
             limit: Math.max(1, topK),
             with_payload: true,
             filter: qdrantFilter(filter),
         });
 
-        const points = Array.isArray(payload?.result?.points)
-            ? payload.result.points
-            : Array.isArray(payload?.result)
-                ? payload.result
+        const result = payload?.result;
+        const points: QdrantPoint[] = Array.isArray(result)
+            ? result
+            : Array.isArray((result as { points?: QdrantPoint[] } | undefined)?.points)
+                ? ((result as { points: QdrantPoint[] }).points)
                 : [];
 
-        return points.map((point: any) => ({
+        return points.map((point) => ({
             entityType: String(point.payload?.entityType ?? ''),
             entityId: String(point.payload?.entityId ?? ''),
             key: String(point.payload?.key ?? ''),
@@ -122,7 +157,7 @@ export class QdrantBackend implements VectorBackend {
         let offset: string | number | null | undefined = undefined;
 
         while (true) {
-            const payload: any = await this.request<any>('POST', `/collections/${this.collection}/points/scroll`, {
+            const payload: QdrantScrollResponse | null = await this.request<QdrantScrollResponse>('POST', `/collections/${this.collection}/points/scroll`, {
                 limit: Math.max(1, pageSize),
                 offset,
                 with_payload: true,
@@ -130,15 +165,12 @@ export class QdrantBackend implements VectorBackend {
                 filter: qdrantFilter(filter),
             });
 
-            const points = Array.isArray(payload?.result?.points)
-                ? payload.result.points
-                : Array.isArray(payload?.result)
-                    ? payload.result
-                    : [];
+            const scrollResult: QdrantScrollResponse['result'] = payload?.result;
+            const points: QdrantPoint[] = Array.isArray(scrollResult?.points) ? scrollResult!.points! : [];
 
-            ids.push(...points.map((point: any) => String(point.id)));
+            ids.push(...points.map((point) => String(point.id)));
 
-            const nextOffset: string | number | null | undefined = payload?.result?.next_page_offset;
+            const nextOffset: string | number | null | undefined = scrollResult?.next_page_offset;
             if (!nextOffset || points.length < Math.max(1, pageSize)) {
                 break;
             }

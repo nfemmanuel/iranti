@@ -1,3 +1,7 @@
+/**
+ * Integration test: archived-entry history chain -- verifies that each archived
+ * entry preserves the full replacement trail with archivedReason and timestamps.
+ */
 import 'dotenv/config';
 import { librarianWrite } from '../src/librarian/index';
 import { getDb } from '../src/library/client';
@@ -91,7 +95,7 @@ async function testArchiveTraceability() {
 
     // Test 5: Verify archive preserves old value
     console.log('Test 5: Verify archive preserves old value');
-    const oldValue = archived.valueRaw as any;
+    const oldValue = archived.valueRaw as Record<string, unknown>;
     
     if (oldValue.version !== 1 || oldValue.data !== 'original') {
         console.log('  ✗ FAILED: Archive does not preserve original value\n');
@@ -130,7 +134,7 @@ async function testArchiveTraceability() {
         process.exit(1);
     }
 
-    const newValue = currentEntry.valueRaw as any;
+    const newValue = currentEntry.valueRaw as Record<string, unknown>;
     if (newValue.version !== 2 || newValue.data !== 'updated') {
         console.log('  ✗ FAILED: KB does not have new value\n');
         process.exit(1);
@@ -145,7 +149,7 @@ async function testArchiveTraceability() {
 
     // Test 7: Verify conflictLog preserved
     console.log('Test 7: Verify conflictLog preserved in archive');
-    const conflictLog = archived.conflictLog as any[];
+    const conflictLog = archived.conflictLog as unknown[];
     
     if (!Array.isArray(conflictLog)) {
         console.log('  ✗ FAILED: conflictLog is not an array\n');

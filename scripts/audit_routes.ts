@@ -1,3 +1,10 @@
+/**
+ * Dev utility to verify route-level auth enforcement on a running iranti server.
+ *
+ * Issues HTTP requests to every API endpoint and checks whether each responds
+ * with 401 (protected) or 200 (public) as expected.
+ * Requires a locally running server (default port 3001 or IRANTI_PORT).
+ */
 import 'dotenv/config';
 
 async function auditRoutes() {
@@ -55,8 +62,8 @@ async function auditRoutes() {
                     failed++;
                 }
             }
-        } catch (err: any) {
-            console.log(`✗ ${test.method} ${test.path} - ERROR: ${err.message}`);
+        } catch (err) {
+            console.log(`✗ ${test.method} ${test.path} - ERROR: ${err instanceof Error ? err.message : String(err)}`);
             failed++;
         }
     }

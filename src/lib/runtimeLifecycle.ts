@@ -1,3 +1,31 @@
+/**
+ * Instance runtime lifecycle management for Iranti.
+ *
+ * Manages the runtime.json sidecar file that each managed Iranti instance
+ * writes on startup and updates during its lifetime. The file records PID,
+ * port, version, heartbeat timestamps, and lifecycle status so the CLI and
+ * control plane can determine whether an instance is running, stale, or dead
+ * without needing a live connection.
+ *
+ * Inspection pipeline:
+ *   1. Read runtime.json → parse → verify PID alive → probe health URL/port
+ *   2. Classify as: running | unhealthy | stale | stopped | missing | invalid
+ *   3. Self-heal: discard corrupt or orphaned metadata files automatically
+ *
+ * Runtime authority resolution: discovers which runtime.json to use by checking
+ * IRANTI_INSTANCE_DIR, IRANTI_INSTANCE_RUNTIME_FILE, and env path heuristics
+ * (IRANTI_ESCALATION_DIR parent, IRANTI_REQUEST_LOG_FILE grandparent).
+ *
+ * Key exports:
+ *   - inspectRuntimeState()               — full inspection with classification + health probe
+ *   - readInstanceRuntime()               — parse runtime.json synchronously
+ *   - writeInstanceRuntime()              — write locked runtime.json
+ *   - updateInstanceRuntime()             — locked read-modify-write
+ *   - markRuntimeStopped()               — record clean shutdown in runtime.json
+ *   - resolveRuntimeAuthorityFromEnv()    — find runtime.json path from env vars
+ *   - isPidAlive()                        — cross-platform PID liveness check (zombie-aware)
+ */
+
 import fs from 'fs';
 import fsp from 'fs/promises';
 import http from 'http';

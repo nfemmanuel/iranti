@@ -1,3 +1,7 @@
+/**
+ * Integration test: staff-event normalisation pipeline -- verifies that raw
+ * staff events are correctly normalised, deduplicated, and persisted.
+ */
 import { randomUUID } from 'crypto';
 import { librarianWrite } from '../src/librarian';
 import { bootstrapHarness } from './harness';

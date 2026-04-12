@@ -1,3 +1,7 @@
+/**
+ * Integration test: LLM provider fallback chain -- verifies graceful degradation
+ * when the primary provider fails or returns errors.
+ */
 import 'dotenv/config';
 
 // Temporarily override to a provider that will definitely fail
@@ -19,7 +23,7 @@ async function test() {
         },
     ], 256);
 
-    console.log('Response received from:', (response as any).providerUsed);
+    console.log('Response received from:', (response as { providerUsed?: string }).providerUsed);
     console.log('Text:', response.text);
     console.log('\n✓ Fallback chain working correctly');
 

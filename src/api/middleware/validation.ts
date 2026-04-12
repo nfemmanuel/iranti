@@ -1,6 +1,17 @@
 /**
- * Input Validation Middleware
- * Validates and sanitizes API request inputs
+ * Input validation middleware for the iranti API.
+ *
+ * Validates request bodies against named schema definitions before they reach
+ * route handlers. Each schema entry describes field-level constraints
+ * (type, required, maxLength, pattern, min/max, maxSize).
+ *
+ * Key exports:
+ *  validateInput(schemaName)       — express middleware factory; rejects with 400 on failure
+ *  validateSessionListQuery(query) — parses + validates GET /sessions query string
+ *  validateSessionLedgerQuery(q)   — parses + validates GET /ledger query string
+ *  sanitizeString(str)             — XSS-escapes a string value
+ *  validateEntity(entity)          — returns true if entity matches entityType/entityId pattern
+ *  validateKey(key)                — returns true if key is alphanumeric+underscore/hyphen
  */
 
 import { Request, Response, NextFunction } from 'express';
@@ -8,8 +19,20 @@ import type { SessionListInput, SessionListSort, SessionOperatorState } from '..
 import type { EventLevel } from '../../lib/staffEventEmitter';
 import type { IrantiAuthContext } from './auth';
 
+/** Constraint descriptor for a single field in a validation schema. */
+interface FieldSchema {
+    type: 'string' | 'number' | 'boolean' | 'array' | 'object' | 'any';
+    required: boolean;
+    maxLength?: number;
+    pattern?: RegExp;
+    maxSize?: number;
+    min?: number;
+    max?: number;
+    default?: unknown;
+}
+
 // Validation schemas
-const schemas = {
+const schemas: Record<string, Record<string, FieldSchema>> = {
   write: {
     entity: { type: 'string', required: true, pattern: /^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_/-]+$/, maxLength: 200 },
     key: { type: 'string', required: true, pattern: /^[a-zA-Z0-9_-]+$/, maxLength: 100 },
@@ -95,7 +118,7 @@ const schemas = {
   }
 };
 
-function validateField(value: any, schema: any, fieldName: string): string | null {
+function validateField(value: unknown, schema: FieldSchema, fieldName: string): string | null {
   // Required check
   if (schema.required && (value === undefined || value === null)) {
     return `Missing required field: ${fieldName}`;
@@ -111,8 +134,8 @@ function validateField(value: any, schema: any, fieldName: string): string | nul
     return `Invalid type for ${fieldName}: expected ${schema.type}, got ${actualType}`;
   }
 
-  // String validations
-  if (schema.type === 'string') {
+  // String validations — type guard mirrors the actualType check above
+  if (schema.type === 'string' && typeof value === 'string') {
     if (schema.maxLength && value.length > schema.maxLength) {
       return `${fieldName} exceeds maximum length of ${schema.maxLength}`;
     }
@@ -121,8 +144,8 @@ function validateField(value: any, schema: any, fieldName: string): string | nul
     }
   }
 
-  // Number validations
-  if (schema.type === 'number') {
+  // Number validations — type guard mirrors the actualType check above
+  if (schema.type === 'number' && typeof value === 'number') {
     if (schema.min !== undefined && value < schema.min) {
       return `${fieldName} must be at least ${schema.min}`;
     }
@@ -139,8 +162,8 @@ function validateField(value: any, schema: any, fieldName: string): string | nul
     }
   }
 
-  // Array validations
-  if (schema.type === 'array') {
+  // Array validations — type guard mirrors the actualType check above
+  if (schema.type === 'array' && Array.isArray(value)) {
     if (schema.maxLength && value.length > schema.maxLength) {
       return `${fieldName} exceeds maximum length of ${schema.maxLength}`;
     }
@@ -167,7 +190,7 @@ export function validateInput(schemaName: keyof typeof schemas) {
 
       // Apply defaults
       if (data[fieldName] === undefined && 'default' in fieldSchema) {
-        data[fieldName] = (fieldSchema as any).default;
+        data[fieldName] = fieldSchema.default;
       }
     }
 

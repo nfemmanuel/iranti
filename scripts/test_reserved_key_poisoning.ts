@@ -1,3 +1,7 @@
+/**
+ * Security test: blocked write attempts to reserved system keys -- ensures the
+ * write-guard rules prevent external agents from overwriting protected entries.
+ */
 import 'dotenv/config';
 import { librarianWrite } from '../src/librarian/index';
 import { bootstrapHarness, errorMatches } from './harness';
@@ -22,14 +26,14 @@ async function testReservedKeyPoisoning() {
         });
         console.log('  ✗ FAILED: Write should have been blocked\n');
         process.exit(1);
-    } catch (err: any) {
+    } catch (err) {
         if (errorMatches(err, [
             /key 'attendant_state' is reserved/i,
             /attendant_state is reserved for staff/i,
         ])) {
             console.log('  ✓ PASSED: Reserved key write blocked\n');
         } else {
-            console.log(`  ✗ FAILED: Wrong error: ${err.message}\n`);
+            console.log(`  ✗ FAILED: Wrong error: ${err instanceof Error ? err.message : String(err)}\n`);
             process.exit(1);
         }
     }
@@ -53,8 +57,8 @@ async function testReservedKeyPoisoning() {
             console.log(`  ✗ FAILED: Unexpected action: ${result.action}\n`);
             process.exit(1);
         }
-    } catch (err: any) {
-        console.log(`  ✗ FAILED: ${err.message}\n`);
+    } catch (err) {
+        console.log(`  ✗ FAILED: ${err instanceof Error ? err.message : String(err)}\n`);
         process.exit(1);
     }
 
@@ -73,11 +77,11 @@ async function testReservedKeyPoisoning() {
         });
         console.log('  ✗ FAILED: Cross-agent write should have been blocked\n');
         process.exit(1);
-    } catch (err: any) {
-        if (err.message.includes('agents may only write to their own agent namespace')) {
+    } catch (err) {
+        if (err instanceof Error && err.message.includes('agents may only write to their own agent namespace')) {
             console.log('  ✓ PASSED: Cross-agent write blocked\n');
         } else {
-            console.log(`  ✗ FAILED: Wrong error: ${err.message}\n`);
+            console.log(`  ✗ FAILED: Wrong error: ${err instanceof Error ? err.message : String(err)}\n`);
             process.exit(1);
         }
     }
@@ -101,8 +105,8 @@ async function testReservedKeyPoisoning() {
             console.log(`  ✗ FAILED: Unexpected action: ${result.action}\n`);
             process.exit(1);
         }
-    } catch (err: any) {
-        console.log(`  ✗ FAILED: ${err.message}\n`);
+    } catch (err) {
+        console.log(`  ✗ FAILED: ${err instanceof Error ? err.message : String(err)}\n`);
         process.exit(1);
     }
 
@@ -121,11 +125,11 @@ async function testReservedKeyPoisoning() {
         });
         console.log('  ✗ FAILED: Underscore-prefixed key write should have been blocked\n');
         process.exit(1);
-    } catch (err: any) {
-        if (err.message.includes('underscore-prefixed keys are reserved')) {
+    } catch (err) {
+        if (err instanceof Error && err.message.includes('underscore-prefixed keys are reserved')) {
             console.log('  ✓ PASSED: Underscore-prefixed key write blocked\n');
         } else {
-            console.log(`  ✗ FAILED: Wrong error: ${err.message}\n`);
+            console.log(`  ✗ FAILED: Wrong error: ${err instanceof Error ? err.message : String(err)}\n`);
             process.exit(1);
         }
     }
@@ -149,8 +153,8 @@ async function testReservedKeyPoisoning() {
             console.log(`  ✗ FAILED: Unexpected action: ${result.action}\n`);
             process.exit(1);
         }
-    } catch (err: any) {
-        console.log(`  ✗ FAILED: ${err.message}\n`);
+    } catch (err) {
+        console.log(`  ✗ FAILED: ${err instanceof Error ? err.message : String(err)}\n`);
         process.exit(1);
     }
 
@@ -169,11 +173,11 @@ async function testReservedKeyPoisoning() {
         });
         console.log('  ✗ FAILED: Write should have been blocked\n');
         process.exit(1);
-    } catch (err: any) {
+    } catch (err) {
         if (errorMatches(err, [/key 'agent_profile' is reserved/i])) {
             console.log('  ✓ PASSED: Reserved key write blocked\n');
         } else {
-            console.log(`  ✗ FAILED: Wrong error: ${err.message}\n`);
+            console.log(`  ✗ FAILED: Wrong error: ${err instanceof Error ? err.message : String(err)}\n`);
             process.exit(1);
         }
     }

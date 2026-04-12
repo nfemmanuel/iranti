@@ -1,3 +1,30 @@
+/**
+ * LLM provider abstraction layer for Iranti.
+ *
+ * Provides a unified interface over multiple LLM backends (OpenAI, Gemini,
+ * Claude, Groq, Mistral, Ollama, and a mock for tests). Provider selection is
+ * controlled by LLM_PROVIDER and LLM_PROVIDER_FALLBACK env vars. All requests
+ * flow through completeWithFallback() which walks the fallback chain and emits
+ * a staff event on fallback or total failure.
+ *
+ * Budget enforcement: every LLM call within a request context increments a
+ * counter tracked via AsyncLocalStorage. Calls beyond MAX_LLM_CALLS_PER_REQUEST
+ * throw immediately to prevent runaway LLM spend.
+ *
+ * Providers are lazily loaded on first use and cached in-process. The mock
+ * provider is always appended to the fallback chain as a last-resort safety net.
+ *
+ * Key exports:
+ *   - completeWithFallback()         — call LLM with fallback chain + budget enforcement
+ *   - completeRouted()               — call a specific provider/model directly
+ *   - complete()                     — shorthand for completeWithFallback with default options
+ *   - initProvider()                 — warm up a named provider
+ *   - getSupportedProviders()        — list of all known provider names
+ *   - normalizeProviderApiError()    — standardize HTTP API error messages
+ *   - normalizeProviderCaughtError() — standardize caught provider errors
+ *   - LLMProvider / LLMMessage / LLMResponse — core provider interface types
+ */
+
 // ─── Provider Interface ──────────────────────────────────────────────────────
 
 import { inc, timeStart, timeEnd } from './metrics';
@@ -63,22 +90,18 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs?: number): Promise<
     }
 }
 
+const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
+    openai: 'OpenAI',
+    claude: 'Claude',
+    gemini: 'Gemini',
+    groq: 'Groq',
+    mistral: 'Mistral',
+    ollama: 'Ollama',
+    mock: 'Mock',
+};
+
 function titleCaseProvider(provider: string): string {
-    return provider === 'openai'
-        ? 'OpenAI'
-        : provider === 'claude'
-            ? 'Claude'
-            : provider === 'gemini'
-                ? 'Gemini'
-                : provider === 'groq'
-                    ? 'Groq'
-                    : provider === 'mistral'
-                        ? 'Mistral'
-                        : provider === 'ollama'
-                            ? 'Ollama'
-                            : provider === 'mock'
-                                ? 'Mock'
-                                : provider;
+    return PROVIDER_DISPLAY_NAMES[provider] ?? provider;
 }
 
 export function normalizeProviderApiError(

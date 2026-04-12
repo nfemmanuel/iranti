@@ -1,3 +1,29 @@
+/**
+ * Mock LLM provider for Iranti testing.
+ *
+ * Deterministic, scenario-driven provider that simulates realistic LLM
+ * behavior for Staff component tests. Prompt classification (S3 architecture)
+ * routes each Staff prompt to a specific canned response branch without regex
+ * scanning at dispatch time, making test assertions on branch coverage possible.
+ *
+ * Features:
+ *   - Scenarios: default | disagreement | unreliable | collaborative | noisy
+ *   - Failure modes: malformed_json | wrong_shape | truncated | empty | throw
+ *   - Scheduled failures (failBeforeSuccessCount) for retry-path testing
+ *   - Probabilistic failures (failureModeRate) for fuzz-style testing
+ *   - Seeded randomness for deterministic test runs
+ *   - Response delay simulation (fixed or range-based)
+ *   - strictFallthrough mode to catch unhandled Staff prompt shapes
+ *   - Kind-count tracking so tests can assert which branches were exercised
+ *
+ * Key exports:
+ *   - configureMock()        — reconfigure the singleton for a new test
+ *   - classifyPromptKind()   — pure classifier for unit testing (no state)
+ *   - getMockKindCounts()    — read per-kind call counts
+ *   - reset*Tracking()       — clear counters between test cases
+ *   - default export         — singleton MockProvider instance
+ */
+
 import { CompleteOptions, LLMMessage, LLMProvider, LLMResponse } from '../llm';
 
 export type MockScenario =
