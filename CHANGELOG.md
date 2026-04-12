@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.34 - 2026-04-12
+
+### Added
+
+- **`iranti connect` command.** One-liner cloud workspace setup: `iranti connect <url> --key <api-key>` writes `.env.iranti` with `IRANTI_URL` and `IRANTI_API_KEY`, then scaffolds `.mcp.json` and `.vscode/mcp.json` so MCP-aware editors pick up the server automatically. This is the command shown in the iranti.cloud dashboard quick-connect dialog.
+
 ## 0.3.33 - 2026-04-12
 
 ### Fixed
