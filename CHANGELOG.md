@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.33 - 2026-04-12
+
+### Fixed
+
+- **Drift false positive on completed tasks.** `drift` signal was firing even after a task finished, producing spurious checkpoint prompts as the conversation wound down. Now suppressed when `checkpoint.currentStep` starts with `COMPLETE`.
+- **Compliance false positive — unused injection.** `injectedFactsAreTaskRelevant()` was comparing injected facts against the stale session-level `inferredTaskType` instead of the current user message. Facts relevant to what was actually asked were incorrectly flagged as unused, incrementing `consecutiveUnusedMemoryInjections` and degrading compliance.
+- **`usageGuidance` verbosity.** The MANDATORY protocol reminder block was re-injected every turn even on fully healthy agents. Now suppressed when all compliance counters are zero (`isComplianceHealthy`), saving injection tokens on well-behaved hosts.
+
 ## 0.3.19 - Unreleased
 
 ### Improved
