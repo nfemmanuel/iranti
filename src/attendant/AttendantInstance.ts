@@ -1600,8 +1600,24 @@ function advisoryTaskTokens(taskType: string | null | undefined): string[] {
     ));
 }
 
-function buildUsageGuidance(tool: 'observe' | 'attend', turnsWithoutWrite: number = 0): ObserveResult['usageGuidance'] {
+function buildUsageGuidance(
+    tool: 'observe' | 'attend',
+    turnsWithoutWrite: number = 0,
+    complianceHealthy: boolean = false,
+): ObserveResult['usageGuidance'] {
     const hasComplianceIssue = turnsWithoutWrite >= 2;
+
+    // When the agent is fully compliant (all counters at zero) and this is an
+    // attend call, suppress the full MANDATORY reminder — it is already in
+    // IRANTI.md and re-injecting it every turn wastes context tokens. The
+    // reminder returns the moment any compliance counter slips above zero.
+    if (tool === 'attend' && complianceHealthy && !hasComplianceIssue) {
+        return {
+            tool,
+            reminder: '',
+            note: '',
+        };
+    }
 
     if (!hasComplianceIssue) {
         return {
@@ -4257,6 +4273,16 @@ export class AttendantInstance {
         });
     }
 
+    /** True when every compliance counter is zero — agent is fully on protocol. */
+    private get isComplianceHealthy(): boolean {
+        return (
+            this.attendsWithoutPersist === 0 &&
+            this.turnsWithoutWrite === 0 &&
+            this.consecutivePreResponseWithoutPost === 0 &&
+            this.consecutiveUnusedMemoryInjections === 0
+        );
+    }
+
     // M2: run fact extraction on the content of a just-completed read-only
     // tool call and persist the extracted facts to the knowledge library with
     // source='attendant_autowrite' and properties.autowriteBatchId set to the
@@ -5106,7 +5132,12 @@ If no durable facts can be extracted, return an empty array: [].`,
         // reply and drift there is less actionable. Computed once near the
         // top so every return path can echo the same value without re-running
         // the tokenization. Pure — no instance state reads beyond brief.
-        const drift: DriftSignal | undefined = (phase !== 'post-response' && this.brief?.inferredTaskType)
+        // Drift is suppressed when the stored checkpoint's currentStep begins
+        // with "COMPLETE" — that signals the declared task finished and topic
+        // shift is expected rather than accidental.
+        const checkpointComplete =
+            this.brief?.sessionCheckpoint?.checkpoint?.currentStep?.trimStart().toUpperCase().startsWith('COMPLETE') === true;
+        const drift: DriftSignal | undefined = (phase !== 'post-response' && this.brief?.inferredTaskType && !checkpointComplete)
             ? detectTaskDrift(latestMessage, currentContext, this.brief.inferredTaskType)
             : undefined;
 
@@ -5180,7 +5211,7 @@ If no durable facts can be extracted, return an empty array: [].`,
                 complianceWarning,
                 compliance,
                 memoryAttributions,
-                usageGuidance: buildUsageGuidance('attend', this.turnsWithoutWrite),
+                usageGuidance: buildUsageGuidance('attend', this.turnsWithoutWrite, this.isComplianceHealthy),
                 facts: [],
                 entitiesDetected: [],
                 alreadyPresent: 0,
@@ -5362,7 +5393,7 @@ If no durable facts can be extracted, return an empty array: [].`,
                 compliance,
                 memoryAttributions: [],
                 matchedUserRules: matchedUserRules.length > 0 ? matchedUserRules : undefined,
-                usageGuidance: buildUsageGuidance('attend', this.turnsWithoutWrite),
+                usageGuidance: buildUsageGuidance('attend', this.turnsWithoutWrite, this.isComplianceHealthy),
                 facts: [],
                 entitiesDetected: [],
                 alreadyPresent: 0,
@@ -5791,7 +5822,10 @@ If no durable facts can be extracted, return an empty array: [].`,
                         .map((fact) => fact.knowledgeEntryId)
                         .filter((value): value is number => typeof value === 'number'),
                     injectedSummaries: structuredFacts.map((fact) => fact.summary).filter(Boolean),
-                    taskContext: this.brief?.inferredTaskType,
+                    // Use the current user message as the relevance anchor so
+                    // injectedFactsAreTaskRelevant() compares against what was
+                    // actually asked, not the stale session-level declared task.
+                    taskContext: latestMessage || this.brief?.inferredTaskType,
                 }),
             ]
             : [];
@@ -5860,7 +5894,7 @@ If no durable facts can be extracted, return an empty array: [].`,
             memorySearchPerformed,
             memoryResultsConsidered,
             matchedUserRules: matchedUserRules.length > 0 ? matchedUserRules : undefined,
-            usageGuidance: buildUsageGuidance('attend', this.turnsWithoutWrite),
+            usageGuidance: buildUsageGuidance('attend', this.turnsWithoutWrite, this.isComplianceHealthy),
             toolCallGuidance,
             // M2: surface the outcome of tool-result extraction (or undefined if
             // no toolResult was passed). Populated BEFORE decideMemoryNeed so
