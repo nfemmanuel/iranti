@@ -265,7 +265,22 @@ export const DIAGNOSTICS_HELP: HelpEntry[] = [
     },
 ];
 
+export const CONNECT_HELP: HelpEntry[] = [
+    {
+        command: 'iranti connect <url> --key <api-key> [path] [--force]',
+        description: 'Connect the current project to an Iranti Cloud workspace and scaffold MCP config files.',
+        useWhen: 'you have an Iranti Cloud workspace and want to wire up a local project to it in one step — writes .env.iranti with the cloud endpoint and API key, then scaffolds .mcp.json and .vscode/mcp.json so editors pick up the MCP server automatically.',
+        scenario: 'Pasting the quick-connect command from the iranti.cloud dashboard into a project terminal: `iranti connect https://my-workspace.fly.dev --key key_abc123`.',
+    },
+];
+
 export const INTEGRATIONS_HELP: HelpEntry[] = [
+    {
+        command: 'iranti connect <url> --key <api-key> [path] [--force]',
+        description: 'Connect the current project to an Iranti Cloud workspace.',
+        useWhen: 'you copied the quick-connect command from the iranti.cloud dashboard and want to wire up this project directory in one step.',
+        scenario: 'Running the one-liner from the dashboard to bind a local repo to a hosted workspace.',
+    },
     {
         command: 'iranti mcp [--help]',
         description: 'Start the stdio MCP server.',

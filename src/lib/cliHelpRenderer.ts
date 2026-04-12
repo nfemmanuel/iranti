@@ -24,6 +24,7 @@ import {
     COMMON_FLOWS,
     CONFIGURATION_HELP,
     CONFIGURE_HELP,
+    CONNECT_HELP,
     DIAGNOSTICS_HELP,
     HelpEntry,
     INSTANCE_HELP,
@@ -122,6 +123,7 @@ export function printMainHelp(style: CliHelpStyle): void {
     printHelpEntries(style, 'Configuration', CONFIGURATION_HELP);
     printHelpEntries(style, 'Keys', KEY_HELP);
     printHelpEntries(style, 'Diagnostics And Operator Tools', DIAGNOSTICS_HELP);
+    printHelpEntries(style, 'Cloud Connect', CONNECT_HELP);
     printHelpEntries(style, 'Integrations', INTEGRATIONS_HELP);
 
     console.log(style.sectionTitle('Common Flows'));
@@ -221,6 +223,10 @@ export function printAuthRevokeKeyHelp(style: CliHelpStyle): void {
 
 export function printIntegrateHelp(style: CliHelpStyle): void {
     printHelpEntries(style, 'Integrations', INTEGRATE_HELP);
+}
+
+export function printConnectHelp(style: CliHelpStyle): void {
+    printHelpEntries(style, 'Connect Command', CONNECT_HELP);
 }
 
 export function printProjectInitHelp(style: CliHelpStyle): void {

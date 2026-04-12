@@ -42,6 +42,7 @@ import {
     printConfigureHelp as renderConfigureHelp,
     printConfigureInstanceHelp as renderConfigureInstanceHelp,
     printConfigureProjectHelp as renderConfigureProjectHelp,
+    printConnectHelp as renderConnectHelp,
     printDoctorHelp as renderDoctorHelp,
     printHandshakeHelp as renderHandshakeHelp,
     printHandoffHelp as renderHandoffHelp,
@@ -9303,6 +9304,10 @@ async function claudeGlobalUnsetup(force: boolean): Promise<void> {
     console.log(`  hook script  ${hookScriptPath}  (${scriptStatus})`);
 }
 
+function printConnectHelp(): void {
+    renderConnectHelp({ sectionTitle, commandText });
+}
+
 function printClaudeSetupHelp(): void {
     console.log([
         'Scaffold Claude Code MCP and hook files for the current project.',
@@ -9475,6 +9480,82 @@ async function discoverProjectArtifacts(scanRoots: string[]): Promise<UninstallP
     }
 
     return Array.from(projects.values()).sort((a, b) => a.projectPath.localeCompare(b.projectPath));
+}
+
+async function connectCommand(args: ParsedArgs): Promise<void> {
+    if (hasFlag(args, 'help')) {
+        printConnectHelp();
+        return;
+    }
+
+    // URL is the first positional after the command (= args.subcommand in the parsed args structure)
+    const endpointRaw = args.subcommand ?? args.positionals[0];
+    const apiKey = getFlag(args, 'key');
+
+    if (!endpointRaw) {
+        throw cliError(
+            'IRANTI_CONNECT_ENDPOINT_REQUIRED',
+            'Endpoint URL is required. Usage: iranti connect <url> --key <api-key>',
+            [
+                'The URL is shown in the quick-connect dialog on your iranti.cloud dashboard.',
+                'Example: iranti connect https://my-workspace.fly.dev --key key_abc123',
+            ],
+        );
+    }
+    if (!apiKey) {
+        throw cliError(
+            'IRANTI_CONNECT_API_KEY_REQUIRED',
+            'API key is required. Usage: iranti connect <url> --key <api-key>',
+            [
+                'Generate a key in the quick-connect dialog on your iranti.cloud dashboard.',
+                'Example: iranti connect https://my-workspace.fly.dev --key key_abc123',
+            ],
+        );
+    }
+
+    // Normalize and validate the URL
+    let endpoint: string;
+    try {
+        const u = new URL(endpointRaw);
+        if (u.protocol !== 'https:' && u.protocol !== 'http:') {
+            throw new Error(`URL must use http:// or https://, got: ${u.protocol}`);
+        }
+        endpoint = u.origin;
+    } catch {
+        throw cliError(
+            'IRANTI_CONNECT_INVALID_URL',
+            `Invalid endpoint URL: ${endpointRaw}. Expected a full URL such as https://my-workspace.fly.dev`,
+            ['The URL is shown in your iranti.cloud dashboard under the workspace quick-connect dialog.'],
+        );
+    }
+
+    const force = hasFlag(args, 'force');
+    // Optional project path: if URL came from args.subcommand, the path would be args.positionals[0]
+    const projectArg = endpointRaw === args.subcommand ? args.positionals[0] : args.positionals[1];
+    const projectPath = path.resolve(projectArg ?? process.cwd());
+
+    if (!fs.existsSync(projectPath)) {
+        throw cliError('IRANTI_PROJECT_PATH_NOT_FOUND', `Project path not found: ${projectPath}`);
+    }
+
+    // Step 1: Write .env.iranti with cloud connection details
+    const projectEnvPath = await writeProjectBinding(projectPath, {
+        IRANTI_URL: endpoint,
+        IRANTI_API_KEY: apiKey,
+    });
+
+    // Step 2: Scaffold MCP config files so editors discover Iranti automatically
+    const result = await writeClaudeCodeProjectFiles(projectPath, projectEnvPath, force);
+
+    console.log(`${okLabel()} Connected to Iranti Cloud`);
+    console.log(`  endpoint     ${endpoint}`);
+    console.log(`  project      ${projectPath}`);
+    console.log(`  binding      ${projectEnvPath}`);
+    console.log(`  .mcp.json    ${result.mcp}`);
+    console.log(`  .vscode/mcp  ${result.vscodeMcp}`);
+    console.log('');
+    console.log(`${infoLabel()} Reload your editor to pick up the new MCP server.`);
+    console.log(`  Verify: iranti doctor --project-env ${projectEnvPath}`);
 }
 
 async function claudeSetupCommand(args: ParsedArgs): Promise<void> {
@@ -10800,6 +10881,11 @@ async function main(): Promise<void> {
         console.log(`  .github/copilot-instructions.md  ${instructionsStatus}`);
         console.log(`  .mcp.json                        ${mcpStatus}`);
         console.log(`  .vscode/mcp                      ${vscodeMcpStatus}`);
+        return;
+    }
+
+    if (args.command === 'connect') {
+        await connectCommand(args);
         return;
     }
 

@@ -99,6 +99,7 @@ function testHelpMatrix(): void {
         { args: ['claude-setup', '--help'], token: 'Scaffold Claude Code MCP and hook files for the current project.' },
         { args: ['claude-hook', '--help'], token: 'Claude Code -> Iranti hook helper' },
         { args: ['codex-setup', '--help'], token: 'Configure Codex to use the local Iranti MCP server.' },
+        { args: ['connect', '--help'], token: 'Connect Command' },
     ];
 
     for (const check of checks) {
