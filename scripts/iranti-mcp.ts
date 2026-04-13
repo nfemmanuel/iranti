@@ -33,6 +33,32 @@ let runtimeHostOverride: string | null = null;
 let shutdownPromise: Promise<void> | null = null;
 let processIranti: Iranti | null = null;
 
+// Lazy DB startup state — defers agent registration and protocol-state
+// restoration until the first tool call instead of process start. Allows
+// the MCP server to complete the MCP initialize/tools-list exchange without
+// an active database, which is required for Glama's quality checks.
+let _dbStartupDone = false;
+let _dbStartupPromise: Promise<void> | null = null;
+
+async function dbStartup(): Promise<void> {
+    if (_dbStartupDone) return;
+    if (!_dbStartupPromise) {
+        _dbStartupPromise = (async () => {
+            if (!processIranti) throw new Error('[iranti-mcp] dbStartup called before iranti was initialized');
+            await ensureDefaultAgent(processIranti);
+            const agentForBootstrap = defaultAgentId();
+            const bootstrapResult = await processIranti.loadProtocolStateFromLedger(agentForBootstrap);
+            if (bootstrapResult.handshakeRestored || bootstrapResult.attendRestored) {
+                process.stderr.write(
+                    `[iranti-mcp] Protocol state restored from ledger: handshake=${bootstrapResult.handshakeRestored} attend=${bootstrapResult.attendRestored}\n`
+                );
+            }
+            _dbStartupDone = true;
+        })();
+    }
+    return _dbStartupPromise;
+}
+
 const HOST_SETUP_CHECKS: Record<string, { file: string; command: string }> = {
     claude_code: { file: 'CLAUDE.md', command: 'iranti claude-setup .' },
     codex: { file: 'AGENTS.md', command: 'iranti codex-setup' },
@@ -425,22 +451,11 @@ async function main(): Promise<void> {
     });
     processIranti = iranti;
 
-    await ensureDefaultAgent(iranti);
-
-    // Restore protocol tracker state from the session ledger so that
-    // hosts which restart the MCP subprocess per tool call (e.g. Copilot CLI)
-    // can complete a cross-process handshake → attend → search sequence.
-    const agentForBootstrap = defaultAgentId();
-    const bootstrapResult = await iranti.loadProtocolStateFromLedger(agentForBootstrap);
-    if (bootstrapResult.handshakeRestored || bootstrapResult.attendRestored) {
-        process.stderr.write(
-            `[iranti-mcp] Protocol state restored from ledger: handshake=${bootstrapResult.handshakeRestored} attend=${bootstrapResult.attendRestored}\n`
-        );
-    }
+    // DB startup is deferred to first tool call via dbStartup() — see above.
 
     const server = new McpServer({
         name: 'iranti-mcp',
-        version: '0.3.35',
+        version: '0.3.36',
     });
 
     server.registerTool('iranti_handshake', {
@@ -461,6 +476,7 @@ Do not use this as a per-turn retrieval tool; use iranti_attend.`,
             postCompaction: z.boolean().optional().describe('Set to true after context compaction to force re-delivery of operating rules. Omit on normal mid-session handshake calls — rules are only sent once per context window.'),
         },
     }, async ({ task, recentMessages, agent, agentId, host, postCompaction }) => {
+        await dbStartup();
         const resolvedHost = resolveToolHost(host);
         const resolvedAgent = resolveToolAgent(agent, agentId, resolvedHost);
         syncRuntimeLedgerContext(iranti, resolvedHost, resolvedAgent);
@@ -521,6 +537,7 @@ checkpoint state before closing the turn.`,
             agentId: z.string().optional().describe('Alias for agent. Override the default agent id.'),
         },
     }, async ({ latestMessage, message, currentContext, entityHints, maxFacts, forceInject, phase, pendingToolCall, toolResult, agent, agentId }) => {
+        await dbStartup();
         const resolvedAgent = resolveToolAgent(agent, agentId);
         syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
         const resolvedLatestMessage = resolveAttendLatestMessage({ latestMessage, message });
@@ -637,6 +654,7 @@ open_risks, recent_actions, and recent_file_changes to those entities for handof
             agentId: z.string().optional().describe('Alias for agent. Override the default agent id.'),
         },
     }, async ({ task, recentMessages, currentStep, nextStep, openRisks, recentOutputs, actions, fileChanges, entityTargets, notes, sessionId, agent, agentId }) => {
+        await dbStartup();
         const resolvedAgent = resolveToolAgent(agent, agentId);
         syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
         const result = await iranti.checkpoint({
@@ -668,6 +686,7 @@ open_risks, recent_actions, and recent_file_changes to those entities for handof
             agentId: z.string().optional().describe('Alias for agent. Override the default agent id.'),
         },
     }, async ({ currentContext, entityHints, maxFacts, agent, agentId }) => {
+        await dbStartup();
         const resolvedAgent = resolveToolAgent(agent, agentId);
         syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
         try {
@@ -702,6 +721,7 @@ memory alone before checking Iranti.`,
             agentId: z.string().optional().describe('Alias for agent. Override the default agent id for protocol tracking.'),
         },
     }, async ({ entity, key, agent, agentId }) => {
+        await dbStartup();
         const resolvedAgent = resolveToolAgent(agent, agentId);
         syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
         try {
@@ -734,6 +754,7 @@ blockers that were resolved, values that were contested or superseded.`,
             agentId: z.string().optional().describe('Alias for agent. Override the default agent id for protocol tracking.'),
         },
     }, async ({ entity, key, limit, includeExpired, includeContested, agent, agentId }) => {
+        await dbStartup();
         const resolvedAgent = resolveToolAgent(agent, agentId);
         syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
         try {
@@ -768,6 +789,7 @@ the exact key, use this before saying you do not know.`,
             agentId: z.string().optional().describe('Alias for agent. Override the default agent id for protocol tracking.'),
         },
     }, async ({ query, entityType, entityId, limit, lexicalWeight, vectorWeight, minScore, agent, agentId }) => {
+        await dbStartup();
         const resolvedAgent = resolveToolAgent(agent, agentId);
         syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
         try {
@@ -815,6 +837,7 @@ such as issueStatus=open|resolved, severity, or resolution notes.`,
             agentId: z.string().optional().describe('Alias for agent. Override the default agent id.'),
         },
     }, async ({ entity, key, valueJson, summary, confidence, source, propertiesJson, validFrom, requestId, agent, agentId }) => {
+        await dbStartup();
         const target = resolvePersonalWriteTarget({ entity, key });
         const resolvedAgent = resolveToolAgent(agent, agentId);
         syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
@@ -886,6 +909,7 @@ as rule/<rule_id> entities and persist across sessions.`,
             agentId: z.string().optional().describe('Alias for agent. Override the default agent id.'),
         },
     }, async ({ ruleId, rule, triggers, scope, enforcement, source, agent, agentId }) => {
+        await dbStartup();
         const resolvedAgent = resolveToolAgent(agent, agentId);
         syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
         const normalizedId = ruleId.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
@@ -940,6 +964,7 @@ trackable issue lifecycle entry.`,
             agentId: z.string().optional().describe('Alias for agent. Override the default agent id.'),
         },
     }, async ({ entity, issueId, title, status, summary, confidence, source, severity, detailsJson, discoveredAt, resolvedAt, resolution, tags, requestId, agent, agentId }) => {
+        await dbStartup();
         const resolvedAgent = resolveToolAgent(agent, agentId);
         syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
         const result = await iranti.writeIssue({
@@ -979,6 +1004,7 @@ this for arbitrary prose or every turn.`,
             agentId: z.string().optional().describe('Alias for agent. Override the default agent id.'),
         },
     }, async ({ response, projectEntity, personalEntity, source, confidence, agent, agentId }) => {
+        await dbStartup();
         const resolvedAgent = resolveToolAgent(agent, agentId);
         syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
         const result = await rememberAssistantResponseFacts({
@@ -1008,6 +1034,7 @@ this for arbitrary prose or every turn.`,
             agentId: z.string().optional().describe('Alias for agent. Override the default agent id.'),
         },
     }, async ({ entity, content, confidence, source, agent, agentId }) => {
+        await dbStartup();
         const resolvedAgent = resolveToolAgent(agent, agentId);
         syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
         const result = await iranti.ingest({
@@ -1030,6 +1057,7 @@ this for arbitrary prose or every turn.`,
             createdBy: z.string().optional().describe('Override the default agent id.'),
         },
     }, async ({ fromEntity, relationshipType, toEntity, propertiesJson, createdBy }) => {
+        await dbStartup();
         const properties = propertiesJson ? safeJsonParse(propertiesJson) : undefined;
         const resolvedAgent = withDefaultAgent(createdBy);
         syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
@@ -1050,6 +1078,7 @@ whether memory should be injected before graph traversal.`,
             agentId: z.string().optional().describe('Alias for agent. Override the default agent id for protocol tracking.'),
         },
     }, async ({ entity, agent, agentId }) => {
+        await dbStartup();
         const resolvedAgent = resolveToolAgent(agent, agentId);
         syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
         try {
@@ -1074,6 +1103,7 @@ whether memory should be injected before graph traversal.`,
             agentId: z.string().optional().describe('Alias for agent. Override the default agent id for protocol tracking.'),
         },
     }, async ({ entity, depth, agent, agentId }) => {
+        await dbStartup();
         const resolvedAgent = resolveToolAgent(agent, agentId);
         syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
         try {
@@ -1097,6 +1127,7 @@ whether memory should be injected before provenance discovery.`,
             agentId: z.string().optional().describe('Alias for agent. Override the default agent id for protocol tracking.'),
         },
     }, async ({ entity, agent, agentId }) => {
+        await dbStartup();
         const resolvedAgent = resolveToolAgent(agent, agentId);
         syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
         try {
