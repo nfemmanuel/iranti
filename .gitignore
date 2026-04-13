@@ -63,3 +63,4 @@ tests/conflict/.runtime/
 tests/temporal/.runtime/
 .env.iranti
 .env.iranti.local
+.mcpregistry_*

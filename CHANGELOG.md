@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.35 - 2026-04-13
+
+### Added
+
+- **MCP Registry listing.** Added `mcpName` to `package.json` and `server.json` for submission to the [MCP Server Registry](https://registry.modelcontextprotocol.io/). Iranti is now discoverable as `io.github.nfemmanuel/iranti`.
+
 ## 0.3.34 - 2026-04-12
 
 ### Added

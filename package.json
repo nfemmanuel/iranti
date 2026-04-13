@@ -1,6 +1,7 @@
 {
   "name": "iranti",
-  "version": "0.3.34",
+  "version": "0.3.35",
+  "mcpName": "io.github.nfemmanuel/iranti",
   "description": "Memory infrastructure for multi-agent AI systems",
   "main": "dist/src/sdk/index.js",
   "files": [

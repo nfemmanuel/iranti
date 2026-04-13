@@ -1,0 +1,44 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.nfemmanuel/iranti",
+  "description": "Persistent, shared memory for AI agents — facts, checkpoints, semantic search.",
+  "license": "MIT",
+  "homepage": "https://iranti.dev",
+  "repository": {
+    "url": "https://github.com/nfemmanuel/iranti",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "iranti",
+      "version": "0.3.34",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "DATABASE_URL",
+          "description": "PostgreSQL connection string for the Iranti database.",
+          "isRequired": true,
+          "isSecret": false,
+          "format": "string"
+        },
+        {
+          "name": "IRANTI_API_KEY",
+          "description": "API key for a remote Iranti instance (e.g. iranti.cloud).",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "IRANTI_URL",
+          "description": "Base URL of the Iranti API server (e.g. https://<slug>.iranti.cloud).",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}
