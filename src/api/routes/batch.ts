@@ -14,7 +14,7 @@
 import { Router, Request, Response } from "express";
 import { getDb } from "../../library/client";
 
-export const batchRouter = Router();
+export const batchRouter: Router = Router();
 
 /**
  * Batch query endpoint: fetch multiple KB entries in one request

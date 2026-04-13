@@ -12,7 +12,7 @@
 import { Router, Request, Response } from "express";
 import { getDb } from "../../library/client";
 
-export const devRouter = Router();
+export const devRouter: Router = Router();
 
 /**
  * DEV ONLY: clears benchmark data so runs are comparable.
