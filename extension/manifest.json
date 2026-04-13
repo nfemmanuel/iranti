@@ -1,0 +1,59 @@
+{
+  "manifest_version": "0.3",
+  "name": "iranti",
+  "display_name": "Iranti",
+  "version": "0.3.37",
+  "description": "Persistent shared memory for AI coding agents. Stores facts as entity/key/value triples with hybrid semantic search, task checkpoints, and conflict resolution — shared across Claude Code, Codex CLI, and GitHub Copilot.",
+  "author": {
+    "name": "nfemmanuel",
+    "url": "https://github.com/nfemmanuel"
+  },
+  "license": "AGPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nfemmanuel/iranti"
+  },
+  "keywords": ["memory", "agent-memory", "multi-agent", "mcp", "claude-code", "codex"],
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "npx",
+      "args": ["-y", "iranti", "mcp"],
+      "env": {
+        "DATABASE_URL": "${user_config.database_url}",
+        "IRANTI_API_KEY": "${user_config.api_key}",
+        "IRANTI_URL": "${user_config.server_url}"
+      }
+    }
+  },
+  "user_config": {
+    "database_url": {
+      "type": "string",
+      "title": "Database URL",
+      "description": "PostgreSQL connection string for your Iranti instance (postgresql://user:pass@host/dbname)",
+      "sensitive": true,
+      "required": true
+    },
+    "api_key": {
+      "type": "string",
+      "title": "API Key",
+      "description": "Iranti API key — generate one with: npx iranti api-key:create",
+      "sensitive": true,
+      "required": true
+    },
+    "server_url": {
+      "type": "string",
+      "title": "Server URL",
+      "description": "URL of your running Iranti instance (e.g. http://localhost:3001)",
+      "required": true
+    }
+  },
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "node": ">=18.0.0"
+    }
+  }
+}
