@@ -1,9 +1,8 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.nfemmanuel/iranti",
+  "version": "0.3.35",
   "description": "Persistent, shared memory for AI agents — facts, checkpoints, semantic search.",
-  "license": "MIT",
-  "homepage": "https://iranti.dev",
   "repository": {
     "url": "https://github.com/nfemmanuel/iranti",
     "source": "github"
@@ -12,7 +11,7 @@
     {
       "registryType": "npm",
       "identifier": "iranti",
-      "version": "0.3.34",
+      "version": "0.3.35",
       "transport": {
         "type": "stdio"
       },
