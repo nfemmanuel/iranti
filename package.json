@@ -1,6 +1,6 @@
 {
   "name": "iranti",
-  "version": "0.3.36",
+  "version": "0.3.37",
   "mcpName": "io.github.nfemmanuel/iranti",
   "description": "Memory infrastructure for multi-agent AI systems",
   "main": "dist/src/sdk/index.js",
@@ -17,6 +17,7 @@
     "dist/scripts/api-key-list.js",
     "dist/scripts/api-key-revoke.js",
     "bin/iranti.js",
+    "bin/iranti-mcp-server.js",
     "prisma.config.ts",
     "prisma/schema.prisma",
     "prisma/migrations/**/*",
@@ -25,7 +26,8 @@
     "LICENSE"
   ],
   "bin": {
-    "iranti": "bin/iranti.js"
+    "iranti": "bin/iranti.js",
+    "iranti-mcp-server": "bin/iranti-mcp-server.js"
   },
   "type": "commonjs",
   "engines": {
