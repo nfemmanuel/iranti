@@ -4,6 +4,7 @@
 [![MCP Server](https://img.shields.io/badge/MCP-server-purple.svg)](https://modelcontextprotocol.io)
 [![npm](https://img.shields.io/badge/npm-iranti-red.svg)](https://www.npmjs.com/package/iranti)
 [![npm version](https://img.shields.io/npm/v/iranti.svg)](https://www.npmjs.com/package/iranti)
+[![iranti MCP server](https://glama.ai/mcp/servers/nfemmanuel/iranti/badges/score.svg)](https://glama.ai/mcp/servers/nfemmanuel/iranti)
 
 **Shared memory for AI coding tools — Claude Code, Codex CLI, and GitHub Copilot.**
 
