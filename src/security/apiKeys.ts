@@ -34,6 +34,8 @@ export interface ApiKeyValidationResult {
     keyId?: string;
     owner?: string;
     scopes?: string[];
+    userId?: number;
+    tokenScope?: string;
     status?: 401 | 500;
     error?: string;
 }
@@ -142,7 +144,8 @@ export async function loadApiKeyRegistry(forceRefresh: boolean = false): Promise
 
     const entry = await getDb().knowledgeEntry.findUnique({
         where: {
-            entityType_entityId_key: {
+            userId_entityType_entityId_key: {
+                userId: 1,
                 entityType: REGISTRY_ENTITY_TYPE,
                 entityId: REGISTRY_ENTITY_ID,
                 key: REGISTRY_KEY,
@@ -160,7 +163,8 @@ export async function saveApiKeyRegistry(registry: ApiKeyRegistry): Promise<void
     const normalized = normalizeRegistry(registry);
     await getDb().knowledgeEntry.upsert({
         where: {
-            entityType_entityId_key: {
+            userId_entityType_entityId_key: {
+                userId: 1,
                 entityType: REGISTRY_ENTITY_TYPE,
                 entityId: REGISTRY_ENTITY_ID,
                 key: REGISTRY_KEY,
@@ -286,7 +290,7 @@ export async function validateApiKey(providedKey: string | undefined): Promise<A
 
     const provided = providedKey.trim();
     if (legacy && safeEqualString(provided, legacy)) {
-        return { ok: true, mode: 'legacy_env', keyId: 'legacy_env', owner: 'legacy_env', scopes: ['*'] };
+        return { ok: true, mode: 'legacy_env', keyId: 'legacy_env', owner: 'legacy_env', scopes: ['*'], userId: 1, tokenScope: 'dev_cli' };
     }
 
     if (legacyList.length > 0) {
@@ -296,7 +300,7 @@ export async function validateApiKey(providedKey: string | undefined): Promise<A
             if (safeEqualString(provided, key)) matchedLegacy = true;
         }
         if (matchedLegacy) {
-            return { ok: true, mode: 'legacy_list', keyId: 'legacy_list', owner: 'legacy_list', scopes: ['*'] };
+            return { ok: true, mode: 'legacy_list', keyId: 'legacy_list', owner: 'legacy_list', scopes: ['*'], userId: 1, tokenScope: 'dev_cli' };
         }
     }
 
@@ -335,6 +339,8 @@ export async function validateApiKey(providedKey: string | undefined): Promise<A
             keyId: key.keyId,
             owner: key.owner,
             scopes: key.scopes,
+            userId: 1,
+            tokenScope: 'dev_cli',
         };
     } catch {
         return {

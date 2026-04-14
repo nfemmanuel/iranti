@@ -31,6 +31,53 @@ enum ResolutionOutcome {
     original_retained
 }
 
+enum Surface {
+    claude
+    chatgpt
+    gemini
+    deepseek
+    dev_cli
+    web_ui
+    manual
+}
+
+enum TokenScope {
+    dev_cli
+    mcp_consumer_t0
+    mcp_consumer_oauth
+    pairing_temp
+}
+
+// ── Identity ───────────────────────────────────────────────────────────────
+
+model User {
+    id         Int       @id @default(autoincrement())
+    email      String?   @unique
+    createdAt  DateTime  @default(now())
+    mergedInto Int?
+    parent     User?     @relation("UserMerge", fields: [mergedInto], references: [id])
+    children   User[]    @relation("UserMerge")
+    tokens     Token[]
+    entries    KnowledgeEntry[]
+
+    @@map("users")
+}
+
+model Token {
+    id         Int        @id @default(autoincrement())
+    tokenHash  String     @unique
+    userId     Int
+    user       User       @relation(fields: [userId], references: [id])
+    scope      TokenScope
+    surface    Surface
+    createdAt  DateTime   @default(now())
+    lastUsedAt DateTime   @default(now())
+    revokedAt  DateTime?
+
+    @@index([userId])
+    @@map("tokens")
+}
+
 model KnowledgeEntry {
     id           Int       @id @default(autoincrement())
     entityType   String
@@ -51,9 +98,12 @@ model KnowledgeEntry {
     isProtected  Boolean   @default(false)
     properties   Json      @default("{}")
     embedding    Unsupported("vector(256)")?
+    userId       Int       @default(1)
+    surface      Surface?
+    user         User      @relation(fields: [userId], references: [id])
 
-    @@unique([entityType, entityId, key])
-    @@index([entityType, entityId, key])
+    @@unique([userId, entityType, entityId, key])
+    @@index([userId, entityType, entityId, key])
     @@map("knowledge_base")
 }
 

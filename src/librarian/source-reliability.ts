@@ -47,7 +47,8 @@ interface ReliabilityStore {
 export async function getReliabilityScores(): Promise<ReliabilityMap> {
     const entry = await getDb().knowledgeEntry.findUnique({
         where: {
-            entityType_entityId_key: {
+            userId_entityType_entityId_key: {
+                userId: 1,
                 entityType: RELIABILITY_ENTITY_TYPE,
                 entityId: RELIABILITY_ENTITY_ID,
                 key: RELIABILITY_KEY,
@@ -128,7 +129,8 @@ async function persistScores(scores: ReliabilityMap): Promise<void> {
 
     await getDb().knowledgeEntry.upsert({
         where: {
-            entityType_entityId_key: {
+            userId_entityType_entityId_key: {
+                userId: 1,
                 entityType: RELIABILITY_ENTITY_TYPE,
                 entityId: RELIABILITY_ENTITY_ID,
                 key: RELIABILITY_KEY,

@@ -22,6 +22,8 @@ export interface IrantiAuthContext {
     keyId: string;
     owner: string;
     scopes: string[];
+    userId: number;
+    tokenScope: string;
 }
 
 declare global {
@@ -63,6 +65,8 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
         keyId: result.keyId ?? 'unknown',
         owner: result.owner ?? 'unknown',
         scopes: result.scopes ?? ['*'],
+        userId: result.userId ?? 1,
+        tokenScope: result.tokenScope ?? 'dev_cli',
     };
 
     next();

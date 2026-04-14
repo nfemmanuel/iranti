@@ -55,7 +55,8 @@ export async function registerAgent(profile: AgentProfile): Promise<void> {
 
     await getDb().knowledgeEntry.upsert({
         where: {
-            entityType_entityId_key: {
+            userId_entityType_entityId_key: {
+                userId: 1,
                 entityType: 'agent',
                 entityId: profile.agentId,
                 key: 'profile',
@@ -89,7 +90,8 @@ export async function registerAgent(profile: AgentProfile): Promise<void> {
 async function initStats(agentId: string): Promise<void> {
     const existing = await getDb().knowledgeEntry.findUnique({
         where: {
-            entityType_entityId_key: {
+            userId_entityType_entityId_key: {
+                userId: 1,
                 entityType: 'agent',
                 entityId: agentId,
                 key: 'stats',
@@ -131,7 +133,8 @@ export async function updateStats(
 ): Promise<void> {
     const entry = await getDb().knowledgeEntry.findUnique({
         where: {
-            entityType_entityId_key: {
+            userId_entityType_entityId_key: {
+                userId: 1,
                 entityType: 'agent',
                 entityId: agentId,
                 key: 'stats',
@@ -163,7 +166,8 @@ export async function updateStats(
 
     await getDb().knowledgeEntry.update({
         where: {
-            entityType_entityId_key: {
+            userId_entityType_entityId_key: {
+                userId: 1,
                 entityType: 'agent',
                 entityId: agentId,
                 key: 'stats',
@@ -182,7 +186,8 @@ export async function getAgent(agentId: string): Promise<AgentRecord | null> {
     const [profileEntry, statsEntry] = await Promise.all([
         getDb().knowledgeEntry.findUnique({
             where: {
-                entityType_entityId_key: {
+                userId_entityType_entityId_key: {
+                    userId: 1,
                     entityType: 'agent',
                     entityId: agentId,
                     key: 'profile',
@@ -191,7 +196,8 @@ export async function getAgent(agentId: string): Promise<AgentRecord | null> {
         }),
         getDb().knowledgeEntry.findUnique({
             where: {
-                entityType_entityId_key: {
+                userId_entityType_entityId_key: {
+                    userId: 1,
                     entityType: 'agent',
                     entityId: agentId,
                     key: 'stats',

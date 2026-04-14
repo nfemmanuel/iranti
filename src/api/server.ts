@@ -48,6 +48,8 @@ import {
     writeRuntimeState,
 } from '../lib/runtimeLifecycle';
 import { createFirstPartyIranti } from '../lib/createFirstPartyIranti';
+import { consumerMcpRoutes } from './routes/consumerMcp';
+import { tokensRouter } from './routes/tokens';
 import { resolvePackageRoot } from '../lib/packageRoot';
 import { createHealthCheckState, createVectorBackendMonitor, deriveOperatorStatus, HealthCheckState } from './healthChecks';
 
@@ -245,6 +247,18 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: process.env.IRANTI_MAX_BODY_BYTES ?? '256kb' }));
 
+// CORS for Chrome extension service workers
+app.use((req, res, next) => {
+    const origin = req.headers.origin ?? '';
+    if (origin.startsWith('chrome-extension://')) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    }
+    if (req.method === 'OPTIONS') { res.sendStatus(204); return; }
+    next();
+});
+
 // Public health check
 app.get(ROUTES.health, (_req, res) => {
     res.json({
@@ -306,6 +320,12 @@ function terminateStartup(code: number): void {
     }
     server.close(() => closeAndExit());
 }
+
+// Consumer MCP endpoint — token auth is path-embedded, handled inside the route
+app.use('/mcp', consumerMcpRoutes());
+
+// Token management (requires standard API-key auth)
+app.use('/tokens', authenticate, rateLimitMiddleware, tokensRouter);
 
 // Mount protected routes
 app.use(ROUTES.agents, authenticate, rateLimitMiddleware, requireScopeByMethod('agents:read', 'agents:write'), agentRoutes(iranti));

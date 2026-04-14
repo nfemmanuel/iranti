@@ -198,7 +198,8 @@ export async function findEntry(query: EntryQuery, db?: DbClient): Promise<Knowl
     const client = db ?? getDb();
     return client.knowledgeEntry.findUnique({
         where: {
-            entityType_entityId_key: {
+            userId_entityType_entityId_key: {
+                userId: 1,
                 entityType: query.entityType,
                 entityId: query.entityId,
                 key: query.key,
@@ -1018,7 +1019,8 @@ export async function updateEntry(
 
     const entry = await client.knowledgeEntry.update({
         where: {
-            entityType_entityId_key: {
+            userId_entityType_entityId_key: {
+                userId: 1,
                 entityType: query.entityType,
                 entityId: query.entityId,
                 key: query.key,

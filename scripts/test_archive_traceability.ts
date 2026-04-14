@@ -125,7 +125,7 @@ async function testArchiveTraceability() {
     console.log('Test 6: Verify KB has new value');
     const currentEntry = await getDb().knowledgeEntry.findUnique({
         where: {
-            entityType_entityId_key: testEntity,
+            userId_entityType_entityId_key: { userId: 1, ...testEntity },
         },
     });
 

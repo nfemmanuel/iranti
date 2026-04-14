@@ -63,7 +63,8 @@ async function isSeeded(): Promise<boolean> {
     try {
         const entry = await getDb().knowledgeEntry.findUnique({
             where: {
-                entityType_entityId_key: {
+                userId_entityType_entityId_key: {
+                    userId: 1,
                     entityType: 'system',
                     entityId: 'library',
                     key: 'initialization_log',

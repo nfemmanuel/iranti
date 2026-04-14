@@ -46,7 +46,8 @@ batchRouter.post("/", async (req: Request, res: Response) => {
         try {
           const row = await db.knowledgeEntry.findUnique({
             where: {
-              entityType_entityId_key: {
+              userId_entityType_entityId_key: {
+                userId: 1,
                 entityType,
                 entityId,
                 key: it.key,

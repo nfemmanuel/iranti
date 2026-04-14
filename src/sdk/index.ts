@@ -645,7 +645,7 @@ export class Iranti {
             // rather than the fire-and-forget session ledger, to avoid a race
             // condition where the DB write hasn't landed before process exit.
             const row = await getDb().knowledgeEntry.findUnique({
-                where: { entityType_entityId_key: { entityType: 'agent', entityId: agentId, key: 'attendant_state' } },
+                where: { userId_entityType_entityId_key: { userId: 1, entityType: 'agent', entityId: agentId, key: 'attendant_state' } },
                 select: { valueRaw: true, updatedAt: true },
             });
             if (!row) return { handshakeRestored: false, attendRestored: false };

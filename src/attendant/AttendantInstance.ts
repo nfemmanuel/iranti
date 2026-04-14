@@ -2672,7 +2672,8 @@ function inferContextWatchedEntities(task: string, recentMessages: string[]): st
 async function readPersistedBriefForAgent(agentId: string): Promise<WorkingMemoryBrief | null> {
     const entry = await getDb().knowledgeEntry.findUnique({
         where: {
-            entityType_entityId_key: {
+            userId_entityType_entityId_key: {
+                userId: 1,
                 entityType: 'agent',
                 entityId: agentId,
                 key: 'attendant_state',
@@ -7035,7 +7036,8 @@ If nothing is relevant, return: none`,
 
         await getDb().knowledgeEntry.upsert({
             where: {
-                entityType_entityId_key: {
+                userId_entityType_entityId_key: {
+                    userId: 1,
                     entityType: 'agent',
                     entityId: this.agentId,
                     key: 'attendant_state',
