@@ -28,6 +28,7 @@ import path from 'path';
 import { knowledgeRoutes } from './routes/knowledge';
 import { memoryRoutes } from './routes/memory';
 import { agentRoutes } from './routes/agents';
+import { extensionRoutes } from './routes/extension';
 import { devRouter } from './routes/dev';
 import { batchRouter } from './routes/batch';
 import { authenticate } from './middleware/auth';
@@ -78,7 +79,7 @@ const RUNTIME_AUTHORITY = resolveRuntimeAuthorityFromEnv(process.env);
 const INSTANCE_DIR = RUNTIME_AUTHORITY.instanceDir;
 const INSTANCE_RUNTIME_FILE = RUNTIME_AUTHORITY.runtimeFile;
 const INSTANCE_NAME = process.env.IRANTI_INSTANCE_NAME?.trim() || (INSTANCE_DIR ? path.basename(INSTANCE_DIR) : 'adhoc');
-const VERSION = '0.3.39';
+const VERSION = '0.3.40';
 const PORT_RAW = (process.env.IRANTI_PORT ?? '3001').trim();
 const PORT = Number.parseInt(PORT_RAW, 10);
 
@@ -309,6 +310,7 @@ function terminateStartup(code: number): void {
 
 // Mount protected routes
 app.use(ROUTES.agents, authenticate, rateLimitMiddleware, requireScopeByMethod('agents:read', 'agents:write'), agentRoutes(iranti));
+app.use('/extension', authenticate, rateLimitMiddleware, extensionRoutes(iranti));
 app.use('/kb/batchQuery', authenticate, rateLimitMiddleware, requireAnyScope(['kb:read']), batchRouter);
 app.use(ROUTES.kb, authenticate, rateLimitMiddleware, requireScopeFamilyByMethod('kb:read', 'kb:write'), knowledgeRoutes(iranti));
 app.use(ROUTES.memory, authenticate, rateLimitMiddleware, requireScopeByMethod('memory:read', 'memory:write'), memoryRoutes(iranti));
