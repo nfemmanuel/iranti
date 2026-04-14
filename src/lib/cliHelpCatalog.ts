@@ -263,6 +263,12 @@ export const DIAGNOSTICS_HELP: HelpEntry[] = [
         useWhen: 'an attend() call extracted bad or low-quality facts from a tool result and you need to roll them back cleanly.',
         scenario: 'After a noisy Read/Grep autowrite batch, run with --since 15m to preview, then add --commit to delete.',
     },
+    {
+        command: 'iranti feedback [--rating <1-5>] [--comment <text>] [--type bug|praise|suggestion|general] [--dry-run] [--offline]',
+        description: 'Send a one-keypress satisfaction signal to the Iranti team.',
+        useWhen: 'something feels off, you want to share praise, or you have a suggestion — and you have ten seconds.',
+        scenario: 'Running `iranti feedback --type bug` immediately after hitting a frustrating edge case.',
+    },
 ];
 
 export const CONNECT_HELP: HelpEntry[] = [

@@ -61,6 +61,7 @@ import {
     printUninstallHelp as renderUninstallHelp,
     printUpgradeHelp as renderUpgradeHelp,
     printWizardNotes as renderWizardNotes,
+    printFeedbackHelp as renderFeedbackHelp,
 } from '../src/lib/cliHelpRenderer';
 import { getEscalationPaths } from '../src/lib/escalationPaths';
 import { parseDockerContainerNames, parsePublishedDockerHostPorts } from '../src/lib/dockerCliParsing';
@@ -81,6 +82,7 @@ import { buildSemanticFactTags } from '../src/lib/semanticFactTags';
 import { flushStaffEventEmitter } from '../src/lib/staffEventRegistry';
 import { writeProjectScaffoldCloseout, type ScaffoldCloseoutStatus } from '../src/lib/scaffoldCloseout';
 import { deriveProjectCodebaseEntity, writeProjectLearningSnapshot, type ProjectLearningStatus } from '../src/lib/projectLearning';
+import { runFeedbackCommand, type FeedbackType, type FeedbackRunOptions } from '../src/lib/feedbackCollector';
 
 type Scope = 'user' | 'system';
 
@@ -9798,6 +9800,10 @@ function printProviderKeyHelp(): void {
     renderProviderKeyHelp({ sectionTitle, commandText });
 }
 
+function printFeedbackHelp(): void {
+    renderFeedbackHelp({ sectionTitle, commandText });
+}
+
 function printMcpHelp(): void {
     console.log([
         'MCP server and maintenance commands.',
@@ -11002,6 +11008,37 @@ async function revertAutowriteCommand(args: ParsedArgs): Promise<void> {
     }
 }
 
+/**
+ * `iranti feedback` — collect a one-keypress satisfaction signal.
+ *
+ * No DB required. Reads .iranti/session-stats.json for passive usage context,
+ * maintains a throttle record in .iranti/feedback-sent.json, and falls back
+ * to .iranti/pending-feedback.json when the endpoint is unreachable.
+ */
+async function feedbackCommand(args: ParsedArgs): Promise<void> {
+    const ratingStr = getFlag(args, 'rating');
+    const rating = ratingStr !== undefined ? Number(ratingStr) : undefined;
+    const comment = getFlag(args, 'comment');
+    const typeStr = getFlag(args, 'type') ?? 'general';
+    const dryRun = hasFlag(args, 'dry-run');
+    const offline = hasFlag(args, 'offline');
+    const milestoneContext = getFlag(args, 'milestone') ?? null;
+    const type = typeStr as FeedbackType;
+
+    const opts: FeedbackRunOptions = {
+        rating,
+        comment: comment ?? undefined,
+        type,
+        dryRun,
+        offline,
+        milestoneContext,
+        factCount: null,
+        version: getPackageVersion(),
+    };
+
+    await runFeedbackCommand(opts);
+}
+
 async function main(): Promise<void> {
     const args = parseArgs(process.argv.slice(2));
     ACTIVE_PARSED_ARGS = args;
@@ -11364,6 +11401,15 @@ async function main(): Promise<void> {
             return;
         }
         await revertAutowriteCommand(args);
+        return;
+    }
+
+    if (args.command === 'feedback' || args.command === 'fb') {
+        if (hasFlag(args, 'help')) {
+            printFeedbackHelp();
+            return;
+        }
+        await feedbackCommand(args);
         return;
     }
 

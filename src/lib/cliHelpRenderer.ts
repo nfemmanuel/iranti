@@ -325,4 +325,12 @@ export function printProviderKeyHelp(style: CliHelpStyle): void {
     console.log('  Use instance targeting for shared runtime configuration. Use project targeting when the command should follow a specific `.env.iranti` binding.');
 }
 
+export function printFeedbackHelp(style: CliHelpStyle): void {
+    printSingleHelpEntry(
+        style,
+        'Feedback Command',
+        requireHelpEntry(DIAGNOSTICS_HELP, 'iranti feedback ')
+    );
+}
+
 export { printChoiceGuide };
