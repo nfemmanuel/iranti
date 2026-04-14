@@ -388,7 +388,17 @@ export async function runFeedbackCommand(opts: FeedbackRunOptions): Promise<void
         await postFeedback(payload);
         await recordSent(irantiDir, rating);
         const label = RATING_LABELS[rating] ?? String(rating);
-        process.stdout.write(`\n  \u2713 Sent (${label}). Thanks for helping shape Iranti.\n\n`);
+        const lines: string[] = [
+            '',
+            `  \u2713 Got it \u2014 thanks for the signal.`,
+            '',
+            `    ${label}${type !== 'general' ? ` \u00b7 ${type}` : ''}`,
+        ];
+        if (comment) lines.push(`    \u201c${comment}\u201d`);
+        lines.push('');
+        lines.push('  This goes directly to the team. It actually matters.');
+        lines.push('');
+        process.stdout.write(lines.join('\n') + '\n');
     } catch {
         await writePending(irantiDir, payload);
         process.stdout.write('\n  Saved locally \u2014 will retry next time.\n\n');
