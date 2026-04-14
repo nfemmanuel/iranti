@@ -382,7 +382,10 @@ function startFileWatcher(cwd: string): void {
     }
     _watchedCwd = cwd;
     try {
-        _activeWatcher = fs.watch(cwd, { recursive: true }, (_eventType, filename) => {
+        // persistent: false — the watcher must not prevent the process from
+        // exiting naturally when the MCP transport closes. Without this, the
+        // event loop stays alive and the smoke test's 3-second exit window fails.
+        _activeWatcher = fs.watch(cwd, { recursive: true, persistent: false }, (_eventType, filename) => {
             if (!filename) return;
             // Skip the debt file itself to avoid feedback loops
             if (filename === WRITE_DEBT_FILENAME) return;
@@ -526,6 +529,17 @@ async function shutdownProcess(code: number, reason: string): Promise<void> {
             await flushStaffEventEmitter().catch(() => undefined);
             await disconnectDb().catch(() => undefined);
         } finally {
+            // Close the file watcher so it doesn't hold the event loop open.
+            // persistent:false already handles the common case; explicit close
+            // here ensures cleanup even if the option isn't respected by the OS.
+            if (_activeWatcher) {
+                try { _activeWatcher.close(); } catch { /* ok */ }
+                _activeWatcher = null;
+            }
+            if (_watchDebounceTimer) {
+                clearTimeout(_watchDebounceTimer);
+                _watchDebounceTimer = null;
+            }
             if (isInteractiveTerminalLaunch()) {
                 console.error(`[iranti-mcp] shutting down (${reason}).`);
             }
