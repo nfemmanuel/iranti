@@ -60,7 +60,8 @@ export async function seedReliability(scores: Record<string, number>): Promise<v
 
     await getDb().knowledgeEntry.upsert({
         where: {
-            entityType_entityId_key: {
+            userId_entityType_entityId_key: {
+                userId: 1,
                 entityType: 'system',
                 entityId: 'librarian',
                 key: 'source_reliability',
@@ -94,7 +95,8 @@ export async function getKnowledgeEntry(entity: string, key: string) {
     const [entityType, entityId] = entity.split('/');
     return getDb().knowledgeEntry.findUnique({
         where: {
-            entityType_entityId_key: {
+            userId_entityType_entityId_key: {
+                userId: 1,
                 entityType,
                 entityId,
                 key,

@@ -165,7 +165,8 @@ async function resetConflictState(): Promise<void> {
 
     await db.knowledgeEntry.upsert({
         where: {
-            entityType_entityId_key: {
+            userId_entityType_entityId_key: {
+                userId: 1,
                 entityType: 'system',
                 entityId: 'librarian',
                 key: 'conflict_policy',
@@ -196,7 +197,8 @@ async function resetConflictState(): Promise<void> {
 
     await db.knowledgeEntry.upsert({
         where: {
-            entityType_entityId_key: {
+            userId_entityType_entityId_key: {
+                userId: 1,
                 entityType: 'system',
                 entityId: 'librarian',
                 key: 'source_reliability',

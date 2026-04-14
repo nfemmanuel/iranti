@@ -221,7 +221,8 @@ async function main(): Promise<void> {
             const dbForSentinelWrite = initDb(upgradeTestDbUrl);
             await dbForSentinelWrite.knowledgeEntry.upsert({
                 where: {
-                    entityType_entityId_key: {
+                    userId_entityType_entityId_key: {
+                        userId: 1,
                         entityType: 'project',
                         entityId: 'upgrade_preservation_test',
                         key: 'sentinel',
@@ -256,7 +257,8 @@ async function main(): Promise<void> {
             const dbForScaffoldQuery = initDb(upgradeTestDbUrl);
             const scaffoldCloseout = await dbForScaffoldQuery.knowledgeEntry.findUnique({
                 where: {
-                    entityType_entityId_key: {
+                    userId_entityType_entityId_key: {
+                        userId: 1,
                         entityType: 'user',
                         entityId: 'main',
                         key: 'claude_setup_scaffold_status',
@@ -335,7 +337,8 @@ async function main(): Promise<void> {
             const dbForSentinelQuery = initDb(upgradeTestDbUrl);
             const sentinelFact = await dbForSentinelQuery.knowledgeEntry.findUnique({
                 where: {
-                    entityType_entityId_key: {
+                    userId_entityType_entityId_key: {
+                        userId: 1,
                         entityType: 'project',
                         entityId: 'upgrade_preservation_test',
                         key: 'sentinel',
@@ -645,7 +648,8 @@ async function main(): Promise<void> {
             const [codebaseType, codebaseId] = String(codebaseEntity).split('/');
             const overviewFact = await configuredDb.knowledgeEntry.findUnique({
                 where: {
-                    entityType_entityId_key: {
+                    userId_entityType_entityId_key: {
+                        userId: 1,
                         entityType: codebaseType!,
                         entityId: codebaseId!,
                         key: 'project_overview',
@@ -654,7 +658,8 @@ async function main(): Promise<void> {
             });
             const bindingFact = await configuredDb.knowledgeEntry.findUnique({
                 where: {
-                    entityType_entityId_key: {
+                    userId_entityType_entityId_key: {
+                        userId: 1,
                         entityType: codebaseType!,
                         entityId: codebaseId!,
                         key: 'project_binding',
