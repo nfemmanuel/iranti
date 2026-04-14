@@ -25,13 +25,20 @@
  *  GET  /kb/archive-history — get archive history for an entry
  */
 
-import { Router, Request, Response } from 'express';
+import express, { Router, Request, Response } from 'express';
 import { Iranti, ProtocolViolationError } from '../../sdk';
 import { addAlias, listAliases, parseEntityString, resolveEntity } from '../../library/entity-resolution';
 import { validateInput } from '../middleware/validation';
 import { EntityTarget, requireAnyScope, requireEntityScopeByMethod } from '../middleware/authorization';
 import type { IrantiAuthContext } from '../middleware/auth';
-import { findEntriesByEntityType, deleteEntryById } from '../../library/queries';
+import {
+    deleteEntryById,
+    exportFacts,
+    findEntriesByEntityType,
+    importFact,
+    type ImportConflictMode,
+    type ImportRow,
+} from '../../library/queries';
 
 function heuristicEntityId(name: string): string {
     return name
@@ -414,6 +421,150 @@ export function knowledgeRoutes(iranti: Iranti): Router {
             res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
         }
     });
+
+    // GET /export
+    // Streams all (or a filtered subset of) knowledge entries as JSONL.
+    // The first line is a metadata header; subsequent lines are one ExportRow each.
+    //
+    // Query params:
+    //   entityType  — restrict to entries of this entityType
+    //   entityId    — restrict to a single entity (requires entityType)
+    //   since       — ISO-8601 timestamp; only entries updated at or after this date
+    router.get('/export', requireAnyScope(['kb:read']), async (req: Request, res: Response) => {
+        try {
+            const entityType = req.query.entityType ? String(req.query.entityType) : undefined;
+            const entityId   = req.query.entityId   ? String(req.query.entityId)   : undefined;
+            const sinceStr   = req.query.since       ? String(req.query.since)      : undefined;
+
+            let since: Date | undefined;
+            if (sinceStr) {
+                since = new Date(sinceStr);
+                if (Number.isNaN(since.getTime())) {
+                    return res.status(400).json({ error: 'since must be a valid ISO-8601 timestamp.' });
+                }
+            }
+
+            const rows = await exportFacts({ entityType, entityId, since });
+            const exportedAt = new Date().toISOString();
+            const dateTag    = exportedAt.split('T')[0];
+
+            res.setHeader('Content-Type', 'application/x-ndjson');
+            res.setHeader('Content-Disposition', `attachment; filename="iranti-export-${dateTag}.jsonl"`);
+
+            res.write(JSON.stringify({ _type: 'iranti-export', version: '1', exportedAt, total: rows.length }) + '\n');
+            for (const row of rows) {
+                res.write(JSON.stringify(row) + '\n');
+            }
+            res.end();
+        } catch (err) {
+            res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+    });
+
+    // POST /import
+    // Accepts a JSONL body and writes facts into the knowledge base.
+    // Body must be Content-Type: text/plain or application/x-ndjson.
+    // Header lines (objects with _type field) are silently skipped.
+    //
+    // Query params:
+    //   conflict      — 'skip' (default) | 'overwrite' | 'merge'
+    //   dryRun        — 'true' to parse and count without writing
+    //   provenanceTag — stamped on every written entry as properties.importedFrom
+    //   remap         — repeatable: 'oldEntityType=newEntityType' or
+    //                   'oldType/oldId=newType/newId'
+    router.post(
+        '/import',
+        requireAnyScope(['kb:write']),
+        express.text({ type: ['text/plain', 'application/x-ndjson', 'application/octet-stream'], limit: '10mb' }),
+        async (req: Request, res: Response) => {
+            try {
+                const conflictRaw = String(req.query.conflict ?? 'skip');
+                const conflictMode: ImportConflictMode =
+                    conflictRaw === 'overwrite' ? 'overwrite'
+                    : conflictRaw === 'merge'   ? 'merge'
+                    : 'skip';
+
+                const dryRun        = req.query.dryRun === 'true';
+                const provenanceTag = req.query.provenanceTag ? String(req.query.provenanceTag) : undefined;
+
+                // Parse namespace remaps: ?remap=rule=policy or ?remap=project/foo=project/bar
+                const remapParam = req.query.remap;
+                const remapRaw: string[] = Array.isArray(remapParam)
+                    ? (remapParam as string[])
+                    : remapParam ? [String(remapParam)] : [];
+                const remaps: Array<{ from: string; fromType: string; fromId?: string; toType: string; toId?: string }> =
+                    remapRaw.flatMap((r) => {
+                        const eqIdx = r.indexOf('=');
+                        if (eqIdx < 1) return [];
+                        const fromStr = r.slice(0, eqIdx).trim();
+                        const toStr   = r.slice(eqIdx + 1).trim();
+                        if (!fromStr || !toStr) return [];
+                        const [fromType, fromId] = fromStr.includes('/') ? fromStr.split('/') : [fromStr, undefined];
+                        const [toType,   toId]   = toStr.includes('/')   ? toStr.split('/')   : [toStr,   undefined];
+                        return [{ from: fromStr, fromType, fromId, toType, toId }];
+                    });
+
+                const body = req.body as unknown;
+                if (typeof body !== 'string') {
+                    return res.status(400).json({
+                        error: 'Request body must be JSONL text. Set Content-Type: text/plain or application/x-ndjson.',
+                    });
+                }
+
+                const lines = body.split('\n');
+                let added = 0, skipped = 0, overwritten = 0, parseErrors = 0, dataLines = 0;
+
+                for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (!trimmed) continue;
+
+                    let parsed: unknown;
+                    try {
+                        parsed = JSON.parse(trimmed);
+                    } catch {
+                        parseErrors++;
+                        continue;
+                    }
+
+                    // Skip metadata header lines
+                    if (
+                        typeof parsed === 'object' &&
+                        parsed !== null &&
+                        '_type' in (parsed as Record<string, unknown>)
+                    ) continue;
+
+                    dataLines++;
+                    let row = parsed as ImportRow;
+
+                    // Apply namespace remaps
+                    for (const remap of remaps) {
+                        const typeMatches = row.entityType === remap.fromType;
+                        const idMatches   = remap.fromId == null || row.entityId === remap.fromId;
+                        if (typeMatches && idMatches) {
+                            row = {
+                                ...row,
+                                entityType: remap.toType,
+                                entityId:   remap.toId ?? row.entityId,
+                            };
+                        }
+                    }
+
+                    if (!dryRun) {
+                        const result = await importFact(row, conflictMode, provenanceTag);
+                        if (result.outcome === 'added')       added++;
+                        else if (result.outcome === 'overwritten') overwritten++;
+                        else skipped++;
+                    } else {
+                        skipped++; // dry-run: all count as skipped
+                    }
+                }
+
+                res.json({ added, skipped, overwritten, parseErrors, total: dataLines, dryRun });
+            } catch (err) {
+                res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+            }
+        },
+    );
 
     return router;
 }

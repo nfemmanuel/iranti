@@ -4,7 +4,7 @@
  *
  * Provides commands: install, setup, configure, auth, doctor, run, attend,
  * handshake, resolve, integrate, project-init, instance, status, upgrade,
- * uninstall, issues, list-rules, delete-rule, and more.
+ * uninstall, issues, list-rules, delete-rule, export, import, snapshot, and more.
  *
  * Run via `npx iranti <command>` or `iranti <command>` after global install.
  * Requires DATABASE_URL or a project/instance binding for most commands.
@@ -14,7 +14,7 @@
  *
  * Provides commands: install, setup, configure, auth, doctor, run, attend,
  * handshake, resolve, integrate, project-init, instance, status, upgrade,
- * uninstall, issues, list-rules, delete-rule, and more.
+ * uninstall, issues, list-rules, delete-rule, export, import, snapshot, and more.
  *
  * Run via `npx iranti <command>` or `iranti <command>` after global install.
  * Requires DATABASE_URL or a project/instance binding for most commands.
@@ -75,7 +75,7 @@ import { startChatSession } from '../src/chat';
 import { createVectorBackend, resolveVectorBackendName } from '../src/library/backends';
 import { InstanceRuntimeState, RuntimeInspection, inspectRuntimeState, isPidRunning, resolveRuntimeAuthorityFromEnv, waitForPidExit } from '../src/lib/runtimeLifecycle';
 import type { Iranti } from '../src/sdk';
-import { auditVectorIndexConsistency, findEntriesByEntityType, deleteEntryById, findEntriesBySourceAndWindow, deleteEntriesBySourceAndWindow } from '../src/library/queries';
+import { auditVectorIndexConsistency, findEntriesByEntityType, deleteEntryById, findEntriesBySourceAndWindow, deleteEntriesBySourceAndWindow, exportFacts, importFact, type ImportConflictMode, type ImportRow } from '../src/library/queries';
 import { backfillChatHistory, parseBackfillChatTranscript } from '../src/lib/autoRemember';
 import { buildSemanticFactTags } from '../src/lib/semanticFactTags';
 import { flushStaffEventEmitter } from '../src/lib/staffEventRegistry';
@@ -10272,6 +10272,591 @@ async function deleteRuleCommand(args: ParsedArgs): Promise<void> {
     }
 }
 
+// ── Export / Import / Snapshot commands ─────────────────────────────────────
+
+/** Marker file written at the end of every successful export (enables --since last). */
+const EXPORT_MARKER_FILE = '.iranti-export-marker';
+
+/** Directory where `iranti snapshot create` stores named JSONL snapshots. */
+const SNAPSHOT_DIR = path.join('.iranti', 'snapshots');
+
+function printExportHelp(): void {
+    console.log([
+        'Export knowledge base facts to JSONL format.',
+        '',
+        'Usage:',
+        '  iranti export [--output <file>] [--entity-type <type>] [--entity <type/id>]',
+        '               [--since <duration|ISO|last>] [--instance <name>] [--project-env <path>]',
+        '               [--json]',
+        '',
+        'Flags:',
+        '  --output <file>        Write JSONL to this file instead of stdout.',
+        '  --entity-type <type>   Only export facts of this entityType (e.g. rule, project).',
+        '  --entity <type/id>     Only export facts for this entity (e.g. project/myapp).',
+        '  --since <value>        Incremental export. Value can be:',
+        '                           - ISO-8601 timestamp: 2025-01-01T00:00:00Z',
+        '                           - Duration ago: 1h, 2d, 30m',
+        '                           - "last": resume from previous export marker',
+        '  --json                 Print summary as JSON to stderr.',
+        '  --instance <name>      Use a named Iranti instance.',
+        '  --project-env <path>   Path to a .env file with DATABASE_URL.',
+        '',
+        'Examples:',
+        '  iranti export                           # full export to stdout',
+        '  iranti export --output backup.jsonl     # full export to file',
+        '  iranti export --entity-type rule        # export only rules',
+        '  iranti export --since last              # export changes since last run',
+        '  iranti export --since 1d                # export changes from the last 24h',
+    ].join('\n'));
+}
+
+function printImportHelp(): void {
+    console.log([
+        'Import JSONL facts into the knowledge base.',
+        '',
+        'Usage:',
+        '  iranti import <file> [--conflict skip|overwrite|merge]',
+        '               [--dry-run] [--remap old=new] [--provenance <tag>]',
+        '               [--instance <name>] [--project-env <path>] [--json]',
+        '',
+        'Flags:',
+        '  <file>                  JSONL file to import (use "-" for stdin).',
+        '  --conflict <mode>       How to handle existing entries:',
+        '                            skip      (default) leave existing entries unchanged',
+        '                            overwrite always replace with the imported value',
+        '                            merge     keep whichever entry has higher confidence',
+        '  --dry-run               Parse and count without writing to the database.',
+        '  --remap <old>=<new>     Rewrite entityType (or entityType/entityId) on import.',
+        '                          Repeatable. e.g. --remap rule=policy',
+        '                                           --remap project/foo=project/bar',
+        '  --provenance <tag>      Tag stamped on every imported entry as importedFrom.',
+        '                          Allows targeted rollback later.',
+        '  --json                  Print result as JSON.',
+        '  --instance <name>       Use a named Iranti instance.',
+        '  --project-env <path>    Path to a .env file with DATABASE_URL.',
+        '',
+        'Examples:',
+        '  iranti import backup.jsonl',
+        '  iranti import backup.jsonl --conflict merge',
+        '  iranti import backup.jsonl --dry-run',
+        '  iranti import backup.jsonl --remap rule=policy --provenance backup-2025-01-01',
+    ].join('\n'));
+}
+
+function printSnapshotHelp(): void {
+    console.log([
+        'Manage named knowledge base snapshots stored in .iranti/snapshots/.',
+        '',
+        'Usage:',
+        '  iranti snapshot <subcommand> [options]',
+        '',
+        'Subcommands:',
+        '  create <name>   Export the full knowledge base to .iranti/snapshots/<name>.jsonl',
+        '  restore <name>  Import a snapshot (default conflict mode: overwrite)',
+        '  list            List all saved snapshots',
+        '  delete <name>   Delete a saved snapshot',
+        '',
+        'Flags (create/restore):',
+        '  --conflict <mode>   Conflict mode for restore (skip|overwrite|merge). Default: overwrite.',
+        '  --dry-run           Preview restore without writing.',
+        '  --instance <name>   Use a named Iranti instance.',
+        '  --project-env <path>',
+        '',
+        'Examples:',
+        '  iranti snapshot create pre-refactor',
+        '  iranti snapshot list',
+        '  iranti snapshot restore pre-refactor',
+        '  iranti snapshot restore pre-refactor --dry-run',
+        '  iranti snapshot delete pre-refactor',
+    ].join('\n'));
+}
+
+/**
+ * Shared DB resolver for export/import commands. Identical logic to
+ * resolveDbForRuleCommands but with a distinct applicationName so query
+ * logs are easy to attribute.
+ */
+async function resolveDbForExportCommands(args: ParsedArgs): Promise<void> {
+    const instanceName = getFlag(args, 'instance');
+    if (instanceName) {
+        const scope = normalizeScope(getFlag(args, 'scope'));
+        const root = resolveInstallRoot(args, scope);
+        const loaded = await loadInstanceEnv(root, instanceName);
+        applyEnvMap(loaded.env);
+    } else {
+        const cwd = path.resolve(getFlag(args, 'project') ?? process.cwd());
+        const explicitProjectEnv = getFlag(args, 'project-env');
+        loadRuntimeEnv({
+            cwd,
+            projectEnvFile: explicitProjectEnv ? path.resolve(explicitProjectEnv) : undefined,
+        });
+    }
+    const databaseUrl = process.env.DATABASE_URL?.trim();
+    if (!databaseUrl) {
+        throw cliError(
+            'IRANTI_DATABASE_URL_MISSING',
+            'DATABASE_URL is required. Run from a bound project, pass --instance <name>, or set DATABASE_URL.',
+            ['Run `iranti project init . --instance <name>` to bind this project.'],
+        );
+    }
+    initDb(databaseUrl, { applicationName: 'iranti:cli:export' });
+}
+
+/**
+ * Parse a --since flag value into a Date.
+ * Accepts ISO timestamps, durations (15m / 2h / 1d), and the special
+ * value "last" which reads the .iranti-export-marker file from cwd.
+ */
+function parseSinceFlag(value: string, cwd: string): Date {
+    const trimmed = value.trim();
+
+    if (trimmed === 'last') {
+        const markerPath = path.join(cwd, EXPORT_MARKER_FILE);
+        if (!fs.existsSync(markerPath)) {
+            throw cliError(
+                'IRANTI_EXPORT_MARKER_MISSING',
+                `No export marker found at ${markerPath}. Run a full export first to create one.`,
+                ['Run: iranti export --output backup.jsonl'],
+            );
+        }
+        const raw = fs.readFileSync(markerPath, 'utf8').trim();
+        const d = new Date(raw);
+        if (Number.isNaN(d.getTime())) {
+            throw cliError(
+                'IRANTI_EXPORT_MARKER_INVALID',
+                `Export marker at ${markerPath} contains an invalid timestamp: "${raw}".`,
+                ['Delete the marker file and run a full export.'],
+            );
+        }
+        return d;
+    }
+
+    // Try duration (15m, 2h, 1d, 30s, 500ms)
+    if (/^[\d]+\s*(ms|s|m|h|d)?$/i.test(trimmed)) {
+        const ms = parseDurationFlag(trimmed, 'since');
+        return new Date(Date.now() - ms);
+    }
+
+    // Try ISO timestamp
+    const d = new Date(trimmed);
+    if (Number.isNaN(d.getTime())) {
+        throw cliError(
+            'IRANTI_SINCE_INVALID',
+            `Invalid --since value: "${trimmed}". Use an ISO timestamp, a duration (15m, 2h, 1d), or "last".`,
+            ['Example: --since 2025-01-01T00:00:00Z', 'Example: --since 1d', 'Example: --since last'],
+        );
+    }
+    return d;
+}
+
+async function exportCommand(args: ParsedArgs): Promise<void> {
+    try {
+        const json       = hasFlag(args, 'json');
+        const outputFile = getFlag(args, 'output');
+        const entityTypeFlag = getFlag(args, 'entity-type');
+        const entityFlag     = getFlag(args, 'entity');
+        const sinceFlag      = getFlag(args, 'since');
+        const cwd = path.resolve(getFlag(args, 'project') ?? process.cwd());
+
+        let entityType: string | undefined = entityTypeFlag ?? undefined;
+        let entityId:   string | undefined;
+
+        if (entityFlag) {
+            const slash = entityFlag.indexOf('/');
+            if (slash < 1) {
+                throw cliError(
+                    'IRANTI_EXPORT_ENTITY_INVALID',
+                    `--entity must be in "type/id" format, got: "${entityFlag}"`,
+                    ['Example: --entity project/myapp'],
+                );
+            }
+            entityType = entityFlag.slice(0, slash);
+            entityId   = entityFlag.slice(slash + 1);
+        }
+
+        let since: Date | undefined;
+        if (sinceFlag) {
+            since = parseSinceFlag(sinceFlag, cwd);
+        }
+
+        await resolveDbForExportCommands(args);
+
+        const rows = await exportFacts({ entityType, entityId, since });
+        const exportedAt = new Date().toISOString();
+        const header = { _type: 'iranti-export', version: '1', exportedAt, total: rows.length };
+
+        const lines = [JSON.stringify(header), ...rows.map((r) => JSON.stringify(r))];
+        const output = lines.join('\n') + '\n';
+
+        if (outputFile) {
+            fs.mkdirSync(path.dirname(path.resolve(outputFile)), { recursive: true });
+            fs.writeFileSync(path.resolve(outputFile), output, 'utf8');
+        } else {
+            process.stdout.write(output);
+        }
+
+        // Write export marker for --since last
+        if (!since) {
+            // Only stamp the marker on full (non-incremental) exports so that
+            // --since last always covers the delta from the last FULL export.
+            try {
+                fs.writeFileSync(path.join(cwd, EXPORT_MARKER_FILE), exportedAt + '\n', 'utf8');
+            } catch {
+                // Marker write is best-effort; don't fail the export.
+            }
+        }
+
+        if (json) {
+            process.stderr.write(JSON.stringify({
+                ok: true,
+                total: rows.length,
+                exportedAt,
+                output: outputFile ?? '(stdout)',
+                filters: { entityType, entityId, since: since?.toISOString() },
+            }, null, 2) + '\n');
+            return;
+        }
+
+        if (outputFile) {
+            console.log(`${okLabel()} Exported ${rows.length} ${rows.length === 1 ? 'fact' : 'facts'} → ${outputFile}`);
+        } else {
+            // Stats go to stderr when output is stdout so they don't corrupt the JSONL
+            process.stderr.write(`${okLabel()} Exported ${rows.length} ${rows.length === 1 ? 'fact' : 'facts'}\n`);
+        }
+    } finally {
+        await disconnectDb().catch(() => undefined);
+    }
+}
+
+/** Parse repeatable --remap flags into a normalised list. */
+function parseRemapFlags(args: ParsedArgs): Array<{ fromType: string; fromId?: string; toType: string; toId?: string }> {
+    const raw = getFlag(args, 'remap');
+    if (!raw) return [];
+    // --remap can appear multiple times; fall back to treating single value as array
+    const values = Array.isArray(raw) ? (raw as string[]) : [raw];
+    return values.flatMap((r) => {
+        const eqIdx = r.indexOf('=');
+        if (eqIdx < 1) return [];
+        const fromStr = r.slice(0, eqIdx).trim();
+        const toStr   = r.slice(eqIdx + 1).trim();
+        if (!fromStr || !toStr) return [];
+        const [fromType, fromId] = fromStr.includes('/') ? fromStr.split('/') : [fromStr, undefined];
+        const [toType,   toId]   = toStr.includes('/')   ? toStr.split('/')   : [toStr,   undefined];
+        return [{ fromType, fromId, toType, toId }];
+    });
+}
+
+async function importCommand(args: ParsedArgs): Promise<void> {
+    try {
+        const json         = hasFlag(args, 'json');
+        const dryRun       = hasFlag(args, 'dry-run');
+        const provenanceTag = getFlag(args, 'provenance') ?? undefined;
+        const conflictRaw  = getFlag(args, 'conflict') ?? 'skip';
+        const conflictMode: ImportConflictMode =
+            conflictRaw === 'overwrite' ? 'overwrite'
+            : conflictRaw === 'merge'   ? 'merge'
+            : 'skip';
+
+        const remaps = parseRemapFlags(args);
+
+        const inputArg = args.positionals[0]?.trim();
+        if (!inputArg) {
+            throw cliError(
+                'IRANTI_IMPORT_FILE_REQUIRED',
+                'Missing input file. Usage: iranti import <file>',
+                ['Use "-" to read from stdin.', 'Run `iranti import --help` for options.'],
+            );
+        }
+
+        let rawContent: string;
+        if (inputArg === '-') {
+            // Read from stdin
+            const chunks: Buffer[] = [];
+            for await (const chunk of process.stdin) {
+                chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
+            }
+            rawContent = Buffer.concat(chunks).toString('utf8');
+        } else {
+            const resolved = path.resolve(inputArg);
+            if (!fs.existsSync(resolved)) {
+                throw cliError(
+                    'IRANTI_IMPORT_FILE_NOT_FOUND',
+                    `File not found: ${resolved}`,
+                    ['Check the path and try again.'],
+                );
+            }
+            rawContent = fs.readFileSync(resolved, 'utf8');
+        }
+
+        await resolveDbForExportCommands(args);
+
+        const lines = rawContent.split('\n');
+        let added = 0, skipped = 0, overwritten = 0, parseErrors = 0, dataLines = 0;
+        const conflictDetails: Array<{ entityType: string; entityId: string; key: string; reason: string }> = [];
+
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+
+            let parsed: unknown;
+            try {
+                parsed = JSON.parse(trimmed);
+            } catch {
+                parseErrors++;
+                continue;
+            }
+
+            // Skip JSONL header lines
+            if (
+                typeof parsed === 'object' &&
+                parsed !== null &&
+                '_type' in (parsed as Record<string, unknown>)
+            ) continue;
+
+            dataLines++;
+            let row = parsed as ImportRow;
+
+            // Apply namespace remaps
+            for (const remap of remaps) {
+                const typeMatches = row.entityType === remap.fromType;
+                const idMatches   = remap.fromId == null || row.entityId === remap.fromId;
+                if (typeMatches && idMatches) {
+                    row = {
+                        ...row,
+                        entityType: remap.toType,
+                        entityId:   remap.toId ?? row.entityId,
+                    };
+                }
+            }
+
+            if (!dryRun) {
+                const result = await importFact(row, conflictMode, provenanceTag);
+                if (result.outcome === 'added')       added++;
+                else if (result.outcome === 'overwritten') overwritten++;
+                else {
+                    skipped++;
+                    if (result.reason) {
+                        conflictDetails.push({ entityType: row.entityType, entityId: row.entityId, key: row.key, reason: result.reason });
+                    }
+                }
+            } else {
+                skipped++;
+            }
+        }
+
+        if (json) {
+            console.log(JSON.stringify({
+                ok: true,
+                dryRun,
+                conflict: conflictMode,
+                total: dataLines,
+                added,
+                skipped,
+                overwritten,
+                parseErrors,
+                ...(conflictDetails.length > 0 ? { conflicts: conflictDetails } : {}),
+            }, null, 2));
+            process.exit(0);
+        }
+
+        const mode = dryRun ? ' (dry-run)' : '';
+        console.log(sectionTitle(`Import results${mode}`));
+        console.log(`  conflict: ${conflictMode}`);
+        console.log(`  total:    ${dataLines}`);
+        if (!dryRun) {
+            console.log(`  added:       ${added}`);
+            console.log(`  overwritten: ${overwritten}`);
+            console.log(`  skipped:     ${skipped}`);
+        } else {
+            console.log(`  (dry-run — no writes performed, ${dataLines} rows parsed)`);
+        }
+        if (parseErrors > 0) {
+            console.log(`  parse errors: ${parseErrors}`);
+        }
+        if (!dryRun) {
+            console.log(`\n${okLabel()} Import complete.`);
+        }
+    } finally {
+        await disconnectDb().catch(() => undefined);
+    }
+}
+
+async function snapshotCommand(args: ParsedArgs): Promise<void> {
+    const subcommand = args.subcommand;
+    const cwd = path.resolve(getFlag(args, 'project') ?? process.cwd());
+    const snapshotDir = path.join(cwd, SNAPSHOT_DIR);
+
+    if (!subcommand || subcommand === 'help' || subcommand === '--help') {
+        printSnapshotHelp();
+        return;
+    }
+
+    if (subcommand === 'list') {
+        if (!fs.existsSync(snapshotDir)) {
+            console.log(`${infoLabel()} No snapshots found. Create one with: iranti snapshot create <name>`);
+            return;
+        }
+        const files = fs.readdirSync(snapshotDir).filter((f) => f.endsWith('.jsonl')).sort();
+        if (files.length === 0) {
+            console.log(`${infoLabel()} No snapshots found. Create one with: iranti snapshot create <name>`);
+            return;
+        }
+        console.log(sectionTitle(`Snapshots (${files.length})`));
+        for (const file of files) {
+            const fullPath = path.join(snapshotDir, file);
+            const stat = fs.statSync(fullPath);
+            const sizeKb = (stat.size / 1024).toFixed(1);
+            console.log(`  ${commandText(file.replace('.jsonl', ''))}  ${sizeKb} KB  ${stat.mtime.toISOString()}`);
+        }
+        return;
+    }
+
+    if (subcommand === 'create') {
+        const name = args.positionals[0]?.trim();
+        if (!name) {
+            throw cliError(
+                'IRANTI_SNAPSHOT_NAME_REQUIRED',
+                'Missing snapshot name. Usage: iranti snapshot create <name>',
+                ['Example: iranti snapshot create pre-refactor'],
+            );
+        }
+        const safeName = name.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const snapshotPath = path.join(snapshotDir, `${safeName}.jsonl`);
+
+        try {
+            await resolveDbForExportCommands(args);
+            const rows = await exportFacts({});
+            const exportedAt = new Date().toISOString();
+            const header = { _type: 'iranti-export', version: '1', exportedAt, snapshotName: safeName, total: rows.length };
+            const lines = [JSON.stringify(header), ...rows.map((r) => JSON.stringify(r))];
+
+            fs.mkdirSync(snapshotDir, { recursive: true });
+            fs.writeFileSync(snapshotPath, lines.join('\n') + '\n', 'utf8');
+
+            console.log(`${okLabel()} Snapshot "${safeName}" created → ${snapshotPath} (${rows.length} facts)`);
+        } finally {
+            await disconnectDb().catch(() => undefined);
+        }
+        return;
+    }
+
+    if (subcommand === 'restore') {
+        const name = args.positionals[0]?.trim();
+        if (!name) {
+            throw cliError(
+                'IRANTI_SNAPSHOT_NAME_REQUIRED',
+                'Missing snapshot name. Usage: iranti snapshot restore <name>',
+                ['Run `iranti snapshot list` to see available snapshots.'],
+            );
+        }
+        const safeName = name.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const snapshotPath = path.join(snapshotDir, `${safeName}.jsonl`);
+
+        if (!fs.existsSync(snapshotPath)) {
+            throw cliError(
+                'IRANTI_SNAPSHOT_NOT_FOUND',
+                `Snapshot "${safeName}" not found at ${snapshotPath}.`,
+                ['Run `iranti snapshot list` to see available snapshots.'],
+            );
+        }
+
+        const conflictRaw  = getFlag(args, 'conflict') ?? 'overwrite';
+        const conflictMode: ImportConflictMode =
+            conflictRaw === 'skip'  ? 'skip'
+            : conflictRaw === 'merge' ? 'merge'
+            : 'overwrite';
+        const dryRun = hasFlag(args, 'dry-run');
+        const json   = hasFlag(args, 'json');
+
+        const rawContent = fs.readFileSync(snapshotPath, 'utf8');
+        const lines = rawContent.split('\n');
+
+        try {
+            await resolveDbForExportCommands(args);
+
+            let added = 0, skipped = 0, overwritten = 0, parseErrors = 0, dataLines = 0;
+
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed) continue;
+
+                let parsed: unknown;
+                try { parsed = JSON.parse(trimmed); } catch { parseErrors++; continue; }
+
+                if (
+                    typeof parsed === 'object' &&
+                    parsed !== null &&
+                    '_type' in (parsed as Record<string, unknown>)
+                ) continue;
+
+                dataLines++;
+                const row = parsed as ImportRow;
+
+                if (!dryRun) {
+                    const result = await importFact(row, conflictMode, `snapshot:${safeName}`);
+                    if (result.outcome === 'added')            added++;
+                    else if (result.outcome === 'overwritten') overwritten++;
+                    else                                       skipped++;
+                } else {
+                    skipped++;
+                }
+            }
+
+            if (json) {
+                console.log(JSON.stringify({ ok: true, snapshot: safeName, dryRun, conflict: conflictMode, total: dataLines, added, skipped, overwritten, parseErrors }, null, 2));
+                process.exit(0);
+            }
+
+            const mode = dryRun ? ' (dry-run)' : '';
+            console.log(sectionTitle(`Snapshot restore: "${safeName}"${mode}`));
+            console.log(`  conflict: ${conflictMode}`);
+            console.log(`  total:    ${dataLines}`);
+            if (!dryRun) {
+                console.log(`  added:       ${added}`);
+                console.log(`  overwritten: ${overwritten}`);
+                console.log(`  skipped:     ${skipped}`);
+                console.log(`\n${okLabel()} Restore complete.`);
+            } else {
+                console.log(`  (dry-run — no writes performed)`);
+            }
+        } finally {
+            await disconnectDb().catch(() => undefined);
+        }
+        return;
+    }
+
+    if (subcommand === 'delete') {
+        const name = args.positionals[0]?.trim();
+        if (!name) {
+            throw cliError(
+                'IRANTI_SNAPSHOT_NAME_REQUIRED',
+                'Missing snapshot name. Usage: iranti snapshot delete <name>',
+                ['Run `iranti snapshot list` to see available snapshots.'],
+            );
+        }
+        const safeName = name.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const snapshotPath = path.join(snapshotDir, `${safeName}.jsonl`);
+
+        if (!fs.existsSync(snapshotPath)) {
+            throw cliError(
+                'IRANTI_SNAPSHOT_NOT_FOUND',
+                `Snapshot "${safeName}" not found at ${snapshotPath}.`,
+                ['Run `iranti snapshot list` to see available snapshots.'],
+            );
+        }
+
+        fs.unlinkSync(snapshotPath);
+        console.log(`${okLabel()} Snapshot "${safeName}" deleted.`);
+        return;
+    }
+
+    throw cliError(
+        'IRANTI_SNAPSHOT_UNKNOWN_SUBCOMMAND',
+        `Unknown snapshot subcommand: "${subcommand}". Use: create, restore, list, delete.`,
+        ['Run `iranti snapshot --help` to see usage.'],
+    );
+}
+
 /**
  * A2: revert-autowrite CLI — pair for M2 tool-result extraction. Every
  * attendant_autowrite stamps the knowledge entry with source=attendant_autowrite
@@ -10743,6 +11328,33 @@ async function main(): Promise<void> {
             return;
         }
         await deleteRuleCommand(args);
+        return;
+    }
+
+    if (args.command === 'export') {
+        if (hasFlag(args, 'help')) {
+            printExportHelp();
+            return;
+        }
+        await exportCommand(args);
+        return;
+    }
+
+    if (args.command === 'import') {
+        if (hasFlag(args, 'help')) {
+            printImportHelp();
+            return;
+        }
+        await importCommand(args);
+        return;
+    }
+
+    if (args.command === 'snapshot') {
+        if (!args.subcommand || args.subcommand === 'help' || args.subcommand === '--help' || hasFlag(args, 'help')) {
+            printSnapshotHelp();
+            return;
+        }
+        await snapshotCommand(args);
         return;
     }
 

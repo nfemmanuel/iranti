@@ -1384,3 +1384,204 @@ export async function updateWriteReceiptOutcome(requestId: string, outcome: stri
         data: { outcome, resultEntryId, escalationFile },
     });
 }
+
+// ── Export / Import ──────────────────────────────────────────────────────────
+
+export interface ExportFactsOptions {
+    /** Only export facts of this entityType. */
+    entityType?: string;
+    /** Only export facts for this entityId (requires entityType). */
+    entityId?: string;
+    /** Only export facts whose updatedAt is at or after this date (incremental export). */
+    since?: Date;
+}
+
+/**
+ * A single fact row ready for JSONL serialisation. All Date fields are left
+ * as Date objects so the caller controls how they are serialised (typically
+ * with JSON.stringify which calls .toISOString() automatically).
+ */
+export interface ExportRow {
+    entityType: string;
+    entityId: string;
+    key: string;
+    valueRaw: unknown;
+    valueSummary: string | null;
+    confidence: number;
+    source: string;
+    validFrom: Date;
+    validUntil: Date | null;
+    createdBy: string | null;
+    isProtected: boolean;
+    properties: Record<string, unknown> | null;
+    updatedAt: Date;
+    createdAt: Date;
+}
+
+/**
+ * Read all (or a filtered slice of) knowledge entries and return them as
+ * plain ExportRow objects suitable for streaming to JSONL.
+ *
+ * Filtering:
+ *   entityType + entityId  → single-entity export
+ *   entityType only         → all entries of that type
+ *   since                   → incremental: only entries updated since that timestamp
+ *
+ * No rows are excluded by default — the caller (CLI or REST route) decides
+ * what to filter. Rows are returned ordered by entityType, entityId, key so
+ * the output file is deterministic and easy to diff.
+ */
+export async function exportFacts(
+    options: ExportFactsOptions = {},
+    db?: DbClient,
+): Promise<ExportRow[]> {
+    const client = db ?? getDb();
+    const { entityType, entityId, since } = options;
+
+    const where: Record<string, unknown> = {};
+    if (entityType) where['entityType'] = entityType;
+    if (entityId) where['entityId'] = entityId;
+    if (since) where['updatedAt'] = { gte: since };
+
+    const entries = await client.knowledgeEntry.findMany({
+        where,
+        orderBy: [{ entityType: 'asc' }, { entityId: 'asc' }, { key: 'asc' }],
+    });
+
+    return entries.map((e) => ({
+        entityType: e.entityType,
+        entityId: e.entityId,
+        key: e.key,
+        valueRaw: e.valueRaw,
+        valueSummary: e.valueSummary,
+        confidence: e.confidence,
+        source: e.source,
+        validFrom: e.validFrom,
+        validUntil: e.validUntil,
+        createdBy: e.createdBy,
+        isProtected: e.isProtected,
+        properties:
+            e.properties && typeof e.properties === 'object' && !Array.isArray(e.properties)
+                ? (e.properties as Record<string, unknown>)
+                : null,
+        updatedAt: e.updatedAt,
+        createdAt: e.createdAt,
+    }));
+}
+
+export type ImportConflictMode = 'skip' | 'overwrite' | 'merge';
+
+/**
+ * Shape of a single row in an import file. Mirrors ExportRow but with
+ * optional/nullable fields where a round-trip may omit them.
+ */
+export interface ImportRow {
+    entityType: string;
+    entityId: string;
+    key: string;
+    valueRaw: unknown;
+    valueSummary?: string | null;
+    confidence: number;
+    source: string;
+    validFrom?: string | Date | null;
+    validUntil?: string | Date | null;
+    createdBy?: string | null;
+    isProtected?: boolean;
+    properties?: Record<string, unknown> | null;
+}
+
+export interface ImportFactResult {
+    outcome: 'added' | 'skipped' | 'overwritten';
+    entityType: string;
+    entityId: string;
+    key: string;
+    /** Human-readable explanation when outcome is 'skipped'. */
+    reason?: string;
+}
+
+/**
+ * Write one ImportRow into the knowledge base with configurable conflict
+ * handling. Bypasses the Librarian conflict pipeline intentionally — the user
+ * has already chosen a conflict mode at the import boundary.
+ *
+ * Conflict modes:
+ *   skip      — leave any existing entry unchanged; return 'skipped'
+ *   overwrite — always write (create new or replace existing)
+ *   merge     — keep whichever entry has the higher confidence value;
+ *               skip if existing.confidence >= incoming.confidence
+ *
+ * provenanceTag, when provided, is stamped as `properties.importedFrom` and
+ * `properties.importedAt` on every written entry. This enables targeted undo
+ * with `iranti delete --imported-from <tag>`.
+ */
+export async function importFact(
+    row: ImportRow,
+    conflictMode: ImportConflictMode,
+    provenanceTag?: string,
+    db?: DbClient,
+): Promise<ImportFactResult> {
+    const query = {
+        entityType: row.entityType,
+        entityId: row.entityId,
+        key: row.key,
+    };
+    const base = { entityType: row.entityType, entityId: row.entityId, key: row.key };
+    const existing = await findEntry(query, db);
+
+    const provenanceProps = provenanceTag
+        ? { importedFrom: provenanceTag, importedAt: new Date().toISOString() }
+        : {};
+
+    if (existing) {
+        if (conflictMode === 'skip') {
+            return { ...base, outcome: 'skipped', reason: 'entry_exists' };
+        }
+        if (conflictMode === 'merge' && existing.confidence >= row.confidence) {
+            return { ...base, outcome: 'skipped', reason: 'existing_confidence_higher_or_equal' };
+        }
+        // overwrite, or merge where incoming wins
+        const stampedProperties: Record<string, unknown> = {
+            ...(row.properties ?? {}),
+            ...provenanceProps,
+        };
+        await updateEntry(
+            query,
+            {
+                valueRaw: row.valueRaw,
+                valueSummary: row.valueSummary ?? '',
+                confidence: row.confidence,
+                source: row.source,
+                validFrom: row.validFrom ? new Date(row.validFrom as string) : undefined,
+                validUntil: row.validUntil != null ? new Date(row.validUntil as string) : null,
+                isProtected: row.isProtected ?? false,
+                properties: stampedProperties,
+            },
+            db,
+        );
+        return { ...base, outcome: 'overwritten' };
+    }
+
+    // New entry — create it
+    const stampedProperties: Record<string, unknown> = {
+        ...(row.properties ?? {}),
+        ...provenanceProps,
+    };
+    await createEntry(
+        {
+            entityType: row.entityType,
+            entityId: row.entityId,
+            key: row.key,
+            valueRaw: row.valueRaw,
+            valueSummary: row.valueSummary ?? '',
+            confidence: row.confidence,
+            source: row.source,
+            validFrom: row.validFrom ? new Date(row.validFrom as string) : new Date(),
+            validUntil: row.validUntil != null ? new Date(row.validUntil as string) : null,
+            createdBy: row.createdBy ?? 'import',
+            isProtected: row.isProtected ?? false,
+            properties: stampedProperties,
+        },
+        db,
+    );
+    return { ...base, outcome: 'added' };
+}

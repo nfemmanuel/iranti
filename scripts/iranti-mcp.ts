@@ -40,6 +40,28 @@ let processIranti: Iranti | null = null;
 let _dbStartupDone = false;
 let _dbStartupPromise: Promise<void> | null = null;
 
+// ── Cross-host write-debt enforcement (file watcher) ─────────────────────────
+// For hosts without hook support (Codex, Copilot, generic MCP), a file watcher
+// started at handshake time detects code file changes and increments
+// .iranti-write-debt the same way the Claude Code PostToolUse hook does.
+// Claude Code keeps its native hooks and does not use the watcher.
+// The iranti_attend gate below reads the same debt file and blocks
+// pre-response attend when debt is outstanding, forcing iranti_write first.
+const WATCHER_CODE_EXTENSIONS = new Set([
+    '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
+    '.py', '.md', '.mdx', '.sh',
+]);
+const WATCHER_EXCLUDE_DIRS = new Set([
+    'node_modules', '.git', 'dist', 'build', '.next',
+    '__pycache__', '.cache', '.iranti',
+]);
+const WRITE_DEBT_FILENAME = '.iranti-write-debt';
+let _activeWatcher: import('node:fs').FSWatcher | null = null;
+let _watchedCwd: string | null = null;
+let _watchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+const _watchPendingChanges = new Set<string>();
+// ─────────────────────────────────────────────────────────────────────────────
+
 async function dbStartup(): Promise<void> {
     if (_dbStartupDone) return;
     if (!_dbStartupPromise) {
@@ -311,6 +333,115 @@ function resolveToolHost(host?: string): string | undefined {
     return currentHost();
 }
 
+// ── File watcher helpers ─────────────────────────────────────────────────────
+
+/** Flush debounced file changes into .iranti-write-debt. */
+function _flushWatcherDebt(cwd: string): void {
+    if (_watchPendingChanges.size === 0) return;
+    const changed = [..._watchPendingChanges];
+    _watchPendingChanges.clear();
+    _watchDebounceTimer = null;
+
+    const debtFile = path.join(cwd, WRITE_DEBT_FILENAME);
+    let debt: { pendingEdits: number; edits: Array<{ file: string; at: string }>; lastEditAt?: string } =
+        { pendingEdits: 0, edits: [] };
+    try {
+        if (fs.existsSync(debtFile)) {
+            debt = JSON.parse(fs.readFileSync(debtFile, 'utf8'));
+        }
+    } catch {
+        debt = { pendingEdits: 0, edits: [] };
+    }
+
+    const now = new Date().toISOString();
+    debt.pendingEdits = (debt.pendingEdits || 0) + changed.length;
+    debt.lastEditAt = now;
+    debt.edits = debt.edits || [];
+    for (const f of changed) {
+        debt.edits.push({ file: f, at: now });
+    }
+    if (debt.edits.length > 20) debt.edits = debt.edits.slice(-20);
+
+    try {
+        fs.writeFileSync(debtFile, JSON.stringify(debt, null, 2), 'utf8');
+    } catch {
+        // Non-fatal: guard will still work on next check if file can't be written
+    }
+}
+
+/**
+ * Start a recursive file watcher on cwd (idempotent — only one watcher per cwd).
+ * Detects code file changes and increments .iranti-write-debt so the attend gate
+ * can block the next pre-response attend on hosts without native hook support.
+ */
+function startFileWatcher(cwd: string): void {
+    if (_activeWatcher && _watchedCwd === cwd) return; // already watching
+    if (_activeWatcher) {
+        try { _activeWatcher.close(); } catch { /* ok */ }
+        _activeWatcher = null;
+    }
+    _watchedCwd = cwd;
+    try {
+        _activeWatcher = fs.watch(cwd, { recursive: true }, (_eventType, filename) => {
+            if (!filename) return;
+            // Skip the debt file itself to avoid feedback loops
+            if (filename === WRITE_DEBT_FILENAME) return;
+            // Skip excluded directories
+            const parts = filename.split(path.sep);
+            if (parts.some(p => WATCHER_EXCLUDE_DIRS.has(p))) return;
+            // Only track recognised code file types
+            const ext = path.extname(filename).toLowerCase();
+            if (!WATCHER_CODE_EXTENSIONS.has(ext)) return;
+
+            _watchPendingChanges.add(filename);
+            // Debounce: batch rapid multi-file saves into a single debt increment
+            if (_watchDebounceTimer) clearTimeout(_watchDebounceTimer);
+            _watchDebounceTimer = setTimeout(() => _flushWatcherDebt(cwd), 200);
+        });
+        _activeWatcher.on('error', () => {
+            // Non-fatal: watcher silently stops if the fs can't support it
+            _activeWatcher = null;
+        });
+    } catch {
+        // Non-fatal: fs.watch may not be available in all environments
+    }
+}
+
+/**
+ * Read .iranti-write-debt and return an isError gate result when debt > 0.
+ * Returns null when attend should proceed normally.
+ */
+function checkWriteDebtForAttend(cwd: string): { content: Array<{ type: 'text'; text: string }>; isError: true } | null {
+    try {
+        const debtFile = path.join(cwd, WRITE_DEBT_FILENAME);
+        if (!fs.existsSync(debtFile)) return null;
+        const debt = JSON.parse(fs.readFileSync(debtFile, 'utf8'));
+        const pendingEdits: number = debt.pendingEdits || 0;
+        if (pendingEdits < 1) return null;
+        const edits: Array<{ file: string }> = debt.edits || [];
+        const fileList = edits.length > 0
+            ? edits.slice(-10).map((e: { file: string }) => `  - ${e.file}`).join('\n')
+            : '  (file list unavailable)';
+        return {
+            content: [{
+                type: 'text' as const,
+                text: [
+                    `WRITE_GUARD_BLOCKED: ${pendingEdits} file edit(s) pending iranti_write.`,
+                    `Changed files (most recent ${Math.min(pendingEdits, 10)}):`,
+                    fileList,
+                    '',
+                    `Required: call iranti_write for each changed file before iranti_attend can proceed.`,
+                    `After writing all pending edits, re-call iranti_attend to get your memory brief.`,
+                ].join('\n'),
+            }],
+            isError: true as const,
+        };
+    } catch {
+        return null; // Non-fatal: if debt file can't be read, allow attend to proceed
+    }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function protocolViolationResult(error: ProtocolViolationError): { content: Array<{ type: 'text'; text: string }>; structuredContent: JsonRecord } {
     return {
         content: [
@@ -455,7 +586,7 @@ async function main(): Promise<void> {
 
     const server = new McpServer({
         name: 'iranti-mcp',
-        version: '0.3.38',
+        version: '0.3.39',
     });
 
     server.registerTool('iranti_handshake', {
@@ -488,6 +619,14 @@ Do not use this as a per-turn retrieval tool; use iranti_attend.`,
             postCompaction,
         });
         const setupWarnings = checkHostSetup(resolvedHost, process.cwd());
+
+        // Start file watcher for hosts that don't have native hook support.
+        // Claude Code uses its own PostToolUse hooks to track write-debt; all
+        // other hosts (Codex, Copilot, generic MCP) rely on the watcher.
+        if (resolvedHost !== 'claude_code') {
+            startFileWatcher(process.cwd());
+        }
+
         if (setupWarnings.length > 0) {
             return textResult({ ...result, setupWarnings });
         }
@@ -540,6 +679,19 @@ checkpoint state before closing the turn.`,
         await dbStartup();
         const resolvedAgent = resolveToolAgent(agent, agentId);
         syncRuntimeLedgerContext(iranti, undefined, resolvedAgent);
+
+        // ── Write-debt gate ───────────────────────────────────────────────────
+        // Block pre-response attend when file edits are pending iranti_write.
+        // This is the cross-host equivalent of the Claude Code PreToolUse deny:
+        // the agent MUST call iranti_write for each pending edit before it can
+        // get its memory brief and reply. Applies to all hosts — Claude Code
+        // write-debt comes from its PostToolUse hook; other hosts use the watcher.
+        if (!phase || phase === 'pre-response' || phase === 'mid-turn') {
+            const debtBlock = checkWriteDebtForAttend(process.cwd());
+            if (debtBlock) return debtBlock;
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
         const resolvedLatestMessage = resolveAttendLatestMessage({ latestMessage, message });
         try {
             let postResponseCapture: { factsExtracted: number; factsWritten: number; checkpointExtracted: boolean; skipped: Array<{ key: string; reason: string }> } | undefined;
