@@ -47,8 +47,10 @@ async function main(): Promise<void> {
     const app = express();
     app.use(express.json());
     app.use((req, _res, next) => {
-        (req as express.Request & { irantiAuth?: { scopes: string[] } }).irantiAuth = {
+        (req as express.Request & { irantiAuth?: { scopes: string[]; userId: number; tokenScope: string } }).irantiAuth = {
             scopes: ['kb:read', 'kb:write'],
+            userId: 1,
+            tokenScope: 'dev_cli',
         };
         next();
     });

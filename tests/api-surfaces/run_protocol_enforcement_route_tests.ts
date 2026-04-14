@@ -47,12 +47,14 @@ async function main(): Promise<void> {
     app.use(express.json());
     app.use((req, _res, next) => {
         (req as express.Request & {
-            irantiAuth?: { mode: string; keyId: string; owner: string; scopes: string[] };
+            irantiAuth?: { mode: string; keyId: string; owner: string; scopes: string[]; userId: number; tokenScope: string };
         }).irantiAuth = {
             mode: 'registry',
             scopes: ['kb:read', 'kb:write', 'memory:read', 'memory:write'],
             keyId: 'protocol_route_test_key',
             owner: 'protocol route test',
+            userId: 1,
+            tokenScope: 'dev_cli',
         };
         next();
     });
