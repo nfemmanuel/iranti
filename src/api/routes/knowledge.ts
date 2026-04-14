@@ -31,6 +31,7 @@ import { addAlias, listAliases, parseEntityString, resolveEntity } from '../../l
 import { validateInput } from '../middleware/validation';
 import { EntityTarget, requireAnyScope, requireEntityScopeByMethod } from '../middleware/authorization';
 import type { IrantiAuthContext } from '../middleware/auth';
+import { findEntriesByEntityType, deleteEntryById } from '../../library/queries';
 
 function heuristicEntityId(name: string): string {
     return name
@@ -366,6 +367,51 @@ export function knowledgeRoutes(iranti: Iranti): Router {
         } catch (err) {
             if (handleProtocolViolation(res, err)) return;
             res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+    });
+
+    // GET /rules
+    router.get('/rules', requireAnyScope(['kb:read']), async (req: Request, res: Response) => {
+        try {
+            const entries = await findEntriesByEntityType('rule');
+            const rules = entries.map((entry) => {
+                const props = entry.properties && typeof entry.properties === 'object' && !Array.isArray(entry.properties)
+                    ? entry.properties as Record<string, unknown>
+                    : null;
+                return {
+                    ruleId: entry.entityId,
+                    key: entry.key,
+                    rule: entry.valueSummary ?? '',
+                    triggers: Array.isArray(props?.triggers) ? props!.triggers : [],
+                    enforcement: props?.enforcement ?? 'soft',
+                    scope: props?.scope ?? 'project',
+                    updatedAt: entry.updatedAt.toISOString(),
+                };
+            });
+            res.json({ total: rules.length, rules });
+        } catch (err) {
+            res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+    });
+
+    // DELETE /rules/:ruleId
+    router.delete('/rules/:ruleId', requireAnyScope(['kb:write']), async (req: Request, res: Response) => {
+        try {
+            const ruleId = req.params.ruleId?.trim();
+            if (!ruleId) {
+                return res.status(400).json({ error: 'ruleId is required.' });
+            }
+            const entries = await findEntriesByEntityType('rule');
+            const matching = entries.filter((e) => e.entityId === ruleId);
+            if (matching.length === 0) {
+                return res.status(404).json({ error: `Rule '${ruleId}' not found.` });
+            }
+            for (const entry of matching) {
+                await deleteEntryById(entry.id);
+            }
+            res.json({ deleted: ruleId, entriesRemoved: matching.length });
+        } catch (err) {
+            res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
         }
     });
 
