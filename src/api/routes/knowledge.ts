@@ -397,7 +397,7 @@ export function knowledgeRoutes(iranti: Iranti): Router {
     // DELETE /rules/:ruleId
     router.delete('/rules/:ruleId', requireAnyScope(['kb:write']), async (req: Request, res: Response) => {
         try {
-            const ruleId = req.params.ruleId?.trim();
+            const ruleId = (req.params['ruleId'] as string)?.trim();
             if (!ruleId) {
                 return res.status(400).json({ error: 'ruleId is required.' });
             }
