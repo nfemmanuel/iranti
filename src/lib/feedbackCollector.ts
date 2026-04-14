@@ -199,6 +199,37 @@ async function writePending(irantiDir: string, payload: FeedbackPayload): Promis
     await fsp.writeFile(file, JSON.stringify(pending, null, 2) + '\n', 'utf8');
 }
 
+/**
+ * Silently retry any queued offline submissions.
+ * Called at the top of runFeedbackCommand so no signal is permanently lost.
+ * Clears each entry as it succeeds; leaves failures for the next attempt.
+ */
+async function drainPendingQueue(irantiDir: string): Promise<void> {
+    const file = path.join(irantiDir, 'pending-feedback.json');
+    let pending: PendingFeedback[];
+    try {
+        pending = JSON.parse(await fsp.readFile(file, 'utf8')) as PendingFeedback[];
+    } catch {
+        return; // nothing queued
+    }
+    if (pending.length === 0) return;
+
+    const remaining: PendingFeedback[] = [];
+    for (const item of pending) {
+        try {
+            await postFeedback(item);
+        } catch {
+            remaining.push(item);
+        }
+    }
+
+    if (remaining.length === 0) {
+        await fsp.unlink(file).catch(() => { /* ok */ });
+    } else {
+        await fsp.writeFile(file, JSON.stringify(remaining, null, 2) + '\n', 'utf8');
+    }
+}
+
 // ── HTTP submission ───────────────────────────────────────────────────────────
 
 function postFeedback(payload: FeedbackPayload): Promise<void> {
@@ -327,6 +358,11 @@ async function promptComment(): Promise<string | null> {
 export async function runFeedbackCommand(opts: FeedbackRunOptions): Promise<void> {
     const irantiDir = resolveIrantiDir();
     const type: FeedbackType = opts.type ?? 'general';
+
+    // Silently drain any queued offline submissions first.
+    if (!opts.dryRun && !opts.offline) {
+        await drainPendingQueue(irantiDir).catch(() => { /* non-fatal */ });
+    }
 
     if (!opts.dryRun && !opts.offline) {
         if (await isThrottled(irantiDir, type)) {
