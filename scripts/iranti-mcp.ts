@@ -9,6 +9,7 @@
  * IRANTI_PROJECT_ENV, IRANTI_INSTANCE_ENV, IRANTI_MCP_AGENT_NAME.
  */
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -60,6 +61,11 @@ let _activeWatcher: import('node:fs').FSWatcher | null = null;
 let _watchedCwd: string | null = null;
 let _watchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 const _watchPendingChanges = new Set<string>();
+// ── Feedback friction detector (Phase 5) ─────────────────────────────────────
+// Counts how many times the write-debt gate has blocked attend this session.
+// After 3 blocks, the next successful attend includes a frictionNudge field.
+let _writeDebtFireCount = 0;
+let _frictionNudgeSentThisSession = false;
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function dbStartup(): Promise<void> {
@@ -463,6 +469,199 @@ function protocolViolationResult(error: ProtocolViolationError): { content: Arra
     };
 }
 
+// ── Feedback nudge system (Phase 3 + 5) ──────────────────────────────────────
+
+type FeedbackNudge = {
+    command: string;
+    message: string;
+    trigger: string;
+    milestone: string;
+    suppressUntil: string;
+};
+
+type SessionStats = {
+    totalSessions: number;
+    totalWrites: number;
+    totalAttends: number;
+    totalValueDeliveries: number;
+    uniqueHosts: string[];
+    firstSessionAt: string;
+    lastSessionAt: string;
+    feedbackMilestonesSeen: string[];
+};
+
+function resolveIrantiDirForCwd(cwd: string): string {
+    const local = path.join(cwd, '.iranti');
+    if (fs.existsSync(local)) return local;
+    const home = process.env.HOME ?? process.env.USERPROFILE ?? '';
+    return path.join(home, '.iranti');
+}
+
+async function readSessionStatsFile(irantiDir: string): Promise<SessionStats | null> {
+    try {
+        const raw = await fsp.readFile(path.join(irantiDir, 'session-stats.json'), 'utf8');
+        return JSON.parse(raw) as SessionStats;
+    } catch {
+        return null;
+    }
+}
+
+async function updateSessionStats(cwd: string, host: string): Promise<SessionStats> {
+    const irantiDir = resolveIrantiDirForCwd(cwd);
+    const existing = (await readSessionStatsFile(irantiDir)) ?? ({} as Partial<SessionStats>);
+    const now = new Date().toISOString();
+    const uniqueHosts = existing.uniqueHosts ?? [];
+    if (host && !uniqueHosts.includes(host)) {
+        uniqueHosts.push(host);
+    }
+    const updated: SessionStats = {
+        totalSessions: (existing.totalSessions ?? 0) + 1,
+        totalWrites: existing.totalWrites ?? 0,
+        totalAttends: existing.totalAttends ?? 0,
+        totalValueDeliveries: existing.totalValueDeliveries ?? 0,
+        uniqueHosts,
+        firstSessionAt: existing.firstSessionAt ?? now,
+        lastSessionAt: now,
+        feedbackMilestonesSeen: existing.feedbackMilestonesSeen ?? [],
+    };
+    try {
+        await fsp.mkdir(irantiDir, { recursive: true });
+        await fsp.writeFile(path.join(irantiDir, 'session-stats.json'), JSON.stringify(updated, null, 2) + '\n', 'utf8');
+    } catch {
+        // Non-fatal: session stats are best-effort
+    }
+    return updated;
+}
+
+const FEEDBACK_MILESTONES: Array<{
+    key: string;
+    check: (s: SessionStats, factCount: number) => boolean;
+    message: string;
+    trigger: string;
+}> = [
+    {
+        key: 'first_run',
+        check: (s) => s.totalSessions === 1,
+        message: "You've just used Iranti for the first time. Got 10 seconds to tell us how it went?",
+        trigger: 'first_session',
+    },
+    {
+        key: 'sessions_10',
+        check: (s) => s.totalSessions >= 10,
+        message: "10 sessions in — how's Iranti working for you?",
+        trigger: 'sessions_milestone',
+    },
+    {
+        key: 'sessions_25',
+        check: (s) => s.totalSessions >= 25,
+        message: "25 sessions with Iranti. We'd love your feedback.",
+        trigger: 'sessions_milestone',
+    },
+    {
+        key: 'sessions_50',
+        check: (s) => s.totalSessions >= 50,
+        message: "50 sessions — you're a power user. Tell us what's working (and what isn't).",
+        trigger: 'sessions_milestone',
+    },
+    {
+        key: 'cross_host_2',
+        check: (s) => s.uniqueHosts.length >= 2,
+        message: "You're using Iranti across multiple environments. How's the experience?",
+        trigger: 'cross_host',
+    },
+    {
+        key: 'cross_host_3',
+        check: (s) => s.uniqueHosts.length >= 3,
+        message: "Three different hosts — Iranti is following you around. Feedback welcome.",
+        trigger: 'cross_host',
+    },
+    {
+        key: 'facts_25',
+        check: (_s, fc) => fc >= 25,
+        message: "You've saved 25+ facts with Iranti. Quick rating?",
+        trigger: 'facts_milestone',
+    },
+    {
+        key: 'facts_50',
+        check: (_s, fc) => fc >= 50,
+        message: "50 facts saved — Iranti is working for you. Would love your thoughts.",
+        trigger: 'facts_milestone',
+    },
+    {
+        key: 'facts_100',
+        check: (_s, fc) => fc >= 100,
+        message: "100 facts in memory. How's it going?",
+        trigger: 'facts_milestone',
+    },
+    {
+        key: 'facts_250',
+        check: (_s, fc) => fc >= 250,
+        message: "250 facts saved. Iranti is earning its keep — got a minute to share?",
+        trigger: 'facts_milestone',
+    },
+    {
+        key: 'facts_500',
+        check: (_s, fc) => fc >= 500,
+        message: "500 facts! That's a lot of context saved. How does Iranti feel after all this use?",
+        trigger: 'facts_milestone',
+    },
+];
+
+async function computeFeedbackNudge(cwd: string, factCount: number): Promise<FeedbackNudge | null> {
+    try {
+        const irantiDir = resolveIrantiDirForCwd(cwd);
+        const stats = await readSessionStatsFile(irantiDir);
+        if (!stats) return null;
+
+        // Suppress if feedback was sent within the last 30 days
+        try {
+            const throttleFile = path.join(irantiDir, 'feedback-sent.json');
+            if (fs.existsSync(throttleFile)) {
+                const throttle = JSON.parse(fs.readFileSync(throttleFile, 'utf8'));
+                if (throttle.lastSentAt) {
+                    const daysSince = (Date.now() - new Date(throttle.lastSentAt).getTime()) / 86_400_000;
+                    if (daysSince < 30) return null;
+                }
+            }
+        } catch {
+            // Non-fatal: proceed without suppression check
+        }
+
+        const seen = new Set<string>(stats.feedbackMilestonesSeen ?? []);
+        for (const milestone of FEEDBACK_MILESTONES) {
+            if (seen.has(milestone.key)) continue;
+            if (!milestone.check(stats, factCount)) continue;
+
+            // Mark as seen immediately so it never fires twice
+            const updatedStats: SessionStats = {
+                ...stats,
+                feedbackMilestonesSeen: [...seen, milestone.key],
+            };
+            try {
+                await fsp.writeFile(
+                    path.join(irantiDir, 'session-stats.json'),
+                    JSON.stringify(updatedStats, null, 2) + '\n',
+                    'utf8',
+                );
+            } catch {
+                // Non-fatal
+            }
+
+            return {
+                command: 'iranti feedback',
+                message: milestone.message,
+                trigger: milestone.trigger,
+                milestone: milestone.key,
+                suppressUntil: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+            };
+        }
+        return null;
+    } catch {
+        return null; // Never fail handshake due to nudge logic
+    }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function normalizeRecentMessages(messages?: string[]): string[] {
     if (!Array.isArray(messages)) return [];
     return messages
@@ -641,10 +840,14 @@ Do not use this as a per-turn retrieval tool; use iranti_attend.`,
             startFileWatcher(process.cwd());
         }
 
+        // Phase 3: increment session stats and compute milestone nudge.
+        await updateSessionStats(process.cwd(), resolvedHost ?? '');
+        const feedbackNudge = await computeFeedbackNudge(process.cwd(), 0);
+
         if (setupWarnings.length > 0) {
-            return textResult({ ...result, setupWarnings });
+            return textResult({ ...result, ...(feedbackNudge ? { feedbackNudge } : {}), setupWarnings });
         }
-        return textResult(result);
+        return textResult(feedbackNudge ? { ...result, feedbackNudge } : result);
     });
 
     server.registerTool('iranti_attend', {
@@ -702,7 +905,10 @@ checkpoint state before closing the turn.`,
         // write-debt comes from its PostToolUse hook; other hosts use the watcher.
         if (!phase || phase === 'pre-response' || phase === 'mid-turn') {
             const debtBlock = checkWriteDebtForAttend(process.cwd());
-            if (debtBlock) return debtBlock;
+            if (debtBlock) {
+                _writeDebtFireCount++;
+                return debtBlock;
+            }
         }
         // ─────────────────────────────────────────────────────────────────────
 
@@ -770,11 +976,24 @@ checkpoint state before closing the turn.`,
             const injectionBlock = factsBlock || rulesBlock
                 ? `${factsBlock}${rulesBlock}`
                 : '';
+            // Phase 5: friction nudge after 3+ write-debt gate fires this session.
+            let frictionNudge: FeedbackNudge | null = null;
+            if (!_frictionNudgeSentThisSession && _writeDebtFireCount >= 3) {
+                _frictionNudgeSentThisSession = true;
+                frictionNudge = {
+                    command: 'iranti feedback',
+                    message: "You've hit the write-debt gate a few times this session. Something feeling off? Would love to hear it.",
+                    trigger: 'friction',
+                    milestone: 'friction_write_debt',
+                    suppressUntil: new Date(Date.now() + 7 * 86_400_000).toISOString(),
+                };
+            }
             return textResult({
                 ...result,
                 facts: sanitizeFacts(result.facts),
                 injectionBlock,
                 ...(postResponseCapture ? { postResponseCapture } : {}),
+                ...(frictionNudge ? { frictionNudge } : {}),
             });
         } catch (error) {
             if (error instanceof ProtocolViolationError) {
