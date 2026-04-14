@@ -269,6 +269,12 @@ export const DIAGNOSTICS_HELP: HelpEntry[] = [
         useWhen: 'something feels off, you want to share praise, or you have a suggestion — and you have ten seconds.',
         scenario: 'Running `iranti feedback --type bug` immediately after hitting a frustrating edge case.',
     },
+    {
+        command: 'iranti ui [--instance <name>] [--project-env <file>] [--port <n>] [--no-open]',
+        description: 'Launch the Iranti control plane web UI and open it in your browser.',
+        useWhen: 'you want to browse agent memory, inspect facts by entity, check system health, or resolve write conflicts from a visual interface.',
+        scenario: 'Run from a bound project after setup to open the Memory Explorer at localhost:7500.',
+    },
 ];
 
 export const CONNECT_HELP: HelpEntry[] = [

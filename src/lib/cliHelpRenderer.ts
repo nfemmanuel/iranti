@@ -333,4 +333,12 @@ export function printFeedbackHelp(style: CliHelpStyle): void {
     );
 }
 
+export function printUiHelp(style: CliHelpStyle): void {
+    printSingleHelpEntry(
+        style,
+        'UI Command',
+        requireHelpEntry(DIAGNOSTICS_HELP, 'iranti ui ')
+    );
+}
+
 export { printChoiceGuide };

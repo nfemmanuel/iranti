@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.41 - 2026-04-14
+
+### Added
+
+- **`iranti ui` command.** Launch the Iranti control plane web UI directly from the terminal: `iranti ui` resolves `DATABASE_URL` from the current project binding or `--instance`, starts `iranti-control-plane` via `npx` (downloads automatically if not installed), and opens your browser to `localhost:7500`. Supports `--port <n>` to use a different port and `--no-open` to skip the browser launch.
+
 ## 0.3.35 - 2026-04-13
 
 ### Added

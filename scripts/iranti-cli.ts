@@ -62,6 +62,7 @@ import {
     printUpgradeHelp as renderUpgradeHelp,
     printWizardNotes as renderWizardNotes,
     printFeedbackHelp as renderFeedbackHelp,
+    printUiHelp as renderUiHelp,
 } from '../src/lib/cliHelpRenderer';
 import { getEscalationPaths } from '../src/lib/escalationPaths';
 import { parseDockerContainerNames, parsePublishedDockerHostPorts } from '../src/lib/dockerCliParsing';
@@ -9804,6 +9805,10 @@ function printFeedbackHelp(): void {
     renderFeedbackHelp({ sectionTitle, commandText });
 }
 
+function printUiHelp(): void {
+    renderUiHelp({ sectionTitle, commandText });
+}
+
 function printMcpHelp(): void {
     console.log([
         'MCP server and maintenance commands.',
@@ -10276,6 +10281,103 @@ async function deleteRuleCommand(args: ParsedArgs): Promise<void> {
     } finally {
         await disconnectDb().catch(() => undefined);
     }
+}
+
+// ── UI (control plane launcher) ──────────────────────────────────────────────
+
+function openBrowserUrl(url: string): void {
+    try {
+        let cmd: string;
+        let cmdArgs: string[];
+        if (process.platform === 'win32') {
+            cmd = 'cmd';
+            cmdArgs = ['/c', 'start', '', url];
+        } else if (process.platform === 'darwin') {
+            cmd = 'open';
+            cmdArgs = [url];
+        } else {
+            cmd = 'xdg-open';
+            cmdArgs = [url];
+        }
+        spawn(cmd, cmdArgs, { stdio: 'ignore', detached: true }).unref();
+    } catch {
+        // Browser open is best-effort; non-fatal
+    }
+}
+
+async function uiCommand(args: ParsedArgs): Promise<void> {
+    // Resolve DATABASE_URL from project binding or instance env
+    const instanceName = getFlag(args, 'instance');
+    if (instanceName) {
+        const scope = normalizeScope(getFlag(args, 'scope'));
+        const root = resolveInstallRoot(args, scope);
+        const loaded = await loadInstanceEnv(root, instanceName);
+        applyEnvMap(loaded.env);
+    } else {
+        const cwd = path.resolve(process.cwd());
+        const explicitProjectEnv = getFlag(args, 'project-env');
+        loadRuntimeEnv({
+            cwd,
+            projectEnvFile: explicitProjectEnv ? path.resolve(explicitProjectEnv) : undefined,
+        });
+    }
+    const databaseUrl = process.env.DATABASE_URL?.trim();
+    if (!databaseUrl) {
+        throw cliError(
+            'IRANTI_DATABASE_URL_MISSING',
+            'DATABASE_URL is required. Run from a bound project, pass --instance <name>, or set DATABASE_URL.',
+            ['Run `iranti project init . --instance <name>` to bind this project.'],
+        );
+    }
+
+    const noOpen = hasFlag(args, 'no-open');
+    const port = getFlag(args, 'port') ?? '7500';
+    const url = `http://localhost:${port}`;
+
+    // npx handles both cases: uses the global install if available, downloads otherwise
+    const npxExe = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+
+    console.log(`${infoLabel()} Starting Iranti control plane at ${url} …`);
+
+    if (!noOpen) {
+        // Give the server a moment to bind before opening the browser
+        setTimeout(() => { openBrowserUrl(url); }, 2500);
+    }
+
+    await new Promise<void>((resolve, reject) => {
+        const child = spawn(npxExe, ['--yes', 'iranti-control-plane'], {
+            stdio: 'inherit',
+            env: {
+                ...process.env,
+                DATABASE_URL: databaseUrl,
+                PORT: port,
+            },
+        });
+
+        const onSigint = () => { child.kill('SIGINT'); };
+        process.once('SIGINT', onSigint);
+
+        child.on('error', (err) => {
+            process.off('SIGINT', onSigint);
+            reject(cliError(
+                'IRANTI_CP_SPAWN_FAILED',
+                `Failed to start iranti-control-plane: ${(err as Error).message}`,
+                ['Ensure npx is available on PATH (it comes with npm).'],
+            ));
+        });
+
+        child.on('exit', (code, signal) => {
+            process.off('SIGINT', onSigint);
+            if (signal === 'SIGINT' || signal === 'SIGTERM') {
+                resolve();
+                return;
+            }
+            if ((code ?? 0) !== 0) {
+                process.exit(code ?? 1);
+            }
+            resolve();
+        });
+    });
 }
 
 // ── Export / Import / Snapshot commands ─────────────────────────────────────
@@ -11565,6 +11667,15 @@ async function main(): Promise<void> {
             return;
         }
         throw new Error(`Unknown integrate target '${args.subcommand ?? ''}'. Use 'claude', 'codex', or 'copilot'.`);
+    }
+
+    if (args.command === 'ui') {
+        if (hasFlag(args, 'help')) {
+            printUiHelp();
+            return;
+        }
+        await uiCommand(args);
+        return;
     }
 
     throw cliError(
