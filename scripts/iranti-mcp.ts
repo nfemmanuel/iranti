@@ -21,7 +21,7 @@ import { createFirstPartyIranti } from '../src/lib/createFirstPartyIranti';
 import { loadRuntimeEnv } from '../src/lib/runtimeEnv';
 import { autoRememberPromptFacts, isAutoRememberEnabled, rememberAssistantResponseFacts, resolvePersonalWriteTarget } from '../src/lib/autoRemember';
 import { flushStaffEventEmitter, getStaffEventEmitter } from '../src/lib/staffEventRegistry';
-import { disconnectDb } from '../src/library/client';
+import { disconnectDb, getDb } from '../src/library/client';
 import { activeAttendants, clearAttendant, getAttendant } from '../src/attendant';
 import { extractAssistantCheckpointPayload } from '../src/lib/assistantCheckpoint';
 import { formatStructuredFactBlock } from '../src/lib/hostMemoryFormatting';
@@ -842,7 +842,15 @@ Do not use this as a per-turn retrieval tool; use iranti_attend.`,
 
         // Phase 3: increment session stats and compute milestone nudge.
         await updateSessionStats(process.cwd(), resolvedHost ?? '');
-        const feedbackNudge = await computeFeedbackNudge(process.cwd(), 0);
+        let factCount = 0;
+        try {
+            factCount = await getDb().knowledgeEntry.count({
+                where: { NOT: [{ entityType: 'system' }, { entityType: 'agent' }] },
+            });
+        } catch {
+            // Non-fatal: factCount milestones degrade gracefully to 0
+        }
+        const feedbackNudge = await computeFeedbackNudge(process.cwd(), factCount);
 
         if (setupWarnings.length > 0) {
             return textResult({ ...result, ...(feedbackNudge ? { feedbackNudge } : {}), setupWarnings });
