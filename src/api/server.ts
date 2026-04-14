@@ -28,7 +28,6 @@ import path from 'path';
 import { knowledgeRoutes } from './routes/knowledge';
 import { memoryRoutes } from './routes/memory';
 import { agentRoutes } from './routes/agents';
-import { extensionRoutes } from './routes/extension';
 import { devRouter } from './routes/dev';
 import { batchRouter } from './routes/batch';
 import { authenticate } from './middleware/auth';
@@ -310,7 +309,6 @@ function terminateStartup(code: number): void {
 
 // Mount protected routes
 app.use(ROUTES.agents, authenticate, rateLimitMiddleware, requireScopeByMethod('agents:read', 'agents:write'), agentRoutes(iranti));
-app.use('/extension', authenticate, rateLimitMiddleware, extensionRoutes(iranti));
 app.use('/kb/batchQuery', authenticate, rateLimitMiddleware, requireAnyScope(['kb:read']), batchRouter);
 app.use(ROUTES.kb, authenticate, rateLimitMiddleware, requireScopeFamilyByMethod('kb:read', 'kb:write'), knowledgeRoutes(iranti));
 app.use(ROUTES.memory, authenticate, rateLimitMiddleware, requireScopeByMethod('memory:read', 'memory:write'), memoryRoutes(iranti));
