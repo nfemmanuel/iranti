@@ -48,6 +48,13 @@ enum TokenScope {
     pairing_temp
 }
 
+enum FeedbackType {
+    bug
+    praise
+    suggestion
+    general
+}
+
 // ── Identity ───────────────────────────────────────────────────────────────
 
 model User {
@@ -217,4 +224,29 @@ model StaffEvent {
     @@index([level, timestamp])
     @@index([entityType, entityId, key, timestamp])
     @@map("staff_events")
+}
+
+// ── Feedback ───────────────────────────────────────────────────────────────
+
+model Feedback {
+    id               String       @id @default(uuid()) @db.Uuid
+    feedbackId       String       @unique @map("feedback_id") @db.Uuid
+    rating           Int
+    comment          String?
+    type             FeedbackType
+    version          String
+    os               String
+    arch             String
+    nodeVersion      String       @map("node_version")
+    sessionCount     Int?         @map("session_count")
+    factCount        Int?         @map("fact_count")
+    instanceId       String       @map("instance_id")
+    milestoneContext String?      @map("milestone_context")
+    submittedAt      DateTime     @map("submitted_at")
+    receivedAt       DateTime     @default(now()) @map("received_at")
+
+    @@index([instanceId])
+    @@index([receivedAt])
+    @@index([rating])
+    @@map("feedback")
 }

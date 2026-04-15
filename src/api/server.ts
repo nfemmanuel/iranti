@@ -50,6 +50,7 @@ import {
 import { createFirstPartyIranti } from '../lib/createFirstPartyIranti';
 import { consumerMcpRoutes } from './routes/consumerMcp';
 import { tokensRouter } from './routes/tokens';
+import { feedbackRouter } from './routes/feedback';
 import { resolvePackageRoot } from '../lib/packageRoot';
 import { createHealthCheckState, createVectorBackendMonitor, deriveOperatorStatus, HealthCheckState } from './healthChecks';
 
@@ -320,6 +321,9 @@ function terminateStartup(code: number): void {
     }
     server.close(() => closeAndExit());
 }
+
+// Feedback — unauthenticated, rate-limited by IP
+app.use('/feedback', rateLimitMiddleware, feedbackRouter);
 
 // Consumer MCP endpoint — token auth is path-embedded, handled inside the route
 app.use('/mcp', consumerMcpRoutes());
