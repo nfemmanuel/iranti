@@ -4393,7 +4393,9 @@ export class AttendantInstance {
             const response = await route('extraction', [
                 {
                     role: 'user',
-                    content: `You are extracting structured facts from the output of a read-only tool call that an agent just executed.
+                    content: `Output: a JSON array only. No prose, no preamble, no explanation.
+
+You are extracting structured facts from the output of a read-only tool call that an agent just executed.
 
 Tool: ${toolResult.toolName}
 ${contextLabel}
@@ -4437,7 +4439,11 @@ If no durable facts can be extracted, return an empty array: [].`,
             providerUsed = response.providerUsed;
             modelUsed = response.model;
             const clean = response.text.replace(/```json|```/g, '').trim();
-            parsed = JSON.parse(clean);
+            // If the model added preamble before the JSON array, extract the array with regex.
+            const jsonText = (clean.startsWith('[') || clean.startsWith('{'))
+                ? clean
+                : (clean.match(/\[[\s\S]*\]/) ?? [clean])[0];
+            parsed = JSON.parse(jsonText);
         } catch (err) {
             baseOutcome.extractorError = err instanceof Error ? err.message : String(err);
             baseOutcome.durationMs = Date.now() - extractionStart;
@@ -4790,7 +4796,9 @@ If no durable facts can be extracted, return an empty array: [].`,
             const response = await route('extraction', [
                 {
                     role: 'user',
-                    content: `You are extracting durable facts from ${
+                    content: `Output: a JSON array only. No prose, no preamble, no explanation.
+
+You are extracting durable facts from ${
                         sourceLabel === OBSERVED_FROM_USER_SOURCE_TAG
                             ? "a user's message to an AI coding agent"
                             : "an AI coding agent's response to a user"
@@ -4822,7 +4830,11 @@ If no durable facts can be extracted, return an empty array: [].`,
                 },
             ], 1024);
             const clean = response.text.replace(/```json|```/g, '').trim();
-            parsed = JSON.parse(clean);
+            // If the model added preamble before the JSON array, extract the array with regex.
+            const jsonText = (clean.startsWith('[') || clean.startsWith('{'))
+                ? clean
+                : (clean.match(/\[[\s\S]*\]/) ?? [clean])[0];
+            parsed = JSON.parse(jsonText);
         } catch (err) {
             skipped.push({ reason: 'extractor_failure', detail: err instanceof Error ? err.message : String(err) });
             return base;
