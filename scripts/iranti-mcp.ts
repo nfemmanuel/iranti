@@ -57,6 +57,10 @@ const WATCHER_EXCLUDE_DIRS = new Set([
     '__pycache__', '.cache', '.iranti',
 ]);
 const WRITE_DEBT_FILENAME = '.iranti-write-debt';
+// Block attend only after this many unique file edits are pending — avoids
+// false-positive blocks on single-file changes while still enforcing logging
+// discipline when a meaningful batch of edits has accumulated.
+const WRITE_DEBT_BLOCK_THRESHOLD = 5;
 let _activeWatcher: import('node:fs').FSWatcher | null = null;
 let _watchedCwd: string | null = null;
 let _watchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -417,7 +421,7 @@ function startFileWatcher(cwd: string): void {
 }
 
 /**
- * Read .iranti-write-debt and return an isError gate result when debt > 0.
+ * Read .iranti-write-debt and return an isError gate result when debt >= WRITE_DEBT_BLOCK_THRESHOLD.
  * Returns null when attend should proceed normally.
  */
 function checkWriteDebtForAttend(cwd: string): { content: Array<{ type: 'text'; text: string }>; isError: true } | null {
@@ -426,7 +430,7 @@ function checkWriteDebtForAttend(cwd: string): { content: Array<{ type: 'text'; 
         if (!fs.existsSync(debtFile)) return null;
         const debt = JSON.parse(fs.readFileSync(debtFile, 'utf8'));
         const pendingEdits: number = debt.pendingEdits || 0;
-        if (pendingEdits < 1) return null;
+        if (pendingEdits < WRITE_DEBT_BLOCK_THRESHOLD) return null;
         const edits: Array<{ file: string }> = debt.edits || [];
         const fileList = edits.length > 0
             ? edits.slice(-10).map((e: { file: string }) => `  - ${e.file}`).join('\n')
@@ -435,12 +439,12 @@ function checkWriteDebtForAttend(cwd: string): { content: Array<{ type: 'text'; 
             content: [{
                 type: 'text' as const,
                 text: [
-                    `WRITE_GUARD_BLOCKED: ${pendingEdits} file edit(s) pending iranti_write.`,
+                    `WRITE_GUARD_BLOCKED: ${pendingEdits} file edit(s) pending iranti_write (threshold: ${WRITE_DEBT_BLOCK_THRESHOLD}).`,
                     `Changed files (most recent ${Math.min(pendingEdits, 10)}):`,
                     fileList,
                     '',
                     `Required: call iranti_write for each changed file before iranti_attend can proceed.`,
-                    `After writing all pending edits, re-call iranti_attend to get your memory brief.`,
+                    `After writing pending edits below the threshold, re-call iranti_attend to get your memory brief.`,
                 ].join('\n'),
             }],
             isError: true as const,

@@ -134,6 +134,19 @@ const TOOL_COST_WRITE_NUDGE_THRESHOLD = 5;
 // concrete draft facts instead of a vague "write something" reminder.
 const RECENT_AUTOWRITE_BUFFER_LIMIT = 12;
 const AUTOWRITE_SOURCE_TAG = 'attendant_autowrite';
+// Bidirectional attend — source tags for observed captures
+const OBSERVED_FROM_DISCOVERY_SOURCE_TAG = 'observed_from_discovery';
+const OBSERVED_FROM_USER_SOURCE_TAG = 'observed_from_user';
+const OBSERVED_FROM_AGENT_SOURCE_TAG = 'observed_from_agent';
+// Bidirectional attend — capture configuration defaults
+const OBSERVE_CAPTURE_DEFAULT_CONFIDENCE = 70;
+const OBSERVE_CAPTURE_MAX_CONFIDENCE = 70;
+const OBSERVE_CAPTURE_MAX_FACTS = 5;
+const OBSERVE_POST_RESPONSE_SIZE_THRESHOLD = 5000;
+const OBSERVE_CAPTURE_SESSION_DEDUP_CACHE_SIZE = 256;
+const OBSERVE_BOILERPLATE_MAX_CHARS = 30;
+const OBSERVE_CAPTURE_PRE_RESPONSE_ENABLED = false;
+const OBSERVE_CAPTURE_POST_RESPONSE_ENABLED = true;
 // M7: response file-change autowrite — constants governing the scan pass
 // that runs at post-response to extract file paths from the agent's reply.
 const RESPONSE_FILE_CAPTURE_MIN_CHARS = 50;
@@ -623,6 +636,11 @@ export interface AttendInput extends ObserveInput {
     // plan a bounded sub-turn retrieval retry. Only inspected when
     // phase='mid-turn'; ignored on pre-response and post-response.
     partialResponse?: string;
+    // Bidirectional attend — post-response only. Short freeform summary of
+    // durable takeaways the agent wants captured. Required when latestMessage
+    // exceeds OBSERVE_POST_RESPONSE_SIZE_THRESHOLD. When provided the chunker
+    // runs on findings and latestMessage is ignored for capture purposes.
+    findings?: string;
 }
 
 export interface SessionCheckpointInput extends AgentContext {
@@ -667,6 +685,9 @@ export interface AttendResult extends ObserveResult {
     memorySearchPerformed?: boolean;
     memoryResultsConsidered?: number;
     postResponseCapture?: PostResponseCaptureInfo;
+    // Bidirectional attend — capture result for the phase that ran.
+    // Absent when capture was skipped (e.g. pre-response while disabled).
+    capture?: BiDirectionalCaptureResult;
     matchedUserRules?: MatchedUserRule[];
     // A2: only populated when the caller passed pendingToolCall.
     // Reports which entity hints were derived from the tool call so the agent
@@ -884,6 +905,31 @@ export interface PostResponseCaptureInfo {
     factsWritten: number;
     checkpointExtracted: boolean;
     skipped: Array<{ key: string; reason: string }>;
+}
+
+// Bidirectional attend — result block returned for every capture phase.
+export interface BiDirectionalCaptureResult {
+    // Candidate facts returned by the extractor before dedup.
+    factsExtracted: number;
+    // Facts persisted after dedup and confidence capping.
+    factsWritten: number;
+    // Facts dropped because an iranti_write this turn already covered them.
+    skippedDupe: number;
+    // Facts dropped by session-wide semantic dedup LRU.
+    skippedRepeat: number;
+    // Facts dropped by the boilerplate filter.
+    skippedBoilerplate: number;
+    // Batch ID shared across all observed writes in the turn. One-call revert anchor.
+    observedBatchId: string;
+    // observed_from_user | observed_from_discovery | observed_from_agent
+    sourceLabel: string;
+    // The phase the capture ran in.
+    phase: string;
+    // True when latestMessage exceeded the size threshold and no findings field
+    // was provided. Host should retry with a findings field.
+    findingsRequired?: boolean;
+    // Per-skip records for debugging.
+    skipped: Array<{ reason: string; detail?: string }>;
 }
 
 // M7: response file-change autowrite — outcome of the post-response scan pass
@@ -3658,6 +3704,10 @@ export class AttendantInstance {
         factCount: number;
         writtenEntries: Array<{ entity: string; key: string; summary: string }>;
     }> = [];
+    // Bidirectional attend — session-wide semantic dedup LRU. Keys are
+    // `${entityType}/${entityId}:${key}:${normalizedSummary}`. Bounded to
+    // OBSERVE_CAPTURE_SESSION_DEDUP_CACHE_SIZE entries. Cleared on session end.
+    private observedSummaryCache: Map<string, string> = new Map();
     // M3: tracks whether the current turn has already forced a nudge so we do
     // not nag repeatedly within the same turn.
     private writeNudgeEmittedThisTurn: boolean = false;
@@ -4429,7 +4479,7 @@ If no durable facts can be extracted, return an empty array: [].`,
                     valueRaw: fact.value,
                     valueSummary: fact.summary.slice(0, 500),
                     confidence: fact.confidence,
-                    source: AUTOWRITE_SOURCE_TAG,
+                    source: OBSERVED_FROM_DISCOVERY_SOURCE_TAG,
                     createdBy: `attendant:${this.agentId}`,
                     properties: {
                         memoryScope: 'project',
@@ -4494,7 +4544,7 @@ If no durable facts can be extracted, return an empty array: [].`,
         if (this.eventSource && writtenEntries.length > 0) {
             getStaffEventEmitter().emit({
                 staffComponent: 'Attendant',
-                actionType: 'attendant_autowrite',
+                actionType: 'attendant_observed_discovery',
                 agentId: this.agentId,
                 source: this.eventSource,
                 reason: `tool_result_extraction:${toolResult.toolName}`,
@@ -4676,6 +4726,204 @@ If no durable facts can be extracted, return an empty array: [].`,
         }
 
         return baseResult;
+    }
+
+    // Bidirectional attend — extract durable facts from observed text (user
+    // message or assistant reply) and persist them with source-appropriate labels
+    // and capped confidence.
+    //
+    // Isolation policy: failures MUST NOT abort the attend call. All errors are
+    // caught, reported via the skipped array, and the attend response is otherwise
+    // unaffected.
+    private async runObservedCapture(
+        text: string,
+        sourceLabel: string,
+        batchId: string,
+        targetEntityString: string,
+        phase: string,
+    ): Promise<BiDirectionalCaptureResult> {
+        const skipped: Array<{ reason: string; detail?: string }> = [];
+        const base: BiDirectionalCaptureResult = {
+            factsExtracted: 0,
+            factsWritten: 0,
+            skippedDupe: 0,
+            skippedRepeat: 0,
+            skippedBoilerplate: 0,
+            observedBatchId: batchId,
+            sourceLabel,
+            phase,
+            skipped,
+        };
+
+        // Boilerplate guard: skip very short or greeting-only user messages.
+        if (sourceLabel === OBSERVED_FROM_USER_SOURCE_TAG) {
+            const trimmed = text.trim();
+            if (trimmed.length < OBSERVE_BOILERPLATE_MAX_CHARS) {
+                skipped.push({ reason: 'boilerplate_too_short' });
+                base.skippedBoilerplate++;
+                return base;
+            }
+            const greetingPattern = /^(hi|hello|hey|thanks|thank you|ok|okay|sure|yes|no|yep|nope|got it|sounds good|great|perfect)[.!?,\s]*$/i;
+            if (greetingPattern.test(trimmed)) {
+                skipped.push({ reason: 'boilerplate_greeting' });
+                base.skippedBoilerplate++;
+                return base;
+            }
+        }
+
+        const targetEntity = parseAutowriteEntity(targetEntityString);
+
+        const focusInstructions = sourceLabel === OBSERVED_FROM_USER_SOURCE_TAG
+            ? `Focus on:
+- User preferences, constraints, and working style statements
+- Explicit corrections or decisions the user has made
+- Project context, requirements, or scope the user has stated
+- Technology choices or architectural decisions the user has declared`
+            : `Focus on:
+- Conclusions the agent has reached about the codebase or system state
+- Commitments or decisions the agent has made in the response
+- Confirmed findings about how the code works
+- Architectural or design facts established during this turn`;
+
+        let parsed: unknown;
+        try {
+            const response = await route('extraction', [
+                {
+                    role: 'user',
+                    content: `You are extracting durable facts from ${
+                        sourceLabel === OBSERVED_FROM_USER_SOURCE_TAG
+                            ? "a user's message to an AI coding agent"
+                            : "an AI coding agent's response to a user"
+                    }.
+
+Source phase: ${phase}
+Target entity: ${targetEntityString}
+
+Text:
+"""
+${text}
+"""
+
+Extract up to ${OBSERVE_CAPTURE_MAX_FACTS} distinct durable facts worth preserving across future sessions. ${focusInstructions}
+
+Rules:
+- Discard greetings, acknowledgements, procedural commentary, and vague impressions
+- Each fact must be a concrete, standalone statement
+- Do not invent or extrapolate beyond what the text explicitly states
+
+Return ONLY a valid JSON array. No explanation, no markdown, no backticks.
+Each fact must have:
+- key: a short snake_case identifier
+- value: a concrete JSON value (string, number, boolean, array, or object)
+- summary: a one-sentence natural-language summary
+- confidence: integer 0-100
+
+If no durable facts can be extracted, return an empty array: [].`,
+                },
+            ], 1024);
+            const clean = response.text.replace(/```json|```/g, '').trim();
+            parsed = JSON.parse(clean);
+        } catch (err) {
+            skipped.push({ reason: 'extractor_failure', detail: err instanceof Error ? err.message : String(err) });
+            return base;
+        }
+
+        if (!Array.isArray(parsed) || parsed.length === 0) {
+            skipped.push({ reason: 'no_facts_extracted' });
+            return base;
+        }
+
+        const capped = parsed.slice(0, OBSERVE_CAPTURE_MAX_FACTS);
+        base.factsExtracted = capped.length;
+
+        for (const rawFact of capped) {
+            const fact = normalizeAutowriteFact(rawFact);
+            if (!fact) {
+                skipped.push({ reason: 'fact_shape_invalid' });
+                continue;
+            }
+
+            // Session-wide semantic dedup using entity + key + normalized summary.
+            const dedupKey = `${targetEntity.entityType}/${targetEntity.entityId}:${fact.key}:${
+                fact.summary.slice(0, 80).toLowerCase().replace(/\s+/g, ' ').trim()
+            }`;
+            if (this.observedSummaryCache.has(dedupKey)) {
+                // Bump lastSeen and skip the write.
+                this.observedSummaryCache.set(dedupKey, new Date().toISOString());
+                base.skippedRepeat++;
+                skipped.push({ reason: 'session_dedup_repeat', detail: fact.key });
+                continue;
+            }
+
+            // LRU eviction: drop oldest entry when cache is at capacity.
+            if (this.observedSummaryCache.size >= OBSERVE_CAPTURE_SESSION_DEDUP_CACHE_SIZE) {
+                const firstKey = this.observedSummaryCache.keys().next().value;
+                if (firstKey !== undefined) {
+                    this.observedSummaryCache.delete(firstKey);
+                }
+            }
+
+            // Cap confidence at the observed maximum regardless of LLM output.
+            const rawConfidence = typeof fact.confidence === 'number' ? fact.confidence : OBSERVE_CAPTURE_DEFAULT_CONFIDENCE;
+            const cappedConfidence = Math.min(rawConfidence, OBSERVE_CAPTURE_MAX_CONFIDENCE);
+
+            try {
+                await librarianWrite({
+                    entityType: targetEntity.entityType,
+                    entityId: targetEntity.entityId,
+                    key: fact.key,
+                    valueRaw: fact.value,
+                    valueSummary: fact.summary.slice(0, 500),
+                    confidence: cappedConfidence,
+                    source: sourceLabel,
+                    createdBy: `attendant:${this.agentId}`,
+                    properties: {
+                        memoryScope: 'project',
+                        capturePhase: `observed_capture_${phase.replace(/-/g, '_')}`,
+                        autowriteBatchId: batchId,
+                        autowriteOccurredAt: new Date().toISOString(),
+                        ...buildSemanticFactTags({
+                            memoryScope: 'project',
+                            durableClass: 'observed_fact',
+                            mergeStrategy: 'replace',
+                            extraTags: ['observed', sourceLabel, `phase:${phase}`],
+                        }),
+                    } as Record<string, unknown>,
+                });
+                this.observedSummaryCache.set(dedupKey, new Date().toISOString());
+                base.factsWritten++;
+            } catch (writeErr) {
+                skipped.push({
+                    reason: 'librarian_write_failed',
+                    detail: writeErr instanceof Error ? writeErr.message : String(writeErr),
+                });
+            }
+        }
+
+        // Observed captures count as half-credit toward compliance counters.
+        if (base.factsWritten > 0) {
+            this.attendsWithoutPersist = Math.max(0, this.attendsWithoutPersist - 1);
+            if (this.eventSource) {
+                getStaffEventEmitter().emit({
+                    staffComponent: 'Attendant',
+                    actionType: 'attendant_observed_capture',
+                    agentId: this.agentId,
+                    source: this.eventSource,
+                    reason: `observed_capture:${sourceLabel}`,
+                    level: 'audit',
+                    metadata: this.buildEventMetadata({
+                        observedBatchId: batchId,
+                        sourceLabel,
+                        phase,
+                        targetEntity: targetEntityString,
+                        factsExtracted: base.factsExtracted,
+                        factsWritten: base.factsWritten,
+                    }),
+                });
+            }
+        }
+
+        return base;
     }
 
     // M3: build a forced write-nudge payload when tool-cost pressure crosses
@@ -5186,6 +5434,44 @@ If no durable facts can be extracted, return an empty array: [].`,
                 latestMessage,
                 `rfca_${Date.now()}`,
             );
+            // Bidirectional attend — post-response observed capture.
+            // Runs AFTER responseFileCapture so file-change writes are already
+            // reflected in compliance counters before capture bumps half-credit.
+            const observedBatchId = `obs_${Date.now()}`;
+            let capture: BiDirectionalCaptureResult | undefined;
+            if (OBSERVE_CAPTURE_POST_RESPONSE_ENABLED && latestMessage) {
+                const textToCapture = input.findings
+                    ?? (latestMessage.length <= OBSERVE_POST_RESPONSE_SIZE_THRESHOLD ? latestMessage : undefined);
+                const findingsRequired = !textToCapture
+                    && !input.findings
+                    && latestMessage.length > OBSERVE_POST_RESPONSE_SIZE_THRESHOLD;
+                if (textToCapture) {
+                    const targetEntity = getProjectMemoryEntity() ?? 'system/observed';
+                    capture = await this.runObservedCapture(
+                        textToCapture,
+                        OBSERVED_FROM_AGENT_SOURCE_TAG,
+                        observedBatchId,
+                        targetEntity,
+                        'post-response',
+                    );
+                } else if (findingsRequired) {
+                    capture = {
+                        factsExtracted: 0,
+                        factsWritten: 0,
+                        skippedDupe: 0,
+                        skippedRepeat: 0,
+                        skippedBoilerplate: 0,
+                        observedBatchId,
+                        sourceLabel: OBSERVED_FROM_AGENT_SOURCE_TAG,
+                        phase: 'post-response',
+                        findingsRequired: true,
+                        skipped: [{
+                            reason: 'findings_required',
+                            detail: 'latestMessage exceeded size threshold and no findings field was provided',
+                        }],
+                    };
+                }
+            }
             compliance = this.buildComplianceState(this.complianceUpdatedAt);
             if (memoryAttributions.some((entry) => !entry.used)) {
                 complianceWarning = ignoredMemoryWarning;
@@ -5289,6 +5575,17 @@ If no durable facts can be extracted, return an empty array: [].`,
                 // M7: response file-change autowrite — populated at post-response.
                 // Contains the outcome of the scan pass over the agent's reply.
                 responseFileCapture,
+                // Bidirectional attend — observed capture result for this turn.
+                capture,
+                // postResponseCapture wired from capture for backwards compat.
+                postResponseCapture: capture
+                    ? {
+                        factsExtracted: capture.factsExtracted,
+                        factsWritten: capture.factsWritten,
+                        checkpointExtracted: false,
+                        skipped: capture.skipped.map((s) => ({ key: s.reason, reason: s.detail ?? s.reason })),
+                    }
+                    : undefined,
             };
         }
 

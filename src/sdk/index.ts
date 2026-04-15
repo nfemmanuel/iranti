@@ -328,6 +328,10 @@ export interface AttendInput extends ObserveInput {
     phase?: 'pre-response' | 'post-response' | 'mid-turn';
     pendingToolCall?: PendingToolCall;
     toolResult?: ToolResultPayload;
+    // Bidirectional attend — post-response only. Short freeform summary of
+    // durable takeaways the agent wants captured. Required when latestMessage
+    // exceeds the post-response size threshold.
+    findings?: string;
 }
 
 type SessionLedgerContext = {

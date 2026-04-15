@@ -109,11 +109,15 @@ function fallbackProtocolAgent(req: Request): string | null {
             ? req.query.agent.trim()
             : '';
     if (explicit) return explicit;
-    const keyId = auth?.keyId?.trim();
-    // Intentional fallback: protocol state is keyed to the authenticated API key
-    // when the caller does not send agentId, so protocol-gated reads still have a
-    // stable principal. Explicit agentId/query aliases still override this path.
-    return keyId ? `api:${keyId}` : null;
+    // Do not fall back to the API key ID as a protocol principal. Protocol
+    // enforcement is only meaningful for named agents that have completed a
+    // handshake + attend cycle. Using the key ID as a fallback causes any
+    // programmatic or diagnostic caller (e.g. the Control Plane health probe)
+    // to be blocked with 428 on the first request after an instance restart,
+    // since no prior handshake/attend exists for that principal. Callers
+    // without an explicit agentId get null here, which causes checkProtocol to
+    // return early — no enforcement, no 428.
+    return null;
 }
 
 function applyProtocolContext(iranti: Iranti, req: Request): void {
