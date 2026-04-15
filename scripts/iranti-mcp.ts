@@ -803,7 +803,7 @@ async function main(): Promise<void> {
 
     const server = new McpServer({
         name: 'iranti-mcp',
-        version: '0.3.41',
+        version: '0.4.1',
     });
 
     server.registerTool('iranti_handshake', {
