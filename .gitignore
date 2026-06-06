@@ -1,0 +1,45 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+build/
+
+# environment files — never commit these
+.env
+.env.*
+!.env.example
+
+# iranti runtime data
+.iranti-runtime/
+.iranti-write-debt
+escalation/
+
+# MCP registry tokens
+.mcpregistry_*
+
+# logs
+logs/
+bench_logs/
+*.log
+
+# VS Code history
+.history/
+
+# build artifacts
+*.tgz
+*.tar.gz
+
+# Python
+__pycache__/
+*.pyc
+.venv*/
+*.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# temp
+.tmp_*/
+.npm-cache/
