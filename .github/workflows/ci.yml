@@ -1,5 +1,18 @@
+# CI — Continuous Integration
+#
+# This file tells GitHub what to check automatically every time someone
+# pushes code or opens a pull request. If any check fails, GitHub blocks
+# the merge and shows a red X. If all pass, it shows a green checkmark.
+#
+# You do not run this manually. GitHub runs it for you.
+
 name: CI
 
+# WHEN TO RUN
+# -----------
+# Run this pipeline on every push to iranti-core, and on every pull request
+# that targets iranti-core. This means no code reaches the branch without
+# passing these checks first.
 on:
   push:
     branches: [iranti-core]
@@ -9,28 +22,48 @@ on:
 jobs:
   ci:
     name: Type-check, lint, test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest  # GitHub provides a fresh Linux machine for each run
 
     steps:
+      # Step 1: Download the code from GitHub onto the CI machine.
       - uses: actions/checkout@v4
 
+      # Step 2: Install pnpm (our package manager) on the CI machine.
       - uses: pnpm/action-setup@v4
         with:
           version: 11
 
+      # Step 3: Install Node.js (the runtime TypeScript compiles down to).
+      # "cache: pnpm" means GitHub will save the downloaded packages between
+      # runs so we do not re-download everything from scratch each time.
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
 
+      # Step 4: Install all the project's dependencies (TypeScript, ESLint, Vitest, etc.)
+      # --frozen-lockfile means: use exact versions from pnpm-lock.yaml.
+      # If the lockfile is out of date, this fails loudly instead of silently
+      # installing the wrong versions.
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Step 5: Run the TypeScript compiler in check-only mode.
+      # This catches type errors — passing a number where a string is expected,
+      # calling a method that does not exist on an object, etc.
+      # Does not produce output files, just reports errors.
       - name: Type-check
         run: pnpm typecheck
 
+      # Step 6: Run ESLint across the src/ folder.
+      # Catches code patterns that are likely bugs or bad practice.
+      # Zero tolerance — any error fails the build.
       - name: Lint
         run: pnpm lint
 
+      # Step 7: Run all tests via Vitest.
+      # Currently no tests exist, so this passes immediately.
+      # As tests are added (Phase 0 onward), this is the gate that confirms
+      # new code does not break existing behaviour.
       - name: Test
         run: pnpm test
