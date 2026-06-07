@@ -8,6 +8,16 @@ This folder is the map for everything needed to plan, design, and build iranti-c
 
 ---
 
+## Research
+
+Market and competitive intelligence.
+
+| Document | Status | Description |
+|---|---|---|
+| [Competitive landscape](research/competitive-landscape.md) | `research` | Who is building in the AI memory space, what they have built, and where iranti is differentiated. Sourced and adversarially verified. |
+
+---
+
 ## Rough notes
 
 Where thinking starts. Documents here are unpolished and subject to change without notice.

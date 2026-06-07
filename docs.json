@@ -17,6 +17,12 @@
         ]
       },
       {
+        "group": "Research",
+        "pages": [
+          "docs/research/competitive-landscape"
+        ]
+      },
+      {
         "group": "Rough notes",
         "pages": [
           "docs/rough-notes/early-thoughts",
