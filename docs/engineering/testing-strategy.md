@@ -1,6 +1,6 @@
 # Testing strategy
 
-**Status:** template  
+**Status:** draft  
 **[Back to map](../MAP.md)**
 
 ---
@@ -64,12 +64,11 @@ Define how iranti-core is tested: what kinds of tests are written, where they li
 
 ## Open items
 
-_Fill in:_
-- Test framework decision (Jest vs. Vitest — Vitest is faster, Jest is more mature)
-- Mock strategy for LLM calls in unit tests
-- How to test the Attendant's signal/noise classification
-- Test database seeding strategy for integration tests
-- Coverage thresholds (if any) to enforce in CI
+- Test framework: **Vitest 3** (decided — faster than Jest, native TypeScript, `vi.mock()` built in)
+- Mock strategy for LLM calls: `vi.mock()` for unit tests; real calls only in e2e with a test API key
+- How to test the Attendant's signal/noise classification: decided when Attendant is built
+- Test database seeding strategy: migration-first clean state; seed helpers added in Phase 0
+- Coverage thresholds: none enforced in CI — coverage is a signal, not a gate
 
 ## Related docs
 

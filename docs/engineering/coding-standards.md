@@ -1,6 +1,6 @@
 # Coding standards
 
-**Status:** template  
+**Status:** draft  
 **[Back to map](../MAP.md)**
 
 ---
@@ -13,25 +13,31 @@ Define how code is written, structured, and reviewed in the iranti-core codebase
 
 ## Language and tooling
 
-- **Language:** TypeScript (strict mode, no `any`)
-- **Runtime:** Node.js
-- **Package manager:** _choose one_
-- **Formatter:** Prettier
-- **Linter:** ESLint
-- **Database toolkit:** Prisma
-- **Test framework:** _choose one_
+- **Language:** TypeScript 5.x (strict mode, no `any`)
+- **Runtime:** Node.js 22 LTS
+- **Package manager:** pnpm 11
+- **Formatter:** Prettier 3 (config in `.prettierrc`)
+- **Linter:** ESLint 9 with flat config (`eslint.config.js`), type-aware rules via `typescript-eslint`
+- **Database toolkit:** TBD in Phase 0 (Drizzle or Prisma, decided when schema is implemented)
+- **Test framework:** Vitest 3
 
 ## File and folder structure
 
-_Define the conventions for how code is organized. For example:_
+```
+src/
+  library/      — fact storage, CRUD, session management, entity model
+  staff/        — Attendant, Librarian, Archivist
+  graph/        — GraphBackend interface and PostgreSQL implementation
+  mcp/          — MCP server and tool handlers
+  types/        — shared TypeScript types and interfaces
+tests/
+  integration/  — tests that require a running database
+  e2e/          — full session scenario tests
+```
 
-- Feature code lives in `src/<feature-name>/`
-- Unit tests live alongside the code they test: `src/<feature-name>/<file>.test.ts`
-- Integration tests live in `tests/integration/`
-- Shared types live in `src/types/`
-- Database queries live in `src/library/`
+Unit tests live alongside the code they test: `src/library/facts.test.ts` next to `src/library/facts.ts`.
 
-_Fill in the actual conventions when the project structure is decided._
+One file per logical unit. A file that exports more than one primary thing is usually two files.
 
 ## Naming conventions
 
@@ -72,12 +78,9 @@ _Fill in the actual conventions when the project structure is decided._
 
 ## Open items
 
-_Fill in:_
-- Package manager decision (npm, pnpm, yarn)
-- Test framework decision (Jest, Vitest, etc.)
-- Full folder structure for `src/`
-- Import alias setup (`@iranti/` prefix or similar)
-- Pre-commit hook setup (lint + format + type-check)
+- Import alias setup (`@iranti/` prefix) — add when the project grows enough to need it
+- Pre-commit hooks (lint + format + type-check on staged files) — set up with `lefthook` in Phase 1
+- Database toolkit (Drizzle vs. Prisma) — decided at start of Phase 0
 
 ## Related docs
 

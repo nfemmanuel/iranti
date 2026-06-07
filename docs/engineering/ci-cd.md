@@ -1,6 +1,6 @@
 # CI/CD setup
 
-**Status:** template  
+**Status:** draft  
 **[Back to map](../MAP.md)**
 
 ---
@@ -15,30 +15,30 @@ CI runs on every push and every PR. It must pass before any PR is merged to main
 
 ### What CI runs
 
-On every PR:
-1. **Type check** — `tsc --noEmit` — TypeScript must compile clean
-2. **Lint** — ESLint must pass with zero errors
-3. **Format check** — Prettier must report no changes needed
-4. **Unit tests** — all unit tests pass
-5. **Integration tests** — all integration tests pass (requires a test database)
+On every PR and push to `iranti-core`:
+1. **Type check** — `pnpm typecheck` (`tsc --noEmit`) — TypeScript must compile clean
+2. **Lint** — `pnpm lint` (ESLint) — must pass with zero errors
+3. **Tests** — `pnpm test` (Vitest) — all tests pass
+
+Format check is enforced locally via pre-commit hooks (coming in Phase 1), not in CI — format issues should never reach a PR.
+
+Phase 0 will add a PostgreSQL integration test step once the schema and migrations exist.
 
 ### CI environment
 
-- Platform: GitHub Actions
-- Node version: _specify_
-- PostgreSQL version: _specify_
-- Docker: used to spin up the test database in CI
+- Platform: GitHub Actions (`ubuntu-latest`)
+- Node version: 22 LTS
+- Package manager: pnpm 11 (via `pnpm/action-setup@v4`)
+- Workflow file: `.github/workflows/ci.yml`
 
 ### Test database in CI
 
-CI spins up a PostgreSQL instance using Docker Compose. Prisma migrations run on each CI run against a fresh database. Tests run against this clean state. The database is torn down at the end of the run.
-
-_Define the exact Docker Compose setup for CI._
+When integration tests are added (Phase 0), CI will spin up PostgreSQL using GitHub Actions `services`. Migrations run on each CI run against a fresh database. Tests run against this clean state.
 
 ### Secrets in CI
 
-- `DATABASE_URL` — test database connection string
-- API keys — add as GitHub Actions secrets, never in code
+- `DATABASE_URL` — added as a GitHub Actions secret when integration tests are active
+- Any API keys — GitHub Actions secrets only, never in code
 
 ## CD (continuous deployment)
 
@@ -60,12 +60,9 @@ When iranti has a server component (cloud account, control plane), a server depl
 
 ## Open items
 
-_Fill in:_
-- Node version to pin
-- PostgreSQL version to pin
-- GitHub Actions workflow file location (`.github/workflows/ci.yml`)
-- npm publish: manual tag trigger vs. automatic on merge to main
-- Test database Docker Compose configuration for CI
+- npm publish: manual tag trigger vs. automatic on merge — decided when iranti-core is ready to ship
+- PostgreSQL service config for CI integration tests — added in Phase 0
+- CD pipeline — deferred until there is a server component to deploy
 
 ## Related docs
 
