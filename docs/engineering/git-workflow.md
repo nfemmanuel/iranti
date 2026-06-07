@@ -1,6 +1,6 @@
 # Git workflow
 
-**Status:** template  
+**Status:** draft  
 **[Back to map](../MAP.md)**
 
 ---
@@ -12,12 +12,11 @@ Define how git is used in the iranti-core project: branch naming, commit format,
 ## Branch model
 
 - `main` — always deployable, always passing CI
-- `dev` — integration branch, or work directly on `main` (decide which)
 - Feature branches — `feature/<short-description>`
 - Fix branches — `fix/<short-description>`
 - Phase branches — `phase/<n>-<description>` (e.g. `phase/1-library`)
 
-_Decide which model to use before the first commit._
+Feature branches only, no dev buffer. During the rebuild, feature branches come off `iranti-core`. After the rebuild merges to main, feature branches come off `main`.
 
 ## Commit format
 
@@ -52,7 +51,7 @@ docs(schema): add media table placeholder columns
 - PRs are reviewed before merging — even a self-review with fresh eyes counts
 - PR description includes: what changed, why, how to test
 - PRs pass CI before merge
-- Squash or rebase to keep history clean (decide which before the first PR)
+- Squash merge only. All commits on a feature branch collapse into one clean commit on the target branch. Delete the feature branch after merge.
 
 ## What not to commit
 
@@ -68,13 +67,23 @@ docs(schema): add media table placeholder columns
 - Phase completions are tagged: `v0.1.0` = Phase 1 done, `v0.2.0` = Phase 2 done, etc.
 - Breaking changes bump the major version
 
+## Rebuild branch strategy
+
+The iranti-core rebuild lives on an orphan branch (`iranti-core`) with no shared history with main. Feature branches during the rebuild come off `iranti-core`.
+
+When the rebuild is complete and ready to ship:
+
+    git checkout main
+    git merge iranti-core --allow-unrelated-histories
+
+Main retains its full history. The rebuild history lives on the other side of the merge.
+
 ## Open items
 
-_Fill in:_
-- Branch model decision (main only vs. main + dev)
-- Merge strategy decision (squash vs. rebase)
-- GitHub repository name and visibility
-- Branch protection rules for `main`
+- Branch model: feature branches only, off iranti-core during rebuild
+- Merge strategy: squash merge
+- GitHub repository: existing iranti repo (public)
+- Branch protection on main: protect from direct pushes, require PR. Set this up in GitHub repo settings.
 
 ## Related docs
 

@@ -1,0 +1,144 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "iranti",
+  "colors": {
+    "primary": "#6366F1",
+    "light": "#818CF8",
+    "dark": "#4338CA"
+  },
+  "favicon": "/favicon.svg",
+  "navigation": {
+    "groups": [
+      {
+        "group": "Overview",
+        "pages": [
+          "docs/MAP"
+        ]
+      },
+      {
+        "group": "Rough notes",
+        "pages": [
+          "docs/rough-notes/early-thoughts",
+          "docs/rough-notes/iranti-core-prd"
+        ]
+      },
+      {
+        "group": "Package PRDs",
+        "pages": [
+          "docs/prds/iranti-core",
+          "docs/prds/iranti-web",
+          "docs/prds/iranti-control-plane",
+          "docs/prds/iranti-benchmarking"
+        ]
+      },
+      {
+        "group": "Memory and storage",
+        "pages": [
+          "docs/specs/memory-storage/fact-storage",
+          "docs/specs/memory-storage/session-grouping",
+          "docs/specs/memory-storage/knowledge-graph",
+          "docs/specs/memory-storage/checkpoints",
+          "docs/specs/memory-storage/rules-and-preferences",
+          "docs/specs/memory-storage/media-storage"
+        ]
+      },
+      {
+        "group": "Retrieval",
+        "pages": [
+          "docs/specs/retrieval/two-pass-retrieval",
+          "docs/specs/retrieval/context-window-observation",
+          "docs/specs/retrieval/reactive-retrieval",
+          "docs/specs/retrieval/periodic-drift-check",
+          "docs/specs/retrieval/graph-traversal-retrieval"
+        ]
+      },
+      {
+        "group": "Memory lifecycle",
+        "pages": [
+          "docs/specs/lifecycle/memory-decay",
+          "docs/specs/lifecycle/hebbian-reinforcement",
+          "docs/specs/lifecycle/archive",
+          "docs/specs/lifecycle/conflict-detection",
+          "docs/specs/lifecycle/human-conflict-resolution"
+        ]
+      },
+      {
+        "group": "Intelligence",
+        "pages": [
+          "docs/specs/intelligence/source-reliability",
+          "docs/specs/intelligence/autonomous-write-routing",
+          "docs/specs/intelligence/bidirectional-attendant"
+        ]
+      },
+      {
+        "group": "Integration",
+        "pages": [
+          "docs/specs/integration/mcp-host-support",
+          "docs/specs/integration/cli",
+          "docs/specs/integration/sdk",
+          "docs/specs/integration/python-client",
+          "docs/specs/integration/dev-mode",
+          "docs/specs/integration/graph-backend-abstraction"
+        ]
+      },
+      {
+        "group": "Observability and accounts",
+        "pages": [
+          "docs/specs/observability/usage-analytics",
+          "docs/specs/observability/cloud-account-backup",
+          "docs/specs/observability/session-ledger",
+          "docs/specs/observability/agent-registry",
+          "docs/specs/observability/protocol-enforcement",
+          "docs/specs/observability/system-self-awareness"
+        ]
+      },
+      {
+        "group": "Technical design",
+        "pages": [
+          "docs/technical/schema",
+          "docs/technical/graph-backend-interface",
+          "docs/technical/mcp-tool-surface",
+          "docs/technical/security-architecture",
+          "docs/technical/access-control"
+        ]
+      },
+      {
+        "group": "Engineering",
+        "pages": [
+          "docs/engineering/coding-standards",
+          "docs/engineering/git-workflow",
+          "docs/engineering/ci-cd",
+          "docs/engineering/testing-strategy"
+        ]
+      },
+      {
+        "group": "Deferred",
+        "pages": [
+          "docs/deferred/cloud-account",
+          "docs/deferred/media-storage",
+          "docs/deferred/cold-start-learning",
+          "docs/deferred/team-collaboration",
+          "docs/deferred/cloud-encryption",
+          "docs/deferred/gdpr-compliance"
+        ]
+      }
+    ]
+  },
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "navbar": {
+    "primary": {
+      "type": "button",
+      "label": "GitHub",
+      "href": "https://github.com/YOUR_USERNAME/iranti"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/YOUR_USERNAME/iranti"
+    }
+  }
+}
