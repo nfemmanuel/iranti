@@ -15,6 +15,8 @@ Market and competitive intelligence.
 | Document | Status | Description |
 |---|---|---|
 | [Competitive landscape](research/competitive-landscape.md) | `research` | Who is building in the AI memory space, what they have built, and where iranti is differentiated. Sourced and adversarially verified. |
+| [Go-to-market playbook](research/go-to-market-playbook.md) | `research` | How Mem0, Zep, MemGPT, and Supermemory gained traction — what is copyable, what was timing, and what iranti's launch strategy should look like. |
+| [RAG and context engineering](research/rag-and-context-engineering.md) | `research` | Plain-English primer on RAG, context engineering, and where iranti sits in the technical landscape. Written for a non-engineer audience. |
 
 ---
 

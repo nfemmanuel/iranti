@@ -19,7 +19,9 @@
       {
         "group": "Research",
         "pages": [
-          "docs/research/competitive-landscape"
+          "docs/research/competitive-landscape",
+          "docs/research/go-to-market-playbook",
+          "docs/research/rag-and-context-engineering"
         ]
       },
       {
