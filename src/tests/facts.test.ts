@@ -1,11 +1,12 @@
 // Integration tests — facts.ts
 //
 // The most complex module — tests cover:
-//   writeFact (create, upsert, archive snapshot, protected guard, stability preservation)
-//   readFact  (not found, access tracking, archived exclusion)
-//   readFactsByEntity (ordering, empty entity)
+//   writeFact (create, upsert, archive snapshot, protected guard, stability preservation,
+//              surface validation, tenantId isolation, updatedAt)
+//   readFact  (not found, access tracking, archived exclusion, tenant scoping)
+//   readFactsByEntity (ordering, empty entity, tenant scoping)
 //   archiveFact (marks archived, creates archive row, no-op on already-archived)
-//   getFactHistory / getFactHistoryByKey
+//   getFactHistory / getFactHistoryByKey (including tenant scoping)
 
 import { randomUUID } from "crypto";
 import { eq } from "drizzle-orm";
@@ -13,6 +14,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { db, pool } from "../db/connection.js";
 import { facts } from "../db/schema.js";
 import {
+  VALID_SURFACES,
   archiveFact,
   getFactById,
   getFactHistory,
@@ -328,5 +330,158 @@ describe("getFactHistoryByKey", () => {
     expect(history).toHaveLength(2);
     expect(history[0]!.value).toBe("b"); // most recently superseded
     expect(history[1]!.value).toBe("a");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Surface validation
+// ---------------------------------------------------------------------------
+
+describe("surface validation", () => {
+  it("accepts all valid surface values", async () => {
+    for (const surface of VALID_SURFACES) {
+      const entityId = randomUUID();
+      const fact = await writeFact({
+        entityType: "user",
+        entityId,
+        key: "surface-test",
+        value: "ok",
+        source: "test",
+        surface,
+      });
+      expect(fact.surface).toBe(surface);
+    }
+  });
+
+  it("throws for an invalid surface value", async () => {
+    await expect(
+      writeFact({
+        entityType: "user",
+        entityId: randomUUID(),
+        key: "bad-surface",
+        value: "ok",
+        source: "test",
+        surface: "myspace",
+      }),
+    ).rejects.toThrow("Invalid surface");
+  });
+
+  it("accepts null surface (facts written outside a known host)", async () => {
+    const fact = await writeFact({
+      entityType: "user",
+      entityId: randomUUID(),
+      key: "no-surface",
+      value: "ok",
+      source: "test",
+      surface: null,
+    });
+    expect(fact.surface).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// updatedAt
+// ---------------------------------------------------------------------------
+
+describe("updatedAt", () => {
+  it("is set on initial write", async () => {
+    const fact = await writeFact({
+      entityType: "user",
+      entityId: randomUUID(),
+      key: "ts-test",
+      value: "v1",
+      source: "test",
+    });
+
+    expect(fact.updatedAt).toBeInstanceOf(Date);
+    expect(fact.createdAt).toBeInstanceOf(Date);
+  });
+
+  it("is updated when the value changes", async () => {
+    const entityId = randomUUID();
+
+    const f1 = await writeFact({
+      entityType: "user",
+      entityId,
+      key: "ts-key",
+      value: "original",
+      source: "test",
+    });
+
+    // Small sleep to ensure a measurable time difference
+    await new Promise((r) => setTimeout(r, 10));
+
+    await writeFact({
+      entityType: "user",
+      entityId,
+      key: "ts-key",
+      value: "updated",
+      source: "test",
+    });
+
+    const updated = await getFactById(f1.id);
+    expect(updated!.updatedAt.getTime()).toBeGreaterThan(f1.updatedAt.getTime());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// tenantId isolation
+// ---------------------------------------------------------------------------
+
+describe("tenantId isolation", () => {
+  it("two tenants can hold independent values for the same entity+key", async () => {
+    const entityId = randomUUID();
+
+    await writeFact({
+      entityType: "user",
+      entityId,
+      key: "preference",
+      value: "dark-mode",
+      source: "test",
+      tenantId: "tenant-a",
+    });
+
+    await writeFact({
+      entityType: "user",
+      entityId,
+      key: "preference",
+      value: "light-mode",
+      source: "test",
+      tenantId: "tenant-b",
+    });
+
+    const forA = await readFact("user", entityId, "preference", "tenant-a");
+    const forB = await readFact("user", entityId, "preference", "tenant-b");
+
+    expect(forA?.value).toBe("dark-mode");
+    expect(forB?.value).toBe("light-mode");
+  });
+
+  it("readFactsByEntity only returns facts for the specified tenant", async () => {
+    const entityId = randomUUID();
+
+    await writeFact({
+      entityType: "user",
+      entityId,
+      key: "a",
+      value: "tenant-a-value",
+      source: "test",
+      tenantId: "tenant-a",
+    });
+
+    await writeFact({
+      entityType: "user",
+      entityId,
+      key: "b",
+      value: "tenant-b-value",
+      source: "test",
+      tenantId: "tenant-b",
+    });
+
+    const forA = await readFactsByEntity("user", entityId, "tenant-a");
+    const forB = await readFactsByEntity("user", entityId, "tenant-b");
+
+    expect(forA.every((f) => f.value === "tenant-a-value")).toBe(true);
+    expect(forB.every((f) => f.value === "tenant-b-value")).toBe(true);
   });
 });

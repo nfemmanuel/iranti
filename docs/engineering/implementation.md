@@ -29,7 +29,7 @@ These are explicit out-of-scope boundaries. Do not let scope creep pull us in th
 
 - **Not a chat history system.** We store durable facts, not raw message logs. Conversation history belongs in the host's own context window.
 - **Not a search engine.** Retrieval in early phases is exact-match and entity-scoped. Semantic/vector search comes in Phase 3.
-- **Not a rules engine.** We store rules as facts. We do not evaluate or enforce them — that is the agent's job.
+- **Not a rules engine.** iranti stores behavioral rules in a dedicated `rules` table and surfaces them for injection into agent context via `iranti_attend`. It does not evaluate, enforce, or act on them — that is the agent's job. Rules are plain natural language sentences that agents read and follow. The value of iranti's rules system is convergence: every AI host (Claude, ChatGPT, Gemini) sees the same rules on every `iranti_attend` call, which drives consistent behavior across platforms.
 - **Not a multi-user SaaS (yet).** Phase 0-4 are single-user. Multi-user auth and tenancy is Phase 5.
 - **Not a database for arbitrary app data.** Facts are about AI memory. Do not repurpose this as a general-purpose app database.
 
@@ -95,7 +95,7 @@ These are explicit out-of-scope boundaries. Do not let scope creep pull us in th
 - No multi-user auth
 - No entity aliases or relationships
 
-**Status:** Schema and library files written. Migrations not yet run. Tests not yet written.
+**Status:** ✅ Complete. Schema, migrations (0000–0002), library CRUD, 46 integration tests, CI with PostgreSQL service — all committed on `iranti-core` (`7fadef5`).
 
 ---
 
@@ -110,7 +110,13 @@ These are explicit out-of-scope boundaries. Do not let scope creep pull us in th
 - Session management (open/close via MCP)
 - Basic protocol enforcement (attend before write)
 
-**Key decision:** MCP server is stateless. All state lives in PostgreSQL. Multiple MCP instances can connect to the same database.
+**Key decision — single-instance for Phase 1:** The MCP server is stateless in that all durable state lives in PostgreSQL. However, Phase 1 is designed for a **single MCP server instance** (one process, one user). Concurrent writes from multiple simultaneous instances are not prevented by Phase 1 code. Multi-instance concurrency (advisory locks, write serialization) is deferred to Phase 2. Do not run two Phase 1 servers against the same database expecting safe concurrent writes.
+
+**Tools:**
+- `iranti_attend` — inject relevant facts, rules, and the active checkpoint into the agent's context before responding
+- `iranti_write` — store a learned fact
+- `iranti_write_rule` — store a behavioral rule
+- `iranti_archive` — mark a fact as no longer current
 
 ---
 
@@ -209,6 +215,7 @@ Rules are fundamentally different from facts:
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | UUID PK | |
+| `tenantId` | TEXT NOT NULL DEFAULT `'default'` | Tenant scoping seam. All Phase 0–4 rows use `'default'`. Phase 5 populates real tenant IDs. |
 | `entityType` | TEXT NOT NULL | Scoping tier: `system`, `user`, `project` |
 | `entityId` | TEXT NOT NULL | `global`, `nf`, `iranti-core`, etc. |
 | `text` | TEXT NOT NULL | The rule in plain language. A full sentence the agent can read. |
@@ -279,24 +286,31 @@ The core primitive. One fact = one piece of information about one entity.
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | UUID PK | Does NOT change on upsert. The UUID is stable for the lifetime of the fact. |
+| `tenantId` | TEXT NOT NULL DEFAULT `'default'` | Tenant scoping seam. All Phase 0–4 rows use `'default'`. Phase 5 populates real tenant IDs. Part of the unique constraint. |
 | `entityType` | TEXT NOT NULL | |
 | `entityId` | TEXT NOT NULL | |
 | `key` | TEXT NOT NULL | What this fact is about: `timezone`, `preferred_language`, `tech_stack`. |
 | `value` | TEXT NOT NULL | The current value. Plain text. Structured data as JSON string. |
 | `confidence` | REAL NOT NULL DEFAULT 1.0 | 0.0–1.0. Starts at 1.0, decays over time in Phase 4. |
-| `source` | TEXT NOT NULL | Who/what wrote this: `claude-code`, `chatgpt`, `manual`. |
-| `surface` | TEXT | Which AI host surface: `claude`, `chatgpt`, `gemini`, `deepseek`, `dev_cli`, `web_ui`, `manual`. Nullable for writes not from a specific host. |
+| `source` | TEXT NOT NULL | **Free-text label** for what wrote this fact: `claude-code`, `chatgpt-session`, `manual`. This is not the surface enum — it is a human-readable provenance label. |
+| `surface` | TEXT | **Validated enum** for which AI host platform wrote this fact: `claude`, `chatgpt`, `gemini`, `deepseek`, `dev_cli`, `web_ui`, `manual`. Nullable for writes not from a known host. Validated at write time by `assertValidSurface()` against `VALID_SURFACES`. |
+| `agentId` | UUID FK → agents | **FK to registered agent**. NULL if written outside an agent session. Enables per-agent auditing. |
 | `sessionId` | UUID FK → sessions | NULL if not in a session. |
-| `agentId` | UUID FK → agents | NULL if written outside an agent session. |
 | `isProtected` | BOOLEAN NOT NULL DEFAULT FALSE | If true, `writeFact` will refuse to overwrite. Only `adminOverrideFact` can change protected facts (Phase 2). |
 | `isArchived` | BOOLEAN NOT NULL DEFAULT FALSE | True = this fact is inactive. Does not appear in normal reads. |
 | `createdAt` | TIMESTAMPTZ NOT NULL DEFAULT NOW() | Set on creation, never updated. |
-| `lastAccessedAt` | TIMESTAMPTZ NOT NULL DEFAULT NOW() | Updated on every read. Feeds Phase 4 decay. |
-| `stabilityScore` | REAL NOT NULL DEFAULT 1.0 | How resistant this fact is to decay. Incremented on every read. |
+| `updatedAt` | TIMESTAMPTZ NOT NULL DEFAULT NOW() | Updated on every **write**. Distinct from `lastAccessedAt` — `updatedAt` only changes when the value changes; `lastAccessedAt` changes on reads. |
+| `lastAccessedAt` | TIMESTAMPTZ NOT NULL DEFAULT NOW() | Updated on every **read** (`readFact`, `readFactsByEntity`). Feeds Phase 4 decay. |
+| `stabilityScore` | REAL NOT NULL DEFAULT 1.0 | How resistant this fact is to decay. Incremented on every read in Phase 4. |
 | `accessCount` | INTEGER NOT NULL DEFAULT 0 | Lifetime read count. Feeds Phase 4 Hebbian reinforcement. |
 | `metadata` | JSONB | Free-form extra data. Used by agents for provenance, context, etc. |
 
-**Unique constraint:** `(entityType, entityId, key)` — one active value per key per entity.
+**Unique constraint:** `(tenantId, entityType, entityId, key)` — one active value per key per entity per tenant.
+
+**Provenance — three distinct fields:**
+- `source` (TEXT) — a free-text label describing *what* wrote the fact. Not validated. Examples: `"claude-code-session"`, `"manual"`, `"iranti-cli"`.
+- `surface` (TEXT enum) — the AI host *platform* that was active when the fact was written. Validated at write time against `VALID_SURFACES`. Examples: `"claude"`, `"chatgpt"`, `"gemini"`.
+- `agentId` (UUID FK) — the registered iranti agent that wrote the fact. Enables per-agent fact queries and future per-agent permissions.
 
 **Key behaviors:**
 - Writing a fact with the same `(entityType, entityId, key)` as an existing fact will: (1) snapshot the old value to `fact_archive` with `archivedReason = 'superseded'`, then (2) update the fact in place. The UUID does not change.
@@ -314,6 +328,7 @@ Every time a fact's value changes, or a fact is manually archived, a snapshot of
 |--------|------|-------|
 | `id` | UUID PK | |
 | `factId` | UUID NOT NULL FK → facts | The fact this is a snapshot of. Use this to query history for a given fact. |
+| `tenantId` | TEXT NOT NULL DEFAULT `'default'` | Tenant scoping seam. Denormalized from the parent fact for direct querying without a join. |
 | `entityType` | TEXT NOT NULL | Denormalized for direct querying without a join. |
 | `entityId` | TEXT NOT NULL | |
 | `key` | TEXT NOT NULL | |
@@ -331,7 +346,7 @@ Every time a fact's value changes, or a fact is manually archived, a snapshot of
 
 **Indexes:**
 - `(factId, archivedAt DESC)` — get full history of a specific fact
-- `(entityType, entityId, key, archivedAt DESC)` — get history of a fact by entity+key (without needing factId)
+- `(tenantId, entityType, entityId, key, archivedAt DESC)` — get history of a fact by entity+key (without needing factId); tenantId-scoped for Phase 5 isolation
 
 **History query pattern:**
 ```sql
@@ -361,6 +376,14 @@ Drizzle also produces better SQL for complex queries (recursive CTEs, lateral jo
 ### Why a separate `fact_archive` table rather than a soft-delete column
 
 The `isArchived` boolean approach loses old values permanently. If you overwrite `user/alice/timezone` from `UTC+1` to `UTC+2`, there is no record that it was ever `UTC+1`. The separate archive table preserves the full history of every value change, which is what "tracing a fact through time" requires. It also lets the future archivist daemon store richer metadata (decay reason, conflict resolution outcome, etc.) without polluting the active facts table.
+
+### Why `tenantId` exists from Phase 0 as a seam
+
+Phase 5 adds multi-tenancy. Without a `tenantId` column, Phase 5 requires a migration that adds the column to a potentially large `facts` table and rewrites the unique constraint — both expensive operations under load.
+
+By adding `tenantId TEXT NOT NULL DEFAULT 'default'` to `facts`, `fact_archive`, and `rules` from Phase 0, and including it in the unique constraint from day one, Phase 5 becomes a populate-and-reassign operation: existing rows get `tenantId = 'default'`, new tenants get their own IDs. No structural migration required.
+
+Cost in Phase 0: one extra TEXT column per row with a static default. That is essentially free.
 
 ### Why facts are never hard-deleted
 
@@ -420,25 +443,34 @@ The original iranti grew organically over time. Reading it is like reading the r
 | Prisma | Drizzle + postgres.js | No binary proxy, better complex SQL, better performance. |
 | Integer PKs | UUID PKs | No sequential enumeration vulnerability. Safe across distributed nodes. |
 | Single monolithic archive table | `fact_archive` (simple, Phase 0) + richer archive (Phase 2) | Start simple, add complexity when it's earned. |
+| No `tenantId` until multi-user migration | `tenantId TEXT NOT NULL DEFAULT 'default'` from Phase 0 | Eliminates a breaking structural migration when Phase 5 ships. The column and unique constraint are in place; Phase 5 just populates non-default values. |
+| No surface validation (application accepted any string) | `VALID_SURFACES` constant + `assertValidSurface()` in `facts.ts` | The `surface` column only contains known AI host values. Prevents silent data drift as new hosts are added — unknown surfaces fail loudly. |
+| One timestamp (`lastAccessedAt`) tracking all mutations | `updatedAt` (writes) + `lastAccessedAt` (reads) | Two distinct signals. `updatedAt` answers "when was this fact last written?" `lastAccessedAt` answers "when was this fact last read?" Phase 4 decay uses `lastAccessedAt`. Auditing uses `updatedAt`. |
 
 ---
 
 ## Current status
 
+**Phase 0 is complete and committed** (`7fadef5` — 29 files, 4740 insertions). Phase 1 (MCP server) is next.
+
 | Item | Status |
 |------|--------|
-| Schema written | Done — `src/db/schema.ts` (6 tables) |
-| DB connection | Done — `src/db/connection.ts` |
-| Library CRUD | Done — agents.ts, sessions.ts, entities.ts, facts.ts, rules.ts |
-| `fact_archive` support in facts.ts | Done — writeFact and archiveFact both snapshot to archive |
-| `src/db/migrate.ts` script | Done — Node.js migrator (drizzle-kit migrate was silently failing on Windows) |
-| Migration 0000 — base tables | Done — `drizzle/0000_legal_ultimates.sql` applied |
-| Migration 0001 — rules table | Done — `drizzle/0001_next_black_bolt.sql` applied |
-| All 6 tables live | Done — iranti_dev on localhost:5435 |
-| Implementation reference doc | Done — this file |
-| Integration tests | Not yet written |
-| CI PostgreSQL service | Not yet added to `.github/workflows/ci.yml` |
-| Phase 0 committed | Not yet — nothing from Phase 0 is committed |
+| Schema written | ✅ `src/db/schema.ts` (6 tables) |
+| DB connection | ✅ `src/db/connection.ts` |
+| Library CRUD | ✅ agents.ts, sessions.ts, entities.ts, facts.ts, rules.ts |
+| `fact_archive` support in facts.ts | ✅ writeFact and archiveFact both snapshot to archive |
+| `src/db/migrate.ts` script | ✅ Node.js migrator (drizzle-kit migrate was silently failing on Windows) |
+| Migration 0000 — base tables | ✅ `drizzle/0000_legal_ultimates.sql` applied |
+| Migration 0001 — rules table | ✅ `drizzle/0001_next_black_bolt.sql` applied |
+| Migration 0002 — tenantId seam + updatedAt | ✅ `drizzle/0002_exotic_doctor_doom.sql` applied |
+| tenantId on facts, fact_archive, rules | ✅ `DEFAULT 'default'`, included in unique constraint |
+| updatedAt on facts | ✅ Distinct from lastAccessedAt |
+| Surface validation | ✅ `VALID_SURFACES` + `assertValidSurface()` in facts.ts |
+| All 6 tables live | ✅ iranti_dev on localhost:5435 |
+| Integration tests | ✅ 46/46 passing (5 test files) |
+| CI PostgreSQL service | ✅ `.github/workflows/ci.yml` with `services: postgres:17-alpine` |
+| Implementation reference doc | ✅ This file |
+| Phase 0 committed | ✅ commit `7fadef5` on `iranti-core` |
 
 **Docker note:** iranti-core uses port 5435 (not 5432) because the host machine has native PostgreSQL processes on both 5432 and 5433. The `docker-compose.yml` maps `5435:5432`. The `.env` DATABASE_URL uses port 5435.
 
@@ -454,4 +486,4 @@ These items require a decision before the relevant phase begins. They are listed
 | pgvector vs Qdrant vs Chroma | Phase 3 | All three existed in v0. pgvector is simplest (same DB). | pgvector — fewer moving parts |
 | Graph: recursive CTE vs Apache AGE | Phase 2 | Recursive CTE is pure SQL, no extension. AGE is Cypher but adds an extension dep. | Recursive CTE for Phase 2, revisit if query complexity grows |
 | MCP transport | Phase 1 | stdio (local) or HTTP+SSE (remote) | stdio for Phase 1, HTTP for Phase 5 |
-| Surface enum: string vs PostgreSQL enum type | Phase 0 | PostgreSQL enum is type-safe but hard to extend; text column is flexible | TEXT with application-level validation (Zod enum) |
+| Surface enum: string vs PostgreSQL enum type | Phase 0 ✅ | PostgreSQL enum is type-safe but hard to extend; text column is flexible | TEXT with application-level validation via `VALID_SURFACES` constant + `assertValidSurface()` in `facts.ts`. No Zod dependency needed. |

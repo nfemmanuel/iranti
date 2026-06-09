@@ -15,6 +15,13 @@
       "when": 1780997099561,
       "tag": "0001_next_black_bolt",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781033075893,
+      "tag": "0002_exotic_doctor_doom",
+      "breakpoints": true
     }
   ]
 }

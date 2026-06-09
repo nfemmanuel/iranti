@@ -119,6 +119,12 @@ export const facts = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
 
+    // Tenancy seam — always 'default' in Phase 0–4 (single-user).
+    // Phase 5 (multi-user SaaS) populates this with the real tenant identifier.
+    // Included in the unique constraint from day one so Phase 5 never needs to
+    // perform a breaking constraint migration on a live, populated table.
+    tenantId: text("tenant_id").notNull().default("default"),
+
     // Which entity this fact is about.
     entityType: text("entity_type").notNull(),
     entityId: text("entity_id").notNull(),
@@ -152,6 +158,13 @@ export const facts = pgTable(
       .notNull()
       .defaultNow(),
 
+    // Updated on every write to this row (value change, source update, etc.).
+    // Distinct from lastAccessedAt — reads do not change updatedAt.
+    // Answers "when was this fact last written?" without querying fact_archive.
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+
     // Updated every time this fact is retrieved. Used to calculate memory decay.
     lastAccessedAt: timestamp("last_accessed_at", { withTimezone: true })
       .notNull()
@@ -179,8 +192,10 @@ export const facts = pgTable(
     metadata: jsonb("metadata"),
   },
   (t) => [
-    // One current value per (entity, key). Writing to the same key is an upsert.
-    unique("facts_entity_key_uniq").on(t.entityType, t.entityId, t.key),
+    // One current value per (tenant, entity, key). Writing to the same key
+    // within the same tenant is an upsert. Different tenants can hold
+    // independent values for the same entity+key combination.
+    unique("facts_tenant_entity_key_uniq").on(t.tenantId, t.entityType, t.entityId, t.key),
   ],
 );
 
@@ -207,6 +222,10 @@ export const factArchive = pgTable(
     factId: uuid("fact_id")
       .notNull()
       .references(() => facts.id),
+
+    // Tenancy seam — copied from the fact at snapshot time.
+    // Required to make getFactHistoryByKey() tenant-safe without a join.
+    tenantId: text("tenant_id").notNull().default("default"),
 
     // Denormalized identity columns from the fact at snapshot time.
     // Stored here so you can query history without joining to facts.
@@ -244,8 +263,9 @@ export const factArchive = pgTable(
   (t) => [
     // Primary history query: all snapshots for a specific fact, newest first.
     index("fact_archive_fact_id_idx").on(t.factId, t.archivedAt),
-    // History by entity + key — useful when you don't know the factId yet.
+    // History by tenant + entity + key — used by getFactHistoryByKey().
     index("fact_archive_entity_key_idx").on(
+      t.tenantId,
       t.entityType,
       t.entityId,
       t.key,
@@ -291,6 +311,11 @@ export const rules = pgTable(
   "rules",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+
+    // Tenancy seam — see facts.tenantId for the full explanation.
+    // Rules are tenant-scoped: each tenant has their own set of rules,
+    // including their own system/global rules.
+    tenantId: text("tenant_id").notNull().default("default"),
 
     // Which entity this rule is scoped to.
     // See entity scoping convention above.

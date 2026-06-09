@@ -56,6 +56,7 @@ export async function writeRule(
     | "text"
     | "source"
     | "priority"
+    | "tenantId"
     | "agentId"
     | "sessionId"
     | "metadata"
@@ -78,9 +79,11 @@ export async function writeRule(
 export async function getRulesForEntity(
   entityType: string,
   entityId: string,
+  tenantId: string = "default",
 ): Promise<Rule[]> {
   return db.query.rules.findMany({
     where: and(
+      eq(rules.tenantId, tenantId),
       eq(rules.entityType, entityType),
       eq(rules.entityId, entityId),
       eq(rules.isActive, true),
@@ -107,6 +110,7 @@ export async function getRulesForEntity(
 //   → returns: all system/global + all user/nf + all project/iranti-core rules
 export async function getRulesForAttend(
   entityHints: Array<{ entityType: string; entityId: string }>,
+  tenantId: string = "default",
 ): Promise<Rule[]> {
   // Always start with system/global. De-duplicate in case the caller
   // already included it in the hints list.
@@ -124,9 +128,10 @@ export async function getRulesForAttend(
     )
     .filter((c): c is SQL => c !== undefined);
 
-  // Single query: active rules matching any of the scoped entities.
+  // Single query: active rules for this tenant matching any of the scoped entities.
   return db.query.rules.findMany({
     where: and(
+      eq(rules.tenantId, tenantId),
       eq(rules.isActive, true),
       // or() with a single element works the same as that element alone.
       or(...entityConditions),

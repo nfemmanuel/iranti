@@ -27,6 +27,34 @@ import {
 } from "../db/schema.js";
 
 // ---------------------------------------------------------------------------
+// Surface validation
+// ---------------------------------------------------------------------------
+
+// Allowed AI host surfaces. Every fact can carry the name of the platform
+// that wrote it. This is enforced at write time so the column stays clean.
+// Matches the Surface enum from iranti v0.
+export const VALID_SURFACES = [
+  "claude",
+  "chatgpt",
+  "gemini",
+  "deepseek",
+  "dev_cli",
+  "web_ui",
+  "manual",
+] as const;
+
+export type FactSurface = (typeof VALID_SURFACES)[number];
+
+function assertValidSurface(surface: string | null | undefined): void {
+  if (surface == null) return;
+  if (!(VALID_SURFACES as readonly string[]).includes(surface)) {
+    throw new Error(
+      `Invalid surface "${surface}". Allowed values: ${VALID_SURFACES.join(", ")}.`,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Write
 // ---------------------------------------------------------------------------
 
@@ -51,15 +79,22 @@ export async function writeFact(
     | "value"
     | "source"
     | "surface"
+    | "tenantId"
     | "sessionId"
     | "agentId"
     | "metadata"
   >,
 ): Promise<Fact> {
+  // Validate surface before touching the database.
+  assertValidSurface(input.surface);
+
+  const tenantId = input.tenantId ?? "default";
+
   return db.transaction(async (tx) => {
-    // Step 1: Check whether a fact already exists for this key.
+    // Step 1: Check whether a fact already exists for this key within this tenant.
     const existing = await tx.query.facts.findFirst({
       where: and(
+        eq(facts.tenantId, tenantId),
         eq(facts.entityType, input.entityType),
         eq(facts.entityId, input.entityId),
         eq(facts.key, input.key),
@@ -84,6 +119,7 @@ export async function writeFact(
     if (existing && existing.value !== input.value) {
       await tx.insert(factArchive).values({
         factId: existing.id,
+        tenantId: existing.tenantId,
         entityType: existing.entityType,
         entityId: existing.entityId,
         key: existing.key,
@@ -102,13 +138,14 @@ export async function writeFact(
 
     // Step 4: Upsert the fact.
     // On a brand-new fact: inserts a fresh row with all defaults.
-    // On an existing fact: updates value, source, surface, session, and
-    // lastAccessedAt. Does NOT reset stabilityScore or accessCount — those
+    // On an existing fact: updates value, source, surface, session, updatedAt,
+    // and lastAccessedAt. Does NOT reset stabilityScore or accessCount — those
     // are cumulative signals that survive fact updates.
     const [fact] = await tx
       .insert(facts)
       .values({
         ...input,
+        tenantId,
         confidence: 1.0,
         stabilityScore: existing?.stabilityScore ?? 1.0,
         accessCount: existing?.accessCount ?? 0,
@@ -116,8 +153,8 @@ export async function writeFact(
         isArchived: false,
       })
       .onConflictDoUpdate({
-        // Conflict target: same entity + key.
-        target: [facts.entityType, facts.entityId, facts.key],
+        // Conflict target: same tenant + entity + key.
+        target: [facts.tenantId, facts.entityType, facts.entityId, facts.key],
         set: {
           value: input.value,
           confidence: 1.0,
@@ -126,6 +163,7 @@ export async function writeFact(
           sessionId: input.sessionId,
           agentId: input.agentId,
           metadata: input.metadata,
+          updatedAt: new Date(),
           lastAccessedAt: new Date(),
           // stabilityScore and accessCount are intentionally not reset.
         },
@@ -146,9 +184,11 @@ export async function readFact(
   entityType: string,
   entityId: string,
   key: string,
+  tenantId: string = "default",
 ): Promise<Fact | undefined> {
   const fact = await db.query.facts.findFirst({
     where: and(
+      eq(facts.tenantId, tenantId),
       eq(facts.entityType, entityType),
       eq(facts.entityId, entityId),
       eq(facts.key, key),
@@ -175,9 +215,11 @@ export async function readFact(
 export async function readFactsByEntity(
   entityType: string,
   entityId: string,
+  tenantId: string = "default",
 ): Promise<Fact[]> {
   const found = await db.query.facts.findMany({
     where: and(
+      eq(facts.tenantId, tenantId),
       eq(facts.entityType, entityType),
       eq(facts.entityId, entityId),
       eq(facts.isArchived, false),
@@ -225,6 +267,7 @@ export async function archiveFact(factId: string): Promise<void> {
     // Snapshot the current value to fact_archive before marking it inactive.
     await tx.insert(factArchive).values({
       factId: fact.id,
+      tenantId: fact.tenantId,
       entityType: fact.entityType,
       entityId: fact.entityId,
       key: fact.key,
@@ -268,9 +311,11 @@ export async function getFactHistoryByKey(
   entityType: string,
   entityId: string,
   key: string,
+  tenantId: string = "default",
 ): Promise<FactArchive[]> {
   return db.query.factArchive.findMany({
     where: and(
+      eq(factArchive.tenantId, tenantId),
       eq(factArchive.entityType, entityType),
       eq(factArchive.entityId, entityId),
       eq(factArchive.key, key),
