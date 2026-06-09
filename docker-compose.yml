@@ -1,0 +1,39 @@
+# Local development database.
+#
+# Starts a PostgreSQL 17 instance pre-configured for iranti-core.
+# Run with: pnpm db:up
+# Stop with: pnpm db:down
+#
+# Connection string: postgresql://iranti:iranti_dev@localhost:5435/iranti_dev
+# (matches the DATABASE_URL in .env and .env.example)
+#
+# Port 5432 is reserved for the host's native PostgreSQL installation.
+# iranti-core uses 5435 to avoid the conflict.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: iranti_dev
+      POSTGRES_USER: iranti
+      POSTGRES_PASSWORD: iranti_dev
+      # For local dev only: allow all TCP connections without a password check.
+      # Docker's NAT rewrites source IPs so the 127.0.0.1/::1 trust rules in
+      # pg_hba.conf never match connections from the host. Trust all hosts here
+      # since this is a dev-only container — never do this in production.
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      # Host port 5435 → container port 5432.
+      # 5432 is already in use by the host's native PostgreSQL installation.
+      - "5435:5432"
+    volumes:
+      # Persist data between container restarts. Remove this volume to start fresh.
+      - iranti_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U iranti -d iranti_dev -p 5432"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  iranti_postgres_data:

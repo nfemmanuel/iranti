@@ -127,3 +127,9 @@ Write the single-sentence problem statement. Everything else can be figured out.
 ---
 
 *Research conducted 2026-06-07. Primary sources: HN threads 37901902, 41447317, 35889826 (direct fetch). GitHub stars cross-checked. ProductHunt data from supermemory-mcp README badge. TechCrunch for funding figures.*
+
+---
+
+## Tools to evaluate for GTM
+
+**avalidate.com** — flagged 2026-06-09 as a potential GTM tool to evaluate when we get to launch phase. Investigate: what it does, whether it fits the iranti GTM motion, and if so, where in the launch sequence it belongs.

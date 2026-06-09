@@ -24,6 +24,31 @@ jobs:
     name: Type-check, lint, test
     runs-on: ubuntu-latest  # GitHub provides a fresh Linux machine for each run
 
+    # DATABASE_URL is set here so the migration runner and tests both find it
+    # without needing a .env file. The URL matches the postgres service below.
+    env:
+      DATABASE_URL: postgresql://iranti:iranti_dev@localhost:5435/iranti_dev
+
+    # Spin up a Postgres container alongside the CI runner. GitHub wires up
+    # the ports and tears it down automatically when the job finishes.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: iranti
+          POSTGRES_PASSWORD: iranti_dev
+          POSTGRES_DB: iranti_dev
+        # Map container port 5432 to host port 5435. Matches local dev setup
+        # so DATABASE_URL is identical in both environments.
+        ports:
+          - 5435:5432
+        # Wait for Postgres to accept connections before running any steps.
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       # Step 1: Download the code from GitHub onto the CI machine.
       - uses: actions/checkout@v4
@@ -48,22 +73,27 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Step 5: Run the TypeScript compiler in check-only mode.
+      # Step 5: Apply database migrations.
+      # Creates all 6 tables (agents, sessions, entities, facts, fact_archive,
+      # rules) in the fresh CI Postgres instance. Tests cannot run without this.
+      - name: Run migrations
+        run: pnpm db:migrate
+
+      # Step 6: Run the TypeScript compiler in check-only mode.
       # This catches type errors — passing a number where a string is expected,
       # calling a method that does not exist on an object, etc.
       # Does not produce output files, just reports errors.
       - name: Type-check
         run: pnpm typecheck
 
-      # Step 6: Run ESLint across the src/ folder.
+      # Step 7: Run ESLint across the src/ folder.
       # Catches code patterns that are likely bugs or bad practice.
       # Zero tolerance — any error fails the build.
       - name: Lint
         run: pnpm lint
 
-      # Step 7: Run all tests via Vitest.
-      # Currently no tests exist, so this passes immediately.
-      # As tests are added (Phase 0 onward), this is the gate that confirms
-      # new code does not break existing behaviour.
+      # Step 8: Run all integration tests via Vitest.
+      # Each test file runs in a separate fork with a clean Postgres connection.
+      # Tests use random UUIDs for entity IDs to avoid collisions.
       - name: Test
         run: pnpm test
