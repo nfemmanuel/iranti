@@ -16,11 +16,13 @@ import { facts } from "../db/schema.js";
 import {
   VALID_SURFACES,
   archiveFact,
+  findFact,
   getFactById,
   getFactHistory,
   getFactHistoryByKey,
   readFact,
   readFactsByEntity,
+  readRecentFactsByEntity,
   writeFact,
 } from "../library/facts.js";
 
@@ -330,6 +332,101 @@ describe("getFactHistoryByKey", () => {
     expect(history).toHaveLength(2);
     expect(history[0]!.value).toBe("b"); // most recently superseded
     expect(history[1]!.value).toBe("a");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// findFact (no side effects)
+// ---------------------------------------------------------------------------
+
+describe("findFact", () => {
+  it("finds a fact without touching access tracking", async () => {
+    const entityId = randomUUID();
+
+    const written = await writeFact({
+      entityType: "user",
+      entityId,
+      key: "quiet-read",
+      value: "untouched",
+      source: "test",
+    });
+
+    const found = await findFact("user", entityId, "quiet-read");
+    expect(found?.value).toBe("untouched");
+
+    // accessCount must NOT have incremented.
+    const raw = await getFactById(written.id);
+    expect(raw?.accessCount).toBe(0);
+  });
+
+  it("returns undefined for archived facts", async () => {
+    const entityId = randomUUID();
+
+    const fact = await writeFact({
+      entityType: "user",
+      entityId,
+      key: "gone",
+      value: "x",
+      source: "test",
+    });
+    await archiveFact(fact.id);
+
+    expect(await findFact("user", entityId, "gone")).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// readRecentFactsByEntity
+// ---------------------------------------------------------------------------
+
+describe("readRecentFactsByEntity", () => {
+  it("returns the most recently written facts first, capped at limit", async () => {
+    const entityId = randomUUID();
+
+    for (let i = 0; i < 5; i++) {
+      await writeFact({
+        entityType: "user",
+        entityId,
+        key: `k-${i}`,
+        value: `v-${i}`,
+        source: "test",
+      });
+      // Ensure distinct updatedAt values.
+      await new Promise((r) => setTimeout(r, 5));
+    }
+
+    const recent = await readRecentFactsByEntity("user", entityId, 3);
+
+    expect(recent).toHaveLength(3);
+    // Most recently written first.
+    expect(recent.map((f) => f.key)).toEqual(["k-4", "k-3", "k-2"]);
+  });
+
+  it("only counts returned facts as accessed — capped-out facts are untouched", async () => {
+    const entityId = randomUUID();
+
+    const oldest = await writeFact({
+      entityType: "user",
+      entityId,
+      key: "a-oldest",
+      value: "1",
+      source: "test",
+    });
+    await new Promise((r) => setTimeout(r, 5));
+    const newest = await writeFact({
+      entityType: "user",
+      entityId,
+      key: "b-newest",
+      value: "2",
+      source: "test",
+    });
+
+    await readRecentFactsByEntity("user", entityId, 1);
+
+    const newestRaw = await getFactById(newest.id);
+    const oldestRaw = await getFactById(oldest.id);
+    expect(newestRaw?.accessCount).toBe(1); // returned → counted
+    expect(oldestRaw?.accessCount).toBe(0); // capped out → untouched
   });
 });
 

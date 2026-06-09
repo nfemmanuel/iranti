@@ -210,6 +210,67 @@ export async function readFact(
   return fact;
 }
 
+// Find a fact by entity and key WITHOUT side effects. Unlike readFact, this
+// does not touch lastAccessedAt or accessCount. Use it for existence checks
+// and resolution (e.g. "which fact does this entity+key refer to?") where
+// the access should not count as a memory retrieval.
+export async function findFact(
+  entityType: string,
+  entityId: string,
+  key: string,
+  tenantId: string = "default",
+): Promise<Fact | undefined> {
+  return db.query.facts.findFirst({
+    where: and(
+      eq(facts.tenantId, tenantId),
+      eq(facts.entityType, entityType),
+      eq(facts.entityId, entityId),
+      eq(facts.key, key),
+      eq(facts.isArchived, false),
+    ),
+  });
+}
+
+// Read the most recently written facts for an entity, capped at `limit`.
+// Ordered by updatedAt DESC — facts whose values changed most recently come
+// first. This is the retrieval shape iranti_attend uses: bounded and
+// recency-ordered, so the injection block cannot grow without limit as an
+// entity accumulates facts.
+//
+// Updates lastAccessedAt and accessCount only on the facts actually returned
+// — facts cut off by the cap are not counted as accessed, so the cap does
+// not distort Phase 4 reinforcement data.
+export async function readRecentFactsByEntity(
+  entityType: string,
+  entityId: string,
+  limit: number,
+  tenantId: string = "default",
+): Promise<Fact[]> {
+  const found = await db.query.facts.findMany({
+    where: and(
+      eq(facts.tenantId, tenantId),
+      eq(facts.entityType, entityType),
+      eq(facts.entityId, entityId),
+      eq(facts.isArchived, false),
+    ),
+    orderBy: desc(facts.updatedAt),
+    limit,
+  });
+
+  if (found.length === 0) return [];
+
+  const ids = found.map((f) => f.id);
+  await db
+    .update(facts)
+    .set({
+      lastAccessedAt: new Date(),
+      accessCount: sql`${facts.accessCount} + 1`,
+    })
+    .where(inArray(facts.id, ids));
+
+  return found;
+}
+
 // Read all facts for an entity. Returns them sorted by key.
 // Updates lastAccessedAt and accessCount on every returned fact.
 export async function readFactsByEntity(

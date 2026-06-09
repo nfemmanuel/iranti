@@ -103,20 +103,33 @@ These are explicit out-of-scope boundaries. Do not let scope creep pull us in th
 
 **Goal:** Expose the library over the Model Context Protocol so AI agents can call iranti.
 
-**Deliverables:**
-- MCP server process (`src/mcp/server.ts`)
-- Tools: `iranti_attend`, `iranti_write`, `iranti_search`, `iranti_archive`
-- Agent handshake (auto-register agent on first call)
-- Session management (open/close via MCP)
-- Basic protocol enforcement (attend before write)
+**Status:** ✅ Built and verified. 89/89 tests passing plus an end-to-end stdio smoke test (`scripts/smoke-mcp.mjs`).
+
+**Deliverables (as built):**
+- MCP server process (`src/mcp/server.ts`) — stdio transport, `@modelcontextprotocol/sdk`
+- Tools: `iranti_attend`, `iranti_write`, `iranti_write_rule`, `iranti_archive`
+- Deterministic extraction (`src/mcp/extractor.ts`) — see below
+- Checkpoints (`src/library/checkpoints.ts`) — see below
+- Agent handshake (auto-register + open session on first tool call, first-call-wins)
+- Best-effort session cleanup on SIGINT/SIGTERM — hosts usually kill the process, so leaked sessions are expected and detectable via `getOpenSessions()`
+
+**Key decision — `iranti_attend` is bidirectional.** v0's biggest failure mode was that storing was a separate step (`iranti_write`) the agent had to remember — and agents forget. Phase 1's attend both writes and reads in one call: it extracts structured artifacts (URLs, file paths) from the incoming message and stores them as facts, then returns rules + recent facts + the active checkpoint. Extraction is server-side so every host gets identical behavior.
+
+**Extraction design (learned from v0's auto-capture noise):**
+- Conservative: regex-only — URLs and file paths. Semantic extraction (decisions, preferences) waits for the Phase 2 intelligence layer. Wrong facts are worse than missing facts.
+- Collision-safe keys: `shared_url:<12-hex content hash>` — a static key like `shared_url` would make every new URL overwrite the previous one (facts upsert on entity+key).
+- Deduped within message, capped at 10 artifacts per attend call.
+- Tagged with `source = "iranti_attend_extract"` so noisy extracts are bulk-cleanable.
+
+**Attend response is bounded:** at most 10 facts per entity hint, 20 total, ordered by `updatedAt DESC` (via `readRecentFactsByEntity`, which access-tracks only the rows it returns). "Return everything" stops scaling within weeks — the cap is the contract.
+
+**Checkpoints (Phase 1 implementation):** a checkpoint is a fact with the reserved key `checkpoint`. Zero schema changes; inherits history, tenancy, and provenance from facts. One checkpoint per entity (upsert semantics); `getActiveCheckpoint(hints)` returns the most recently written across the entities in scope, and attend returns it separately from regular facts. Checkpoint facts are exempt from Phase 4 decay by convention — the archivist must skip `key = 'checkpoint'`. A dedicated table with richer structure is a Phase 2 candidate.
 
 **Key decision — single-instance for Phase 1:** The MCP server is stateless in that all durable state lives in PostgreSQL. However, Phase 1 is designed for a **single MCP server instance** (one process, one user). Concurrent writes from multiple simultaneous instances are not prevented by Phase 1 code. Multi-instance concurrency (advisory locks, write serialization) is deferred to Phase 2. Do not run two Phase 1 servers against the same database expecting safe concurrent writes.
 
-**Tools:**
-- `iranti_attend` — inject relevant facts, rules, and the active checkpoint into the agent's context before responding
-- `iranti_write` — store a learned fact
-- `iranti_write_rule` — store a behavioral rule
-- `iranti_archive` — mark a fact as no longer current
+**Dropped from the original sketch:** `iranti_search` (semantic search is Phase 3 — exact-match retrieval via attend covers Phase 1) and "attend before write" protocol enforcement (hosts can't be forced to order calls; instruction files per host handle this — see `hosts.md`).
+
+**Host integration:** see `docs/engineering/hosts.md` for per-host profiles, the capability matrix, and the recommended rollout order. Headline: 8 of 15 surfaces work with Phase 1 stdio alone (all developer tools); every consumer surface (claude.ai, mobile, ChatGPT, Gemini app) needs hosted HTTP transport — consider pulling single-user HTTP forward from Phase 5 to ~Phase 2.x (after write serialization).
 
 ---
 
@@ -451,7 +464,7 @@ The original iranti grew organically over time. Reading it is like reading the r
 
 ## Current status
 
-**Phase 0 is complete and committed** (`7fadef5` — 29 files, 4740 insertions). Phase 1 (MCP server) is next.
+**Phase 0 is complete and committed** (`7fadef5`, supplements in `3321c8c`). **Phase 1 (MCP server) is built and verified** — 4 MCP tools over stdio, bidirectional attend, checkpoints, 89/89 tests, end-to-end stdio smoke test. Host integration profiles live in `docs/engineering/hosts.md`.
 
 | Item | Status |
 |------|--------|
