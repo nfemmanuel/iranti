@@ -8,6 +8,7 @@
 // Usage: pnpm build && node scripts/smoke-mcp.mjs
 
 import "dotenv/config";
+import http from "node:http";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { randomUUID } from "crypto";
@@ -370,6 +371,55 @@ check(
   conflictQ.found && conflictQ.fact?.value === "bun",
   `value=${conflictQ.fact?.value}`,
 );
+
+// 18. Phase 2.5 — CORE-13: aliases absent from default tool list
+check(
+  "CORE-13: search + fetch aliases absent when IRANTI_EXPOSE_OPENAI_ALIASES not set",
+  !names.includes("search") && !names.includes("fetch"),
+  `tools=${names.join(", ")}`,
+);
+
+// 19. Phase 2.5 — CORE-14: attend_log has rows (direct DB check)
+// Uses the same DATABASE_URL as the server subprocess.
+{
+  // Dynamically import postgres so the smoke script stays zero-config
+  // (pnpm adds postgres to PATH via node_modules).
+  const { default: pg } = await import("postgres");
+  const sql = pg(process.env.DATABASE_URL);
+  const [{ count }] = await sql`SELECT count(*)::int AS count FROM attend_log`;
+  check("CORE-14: attend_log has rows after attends", count > 0, `rows=${count}`);
+  await sql.end({ timeout: 3 });
+}
+
+// 20. Phase 2.5 — CORE-12: HTTP transport auth (only when env vars are set)
+const httpToken = process.env.IRANTI_HTTP_TOKEN;
+const httpPort = process.env.IRANTI_HTTP_PORT ? parseInt(process.env.IRANTI_HTTP_PORT, 10) : null;
+if (httpToken && httpPort) {
+  const httpCheck = (opts) =>
+    new Promise((resolve) => {
+      const payload = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "smoke", version: "0" } } });
+      const headers = { "Content-Type": "application/json", "Content-Length": String(Buffer.byteLength(payload)) };
+      if (opts.token) headers["Authorization"] = `Bearer ${opts.token}`;
+      const req = http.request({ host: "127.0.0.1", port: httpPort, path: "/", method: "POST", headers }, (res) => {
+        res.resume();
+        resolve(res.statusCode);
+      });
+      req.on("error", () => resolve(0));
+      req.write(payload);
+      req.end();
+    });
+
+  const noAuth = await httpCheck({});
+  check("CORE-12: HTTP 401 without token", noAuth === 401, `status=${noAuth}`);
+
+  const wrongAuth = await httpCheck({ token: "bad-token" });
+  check("CORE-12: HTTP 401 with wrong token", wrongAuth === 401, `status=${wrongAuth}`);
+
+  const goodAuth = await httpCheck({ token: httpToken });
+  check("CORE-12: HTTP not-401 with correct token", goodAuth !== 401, `status=${goodAuth}`);
+} else {
+  console.log("  [SKIP] CORE-12: HTTP transport (IRANTI_HTTP_TOKEN + IRANTI_HTTP_PORT not set)");
+}
 
 await client.close();
 console.log(failures === 0 ? "\nSMOKE TEST PASSED" : `\nSMOKE TEST FAILED (${failures})`);

@@ -16,7 +16,7 @@
 //     This is irreversible in Phase 0.
 //   - Facts are never hard-deleted.
 
-import { and, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, ne, or, sql } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import {
   factArchive,
@@ -31,6 +31,8 @@ import {
   recordSupersession,
   runDeepConflictCheck,
 } from "./conflicts.js";
+import { getScore } from "./source-reliability.js";
+import { graph } from "../graph/index.js";
 
 // ---------------------------------------------------------------------------
 // Surface validation
@@ -64,18 +66,85 @@ function assertValidSurface(surface: string | null | undefined): void {
 // Write
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Write-time edge recording — Phase 2.5 (CORE-29)
+// ---------------------------------------------------------------------------
+
+// Record co_write + about edges after a writeFact upsert. Fire-and-forget.
+//   about:    fact → entity hub (directed). Lets Phase 3 traversal bridge
+//             facts across entities via the entity node.
+//   co_write: fact → previous fact written in the same session (undirected,
+//             weight 0.5 — weaker evidence than co_access). Only fires when
+//             sessionId is present.
+async function recordWriteEdges(
+  factId: string,
+  entityType: string,
+  entityId: string,
+  sessionId: string | null | undefined,
+  tenantId: string,
+): Promise<void> {
+  const ops: Promise<void>[] = [];
+
+  // about edge: fact → entity
+  ops.push(
+    graph
+      .reinforceEdge(
+        { type: "fact", id: factId },
+        { type: "entity", id: `${entityType}/${entityId}` },
+        "about",
+        1,
+        tenantId,
+      )
+      .catch((err: unknown) => console.error("[iranti] about edge error:", err)),
+  );
+
+  // co_write edge: fact → previous fact in this session
+  if (sessionId) {
+    ops.push(
+      (async () => {
+        const prev = await db.query.facts.findFirst({
+          where: and(
+            eq(facts.sessionId, sessionId),
+            eq(facts.isArchived, false),
+            ne(facts.id, factId),
+          ),
+          orderBy: desc(facts.createdAt),
+        });
+        if (!prev) return;
+        await graph.reinforceEdge(
+          { type: "fact", id: factId },
+          { type: "fact", id: prev.id },
+          "co_write",
+          0.5,
+          tenantId,
+        );
+      })().catch((err: unknown) => console.error("[iranti] co_write edge error:", err)),
+    );
+  }
+
+  await Promise.all(ops);
+}
+
+// ---------------------------------------------------------------------------
+// D7 confidence formula (CORE-27)
+// ---------------------------------------------------------------------------
+
+// stored_confidence = clamp(base × (0.5 + sourceScore), 0, 1)
+// A neutral source (0.5) is identity: 1.0 × 1.0 = 1.0. A fully trusted
+// source (1.0) boosts ×1.5 (clamped to 1.0). A fully distrusted source
+// (0.0) halves the confidence. Deterministic and auditable from the
+// source_reliability table alone.
+function applyConfidenceFormula(base: number, sourceScore: number): number {
+  return Math.min(1.0, Math.max(0.0, base * (0.5 + sourceScore)));
+}
+
+// ---------------------------------------------------------------------------
+
 // Write a fact. If a fact with this (entityType, entityId, key) already
 // exists, snapshot the old value to fact_archive, then replace it.
 // Returns the written fact.
 //
 // Throws if the existing fact is protected (isProtected = true).
-//
-// Note on race conditions: this runs in a transaction, but does not use
-// SELECT FOR UPDATE. Under concurrent load, two simultaneous writes to the
-// same (entityType, entityId, key) could both pass the protection check and
-// both attempt to snapshot. The onConflictDoUpdate ensures only one value
-// survives, but the archive snapshot may be duplicated. Phase 2 will add
-// advisory locks or row-level locking to close this gap.
 export async function writeFact(
   input: Pick<
     NewFact,
@@ -89,7 +158,7 @@ export async function writeFact(
     | "sessionId"
     | "agentId"
     | "metadata"
-  >,
+  > & { confidence?: number },
 ): Promise<Fact> {
   // Validate surface before touching the database.
   assertValidSurface(input.surface);
@@ -132,7 +201,7 @@ export async function writeFact(
     // compare source reliability scores. If the existing source is
     // significantly more trusted, escalate instead of superseding.
     if (existing && existing.value !== input.value) {
-      const outcome = await checkConflict(existing, input.value, input.source);
+      const outcome = await checkConflict(existing, input.value, input.source, tenantId);
       if (outcome === "escalate") {
         // Block the write. Write an escalation record + markdown file.
         // The transaction is still committed — we're just returning early
@@ -154,8 +223,8 @@ export async function writeFact(
       }
       // outcome === "supersede": record the win/loss and continue.
       // recordSupersession runs outside the transaction (best-effort, non-blocking).
-      void recordSupersession(input.source, existing.source).catch((err: unknown) =>
-        console.error("[iranti] reliability update error:", err),
+      void recordSupersession(input.source, existing.source, tenantId).catch(
+        (err: unknown) => console.error("[iranti] reliability update error:", err),
       );
     }
 
@@ -182,6 +251,13 @@ export async function writeFact(
       });
     }
 
+    // Step 3.5 (Phase 2.5, CORE-27): Confidence plumbing.
+    // Apply D7 formula: stored = clamp(base × (0.5 + sourceScore)).
+    // A neutral source (score 0.5) is identity-preserving (× 1.0), so
+    // unchallenged explicit writes behave exactly as before.
+    const sourceScore = await getScore(input.source, tenantId);
+    const storedConfidence = applyConfidenceFormula(input.confidence ?? 1.0, sourceScore);
+
     // Step 4: Upsert the fact.
     // On a brand-new fact: inserts a fresh row with all defaults.
     // On an existing fact: updates value, source, surface, session, updatedAt,
@@ -192,7 +268,7 @@ export async function writeFact(
       .values({
         ...input,
         tenantId,
-        confidence: 1.0,
+        confidence: storedConfidence,
         stabilityScore: existing?.stabilityScore ?? 1.0,
         accessCount: existing?.accessCount ?? 0,
         isProtected: false,
@@ -203,7 +279,7 @@ export async function writeFact(
         target: [facts.tenantId, facts.entityType, facts.entityId, facts.key],
         set: {
           value: input.value,
-          confidence: 1.0,
+          confidence: storedConfidence,
           source: input.source,
           surface: input.surface,
           sessionId: input.sessionId,
@@ -228,6 +304,18 @@ export async function writeFact(
       tenantId,
     ).catch((err: unknown) =>
       console.error("[iranti] deep conflict check error:", err),
+    );
+
+    // Step 6 (Phase 2.5, CORE-29): Write-time edges — fire-and-forget.
+    // about: fact→entity hub. co_write: fact→prev fact in same session.
+    void recordWriteEdges(
+      fact!.id,
+      input.entityType,
+      input.entityId,
+      input.sessionId,
+      tenantId,
+    ).catch((err: unknown) =>
+      console.error("[iranti] write edge error:", err),
     );
 
     return fact!;

@@ -18,6 +18,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { pool } from "../db/connection.js";
 import { shutdownContext } from "./context.js";
+import { startHttpServer } from "./http.js";
 import { attend, attendInputSchema } from "./tools/attend.js";
 import { archive, archiveInputSchema } from "./tools/archive.js";
 import { checkpointTool, checkpointInputSchema } from "./tools/checkpoint.js";
@@ -27,6 +28,12 @@ import { search, searchInputSchema } from "./tools/search.js";
 import { write, writeInputSchema } from "./tools/write.js";
 import { writeIssueTool, writeIssueInputSchema } from "./tools/write-issue.js";
 import { writeRuleTool, writeRuleInputSchema } from "./tools/write-rule.js";
+import {
+  searchAlias,
+  searchAliasInputSchema,
+  fetchAlias,
+  fetchAliasInputSchema,
+} from "./tools/aliases.js";
 
 const server = new McpServer({
   name: "iranti",
@@ -222,6 +229,59 @@ server.registerTool(
     }
   },
 );
+
+// Phase 2.5 (CORE-13): OpenAI deep-research connector aliases.
+// Only registered when IRANTI_EXPOSE_OPENAI_ALIASES=true — these tool names
+// collide with iranti_search / iranti_query on other hosts.
+if (process.env.IRANTI_EXPOSE_OPENAI_ALIASES === "true") {
+  server.registerTool(
+    "search",
+    {
+      title: "Search facts",
+      description:
+        "Search iranti memory for facts matching the query. " +
+        "Returns matching facts from the knowledge base.",
+      inputSchema: searchAliasInputSchema,
+    },
+    async (input) => {
+      try {
+        return asResult(await searchAlias(input));
+      } catch (err) {
+        return asError(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "fetch",
+    {
+      title: "Fetch a fact",
+      description:
+        "Fetch a specific fact by its identifier in " +
+        "'entityType/entityId/key' format.",
+      inputSchema: fetchAliasInputSchema,
+    },
+    async (input) => {
+      try {
+        return asResult(await fetchAlias(input));
+      } catch (err) {
+        return asError(err);
+      }
+    },
+  );
+}
+
+// Phase 2.5 (CORE-12): Optional Streamable HTTP transport.
+// Starts when both IRANTI_HTTP_TOKEN and IRANTI_HTTP_PORT are set.
+// stdio transport always starts regardless.
+const httpToken = process.env.IRANTI_HTTP_TOKEN;
+const httpPortStr = process.env.IRANTI_HTTP_PORT;
+if (httpToken && httpPortStr) {
+  const httpPort = parseInt(httpPortStr, 10);
+  if (!isNaN(httpPort)) {
+    await startHttpServer(server, httpPort, httpToken);
+  }
+}
 
 // Best-effort cleanup. Hosts usually kill the process outright — leaked
 // sessions are expected and detectable via getOpenSessions().

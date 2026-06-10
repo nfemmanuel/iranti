@@ -36,6 +36,13 @@
       "when": 1781071619858,
       "tag": "0004_old_blob",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1781080179246,
+      "tag": "0005_simple_vector",
+      "breakpoints": true
     }
   ]
 }

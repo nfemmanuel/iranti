@@ -92,4 +92,19 @@ describe("source reliability", () => {
 
     expect(await getScore(srcA)).toBeCloseTo(await getScore(srcB));
   });
+
+  // CORE-28: tenant isolation
+  it("tenant-scoped reliability: wins in tenant A do not affect tenant B", async () => {
+    const source = `cross-tenant-${randomUUID()}`;
+
+    // Record wins in tenant A.
+    await recordOutcome(source, "opp", "tenant-a");
+
+    const scoreA = await getScore(source, "tenant-a");
+    const scoreB = await getScore(source, "tenant-b");
+
+    // tenant-a should have > 0.5; tenant-b has no history → DEFAULT_SCORE.
+    expect(scoreA).toBeGreaterThan(DEFAULT_SCORE);
+    expect(scoreB).toBeCloseTo(DEFAULT_SCORE);
+  });
 });

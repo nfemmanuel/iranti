@@ -8,6 +8,7 @@
 // Phase 0 tables: agents, sessions, entities, facts, fact_archive, rules
 // Phase 2a tables: knowledge_edges
 // Phase 2b tables: source_reliability, escalations
+// Phase 2.5 tables: attend_log, metric_counters
 // Later phases add: relationships, entity_aliases, staff_events, tokens, users
 
 import {
@@ -16,6 +17,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   real,
   text,
   timestamp,
@@ -432,7 +434,7 @@ export const knowledgeEdges = pgTable(
 );
 
 // ---------------------------------------------------------------------------
-// source_reliability — Phase 2b
+// source_reliability — Phase 2b / 2.5
 //
 // Tracks the track record of each fact source. A source that consistently
 // wins conflict resolutions earns a higher score; a source that consistently
@@ -441,14 +443,23 @@ export const knowledgeEdges = pgTable(
 //
 // score = wins / (wins + losses), initialised to 0.5 (neutral).
 // Updated on each conflict resolution — not on every write.
+//
+// Phase 2.5 (CORE-28): added tenant_id so reliability scores are scoped per
+// tenant. Composite PK (tenant_id, source) matches the seam every other table
+// has carried since Phase 0. Existing rows migrate to tenant_id = 'default'.
 // ---------------------------------------------------------------------------
-export const sourceReliability = pgTable("source_reliability", {
-  source: text("source").primaryKey(),
-  wins: integer("wins").notNull().default(0),
-  losses: integer("losses").notNull().default(0),
-  score: real("score").notNull().default(0.5),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const sourceReliability = pgTable(
+  "source_reliability",
+  {
+    tenantId: text("tenant_id").notNull().default("default"),
+    source: text("source").notNull(),
+    wins: integer("wins").notNull().default(0),
+    losses: integer("losses").notNull().default(0),
+    score: real("score").notNull().default(0.5),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.source] })],
+);
 
 // ---------------------------------------------------------------------------
 // escalations — Phase 2b
@@ -472,6 +483,53 @@ export const escalations = pgTable("escalations", {
   reason: text("reason").notNull(),
   status: text("status").notNull().default("pending"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ---------------------------------------------------------------------------
+// attend_log — Phase 2.5 (CORE-14)
+//
+// One row per iranti_attend call: behavioral metadata only (counts, sizes,
+// latency). Never stores the content of a fact, conversation, or session —
+// master PRD §11 hard constraint. Written fire-and-forget after the response
+// is assembled so attend latency is unchanged.
+//
+// "tokens saved this week" = SUM(suppressed_tokens_est) WHERE created_at > now()-7d
+// ---------------------------------------------------------------------------
+export const attendLog = pgTable(
+  "attend_log",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: text("tenant_id").notNull().default("default"),
+    sessionId: uuid("session_id"),
+    agentId: uuid("agent_id"),
+    surface: text("surface"),
+    factCount: integer("fact_count").notNull().default(0),
+    ruleCount: integer("rule_count").notNull().default(0),
+    alreadyPresent: integer("already_present").notNull().default(0),
+    injectedChars: integer("injected_chars").notNull().default(0),
+    // Token estimates use chars / 4 (D2: model-agnostic, no tokenizer dep).
+    injectedTokensEst: integer("injected_tokens_est").notNull().default(0),
+    suppressedTokensEst: integer("suppressed_tokens_est").notNull().default(0),
+    latencyMs: integer("latency_ms").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("attend_log_tenant_created_idx").on(t.tenantId, t.createdAt)],
+);
+
+// ---------------------------------------------------------------------------
+// metric_counters — Phase 2.5 (CORE-14)
+//
+// Persists comprehension metrics across process restarts. Each counter is one
+// row keyed by name. Updated fire-and-forget on every attend so the counters
+// accumulate across sessions without requiring the process to stay up.
+//
+// Current keys: minimalConflictsChecked, supersessions, escalations,
+//               deepConflictsDetected
+// ---------------------------------------------------------------------------
+export const metricCounters = pgTable("metric_counters", {
+  name: text("name").primaryKey(),
+  value: integer("value").notNull().default(0),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 // ---------------------------------------------------------------------------
@@ -506,3 +564,9 @@ export type NewSourceReliability = typeof sourceReliability.$inferInsert;
 
 export type Escalation = typeof escalations.$inferSelect;
 export type NewEscalation = typeof escalations.$inferInsert;
+
+export type AttendLog = typeof attendLog.$inferSelect;
+export type NewAttendLog = typeof attendLog.$inferInsert;
+
+export type MetricCounter = typeof metricCounters.$inferSelect;
+export type NewMetricCounter = typeof metricCounters.$inferInsert;

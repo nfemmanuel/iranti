@@ -53,14 +53,15 @@ export async function checkConflict(
   existing: Fact,
   newValue: string,
   newSource: string,
+  tenantId = "default",
 ): Promise<ConflictOutcome> {
   if (existing.value === newValue) return "no_conflict";
 
   comprehensionMetrics.minimalConflictsChecked++;
 
   const [existingScore, newScore] = await Promise.all([
-    getScore(existing.source),
-    getScore(newSource),
+    getScore(existing.source, tenantId),
+    getScore(newSource, tenantId),
   ]);
 
   if (existingScore - newScore > ESCALATION_THRESHOLD) {
@@ -117,8 +118,8 @@ export async function createEscalation(
   await fs.mkdir(dir, { recursive: true });
 
   const [existingScore, newScore] = await Promise.all([
-    getScore(opts.existingFact.source),
-    getScore(opts.newSource),
+    getScore(opts.existingFact.source, opts.tenantId),
+    getScore(opts.newSource, opts.tenantId),
   ]);
 
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
@@ -159,9 +160,10 @@ export async function createEscalation(
 export async function recordSupersession(
   newSource: string,
   existingSource: string,
+  tenantId = "default",
 ): Promise<void> {
   comprehensionMetrics.supersessions++;
-  await recordOutcome(newSource, existingSource);
+  await recordOutcome(newSource, existingSource, tenantId);
 }
 
 // ---------------------------------------------------------------------------

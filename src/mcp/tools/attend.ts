@@ -39,9 +39,20 @@ import { graph } from "../../graph/index.js";
 import { extractor } from "../../extract/index.js";
 import { EXTRACT_SOURCE, extractArtifacts } from "../extractor.js";
 import { ensureContext } from "../context.js";
+import { writeAttendLog, persistMetricCounters } from "../../library/attend-log.js";
+import { comprehensionMetrics } from "../../library/conflicts.js";
 
 export const MAX_FACTS_PER_ENTITY = 10;
 export const MAX_TOTAL_FACTS = 20;
+
+// Track the last persisted metric values so we only send deltas.
+// Reset to zero on process start; DB holds the cumulative all-time total.
+let lastSyncedMetrics = {
+  minimalConflictsChecked: 0,
+  supersessions: 0,
+  escalations: 0,
+  deepConflictsDetected: 0,
+};
 
 // ---------------------------------------------------------------------------
 // Async edge recording — best-effort, never blocks the response
@@ -218,6 +229,7 @@ function isAlreadyPresent(value: string, normalizedHaystack: string): boolean {
 // The full attend pipeline, separated from MCP plumbing so integration
 // tests can call it directly against the database.
 export async function attend(input: AttendInput): Promise<AttendResult> {
+  const startTime = Date.now();
   const ctx = await ensureContext(input.agentName);
   const hints = input.entityHints;
 
@@ -276,12 +288,14 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
   // budget is filled with facts the agent does not already hold. Suppression
   // counts toward `alreadyPresent` for token-saving measurement.
   let alreadyPresent = 0;
+  let suppressedChars = 0;
   const visible = input.currentContext
     ? (() => {
         const haystack = normalizeForContext(input.currentContext);
         return ranked.filter((f: Fact) => {
           if (isAlreadyPresent(f.value, haystack)) {
             alreadyPresent++;
+            suppressedChars += f.value.length;
             return false;
           }
           return true;
@@ -309,6 +323,40 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
       (err: unknown) => console.error("[iranti] extraction error:", err),
     );
   }
+
+  // Phase 2.5 (CORE-14) — attend_log + metric counters. Both fire-and-forget
+  // after the response is assembled so they never add latency.
+  const latencyMs = Date.now() - startTime;
+  const injectedChars =
+    returnedFacts.reduce((s, f) => s + f.value.length, 0) +
+    rules.reduce((s, r) => s + r.text.length, 0);
+
+  void writeAttendLog({
+    sessionId: ctx.session.id,
+    agentId: ctx.agent.id,
+    surface: input.surface,
+    factCount: returnedFacts.length,
+    ruleCount: rules.length,
+    alreadyPresent,
+    injectedChars,
+    injectedTokensEst: Math.floor(injectedChars / 4),
+    suppressedTokensEst: Math.floor(suppressedChars / 4),
+    latencyMs,
+  }).catch((err: unknown) => console.error("[iranti] attend log error:", err));
+
+  // Compute deltas since last sync and persist them, then advance the cursor.
+  const delta = {
+    minimalConflictsChecked:
+      comprehensionMetrics.minimalConflictsChecked - lastSyncedMetrics.minimalConflictsChecked,
+    supersessions: comprehensionMetrics.supersessions - lastSyncedMetrics.supersessions,
+    escalations: comprehensionMetrics.escalations - lastSyncedMetrics.escalations,
+    deepConflictsDetected:
+      comprehensionMetrics.deepConflictsDetected - lastSyncedMetrics.deepConflictsDetected,
+  };
+  lastSyncedMetrics = { ...comprehensionMetrics };
+  void persistMetricCounters(delta).catch(
+    (err: unknown) => console.error("[iranti] metric persist error:", err),
+  );
 
   return {
     rules: rules.map((r) => ({

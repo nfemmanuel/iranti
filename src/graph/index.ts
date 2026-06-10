@@ -3,16 +3,20 @@
 // The graph substrate for iranti's learned relevance index. Edges connect
 // facts, rules, and entities that have appeared together in memory retrievals.
 //
-// Two relations are used in Phase 2a:
+// Relations in use:
 //
 //   co_access — facts retrieved together in the same iranti_attend. Weight
-//               accumulates over time: high weight = "historically useful
-//               together." Stored with canonical pair ordering so (A,B) and
+//               accumulates over time. Canonical pair ordering so (A,B) and
 //               (B,A) are a single row.
 //
-//   governs   — directed edge rule→fact created when a rule and a fact are
-//               injected together in an attend. Groundwork for graph-proximity
-//               rule triggering in Phase 3.
+//   governs   — directed edge rule→fact from attend co-fire. Groundwork for
+//               graph-proximity rule triggering in Phase 3.
+//
+//   co_write  — Phase 2.5 (CORE-29). Facts written in the same session.
+//               Weight 0.5 (weaker than co_access). Canonical ordering.
+//
+//   about     — Phase 2.5 (CORE-29). Directed fact→entity hub edge.
+//               No canonical ordering (asymmetric by type).
 //
 // All edge writes are best-effort. A failed edge insert never breaks core
 // memory operations — the graph is an enhancement, not a blocker.
@@ -123,11 +127,11 @@ export class PostgresGraphBackend implements GraphBackend {
     const tenantId = edge.tenantId ?? "default";
     const w = edge.weight ?? 1;
 
-    // Canonicalize co_access so addEdge and getEdge agree on the row key.
-    const [src, tgt] =
-      edge.relation === "co_access"
-        ? canonicalize({ type: edge.sourceType, id: edge.sourceId }, { type: edge.targetType, id: edge.targetId })
-        : [{ type: edge.sourceType, id: edge.sourceId }, { type: edge.targetType, id: edge.targetId }];
+    // Canonicalize undirected relations so addEdge and getEdge agree on the row key.
+    const undirected = edge.relation === "co_access" || edge.relation === "co_write";
+    const [src, tgt] = undirected
+      ? canonicalize({ type: edge.sourceType, id: edge.sourceId }, { type: edge.targetType, id: edge.targetId })
+      : [{ type: edge.sourceType, id: edge.sourceId }, { type: edge.targetType, id: edge.targetId }];
 
     const [result] = await db
       .insert(knowledgeEdges)
@@ -139,7 +143,7 @@ export class PostgresGraphBackend implements GraphBackend {
         targetId: tgt.id,
         relation: edge.relation,
         weight: w,
-        coAccessCount: edge.relation === "co_access" ? 1 : 0,
+        coAccessCount: undirected ? 1 : 0,
       })
       .onConflictDoUpdate({
         target: [
@@ -171,9 +175,10 @@ export class PostgresGraphBackend implements GraphBackend {
     delta = 1,
     tenantId = "default",
   ): Promise<void> {
-    // Canonicalize co_access so (A,B) and (B,A) are the same row.
-    // governs edges are directed (rule→fact) — preserve direction.
-    const [src, tgt] = relation === "co_access" ? canonicalize(a, b) : [a, b];
+    // Canonicalize undirected relations so (A,B) and (B,A) are the same row.
+    // governs and about edges are directed — preserve their direction.
+    const isUndirected = relation === "co_access" || relation === "co_write";
+    const [src, tgt] = isUndirected ? canonicalize(a, b) : [a, b];
 
     await db
       .insert(knowledgeEdges)
@@ -185,7 +190,7 @@ export class PostgresGraphBackend implements GraphBackend {
         targetId: tgt.id,
         relation,
         weight: delta,
-        coAccessCount: relation === "co_access" ? 1 : 0,
+        coAccessCount: isUndirected ? 1 : 0,
       })
       .onConflictDoUpdate({
         target: [
@@ -198,10 +203,9 @@ export class PostgresGraphBackend implements GraphBackend {
         ],
         set: {
           weight: sql`${knowledgeEdges.weight} + ${delta}`,
-          coAccessCount:
-            relation === "co_access"
-              ? sql`${knowledgeEdges.coAccessCount} + 1`
-              : knowledgeEdges.coAccessCount,
+          coAccessCount: isUndirected
+            ? sql`${knowledgeEdges.coAccessCount} + 1`
+            : knowledgeEdges.coAccessCount,
           lastReinforcedAt: new Date(),
         },
       });
@@ -343,8 +347,9 @@ export class PostgresGraphBackend implements GraphBackend {
     relation: string,
     tenantId = "default",
   ): Promise<KnowledgeEdge | undefined> {
-    // Canonicalize co_access lookups so (A,B) and (B,A) find the same row.
-    const [src, tgt] = relation === "co_access" ? canonicalize(a, b) : [a, b];
+    // Canonicalize undirected relations so (A,B) and (B,A) find the same row.
+    const [src, tgt] =
+      relation === "co_access" || relation === "co_write" ? canonicalize(a, b) : [a, b];
 
     const rows = await db
       .select()

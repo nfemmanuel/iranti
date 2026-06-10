@@ -1,4 +1,4 @@
-// Source reliability — Phase 2b
+// Source reliability — Phase 2b / 2.5
 //
 // Tracks the conflict track record of each fact source. A source that
 // consistently wins conflict resolutions earns a higher score (toward 1.0);
@@ -10,8 +10,12 @@
 // carry more weight automatically — no configuration required. It is updated
 // only on resolved conflicts (supersede = new wins, old loses), not on every
 // write, so writes from unchallenged sources do not inflate their score.
+//
+// Phase 2.5 (CORE-28): tenant_id added so reliability scores are scoped per
+// tenant. All functions accept tenantId (default "default") to remain
+// backward-compatible with single-tenant use.
 
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import { sourceReliability } from "../db/schema.js";
 
@@ -26,9 +30,15 @@ export const ESCALATION_THRESHOLD = 0.2;
 
 // Fetch a source's current reliability score. Returns DEFAULT_SCORE if the
 // source has no recorded history.
-export async function getScore(source: string): Promise<number> {
+export async function getScore(
+  source: string,
+  tenantId = "default",
+): Promise<number> {
   const row = await db.query.sourceReliability.findFirst({
-    where: eq(sourceReliability.source, source),
+    where: and(
+      eq(sourceReliability.tenantId, tenantId),
+      eq(sourceReliability.source, source),
+    ),
   });
   return row?.score ?? DEFAULT_SCORE;
 }
@@ -36,9 +46,13 @@ export async function getScore(source: string): Promise<number> {
 // Get reliability row (full record), or undefined if not yet in the table.
 export async function getReliabilityRow(
   source: string,
+  tenantId = "default",
 ): Promise<{ wins: number; losses: number; score: number } | undefined> {
   const row = await db.query.sourceReliability.findFirst({
-    where: eq(sourceReliability.source, source),
+    where: and(
+      eq(sourceReliability.tenantId, tenantId),
+      eq(sourceReliability.source, source),
+    ),
   });
   if (!row) return undefined;
   return { wins: row.wins, losses: row.losses, score: row.score };
@@ -49,13 +63,14 @@ export async function getReliabilityRow(
 export async function recordOutcome(
   winnerSource: string,
   loserSource: string,
+  tenantId = "default",
 ): Promise<void> {
   await Promise.all([
     db
       .insert(sourceReliability)
-      .values({ source: winnerSource, wins: 1, losses: 0, score: 1.0 })
+      .values({ tenantId, source: winnerSource, wins: 1, losses: 0, score: 1.0 })
       .onConflictDoUpdate({
-        target: sourceReliability.source,
+        target: [sourceReliability.tenantId, sourceReliability.source],
         set: {
           wins: sql`${sourceReliability.wins} + 1`,
           // score = (wins + 1) / (wins + losses + 1)
@@ -65,9 +80,9 @@ export async function recordOutcome(
       }),
     db
       .insert(sourceReliability)
-      .values({ source: loserSource, wins: 0, losses: 1, score: 0.0 })
+      .values({ tenantId, source: loserSource, wins: 0, losses: 1, score: 0.0 })
       .onConflictDoUpdate({
-        target: sourceReliability.source,
+        target: [sourceReliability.tenantId, sourceReliability.source],
         set: {
           losses: sql`${sourceReliability.losses} + 1`,
           // score = wins / (wins + losses + 1)
