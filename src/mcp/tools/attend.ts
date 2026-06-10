@@ -109,33 +109,44 @@ async function recordAttendEdges(
 }
 
 // ---------------------------------------------------------------------------
-// Async semantic extraction — Phase 2b
+// Async semantic extraction — Phase 2b / CORE-32
 // ---------------------------------------------------------------------------
 
-// Extract decision/preference facts from the message and write them to the
-// primary entity. Runs entirely off the response path; extracted facts
-// surface on the *next* attend call.
+// Extract durable facts from text and write them to the primary entity.
+// Returns the count of facts written for telemetry.
+// sourceOverride / confidenceOverride: for attendant_autowrite (context-delta
+// extraction), overrides the per-fact source tag and confidence so auto-writes
+// are distinguishable from agent-authored explicit writes.
+const AUTOWRITE_SOURCE = "attendant_autowrite";
+const AUTOWRITE_CONFIDENCE = 0.70;
+
 async function extractAndStore(
   message: string,
   primary: { entityType: string; entityId: string },
   sessionId: string,
   agentId: string,
-): Promise<void> {
+  sourceOverride?: string,
+  confidenceOverride?: number,
+): Promise<number> {
   const extracted = await extractor.extract(message);
-  if (extracted.length === 0) return;
+  if (extracted.length === 0) return 0;
 
   await upsertEntity(primary.entityType, primary.entityId);
+  let count = 0;
   for (const fact of extracted) {
     await writeFact({
       entityType: primary.entityType,
       entityId: primary.entityId,
       key: fact.key,
       value: fact.value,
-      source: fact.source,
+      source: sourceOverride ?? fact.source,
+      confidence: confidenceOverride ?? fact.confidence,
       sessionId,
       agentId,
     });
+    count++;
   }
+  return count;
 }
 
 const entityHintSchema = z.object({
@@ -365,43 +376,18 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
     );
   }
 
-  // Phase 2b — async semantic extraction. Extracts decision/preference facts
-  // from the message and writes them fire-and-forget. They surface on the
-  // *next* attend. Never blocks the response. Skipped for mid-turn (discovery
-  // top-up only; extraction ran on the pre-response attend).
-  if (!isMidTurn && input.message) {
-    void extractAndStore(input.message, primary, ctx.session.id, ctx.agent.id).catch(
-      (err: unknown) => console.error("[iranti] extraction error:", err),
-    );
-  }
-
-  // Phase 2.5 (CORE-14) — attend_log + metric counters. Both fire-and-forget
-  // after the response is assembled so they never add latency.
+  // Phase 2.5 / CORE-32 — fire-and-forget chain: extraction → log → metrics.
+  // Chained so facts_extracted in the log reflects the actual write count.
+  // None of these must block the response.
   const latencyMs = Date.now() - startTime;
   const injectedChars =
     returnedFacts.reduce((s, f) => s + f.value.length, 0) +
     rules.reduce((s, r) => s + r.text.length, 0);
 
-  void writeAttendLog({
-    sessionId: ctx.session.id,
-    agentId: ctx.agent.id,
-    surface: input.surface,
-    factCount: returnedFacts.length,
-    ruleCount: rules.length,
-    alreadyPresent,
-    injectedChars,
-    injectedTokensEst: Math.floor(injectedChars / 4),
-    suppressedTokensEst: Math.floor(suppressedChars / 4),
-    latencyMs,
-    phase,
-  }).catch((err: unknown) => console.error("[iranti] attend log error:", err));
-
-  // Compute deltas since last sync and persist them. Snapshot the live
-  // counters now (they mutate as conflicts fire), and only advance the cursor
-  // AFTER the write resolves — if persistMetricCounters fails, the delta is
-  // retried on the next attend rather than silently lost.
+  // Snapshot metric deltas before the async chain — conflicts may fire
+  // during extraction; cursor advances only after persist succeeds.
   const snapshot = { ...comprehensionMetrics };
-  const delta = {
+  const metricDelta = {
     minimalConflictsChecked:
       snapshot.minimalConflictsChecked - lastSyncedMetrics.minimalConflictsChecked,
     supersessions: snapshot.supersessions - lastSyncedMetrics.supersessions,
@@ -409,11 +395,47 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
     deepConflictsDetected:
       snapshot.deepConflictsDetected - lastSyncedMetrics.deepConflictsDetected,
   };
-  void persistMetricCounters(delta)
-    .then(() => {
-      lastSyncedMetrics = snapshot;
-    })
-    .catch((err: unknown) => console.error("[iranti] metric persist error:", err));
+
+  void (async () => {
+    let factsExtracted = 0;
+
+    // CORE-32: extraction is the primary write path.
+    // pre/post phases: extract from latestMessage (same as Phase 2b).
+    // post-response additionally: extract from currentContext (the full turn
+    // payload including the assistant response), tagged attendant_autowrite at
+    // reduced confidence so auto-writes are distinguishable in reliability scoring.
+    if (!isMidTurn && input.message) {
+      factsExtracted += await extractAndStore(
+        input.message, primary, ctx.session.id, ctx.agent.id,
+      );
+    }
+    if (phase === "post-response" && input.currentContext) {
+      factsExtracted += await extractAndStore(
+        input.currentContext, primary, ctx.session.id, ctx.agent.id,
+        AUTOWRITE_SOURCE, AUTOWRITE_CONFIDENCE,
+      );
+    }
+
+    await writeAttendLog({
+      sessionId: ctx.session.id,
+      agentId: ctx.agent.id,
+      surface: input.surface,
+      factCount: returnedFacts.length,
+      ruleCount: rules.length,
+      alreadyPresent,
+      injectedChars,
+      injectedTokensEst: Math.floor(injectedChars / 4),
+      suppressedTokensEst: Math.floor(suppressedChars / 4),
+      latencyMs,
+      phase,
+      factsExtracted,
+    });
+
+    await persistMetricCounters(metricDelta);
+    lastSyncedMetrics = snapshot;
+  })().catch((err: unknown) =>
+    console.error("[iranti] async post-attend chain error:", err),
+  );
 
   return {
     rules: rules.map((r) => ({

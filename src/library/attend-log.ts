@@ -26,6 +26,7 @@ export interface AttendLogEntry {
   suppressedTokensEst: number;
   latencyMs: number;
   phase?: string;
+  factsExtracted?: number;
 }
 
 export async function writeAttendLog(entry: AttendLogEntry): Promise<void> {
@@ -42,6 +43,7 @@ export async function writeAttendLog(entry: AttendLogEntry): Promise<void> {
     suppressedTokensEst: entry.suppressedTokensEst,
     latencyMs: entry.latencyMs,
     phase: entry.phase,
+    factsExtracted: entry.factsExtracted ?? 0,
   });
 }
 

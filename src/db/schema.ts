@@ -514,6 +514,8 @@ export const attendLog = pgTable(
     latencyMs: integer("latency_ms").notNull().default(0),
     // Phase 3 (CORE-31): lifecycle phase that produced this attend call.
     phase: text("phase"),
+    // Phase 3 (CORE-32): facts written by server-side extraction this attend.
+    factsExtracted: integer("facts_extracted").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("attend_log_tenant_created_idx").on(t.tenantId, t.createdAt)],

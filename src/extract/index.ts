@@ -59,6 +59,8 @@ const DECISION_PATTERNS: Array<{ re: RegExp; capture: number }> = [
   { re: /\bdecision[:\s]+(.{3,80}?)(?:[.,;]|$)/i, capture: 1 },
   { re: /\bgoing\s+with\s+(.{3,60}?)\s+(?:for|as|because|instead|over)[.,;]?\b/i, capture: 1 },
   { re: /\bwe(?:'re|\ are)\s+(?:using|adopting|switching\s+to)\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1 },
+  { re: /\blet'?s\s+(?:use|go\s+with)\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1 },
+  { re: /\bwe\s+(?:decided|agreed|concluded)\s+(?:that\s+)?(.{3,80}?)(?:[.,;]|$)/i, capture: 1 },
 ];
 
 // Preference patterns: I always want X, prefer Y, never use Z
@@ -67,6 +69,32 @@ const PREFERENCE_PATTERNS: Array<{ re: RegExp; capture: number; prefix: string }
   { re: /\balways\s+(?:use|want|do)\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1, prefix: "preference" },
   { re: /\bnever\s+(?:use|do)\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1, prefix: "preference" },
   { re: /\bi\s+(?:want|need)\s+(?:you\s+to\s+)?always\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1, prefix: "preference" },
+  { re: /\bplease\s+(?:always\s+)?(.{3,60}?)(?:\s+when|\s+if|[.,;]|$)/i, capture: 1, prefix: "preference" },
+  { re: /\bmake\s+sure\s+(?:to\s+)?(?:always\s+)?(.{3,60}?)(?:[.,;]|$)/i, capture: 1, prefix: "preference" },
+  { re: /\bi\s+(?:don'?t|do\s+not)\s+(?:want|like)\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1, prefix: "preference" },
+];
+
+// Constraint patterns: we can't use X, requirement: X, must not do Y
+const CONSTRAINT_PATTERNS: Array<{ re: RegExp; capture: number }> = [
+  { re: /\bwe\s+(?:can'?t|cannot|must\s+not|should\s+not|won'?t)\s+use\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1 },
+  { re: /\brequirement[:\s]+(.{3,80}?)(?:[.,;]|$)/i, capture: 1 },
+  { re: /\bconstraint[:\s]+(.{3,80}?)(?:[.,;]|$)/i, capture: 1 },
+  { re: /\bwe\s+(?:have\s+to|must)\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1 },
+  { re: /\bnot\s+allowed\s+to\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1 },
+];
+
+// Failed approach patterns: tried X but failed, X didn't work
+const FAILED_PATTERNS: Array<{ re: RegExp; capture: number }> = [
+  { re: /\b(?:we\s+)?tried\s+(.{3,60}?)\s+(?:but|and)\s+(?:it\s+)?(?:didn'?t\s+work|failed|was\s+wrong)/i, capture: 1 },
+  { re: /\b(.{3,60}?)\s+didn'?t\s+work(?:\s+because|\s+for)?/i, capture: 1 },
+  { re: /\b(?:don'?t|do\s+not)\s+(?:use|try)\s+(.{3,60}?)\s+(?:—|for|because|it|if)/i, capture: 1 },
+  { re: /\bfailed\s+approach[:\s]+(.{3,80}?)(?:[.,;]|$)/i, capture: 1 },
+];
+
+// Correction patterns: actually X is Y, the correct value is Y
+const CORRECTION_PATTERNS: Array<{ re: RegExp; capture: string }> = [
+  { re: /\bactually,?\s+(.{3,60}?)\s+(?:is|should\s+be)\s+(.{3,60}?)(?:[.,;]|$)/i, capture: "1:2" },
+  { re: /\bthe\s+correct\s+(?:value\s+(?:for\s+)?(?:of\s+)?)?(.{3,60}?)\s+is\s+(.{3,60}?)(?:[.,;]|$)/i, capture: "1:2" },
 ];
 
 export class HeuristicExtractor implements ExtractorBackend {
@@ -94,6 +122,43 @@ export class HeuristicExtractor implements ExtractorBackend {
       if (seen.has(key)) continue;
       seen.add(key);
       results.push({ key, value: raw, source: "extractor_heuristic", confidence: 0.85 });
+    }
+
+    for (const { re, capture } of CONSTRAINT_PATTERNS) {
+      const m = message.match(re);
+      if (!m?.[capture]) continue;
+      const raw = m[capture].trim().replace(/\s+/g, " ");
+      if (raw.length < 3 || raw.length > 120) continue;
+      const key = `constraint:${slugify(raw)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      results.push({ key, value: raw, source: "extractor_heuristic", confidence: 0.85 });
+    }
+
+    for (const { re, capture } of FAILED_PATTERNS) {
+      const m = message.match(re);
+      if (!m?.[capture]) continue;
+      const raw = m[capture].trim().replace(/\s+/g, " ");
+      if (raw.length < 3 || raw.length > 120) continue;
+      const key = `failed-approach:${slugify(raw)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      results.push({ key, value: raw, source: "extractor_heuristic", confidence: 0.80 });
+    }
+
+    for (const { re, capture } of CORRECTION_PATTERNS) {
+      const m = message.match(re);
+      if (!m) continue;
+      // capture is "1:2" — combine both groups into "subject is value"
+      const [c1, c2] = capture.split(":");
+      const subject = m[Number(c1)]?.trim().replace(/\s+/g, " ") ?? "";
+      const val = m[Number(c2)]?.trim().replace(/\s+/g, " ") ?? "";
+      if (subject.length < 3 || val.length < 2) continue;
+      const combined = `${subject} is ${val}`;
+      const key = `correction:${slugify(subject)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      results.push({ key, value: combined, source: "extractor_heuristic", confidence: 0.85 });
     }
 
     return results;

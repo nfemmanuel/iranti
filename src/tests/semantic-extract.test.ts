@@ -176,3 +176,68 @@ describe("attend — semantic extraction integration", () => {
     expect(rows.filter((r) => r.source.startsWith("extractor_"))).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase 3 (CORE-32): expanded corpus + attendant_autowrite
+// ---------------------------------------------------------------------------
+
+describe("HeuristicExtractor — CORE-32 expanded corpus", () => {
+  const ex = new HeuristicExtractor();
+
+  it("extracts a constraint pattern", async () => {
+    const facts = await ex.extract("we cannot use third-party APIs in this module");
+    expect(facts.some((f) => f.key.startsWith("constraint:"))).toBe(true);
+  });
+
+  it("extracts a requirement constraint", async () => {
+    const facts = await ex.extract("requirement: all outputs must be deterministic");
+    expect(facts.some((f) => f.key.startsWith("constraint:"))).toBe(true);
+  });
+
+  it("extracts a failed approach", async () => {
+    const facts = await ex.extract("we tried the polling approach but it didn't work");
+    expect(facts.some((f) => f.key.startsWith("failed-approach:"))).toBe(true);
+  });
+
+  it("extracts a correction", async () => {
+    const facts = await ex.extract("actually the timeout value should be 5000");
+    expect(facts.some((f) => f.key.startsWith("correction:"))).toBe(true);
+  });
+
+  it("new decision patterns: let's use X", async () => {
+    const facts = await ex.extract("let's use pnpm for package management");
+    expect(facts.some((f) => f.key.startsWith("decision:"))).toBe(true);
+  });
+});
+
+describe("attend — CORE-32 attendant_autowrite via currentContext", () => {
+  it("post-response attend extracts attendant_autowrite facts from currentContext", async () => {
+    const entityId = randomUUID();
+    const entityType = "project";
+
+    // Simulate a post-response attend with a currentContext that contains
+    // extractable signal (a decision statement in the assistant's response).
+    await attend({
+      entityHints: [{ entityType, entityId }],
+      phase: "post-response",
+      currentContext: "we decided to use Redis for the session store in this service",
+    });
+
+    await new Promise((r) => setTimeout(r, 300));
+
+    const { db } = await import("../db/connection.js");
+    const { facts } = await import("../db/schema.js");
+    const { and, eq } = await import("drizzle-orm");
+    const rows = await db.query.facts.findMany({
+      where: and(
+        eq(facts.entityType, entityType),
+        eq(facts.entityId, entityId),
+        eq(facts.isArchived, false),
+      ),
+    });
+    const autowrites = rows.filter((r) => r.source === "attendant_autowrite");
+    expect(autowrites.length).toBeGreaterThan(0);
+    // Auto-writes land at reduced confidence (≤ 0.75 after D7 formula on neutral source).
+    expect(autowrites[0]!.confidence).toBeLessThanOrEqual(0.8);
+  });
+});

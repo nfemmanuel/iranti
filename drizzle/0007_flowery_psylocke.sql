@@ -1,0 +1,1 @@
+ALTER TABLE "attend_log" ADD COLUMN "facts_extracted" integer DEFAULT 0 NOT NULL;
