@@ -107,7 +107,7 @@ One engineering effort that unlocks every consumer surface + makes the token-sav
 
 > **⛔ GATE at 2.5 close (strategic-review gap 5):** before marking 2.5 shipped, verify master §3 self-awareness is real — comprehension counters survive restart, attend latency is *measured* (not asserted), and "tokens saved this week" is answerable by one query. If any of these is missing, 2.5 is not done.
 
-### Phase 3 — Retrieval & cross-platform  ⚪
+### Phase 3 — Retrieval & cross-platform  🟢
 
 The retrieval half of the Attendant. Requires its own PRD before build (gate below must be cleared first).
 
@@ -164,4 +164,4 @@ The retrieval half of the Attendant. Requires its own PRD before build (gate bel
 
 ---
 
-_Last updated: 2026-06-10 (Phase 3 in progress — CORE-34/31/32/15/33/17 shipped; CORE-30/16 remain. CORE-17 adds corrections[] + drift heartbeat to attend; sessions.turn_count + attend_log.corrections_count telemetry live.)_
+_Last updated: 2026-06-10 (Phase 3 complete — all COREs shipped: CORE-34/31/32/15/33/17/30/16. media_objects schema live; facts.embedding vector(768) + HNSW index pre-placed for hybrid search; pgvector/pgvector:pg17 Docker image.)_
