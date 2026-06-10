@@ -1,6 +1,6 @@
 # PRD: Phase 3 — The Attendant: retrieval, payload contract & autonomous writes
 
-**Status:** proposed
+**Status:** accepted
 **Phase:** 3 · **Date:** 2026-06-10 · **Author:** Claude (with NF)
 **Related:** master PRD §6 (the Attendant), §8 (inner workings), §12 Phase 3, §13 open questions (the stream, drift N, pass weighting); [alignment review 2026-06-10](../../reviews/2026-06-10-alignment-and-enforcement.md) (Branch C + universal-mechanism amendment); backlog Phase 3 gate items 1–4; CORE-15/16/17/30 + new CORE-31…34; specs [two-pass](../../specs/retrieval/two-pass-retrieval.md), [periodic drift](../../specs/retrieval/periodic-drift-check.md), [graph traversal](../../specs/retrieval/graph-traversal-retrieval.md), [context-window observation](../../specs/retrieval/context-window-observation.md)
 
@@ -41,7 +41,7 @@ Phase 3 makes the rebuild *the Attendant the master PRD describes* — and close
 - **Media ingest behavior** → CORE-30 is schema-only; ingest needs its own spec (master §13).
 - **Hebbian decay, archivist** → Phase 4. Edges strengthen and are now *read*; nothing decays yet.
 - **Hook configurations for specific hosts** → Claude-Code sugar documented in integrations.md, not core deliverables (Branch C amendment: hooks are tier-2).
-- **OAuth, RLS, real tenancy** → Phase 5.
+- **OAuth, RLS, real tenancy** → Phase 5. (Vision: no-account users get local-only KB; users with accounts get local KB synced to iranti cloud. Auth gates the sync layer, not the local store.)
 
 ## 4. Scope
 
@@ -129,5 +129,5 @@ Implements §12 Phase 3 (both Attendant halves) with two deliberate departures. 
 
 ## Changelog
 - 2026-06-10 — proposed (scope: CORE-15/16/17/30 + new 31–34; gate items 1–4 resolved as D1/CORE-34/CORE-33/D4; Branch C + amendment baked in as CORE-31/32; CORE-18/19 deferred by D10)
-- _pending_ — accepted
+- 2026-06-10 — accepted (OAuth Phase 5 vision noted: local-only without account, local+sync with account)
 - _pending_ — shipped

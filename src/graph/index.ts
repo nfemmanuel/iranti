@@ -286,12 +286,25 @@ export class PostgresGraphBackend implements GraphBackend {
       last_reinforced_at: Date | string;
     };
 
+    // frontier_type/frontier_id = the far end of each edge (the node to expand
+    // from next). The prior bug used t.source_type/id in the recursive JOIN,
+    // which walked BACK toward the origin instead of forward — second OR branch
+    // matched edges ending at t.source (already visited). Fix: carry the far
+    // end explicitly and JOIN on frontier_* in the recursive term.
+    // Second bug: DISTINCT ON (id) ORDER BY id LIMIT applied the cap before
+    // weight ordering. Fix: dedup in a subquery, then ORDER BY weight DESC LIMIT.
     const rows = await db.execute<RawEdgeRow>(sql`
       WITH RECURSIVE traversal AS (
+        -- Depth 1: direct edges from the origin node.
+        -- frontier_type/id tracks the far end to expand from next hop.
         SELECT e.id, e.tenant_id, e.source_type, e.source_id,
                e.target_type, e.target_id, e.relation, e.weight,
                e.co_access_count, e.created_at, e.last_reinforced_at,
-               1 AS depth
+               1 AS depth,
+               CASE WHEN e.source_type = ${node.type} AND e.source_id = ${node.id}
+                    THEN e.target_type ELSE e.source_type END AS frontier_type,
+               CASE WHEN e.source_type = ${node.type} AND e.source_id = ${node.id}
+                    THEN e.target_id   ELSE e.source_id   END AS frontier_id
         FROM knowledge_edges e
         WHERE e.tenant_id = ${tenantId}
           AND e.weight >= ${minWeight}
@@ -302,24 +315,37 @@ export class PostgresGraphBackend implements GraphBackend {
 
         UNION
 
+        -- Depth N+1: edges from the frontier of the previous depth.
+        -- JOIN on t.frontier_* (the far end), not t.source_* (the origin side).
         SELECT e.id, e.tenant_id, e.source_type, e.source_id,
                e.target_type, e.target_id, e.relation, e.weight,
                e.co_access_count, e.created_at, e.last_reinforced_at,
-               t.depth + 1
+               t.depth + 1,
+               CASE WHEN e.source_type = t.frontier_type AND e.source_id = t.frontier_id
+                    THEN e.target_type ELSE e.source_type END AS frontier_type,
+               CASE WHEN e.source_type = t.frontier_type AND e.source_id = t.frontier_id
+                    THEN e.target_id   ELSE e.source_id   END AS frontier_id
         FROM knowledge_edges e
         INNER JOIN traversal t ON (
-          (e.source_type = t.target_type AND e.source_id = t.target_id)
-          OR (e.target_type = t.source_type AND e.target_id = t.source_id)
+          (e.source_type = t.frontier_type AND e.source_id = t.frontier_id)
+          OR (e.target_type = t.frontier_type AND e.target_id = t.frontier_id)
         )
         WHERE t.depth < ${depth}
           AND e.tenant_id = ${tenantId}
           AND e.weight >= ${minWeight}
       )
-      SELECT DISTINCT ON (id) id, tenant_id, source_type, source_id,
+      SELECT id, tenant_id, source_type, source_id,
              target_type, target_id, relation, weight, co_access_count,
              created_at, last_reinforced_at
-      FROM traversal
-      ORDER BY id
+      FROM (
+        SELECT DISTINCT ON (id)
+               id, tenant_id, source_type, source_id,
+               target_type, target_id, relation, weight, co_access_count,
+               created_at, last_reinforced_at
+        FROM traversal
+        ORDER BY id
+      ) deduped
+      ORDER BY weight DESC
       LIMIT ${limit}
     `);
 

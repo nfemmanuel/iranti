@@ -180,6 +180,53 @@ describe("GraphBackend — getNeighbors", () => {
   });
 });
 
+describe("GraphBackend — getNeighbors depth>1 (CORE-34 regression)", () => {
+  it("depth-2 traversal reaches nodes two hops away, not back to origin", async () => {
+    // Chain: A — B — C
+    // getNeighbors(A, depth=2) must include C (two hops forward).
+    // Pre-fix bug: the recursive JOIN used t.source_type/id — the ORIGIN side —
+    // which walked backward instead of forward from the frontier. C was
+    // invisible; edges pointing back to A-adjacent nodes could appear instead.
+    const a = randomUUID();
+    const b = randomUUID();
+    const c = randomUUID();
+    const d = randomUUID(); // unrelated — must not appear
+
+    await graph.reinforceEdge({ type: "fact", id: a }, { type: "fact", id: b }, "co_access");
+    await graph.reinforceEdge({ type: "fact", id: b }, { type: "fact", id: c }, "co_access");
+    await graph.reinforceEdge({ type: "fact", id: d }, { type: "fact", id: d }, "co_access");
+
+    const neighbors = await graph.getNeighbors({ type: "fact", id: a }, { depth: 2 });
+    const allIds = neighbors.flatMap((e) => [e.sourceId, e.targetId]);
+
+    expect(allIds).toContain(c);
+    expect(allIds).not.toContain(d);
+  });
+
+  it("weight ordering applies before LIMIT — highest-weight edge wins", async () => {
+    // Setup: A-B (w=1), B-C1 (w=1), B-C2 (w=5).
+    // With limit=1 and ORDER BY weight DESC, B-C2 must win over A-B.
+    // Pre-fix bug: ORDER BY id LIMIT made the winner UUID-order (arbitrary).
+    const a = randomUUID();
+    const b = randomUUID();
+    const c1 = randomUUID();
+    const c2 = randomUUID();
+
+    await graph.reinforceEdge({ type: "fact", id: a }, { type: "fact", id: b }, "co_access");
+    await graph.reinforceEdge({ type: "fact", id: b }, { type: "fact", id: c1 }, "co_access");
+    for (let i = 0; i < 5; i++) {
+      await graph.reinforceEdge({ type: "fact", id: b }, { type: "fact", id: c2 }, "co_access");
+    }
+
+    const top = await graph.getNeighbors({ type: "fact", id: a }, { depth: 2, limit: 1 });
+
+    expect(top).toHaveLength(1);
+    const topIds = [top[0]!.sourceId, top[0]!.targetId];
+    expect(topIds).toContain(c2);
+    expect(top[0]!.weight).toBeCloseTo(5);
+  });
+});
+
 describe("GraphBackend — getEdge", () => {
   it("returns undefined when the edge does not exist", async () => {
     const edge = await graph.getEdge(
