@@ -276,10 +276,11 @@ if (process.env.IRANTI_EXPOSE_OPENAI_ALIASES === "true") {
 // stdio transport always starts regardless.
 const httpToken = process.env.IRANTI_HTTP_TOKEN;
 const httpPortStr = process.env.IRANTI_HTTP_PORT;
+let httpServer: import("node:http").Server | undefined;
 if (httpToken && httpPortStr) {
   const httpPort = parseInt(httpPortStr, 10);
   if (!isNaN(httpPort)) {
-    await startHttpServer(server, httpPort, httpToken);
+    httpServer = await startHttpServer(server, httpPort, httpToken);
   }
 }
 
@@ -288,6 +289,11 @@ if (httpToken && httpPortStr) {
 async function shutdown(signal: string): Promise<void> {
   console.error(`iranti: ${signal} received, closing session`);
   try {
+    // Close the HTTP listener first so its socket is released before exit —
+    // otherwise the port can linger and reject the next process on restart.
+    if (httpServer) {
+      await new Promise<void>((resolve) => httpServer!.close(() => resolve()));
+    }
     await shutdownContext();
     await pool.end({ timeout: 5 });
   } catch (err) {

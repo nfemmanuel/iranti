@@ -344,19 +344,24 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
     latencyMs,
   }).catch((err: unknown) => console.error("[iranti] attend log error:", err));
 
-  // Compute deltas since last sync and persist them, then advance the cursor.
+  // Compute deltas since last sync and persist them. Snapshot the live
+  // counters now (they mutate as conflicts fire), and only advance the cursor
+  // AFTER the write resolves — if persistMetricCounters fails, the delta is
+  // retried on the next attend rather than silently lost.
+  const snapshot = { ...comprehensionMetrics };
   const delta = {
     minimalConflictsChecked:
-      comprehensionMetrics.minimalConflictsChecked - lastSyncedMetrics.minimalConflictsChecked,
-    supersessions: comprehensionMetrics.supersessions - lastSyncedMetrics.supersessions,
-    escalations: comprehensionMetrics.escalations - lastSyncedMetrics.escalations,
+      snapshot.minimalConflictsChecked - lastSyncedMetrics.minimalConflictsChecked,
+    supersessions: snapshot.supersessions - lastSyncedMetrics.supersessions,
+    escalations: snapshot.escalations - lastSyncedMetrics.escalations,
     deepConflictsDetected:
-      comprehensionMetrics.deepConflictsDetected - lastSyncedMetrics.deepConflictsDetected,
+      snapshot.deepConflictsDetected - lastSyncedMetrics.deepConflictsDetected,
   };
-  lastSyncedMetrics = { ...comprehensionMetrics };
-  void persistMetricCounters(delta).catch(
-    (err: unknown) => console.error("[iranti] metric persist error:", err),
-  );
+  void persistMetricCounters(delta)
+    .then(() => {
+      lastSyncedMetrics = snapshot;
+    })
+    .catch((err: unknown) => console.error("[iranti] metric persist error:", err));
 
   return {
     rules: rules.map((r) => ({

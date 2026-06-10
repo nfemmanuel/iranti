@@ -104,6 +104,7 @@ async function recordWriteEdges(
       (async () => {
         const prev = await db.query.facts.findFirst({
           where: and(
+            eq(facts.tenantId, tenantId),
             eq(facts.sessionId, sessionId),
             eq(facts.isArchived, false),
             ne(facts.id, factId),
