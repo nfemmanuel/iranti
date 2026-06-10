@@ -24,6 +24,7 @@ import {
   timestamp,
   unique,
   uuid,
+  vector,
 } from "drizzle-orm/pg-core";
 
 // ---------------------------------------------------------------------------
@@ -199,12 +200,24 @@ export const facts = pgTable(
     isArchived: boolean("is_archived").notNull().default(false),
 
     metadata: jsonb("metadata"),
+
+    // CORE-16 (Phase 3): dense embedding for hybrid retrieval (vector + keyword).
+    // Null until embeddings are enabled (IRANTI_EMBEDDINGS=true).
+    // Dimension 768 matches the default local model (nomic-embed-text via Ollama).
+    // Config-gated (D6): keyword+graph search remains the default; this column
+    // is a schema pre-placement so enabling is a config flip, not a migration.
+    embedding: vector("embedding", { dimensions: 768 }),
   },
   (t) => [
     // One current value per (tenant, entity, key). Writing to the same key
     // within the same tenant is an upsert. Different tenants can hold
     // independent values for the same entity+key combination.
     unique("facts_tenant_entity_key_uniq").on(t.tenantId, t.entityType, t.entityId, t.key),
+    // CORE-16: HNSW index for approximate nearest-neighbour search.
+    // ef_construction / m use pgvector defaults; tune after benchmarking real data.
+    // The index is empty until embeddings are populated; existence has no cost.
+    index("facts_embedding_hnsw_idx")
+      .using("hnsw", t.embedding.op("vector_cosine_ops")),
   ],
 );
 
@@ -588,3 +601,50 @@ export type NewAttendLog = typeof attendLog.$inferInsert;
 
 export type MetricCounter = typeof metricCounters.$inferSelect;
 export type NewMetricCounter = typeof metricCounters.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// media_objects — Phase 3 (CORE-30)
+//
+// Schema-only. No read/write path in Phase 3.
+// Retrieval (CORE-15/16) will consume this in a future phase once ingest
+// behavior has its own spec (master PRD §13).
+//
+// One row = one external media object (image, document, recording, etc.)
+// associated with an entity at a specific semantic slot (key). The object
+// lives at object_url; iranti holds the pointer and the description — never
+// the binary.
+//
+// mime_type: IANA media type, e.g. "image/png", "application/pdf".
+// key: semantic slot, e.g. "diagram:architecture", "screenshot:login-flow".
+// description_text: plain-text caption/description for keyword retrieval.
+// ---------------------------------------------------------------------------
+export const mediaObjects = pgTable(
+  "media_objects",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+
+    tenantId: text("tenant_id").notNull().default("default"),
+
+    entityType: text("entity_type").notNull(),
+    entityId: text("entity_id").notNull(),
+
+    key: text("key").notNull(),
+
+    objectUrl: text("object_url").notNull(),
+    mimeType: text("mime_type").notNull(),
+
+    descriptionText: text("description_text"),
+
+    metadata: jsonb("metadata"),
+
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("media_objects_entity_idx").on(t.tenantId, t.entityType, t.entityId),
+  ],
+);
+
+export type MediaObject = typeof mediaObjects.$inferSelect;
+export type NewMediaObject = typeof mediaObjects.$inferInsert;

@@ -130,4 +130,10 @@ Implements §12 Phase 3 (both Attendant halves) with two deliberate departures. 
 ## Changelog
 - 2026-06-10 — proposed (scope: CORE-15/16/17/30 + new 31–34; gate items 1–4 resolved as D1/CORE-34/CORE-33/D4; Branch C + amendment baked in as CORE-31/32; CORE-18/19 deferred by D10)
 - 2026-06-10 — accepted (OAuth Phase 5 vision noted: local-only without account, local+sync with account)
-- _pending_ — shipped
+- 2026-06-10 — CORE-34 shipped (getNeighbors forward-only CTE + weight ordering)
+- 2026-06-10 — CORE-31 shipped (phase param, mid-turn economics, nextDue breadcrumb, session auto-bootstrap)
+- 2026-06-10 — CORE-32 shipped (extractor corpus expansion, currentContext delta extraction, facts_extracted telemetry)
+- 2026-06-10 — CORE-15 shipped (two-pass peripheral retrieval, graph-hop secondary tier)
+- 2026-06-10 — CORE-33 shipped (token-budgeted injection, IRANTI_TOKEN_BUDGET env, priority order)
+- 2026-06-10 — CORE-17 shipped (stale-context corrections[], drift heartbeat, sessions.turn_count, attend_log.corrections_count)
+- _pending_ — CORE-30, CORE-16 (shipped when done)

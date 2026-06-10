@@ -164,4 +164,4 @@ The retrieval half of the Attendant. Requires its own PRD before build (gate bel
 
 ---
 
-_Last updated: 2026-06-10 (Phase 2.5 shipped + code-review fixes b6fd9e4: HTTP-server close, co_write tenant scope, metric-delta loss. Two review items deferred to the Phase 3 gate: getNeighbors depth>1 traversal and metric_counters tenancy. CORE-30 media_objects schema also Phase 3 prep)._
+_Last updated: 2026-06-10 (Phase 3 in progress — CORE-34/31/32/15/33/17 shipped; CORE-30/16 remain. CORE-17 adds corrections[] + drift heartbeat to attend; sessions.turn_count + attend_log.corrections_count telemetry live.)_
