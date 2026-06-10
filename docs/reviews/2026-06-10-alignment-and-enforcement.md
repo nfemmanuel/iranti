@@ -69,13 +69,27 @@ The pre-response *retrieval* is **already** harness-driven — the `UserPromptSu
 The middle row **is** the PRD's "autonomous write routing" (§6, §8) — delivered through Claude Code's hook surface instead of stream-parsing. Because the agent spends ~zero tokens orchestrating, Branch C **restores** *invisible* and *negligible overhead* — the two principles Branch B breaks. The write-guard can then be deleted, not tuned.
 
 ### The load-bearing cost (must be accepted consciously)
-Hooks are a Claude-Code capability. Codex, bare MCP hosts, and the SDK path do **not** have `Stop`/`PostToolUse` equivalents. **Harness-driven invocation is therefore not model/agent-agnostic** (a direct tension with §2). The resolution is a **capability ladder**, not a single mechanism:
+Hooks are a Claude-Code capability. Codex, bare MCP hosts, chat hosts, and the SDK path do **not** have `Stop`/`PostToolUse` equivalents. **Harness-driven invocation is therefore not model/agent-agnostic** (a direct tension with §2). The resolution is not to treat hooks as the mechanism with degraded fallbacks — it is to identify the **universal mechanism** and treat hooks as sugar on top.
 
-1. **Rich-hook hosts (Claude Code):** full harness-driven invocation. Agent passive.
-2. **Streaming hosts:** Iranti observes the stream and routes autonomously (the original PRD vision; still needs the stream defined).
-3. **Bare hosts:** fall back to agent-driven tool calls + lightweight enforcement (warn, not block).
+### The universal mechanism: the attend payload IS the stream *(amended 2026-06-10, same day)*
 
-Iranti's contract stays the same across the ladder; only the *mechanism of invocation* degrades. This keeps the agnostic principle honest: the **behaviour** is host-independent even though the **enforcement mechanism** is not.
+Ask what Iranti controls on *every* host — including a pure chat host with no files and no hooks:
+
+1. **The attend payload.** Every host that calls `iranti_attend` passes `latestMessage` / `currentContext`. That is the conversation stream arriving server-side, turn by turn. The PRD's open question "what counts as the stream?" has a de facto answer already running: **the stream = the accumulated payloads of attend calls.** Identical for coding sessions and plain conversations.
+2. **The server side of every tool call.** Extraction, write-routing, compliance tracking all live behind the tool boundary where the host cannot opt out. Phase 2b's extractor-inside-attend and v0's `toolResult` / response-capture autowrites are the embryo.
+3. **The tool response channel.** Every result flows back into the model's context on every host — a universal carrier for protocol breadcrumbs ("here is what is due next"). The agent follows the note on the last result; it never tracks the lifecycle itself.
+
+**The agent's only universal obligation collapses to one habit: call attend every turn and hand over the conversation. Everything else happens server-side from that payload.** One habit is enforceable with one server-side check; six rules requiring the agent to hand-author facts is what produced the write-guard pain.
+
+**Write-guard fate, revised:** not deleted — *inverted*. Its diagnosis ("observations happened that are not in memory") is correct; its remedy (block until the agent does the Librarian's job) is the inversion this review documents. Cross-host remedy: when the guard fires, **Iranti performs the writes itself** from material it already holds, tagged `attendant_autowrite` at reduced confidence, and **warns** instead of blocking. Blocking survives only as the configurable `enforce` level of the protocol spec, not the default. The guard degrades from roadblock to backstop extractor.
+
+The ladder, restated honestly:
+
+1. **Universal floor (every host, chat or code):** attend-payload-as-stream + server-side extraction + breadcrumb responses. This is the real autonomous write routing — and the *conversational* case proves it, because there it is the only possible mechanism (no edits to capture).
+2. **Rich-hook hosts (Claude Code):** hooks automate the one remaining habit — they fire the attend calls themselves. Agent fully passive. Sugar, not foundation.
+3. **The irreducible gap:** a bare host whose agent never calls attend gets no memory. No server-side architecture closes that; it is an integration-quality problem surfaced by warn-level ledger lessons.
+
+Consequence: the quality load shifts entirely onto **server-side extraction** (today a 9-pattern heuristic + optional local LLM). That — not hooks — is the Phase 3 centerpiece.
 
 ## 5. The attend lifecycle: pre / mid / post
 
@@ -92,15 +106,15 @@ The three phases are not three flavours of one call. They are the moments the tw
 1. **Is mid-response a first-class phase, or just "pre, repeatable"?** Leaning first-class: distinct trigger (discovery vs turn-start) *and* distinct economics (small budget, dedup, no rule rescan). But it's the phase most tempting to collapse into pre.
 2. **Where does write-routing truly happen — continuously (per-edit `PostToolUse`) or batched (post-response)?** Leaning *both*: per-edit capture is cheap and is what lets us delete the write-guard; post-response consolidates and checkpoints. Needs a concrete split of responsibilities.
 3. **Per phase, hard guarantee vs best-effort?** Post-response persist should be guaranteed (Stop hook); pre-response retrieve is guaranteed (UserPromptSubmit); mid-turn is inherently best-effort. The enforcement *level* (off/warn/enforce from the protocol spec) should probably vary by phase and by host tier, not be a single global switch.
-4. **The write-guard's fate.** Under Branch C the guard becomes redundant (PostToolUse routes writes). Confirm we delete it rather than keep it as a belt-and-suspenders fallback — it is the single largest source of the friction this review documents.
+4. **The write-guard's fate.** ~~Delete it~~ **Invert it** (amended same day): the guard's detection stays, its remedy changes — on firing, Iranti auto-writes from held material (`attendant_autowrite`, reduced confidence) and warns; blocking becomes the opt-in `enforce` level only. Open sub-question: what payload retention does the backstop extractor need server-side to do this well?
 5. **What counts as "the stream"** (§13 open item) for tier-2 streaming hosts. Still unanswered; Branch C lets us defer it for Claude Code but not forever.
 
 ## 7. Implications for Phase 3
 
 Phase 3 is "the Attendant" — and this review changes its shape:
 
-- Phase 3 must **specify the harness-invocation model** (which hook drives which phase) as a first-class deliverable, not an afterthought.
-- Phase 3 should **build `PostToolUse`-driven write-routing** and **delete the write-guard** — this is the concrete first instance of autonomous write routing.
+- Phase 3's centerpiece is **server-side extraction from attend payloads** — the universal autonomous write routing that works on chat hosts and coding hosts alike. The hook-invocation model (which hook drives which phase on Claude Code) is a deliverable, but it is tier-2 sugar, not the foundation.
+- Phase 3 should **invert the write-guard** (auto-write + warn replaces block-and-demand) and add `PostToolUse`-driven edit capture as the Claude-Code enhancement on top.
 - The **protocol-enforcement spec** (currently Phase 7, host-conformance, warn/enforce) needs to graduate early and be re-scoped to cover **agent-lifecycle conformance across the host capability ladder**.
 - **PRD §2 wording** ("invisible", "negligible overhead", "model/agent agnostic") should be reconciled with the capability-ladder reality: behaviour is agnostic, invocation mechanism is tiered.
 
