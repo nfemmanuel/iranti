@@ -31,6 +31,7 @@ import {
 import { upsertEntity } from "../../library/entities.js";
 import {
   VALID_SURFACES,
+  readFactsByIds,
   readRelevantFactsByEntity,
   writeFact,
 } from "../../library/facts.js";
@@ -46,6 +47,8 @@ export const MAX_FACTS_PER_ENTITY = 10;
 export const MAX_TOTAL_FACTS = 20;
 // Mid-turn is a cheap top-up — small budget so it doesn't re-inject the turn.
 export const MAX_MID_TURN_FACTS = 3;
+// Secondary (graph-hop) peripheral facts cap. Separate from primary budget.
+export const MAX_PERIPHERAL_FACTS = 10;
 
 // Track the last persisted metric values so we only send deltas.
 // Reset to zero on process start; DB holds the cumulative all-time total.
@@ -226,6 +229,17 @@ export interface AttendResult {
     source: string;
     updatedAt: string;
   }>;
+  // Phase 3 (CORE-15): graph-hop secondary tier. Facts within 2 hops of the
+  // primary hits, weight-ordered, capped at MAX_PERIPHERAL_FACTS.
+  // Each entry carries the edge relation that connects it to a primary fact.
+  peripheral: Array<{
+    entity: string;
+    key: string;
+    value: string;
+    source: string;
+    updatedAt: string;
+    relation: string;
+  }>;
   checkpoint: { entity: string; text: string; updatedAt: string } | null;
   extracted: Array<{ kind: string; value: string }>;
   // Phase 1.2: how many relevant facts were suppressed because their value
@@ -368,6 +382,63 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
 
   const checkpoint = await getActiveCheckpoint(hints);
 
+  // ---- SECONDARY PASS: graph-hop peripheral retrieval (CORE-15) ------------
+  // Walk up to 2 hops from each primary fact. Collect fact-type neighbor IDs,
+  // deduplicate against primary hits, sort by edge weight, cap, look up.
+  // Skipped for mid-turn — that's a cheap top-up, not a full retrieval.
+  const peripheralFacts: AttendResult["peripheral"] = [];
+  if (!isMidTurn && returnedFacts.length > 0) {
+    const primaryIds = new Set(returnedFacts.map((f) => f.id));
+    const checkpointFactId = checkpoint?.id;
+
+    const edgeLists = await Promise.all(
+      returnedFacts.map((f) =>
+        graph.getNeighbors({ type: "fact", id: f.id }, { depth: 2, limit: 20 }),
+      ),
+    );
+
+    // candidates: neighborFactId → { relation, weight } (highest-weight edge wins)
+    const candidates = new Map<string, { relation: string; weight: number }>();
+    for (const edges of edgeLists) {
+      for (const edge of edges) {
+        for (const [nodeType, nodeId] of [
+          [edge.sourceType, edge.sourceId],
+          [edge.targetType, edge.targetId],
+        ] as [string, string][]) {
+          if (nodeType !== "fact") continue;
+          if (primaryIds.has(nodeId)) continue;
+          if (checkpointFactId && nodeId === checkpointFactId) continue;
+          const existing = candidates.get(nodeId);
+          if (!existing || existing.weight < edge.weight) {
+            candidates.set(nodeId, { relation: edge.relation, weight: edge.weight });
+          }
+        }
+      }
+    }
+
+    if (candidates.size > 0) {
+      const sorted = Array.from(candidates.entries())
+        .sort((a, b) => b[1].weight - a[1].weight)
+        .slice(0, MAX_PERIPHERAL_FACTS);
+
+      const neighborFacts = await readFactsByIds(sorted.map(([id]) => id));
+      const factById = new Map(neighborFacts.map((f) => [f.id, f]));
+
+      for (const [id, meta] of sorted) {
+        const fact = factById.get(id);
+        if (!fact || fact.isArchived) continue;
+        peripheralFacts.push({
+          entity: entityLabel(fact),
+          key: fact.key,
+          value: fact.value,
+          source: fact.source,
+          updatedAt: fact.updatedAt.toISOString(),
+          relation: meta.relation,
+        });
+      }
+    }
+  }
+
   // Phase 2a — async edge recording. Fire-and-forget after the response is
   // assembled so this never adds latency. Errors are logged, never thrown.
   if (returnedFacts.length >= 2 || rules.length > 0) {
@@ -450,6 +521,7 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
       source: f.source,
       updatedAt: f.updatedAt.toISOString(),
     })),
+    peripheral: peripheralFacts,
     checkpoint: checkpoint
       ? {
           entity: entityLabel(checkpoint),

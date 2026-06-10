@@ -14,6 +14,7 @@ import { pool } from "../db/connection.js";
 import { writeCheckpoint } from "../library/checkpoints.js";
 import { findFact, writeFact } from "../library/facts.js";
 import { getRuleById } from "../library/rules.js";
+import { graph } from "../graph/index.js";
 import { EXTRACT_SOURCE } from "../mcp/extractor.js";
 import { attend, MAX_TOTAL_FACTS } from "../mcp/tools/attend.js";
 import { archive } from "../mcp/tools/archive.js";
@@ -697,5 +698,99 @@ describe("archive", () => {
     const result = await archive({ entityType: "project" });
     expect(result.archived).toBe(false);
     expect(result.reason).toContain("Provide either");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3 (CORE-15): two-pass peripheral retrieval via graph hops
+// ---------------------------------------------------------------------------
+
+describe("attend — CORE-15 two-pass peripheral retrieval", () => {
+  it("graph-linked fact appears in peripheral[], not in facts[]", async () => {
+    const entityIdA = randomUUID();
+    const entityIdB = randomUUID();
+
+    // Write one fact per entity with no keyword overlap.
+    const factA = await writeFact({
+      entityType: "project", entityId: entityIdA,
+      key: "stack", value: "TypeScript and Node.js", source: "test",
+    });
+    const factB = await writeFact({
+      entityType: "project", entityId: entityIdB,
+      key: "database", value: "PostgreSQL 16", source: "test",
+    });
+
+    // Create a direct co_access edge between the two facts.
+    await graph.reinforceEdge(
+      { type: "fact", id: factA.id },
+      { type: "fact", id: factB.id },
+      "co_access",
+    );
+
+    // Attend for entity A only — factB has no keyword overlap with entity A's hint.
+    const result = await attend({
+      entityHints: [{ entityType: "project", entityId: entityIdA }],
+    });
+
+    // factA's key should be in the primary tier.
+    expect(result.facts.some((f) => f.key === "stack")).toBe(true);
+
+    // factB should surface in peripheral, not in primary facts.
+    const peripheralKeys = result.peripheral.map((p) => p.key);
+    expect(peripheralKeys).toContain("database");
+    expect(result.facts.some((f) => f.key === "database")).toBe(false);
+
+    // Peripheral entry carries the relation provenance.
+    const pFact = result.peripheral.find((p) => p.key === "database");
+    expect(pFact?.relation).toBe("co_access");
+    expect(pFact?.entity).toContain("project/");
+  });
+
+  it("mid-turn attend returns empty peripheral[]", async () => {
+    const entityId = randomUUID();
+    await writeFact({
+      entityType: "project", entityId,
+      key: "runtime", value: "Node 22", source: "test",
+    });
+
+    const result = await attend({
+      entityHints: [{ entityType: "project", entityId }],
+      phase: "mid-turn",
+    });
+
+    expect(result.peripheral).toHaveLength(0);
+  });
+
+  it("facts in peripheral[] are not duplicated in primary facts[]", async () => {
+    const entityIdA = randomUUID();
+    const entityIdB = randomUUID();
+
+    const factP = await writeFact({
+      entityType: "project", entityId: entityIdA,
+      key: "lang", value: "Go", source: "test",
+    });
+    const factQ = await writeFact({
+      entityType: "project", entityId: entityIdB,
+      key: "infra", value: "Kubernetes", source: "test",
+    });
+
+    await graph.reinforceEdge(
+      { type: "fact", id: factP.id },
+      { type: "fact", id: factQ.id },
+      "co_access",
+    );
+
+    // Both entities in scope — both facts should land in primary tier.
+    const result = await attend({
+      entityHints: [
+        { entityType: "project", entityId: entityIdA },
+        { entityType: "project", entityId: entityIdB },
+      ],
+    });
+
+    const primaryEntries = new Set(result.facts.map((f) => `${f.entity}::${f.key}`));
+    for (const p of result.peripheral) {
+      expect(primaryEntries.has(`${p.entity}::${p.key}`)).toBe(false);
+    }
   });
 });

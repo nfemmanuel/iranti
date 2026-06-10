@@ -560,6 +560,23 @@ export async function readRelevantFactsByEntity(
   return top;
 }
 
+// Look up multiple facts by their IDs. No side effects — does not update
+// lastAccessedAt or accessCount. Used by the secondary (graph-hop) retrieval
+// pass so peripheral suggestions don't inflate access counters.
+export async function readFactsByIds(
+  ids: string[],
+  tenantId: string = "default",
+): Promise<Fact[]> {
+  if (ids.length === 0) return [];
+  return db.query.facts.findMany({
+    where: and(
+      eq(facts.tenantId, tenantId),
+      inArray(facts.id, ids),
+      eq(facts.isArchived, false),
+    ),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Full-text search (for iranti_search)
 // ---------------------------------------------------------------------------
