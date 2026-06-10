@@ -44,6 +44,8 @@ import { comprehensionMetrics } from "../../library/conflicts.js";
 
 export const MAX_FACTS_PER_ENTITY = 10;
 export const MAX_TOTAL_FACTS = 20;
+// Mid-turn is a cheap top-up — small budget so it doesn't re-inject the turn.
+export const MAX_MID_TURN_FACTS = 3;
 
 // Track the last persisted metric values so we only send deltas.
 // Reset to zero on process start; DB holds the cumulative all-time total.
@@ -179,10 +181,30 @@ export const attendInputSchema = {
       "Agent name for the handshake. Only the first tool call's name is " +
         "used; subsequent values are ignored.",
     ),
+  // Phase 3 (CORE-31): attend lifecycle phase.
+  //
+  //   pre-response  — full budget, full rule scan; call at turn start.
+  //   mid-turn      — small budget (3 facts), no rule rescan, dedup vs recent
+  //                   access; call when a new entity is discovered mid-turn.
+  //   post-response — retrieval side identical to pre-response; call after the
+  //                   response is sent to persist turn state.
+  //
+  // First attend of a session auto-bootstraps agent + session regardless of phase.
+  phase: z
+    .enum(["pre-response", "mid-turn", "post-response"])
+    .optional()
+    .default("pre-response")
+    .describe(
+      "Lifecycle phase: 'pre-response' (default, full budget), " +
+        "'mid-turn' (small budget, no rule rescan), " +
+        "'post-response' (persist + close).",
+    ),
 };
 
 export const attendInput = z.object(attendInputSchema);
-export type AttendInput = z.infer<typeof attendInput>;
+// Use z.input so callers (tests, hooks) can omit fields that have defaults.
+// The output type (z.infer) has phase required; the input type has it optional.
+export type AttendInput = z.input<typeof attendInput>;
 
 export interface AttendResult {
   rules: Array<{ entity: string; text: string; priority: number }>;
@@ -199,6 +221,8 @@ export interface AttendResult {
   // was already present in the host-provided currentContext. 0 when no
   // currentContext was passed.
   alreadyPresent: number;
+  // Phase 3 (CORE-31): protocol breadcrumb — what the host should call next.
+  nextDue: string;
 }
 
 function entityLabel(f: { entityType: string; entityId: string }): string {
@@ -228,12 +252,29 @@ function isAlreadyPresent(value: string, normalizedHaystack: string): boolean {
 
 // The full attend pipeline, separated from MCP plumbing so integration
 // tests can call it directly against the database.
+// Compute the protocol breadcrumb based on the current phase.
+function computeNextDue(phase: string): string {
+  switch (phase) {
+    case "pre-response":
+      return "iranti_attend(phase='post-response') due after response; iranti_attend(phase='mid-turn') available if new entities discovered";
+    case "mid-turn":
+      return "iranti_attend(phase='post-response') due after response";
+    case "post-response":
+      return "iranti_attend(phase='pre-response') due at next user turn";
+    default:
+      return "iranti_attend(phase='post-response') due after response";
+  }
+}
+
 export async function attend(input: AttendInput): Promise<AttendResult> {
   const startTime = Date.now();
   const ctx = await ensureContext(input.agentName);
-  const hints = input.entityHints;
+  const hints = input.entityHints ?? [];
+  const phase = input.phase ?? "pre-response";
+  const isMidTurn = phase === "mid-turn";
 
   // ---- WRITE side: extract artifacts from the message ----------------------
+  // Skipped for mid-turn: it's a read-only top-up triggered by discovery.
   // Extracted facts land on the primary entity (first hint). With no hints,
   // they land on the session entity so they are at least recoverable.
   const primary = hints[0] ?? {
@@ -241,7 +282,7 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
     entityId: ctx.session.id,
   };
 
-  const artifacts = input.message ? extractArtifacts(input.message) : [];
+  const artifacts = !isMidTurn && input.message ? extractArtifacts(input.message) : [];
 
   if (artifacts.length > 0) {
     await upsertEntity(primary.entityType, primary.entityId);
@@ -260,14 +301,23 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
   }
 
   // ---- READ side: rules + recent facts + checkpoint ------------------------
-  const rules = await getRulesForAttend(hints);
+  // Mid-turn skips the rule rescan (rules don't change within a turn and the
+  // rescan was already done by the pre-response attend).
+  const rules = isMidTurn ? [] : await getRulesForAttend(hints);
+
+  // Mid-turn uses a smaller fact budget: it's a discovery top-up, not a full
+  // context load. Per-entity cap is also reduced proportionally.
+  const totalBudget = isMidTurn ? MAX_MID_TURN_FACTS : MAX_TOTAL_FACTS;
+  const perEntityCap = isMidTurn
+    ? Math.max(1, Math.ceil(MAX_MID_TURN_FACTS / Math.max(1, hints.length)))
+    : MAX_FACTS_PER_ENTITY;
 
   const factsPerEntity = await Promise.all(
     hints.map((h) =>
       readRelevantFactsByEntity(
         h.entityType,
         h.entityId,
-        MAX_FACTS_PER_ENTITY,
+        perEntityCap,
         input.message,
       ),
     ),
@@ -303,7 +353,7 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
       })()
     : ranked;
 
-  const returnedFacts = visible.slice(0, MAX_TOTAL_FACTS);
+  const returnedFacts = visible.slice(0, totalBudget);
 
   const checkpoint = await getActiveCheckpoint(hints);
 
@@ -317,8 +367,9 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
 
   // Phase 2b — async semantic extraction. Extracts decision/preference facts
   // from the message and writes them fire-and-forget. They surface on the
-  // *next* attend. Never blocks the response.
-  if (input.message) {
+  // *next* attend. Never blocks the response. Skipped for mid-turn (discovery
+  // top-up only; extraction ran on the pre-response attend).
+  if (!isMidTurn && input.message) {
     void extractAndStore(input.message, primary, ctx.session.id, ctx.agent.id).catch(
       (err: unknown) => console.error("[iranti] extraction error:", err),
     );
@@ -342,6 +393,7 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
     injectedTokensEst: Math.floor(injectedChars / 4),
     suppressedTokensEst: Math.floor(suppressedChars / 4),
     latencyMs,
+    phase,
   }).catch((err: unknown) => console.error("[iranti] attend log error:", err));
 
   // Compute deltas since last sync and persist them. Snapshot the live
@@ -385,5 +437,6 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
       : null,
     extracted: artifacts.map((a) => ({ kind: a.kind, value: a.value })),
     alreadyPresent,
+    nextDue: computeNextDue(phase),
   };
 }

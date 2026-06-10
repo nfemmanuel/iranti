@@ -25,6 +25,7 @@ export interface AttendLogEntry {
   injectedTokensEst: number;
   suppressedTokensEst: number;
   latencyMs: number;
+  phase?: string;
 }
 
 export async function writeAttendLog(entry: AttendLogEntry): Promise<void> {
@@ -40,6 +41,7 @@ export async function writeAttendLog(entry: AttendLogEntry): Promise<void> {
     injectedTokensEst: entry.injectedTokensEst,
     suppressedTokensEst: entry.suppressedTokensEst,
     latencyMs: entry.latencyMs,
+    phase: entry.phase,
   });
 }
 
@@ -49,6 +51,7 @@ export async function writeAttendLog(entry: AttendLogEntry): Promise<void> {
 // Pass only non-zero deltas; zero increments are skipped to avoid noise.
 export async function persistMetricCounters(
   delta: Record<string, number>,
+  tenantId = "default",
 ): Promise<void> {
   const entries = Object.entries(delta).filter(([, v]) => v > 0);
   if (entries.length === 0) return;
@@ -56,9 +59,9 @@ export async function persistMetricCounters(
   for (const [name, increment] of entries) {
     await db
       .insert(metricCounters)
-      .values({ name, value: increment })
+      .values({ tenantId, name, value: increment })
       .onConflictDoUpdate({
-        target: metricCounters.name,
+        target: [metricCounters.tenantId, metricCounters.name],
         set: {
           value: sql`${metricCounters.value} + ${increment}`,
           updatedAt: new Date(),

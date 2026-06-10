@@ -9,6 +9,7 @@
 // Phase 2a tables: knowledge_edges
 // Phase 2b tables: source_reliability, escalations
 // Phase 2.5 tables: attend_log, metric_counters
+// Phase 3 changes: attend_log.phase, metric_counters composite PK (tenant_id, name)
 // Later phases add: relationships, entity_aliases, staff_events, tokens, users
 
 import {
@@ -511,6 +512,8 @@ export const attendLog = pgTable(
     injectedTokensEst: integer("injected_tokens_est").notNull().default(0),
     suppressedTokensEst: integer("suppressed_tokens_est").notNull().default(0),
     latencyMs: integer("latency_ms").notNull().default(0),
+    // Phase 3 (CORE-31): lifecycle phase that produced this attend call.
+    phase: text("phase"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("attend_log_tenant_created_idx").on(t.tenantId, t.createdAt)],
@@ -526,11 +529,18 @@ export const attendLog = pgTable(
 // Current keys: minimalConflictsChecked, supersessions, escalations,
 //               deepConflictsDetected
 // ---------------------------------------------------------------------------
-export const metricCounters = pgTable("metric_counters", {
-  name: text("name").primaryKey(),
-  value: integer("value").notNull().default(0),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+// Phase 3 (D4): composite PK (tenant_id, name) so counters are per-tenant.
+// Existing rows migrate to tenant_id = 'default'.
+export const metricCounters = pgTable(
+  "metric_counters",
+  {
+    tenantId: text("tenant_id").notNull().default("default"),
+    name: text("name").notNull(),
+    value: integer("value").notNull().default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.name] })],
+);
 
 // ---------------------------------------------------------------------------
 // Inferred TypeScript types

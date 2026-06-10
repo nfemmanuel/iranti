@@ -24,12 +24,27 @@ import {
   fetchAliasInputSchema,
 } from "./tools/aliases.js";
 
+// Phase 3 (CORE-31): default breadcrumb injected into every non-attend result.
+// attend() returns its own nextDue (phase-specific); all other tools get this.
+const DEFAULT_NEXT_DUE = "iranti_attend(phase='post-response') due after response";
+
 // Tool results are JSON in a text block — every MCP host renders that;
 // structured-output support is still uneven across hosts.
+// Injects nextDue breadcrumb if the payload doesn't already carry one.
 function asResult(payload: unknown) {
+  const obj =
+    typeof payload === "object" &&
+    payload !== null &&
+    !Array.isArray(payload)
+      ? (payload as Record<string, unknown>)
+      : null;
+  const enriched =
+    obj && !("nextDue" in obj)
+      ? { ...obj, nextDue: DEFAULT_NEXT_DUE }
+      : payload;
   return {
     content: [
-      { type: "text" as const, text: JSON.stringify(payload, null, 2) },
+      { type: "text" as const, text: JSON.stringify(enriched, null, 2) },
     ],
   };
 }
