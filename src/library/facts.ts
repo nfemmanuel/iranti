@@ -137,16 +137,19 @@ export async function writeFact(
         // Block the write. Write an escalation record + markdown file.
         // The transaction is still committed — we're just returning early
         // without updating the fact or creating an archive entry.
-        await createEscalation({
-          tenantId,
-          entityType: input.entityType,
-          entityId: input.entityId,
-          key: input.key,
-          existingFact: existing,
-          newValue: input.value,
-          newSource: input.source,
-          reason: "Existing source reliability significantly exceeds new source reliability",
-        });
+        await createEscalation(
+          {
+            tenantId,
+            entityType: input.entityType,
+            entityId: input.entityId,
+            key: input.key,
+            existingFact: existing,
+            newValue: input.value,
+            newSource: input.source,
+            reason: "Existing source reliability significantly exceeds new source reliability",
+          },
+          tx,
+        );
         return existing;
       }
       // outcome === "supersede": record the win/loss and continue.

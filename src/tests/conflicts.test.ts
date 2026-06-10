@@ -98,8 +98,10 @@ describe("writeFact — minimal conflict detection", () => {
     await writeFact({ entityType: "project", entityId, key: "version", value: "v1", source: srcA });
     await writeFact({ entityType: "project", entityId, key: "version", value: "v2", source: srcB });
 
-    // srcB won (superseded srcA). Wait briefly for the async update.
-    await new Promise((r) => setTimeout(r, 80));
+    // srcB won (superseded srcA). recordSupersession is fire-and-forget on the
+    // module connection; wait long enough that it settles under parallel pool
+    // load (matches the 150ms used elsewhere in the suite — 80ms flaked).
+    await new Promise((r) => setTimeout(r, 150));
 
     const { getReliabilityRow } = await import("../library/source-reliability.js");
     const winner = await getReliabilityRow(srcB);
@@ -136,6 +138,47 @@ describe("writeFact — minimal conflict detection", () => {
       // dir might not exist if no escalation ran yet in this test run
     }
     expect(files.some((f) => f.endsWith(".md"))).toBe(true);
+  });
+
+  it("escalation on a colon-containing key writes a fully-visible .md file (no NTFS ADS)", async () => {
+    // Regression: fact keys routinely contain colons (decision:, preference:,
+    // issue:, shared_url:). On Windows/NTFS a colon in a filename silently
+    // creates an alternate data stream — the markdown content vanishes from the
+    // directory listing, defeating human review. The slug sanitizer must
+    // collapse the colon so the full ".md" name survives readdir.
+    const fs = await import("fs/promises");
+    const path = await import("path");
+    const dir = path.join(process.cwd(), "iranti-escalations");
+
+    const entityId = randomUUID();
+    const key = `decision:use-${randomUUID().slice(0, 8)}`; // colon in the key
+    const existingSource = `colon-trusted-${randomUUID()}`;
+    const newSource = `colon-untrusted-${randomUUID()}`;
+
+    // Boost the existing source so the second write escalates.
+    await recordOutcome(existingSource, "x");
+    await recordOutcome(existingSource, "x");
+    await recordOutcome(existingSource, "x");
+    await recordOutcome(existingSource, "x");
+
+    await writeFact({ entityType: "project", entityId, key, value: "typescript", source: existingSource });
+    await writeFact({ entityType: "project", entityId, key, value: "rust", source: newSource });
+
+    const files = await fs.readdir(dir);
+    // The escalation file for THIS entity must be present and end in ".md".
+    // Before the fix, the colon truncated the visible name at "...-decision"
+    // (the rest became an ADS), so no file for this entity ended in ".md".
+    const mine = files.filter(
+      (f) => f.includes(entityId.replace(/[^a-zA-Z0-9_-]/g, "_")) && f.endsWith(".md"),
+    );
+    expect(mine.length).toBeGreaterThanOrEqual(1);
+    // The visible filename must not contain a raw colon.
+    expect(mine.every((f) => !f.includes(":"))).toBe(true);
+
+    // And the markdown content must be readable back (not hidden in a stream).
+    const content = await fs.readFile(path.join(dir, mine[0]!), "utf-8");
+    expect(content).toContain("Conflict Escalation");
+    expect(content).toContain("rust");
   });
 });
 

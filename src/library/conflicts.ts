@@ -72,20 +72,30 @@ export async function checkConflict(
 
 // Write an escalation: DB record + markdown file in IRANTI_ESCALATIONS_DIR.
 // Called by writeFact when checkConflict returns "escalate".
-export async function createEscalation(opts: {
-  tenantId: string;
-  entityType: string;
-  entityId: string;
-  key: string;
-  existingFact: Fact;
-  newValue: string;
-  newSource: string;
-  reason: string;
-}): Promise<void> {
+//
+// `dbClient` lets the caller pass the active transaction so the escalation row
+// commits or rolls back atomically with the write that triggered it. Without
+// it, the row would be written on the module-level connection and survive an
+// outer rollback, orphaning a "pending" escalation against a fact that never
+// changed. Only the `.insert` capability is needed, so the type is narrowed —
+// both `db` and a Drizzle transaction satisfy it.
+export async function createEscalation(
+  opts: {
+    tenantId: string;
+    entityType: string;
+    entityId: string;
+    key: string;
+    existingFact: Fact;
+    newValue: string;
+    newSource: string;
+    reason: string;
+  },
+  dbClient: Pick<typeof db, "insert"> = db,
+): Promise<void> {
   comprehensionMetrics.escalations++;
 
   // DB record.
-  await db.insert(escalations).values({
+  await dbClient.insert(escalations).values({
     tenantId: opts.tenantId,
     entityType: opts.entityType,
     entityId: opts.entityId,
@@ -112,7 +122,16 @@ export async function createEscalation(opts: {
   ]);
 
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
-  const slug = `${opts.entityType}-${opts.entityId}-${opts.key}`.replace(/[/\\]/g, "_");
+  // Sanitize ALL filesystem-unsafe characters, not just slashes. Fact keys
+  // routinely contain colons (decision:, preference:, issue:, shared_url:);
+  // on Windows/NTFS a colon in a filename silently creates an alternate data
+  // stream, so the markdown content becomes invisible in the directory listing
+  // and human review (the whole point of the file) is defeated. Collapse
+  // anything outside [a-zA-Z0-9_-] to an underscore.
+  const slug = `${opts.entityType}-${opts.entityId}-${opts.key}`.replace(
+    /[^a-zA-Z0-9_-]/g,
+    "_",
+  );
   const filename = `${ts}-${slug}.md`.slice(0, 220);
 
   const md = [
