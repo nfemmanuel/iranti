@@ -67,10 +67,10 @@ The master PRD §12 and the executed build use **different** phase numbers. This
 
 | ID | Item | Phase | Status | PRD |
 |---|---|---|---|---|
-| 🔵 CORE-12…14, 27…29 | **Phase 2.5** — single-user HTTP, `attend_log` telemetry + token accounting, Phase 2 hardening (confidence plumbing, reliability tenancy, write-time edges) | 2.5 | PRD accepted | [2.5](prds/phases/phase-2.5-http-telemetry.md) |
+| 🟢 CORE-12…14, 27…29 | **Phase 2.5** — single-user HTTP, `attend_log` telemetry + token accounting, Phase 2 hardening (confidence plumbing, reliability tenancy, write-time edges) | 2.5 | shipped | [2.5](prds/phases/phase-2.5-http-telemetry.md) |
 | ⚪ DOC-2 | Flip spec `template` → `complete` as features ship; add master-PRD §12 pointer to the reconciliation table | — | later | n/a |
 
-> **Next action:** build Phase 2.5 (PRD accepted 2026-06-10).
+> **Next action:** write Phase 3 PRD (CORE-15/16 retrieval + graph-hop; requires own PRD gate).
 
 ---
 
@@ -93,7 +93,7 @@ Judgment on the write path. PRD: [phase-2b](prds/phases/phase-2b-librarian.md). 
 - **🟢 CORE-10** Source reliability scoring — `source_reliability(source, wins, losses, score)`, updated on every supersession outcome.
 - **🟢 CORE-11** **Server-side semantic extraction** — `HeuristicExtractor` (always-on, 5 decision patterns + 4 preference patterns) + `LocalLlmExtractor` (Ollama, config-gated, degrades to heuristic), pluggable `ExtractorBackend`. Wired into `attend` fire-and-forget. Facts surface on next attend.
 
-### Phase 2.5 — Single-user HTTP, telemetry & Phase 2 hardening  🔵 (PRD accepted)
+### Phase 2.5 — Single-user HTTP, telemetry & Phase 2 hardening  🟢 shipped
 
 One engineering effort that unlocks every consumer surface + makes the token-saving story measurable. PRD: [phase-2.5](prds/phases/phase-2.5-http-telemetry.md). Write-safety precondition (CORE-5) satisfied by 2a.
 
@@ -162,4 +162,4 @@ The retrieval half of the Attendant. Requires its own PRD before build (gate bel
 
 ---
 
-_Last updated: 2026-06-10 (Phase 2.5 PRD accepted; CORE-30 media_objects schema deferred to Phase 3 prep by decision)._
+_Last updated: 2026-06-10 (Phase 2.5 shipped: 178 tests green, clean build; CORE-30 media_objects schema deferred to Phase 3 prep by decision)._
