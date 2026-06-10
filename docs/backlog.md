@@ -114,6 +114,7 @@ The retrieval half of the Attendant. Requires its own PRD before build (gate bel
 > 1. **Decide the Apache AGE parallel track.** Master §12 asked for it alongside Phase 2; consciously deferred (2a PRD). Phase 3 is when retrieval starts consuming the graph — decide now whether the CTE impl carries the load or the AGE build starts. Do not let this default silently.
 > 2. **Fix `getNeighbors` depth>1 before two-pass consumes it** — the recursive-CTE join walks back toward the origin (second OR branch matches `t.source`, should be `t.target`), and `DISTINCT ON (id) ORDER BY id` discards weight ordering before the LIMIT. Both confirmed in the 2026-06-10 code review; latent only because nothing calls depth>1 yet.
 > 3. **Introduce token-budgeted injection** using `attend_log` distribution data (2.5 D3 deferred it here deliberately).
+> 4. **Decide `metric_counters` tenancy** — the table shipped in 2.5 with a `name`-only PK, unlike `source_reliability`/`attend_log`/`facts` which all carry `tenant_id`; `persistMetricCounters` writes global rows. Confirmed in the 2026-06-10 review. Invisible at single-tenant scale but a disruptive migration later — make the global-vs-per-tenant call here and migrate while the table is small.
 
 - **CORE-30** `media_objects` schema — `(id, tenant_id, entity_type, entity_id, key, object_url, mime_type, description_text, metadata, created_at)`. Schema-only; no ingest behavior. Needs its own spec (master PRD §252/§551 requires one). Lands here so retrieval (CORE-15/16) can consume it from day one. *(Decision 2026-06-10: deferred from Phase 2.5 — 2.5 already dense; media schema with no consumer would sit inert for two phases.)*
 - **CORE-15** **Two-pass retrieval** — primary = entity + keyword match; secondary = 1–2 hop graph neighbours weighted by edge confidence. *Falls out of CORE-7 nearly for free; answers the master PRD's open question on tier weighting.*
@@ -162,4 +163,4 @@ The retrieval half of the Attendant. Requires its own PRD before build (gate bel
 
 ---
 
-_Last updated: 2026-06-10 (Phase 2.5 shipped: 178 tests green, clean build; CORE-30 media_objects schema deferred to Phase 3 prep by decision)._
+_Last updated: 2026-06-10 (Phase 2.5 shipped + code-review fixes b6fd9e4: HTTP-server close, co_write tenant scope, metric-delta loss. Two review items deferred to the Phase 3 gate: getNeighbors depth>1 traversal and metric_counters tenancy. CORE-30 media_objects schema also Phase 3 prep)._
