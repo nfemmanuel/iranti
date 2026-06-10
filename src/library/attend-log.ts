@@ -27,6 +27,7 @@ export interface AttendLogEntry {
   latencyMs: number;
   phase?: string;
   factsExtracted?: number;
+  correctionsCount?: number;
 }
 
 export async function writeAttendLog(entry: AttendLogEntry): Promise<void> {
@@ -44,6 +45,7 @@ export async function writeAttendLog(entry: AttendLogEntry): Promise<void> {
     latencyMs: entry.latencyMs,
     phase: entry.phase,
     factsExtracted: entry.factsExtracted ?? 0,
+    correctionsCount: entry.correctionsCount ?? 0,
   });
 }
 

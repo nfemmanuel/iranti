@@ -43,6 +43,27 @@
       "when": 1781080179246,
       "tag": "0005_simple_vector",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1781124794774,
+      "tag": "0006_colorful_sphinx",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1781125441485,
+      "tag": "0007_flowery_psylocke",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1781127306874,
+      "tag": "0008_wise_hawkeye",
+      "breakpoints": true
     }
   ]
 }

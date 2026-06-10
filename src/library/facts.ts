@@ -577,6 +577,35 @@ export async function readFactsByIds(
   });
 }
 
+// CORE-17: look up the most recent archived (superseded) value for each fact.
+// Returns a Map<factId, oldValue>. Facts with no archive entry are absent from
+// the map. Used by stale-context correction to detect when the host window holds
+// a value that has since been overwritten.
+export async function readArchivedValuesByFactIds(
+  ids: string[],
+  tenantId: string = "default",
+): Promise<Map<string, string>> {
+  if (ids.length === 0) return new Map();
+  const rows = await db
+    .select({
+      factId: factArchive.factId,
+      value: factArchive.value,
+      archivedAt: factArchive.archivedAt,
+    })
+    .from(factArchive)
+    .where(and(eq(factArchive.tenantId, tenantId), inArray(factArchive.factId, ids)));
+
+  // Keep only the newest snapshot per factId.
+  const best = new Map<string, { value: string; archivedAt: Date }>();
+  for (const row of rows) {
+    const existing = best.get(row.factId);
+    if (!existing || row.archivedAt > existing.archivedAt) {
+      best.set(row.factId, { value: row.value, archivedAt: row.archivedAt });
+    }
+  }
+  return new Map(Array.from(best.entries()).map(([id, { value }]) => [id, value]));
+}
+
 // ---------------------------------------------------------------------------
 // Full-text search (for iranti_search)
 // ---------------------------------------------------------------------------

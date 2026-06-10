@@ -918,3 +918,102 @@ describe("attend — CORE-33 token-budgeted injection", () => {
     expect(result.facts).toHaveLength(5);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase 3 (CORE-17): stale-context corrections
+// ---------------------------------------------------------------------------
+
+describe("attend — CORE-17 stale-context corrections", () => {
+  it("correction fires when host context holds superseded value", async () => {
+    const entityId = randomUUID();
+
+    // Write the fact once (creates version 1: staleVal)...
+    await writeFact({
+      entityType: "project", entityId,
+      key: "stack:language", value: "TypeScript is primary", source: "test",
+    });
+    // ...then overwrite it (archives staleVal, makes currentVal live).
+    await writeFact({
+      entityType: "project", entityId,
+      key: "stack:language", value: "Rust is primary now", source: "test",
+    });
+
+    // Host passes context that still mentions the old value but not the new one.
+    const result = await attend({
+      entityHints: [{ entityType: "project", entityId }],
+      currentContext: "the team decided TypeScript is primary for all services",
+    });
+
+    expect(result.corrections.length).toBeGreaterThan(0);
+    const c = result.corrections.find((x) => x.key === "stack:language")!;
+    expect(c).toBeDefined();
+    expect(c.staleValue).toBe("TypeScript is primary");
+    expect(c.currentValue).toBe("Rust is primary now");
+  });
+
+  it("no correction when fact has never been updated (no archive entry)", async () => {
+    const entityId = randomUUID();
+
+    await writeFact({
+      entityType: "project", entityId,
+      key: "stack:infra", value: "Kubernetes clusters", source: "test",
+    });
+
+    // Context does NOT contain the current value, but there is no archived value
+    // to match against — so no correction should fire.
+    const result = await attend({
+      entityHints: [{ entityType: "project", entityId }],
+      currentContext: "we use Docker compose for local dev",
+    });
+
+    const c = result.corrections.find((x) => x.key === "stack:infra");
+    expect(c).toBeUndefined();
+  });
+
+  it("no corrections returned when currentContext is omitted", async () => {
+    const entityId = randomUUID();
+
+    await writeFact({
+      entityType: "project", entityId,
+      key: "stack:language", value: "Go is primary language", source: "test",
+    });
+    await writeFact({
+      entityType: "project", entityId,
+      key: "stack:language", value: "Elixir is primary language", source: "test",
+    });
+
+    // No context passed — drift is not triggered here, and no context means no
+    // comparison possible.
+    process.env["IRANTI_DRIFT_N"] = "999";
+    try {
+      const result = await attend({
+        entityHints: [{ entityType: "project", entityId }],
+      });
+      expect(result.corrections).toHaveLength(0);
+    } finally {
+      delete process.env["IRANTI_DRIFT_N"];
+    }
+  });
+
+  it("no correction when current value is already present in context", async () => {
+    const entityId = randomUUID();
+
+    await writeFact({
+      entityType: "project", entityId,
+      key: "stack:db", value: "PostgreSQL is the database", source: "test",
+    });
+    await writeFact({
+      entityType: "project", entityId,
+      key: "stack:db", value: "CockroachDB is the database", source: "test",
+    });
+
+    // Context already holds the current value — nothing stale to report.
+    const result = await attend({
+      entityHints: [{ entityType: "project", entityId }],
+      currentContext: "CockroachDB is the database chosen for production",
+    });
+
+    const c = result.corrections.find((x) => x.key === "stack:db");
+    expect(c).toBeUndefined();
+  });
+});

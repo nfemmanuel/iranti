@@ -72,6 +72,10 @@ export const sessions = pgTable("sessions", {
   endedAt: timestamp("ended_at", { withTimezone: true }),
 
   metadata: jsonb("metadata"),
+
+  // CORE-17: drift heartbeat turn counter. Incremented on every attend call.
+  // Used to fire the staleness correction check every IRANTI_DRIFT_N turns.
+  turnCount: integer("turn_count").notNull().default(0),
 });
 
 // ---------------------------------------------------------------------------
@@ -516,6 +520,8 @@ export const attendLog = pgTable(
     phase: text("phase"),
     // Phase 3 (CORE-32): facts written by server-side extraction this attend.
     factsExtracted: integer("facts_extracted").notNull().default(0),
+    // CORE-17: how many stale-context corrections were emitted this attend.
+    correctionsCount: integer("corrections_count").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("attend_log_tenant_created_idx").on(t.tenantId, t.createdAt)],

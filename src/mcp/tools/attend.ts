@@ -31,6 +31,7 @@ import {
 import { upsertEntity } from "../../library/entities.js";
 import {
   VALID_SURFACES,
+  readArchivedValuesByFactIds,
   readFactsByIds,
   readRelevantFactsByEntity,
   writeFact,
@@ -41,6 +42,7 @@ import { extractor } from "../../extract/index.js";
 import { EXTRACT_SOURCE, extractArtifacts } from "../extractor.js";
 import { ensureContext } from "../context.js";
 import { writeAttendLog, persistMetricCounters } from "../../library/attend-log.js";
+import { incrementTurnCount } from "../../library/sessions.js";
 import { comprehensionMetrics } from "../../library/conflicts.js";
 
 export const MAX_FACTS_PER_ENTITY = 10;
@@ -63,6 +65,23 @@ function getInjectionBudget(): number {
   }
   return INJECT_BUDGET_DEFAULT;
 }
+
+// CORE-17: drift heartbeat — stale-context correction.
+// Every IRANTI_DRIFT_N turns the corrections check fires even if the host
+// omits currentContext. In-memory; persisted to sessions.turn_count async.
+const DRIFT_DEFAULT = 5;
+export const MAX_CORRECTIONS = 5;
+
+function getDriftN(): number {
+  const env = process.env["IRANTI_DRIFT_N"];
+  if (env) {
+    const n = parseInt(env, 10);
+    if (!isNaN(n) && n > 0) return n;
+  }
+  return DRIFT_DEFAULT;
+}
+
+let turnCount = 0;
 
 // Track the last persisted metric values so we only send deltas.
 // Reset to zero on process start; DB holds the cumulative all-time total.
@@ -260,6 +279,15 @@ export interface AttendResult {
   // was already present in the host-provided currentContext. 0 when no
   // currentContext was passed.
   alreadyPresent: number;
+  // CORE-17: stale-context corrections. Each entry means the host's context
+  // window contains an old value for a fact that has since been updated.
+  // currentValue is what the fact holds now; staleValue is what the host has.
+  corrections: Array<{
+    entity: string;
+    key: string;
+    currentValue: string;
+    staleValue: string;
+  }>;
   // Phase 3 (CORE-31): protocol breadcrumb — what the host should call next.
   nextDue: string;
 }
@@ -289,6 +317,48 @@ function isAlreadyPresent(value: string, normalizedHaystack: string): boolean {
   return normalizedHaystack.includes(probe);
 }
 
+// CORE-17: stale-context correction helper.
+// Given the pre-budget candidate list (ranked primary facts) and the host's
+// normalised context window, return any cases where the host is holding an old
+// value that has since been superseded. Looks up the most recent archived
+// snapshot per candidate fact; a correction fires when the archived value IS
+// in context but the current value is NOT.
+async function getCorrections(
+  candidates: Fact[],
+  normalizedContext: string,
+  tenantId = "default",
+): Promise<AttendResult["corrections"]> {
+  if (!normalizedContext || candidates.length === 0) return [];
+
+  // Only facts whose current value is absent from context are candidates
+  // — if the current value is already there, nothing to correct.
+  const notCurrent = candidates.filter(
+    (f) => !isAlreadyPresent(f.value, normalizedContext),
+  );
+  if (notCurrent.length === 0) return [];
+
+  const archivedValues = await readArchivedValuesByFactIds(
+    notCurrent.map((f) => f.id),
+    tenantId,
+  );
+
+  const corrections: AttendResult["corrections"] = [];
+  for (const fact of notCurrent) {
+    if (corrections.length >= MAX_CORRECTIONS) break;
+    const staleValue = archivedValues.get(fact.id);
+    if (!staleValue) continue;
+    if (isAlreadyPresent(staleValue, normalizedContext)) {
+      corrections.push({
+        entity: entityLabel(fact),
+        key: fact.key,
+        currentValue: fact.value,
+        staleValue,
+      });
+    }
+  }
+  return corrections;
+}
+
 // The full attend pipeline, separated from MCP plumbing so integration
 // tests can call it directly against the database.
 // Compute the protocol breadcrumb based on the current phase.
@@ -311,6 +381,11 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
   const hints = input.entityHints ?? [];
   const phase = input.phase ?? "pre-response";
   const isMidTurn = phase === "mid-turn";
+
+  // CORE-17: advance the per-process turn counter for drift heartbeat.
+  // isDriftTurn is used below to decide whether to run corrections.
+  turnCount++;
+  const isDriftTurn = turnCount % getDriftN() === 0;
 
   // ---- WRITE side: extract artifacts from the message ----------------------
   // Skipped for mid-turn: it's a read-only top-up triggered by discovery.
@@ -474,7 +549,7 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
   if (checkpoint) {
     const t = est(checkpoint.value);
     if (budgetRemaining >= t) { budgetRemaining -= t; }
-    else { budgetSuppressedChars += checkpoint.value.length; budgetedCheckpoint = null; }
+    else { budgetSuppressedChars += checkpoint.value.length; budgetedCheckpoint = undefined; }
   }
 
   const budgetedFacts = returnedFacts.filter((f) => {
@@ -492,6 +567,18 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
   });
 
   suppressedChars += budgetSuppressedChars;
+
+  // CORE-17: stale-context corrections.
+  // Run when context is provided (always) or when this is a drift turn.
+  // Without context the result is always empty; isDriftTurn ensures the check
+  // fires periodically even when the host skips currentContext for a few turns.
+  const normalizedContext = input.currentContext
+    ? normalizeForContext(input.currentContext)
+    : "";
+  const corrections =
+    normalizedContext || isDriftTurn
+      ? await getCorrections(ranked, normalizedContext)
+      : [];
 
   // Phase 2a — async edge recording. Fire-and-forget after the response is
   // assembled so this never adds latency. Errors are logged, never thrown.
@@ -554,7 +641,10 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
       latencyMs,
       phase,
       factsExtracted,
+      correctionsCount: corrections.length,
     });
+
+    await incrementTurnCount(ctx.session.id);
 
     await persistMetricCounters(metricDelta);
     lastSyncedMetrics = snapshot;
@@ -585,6 +675,7 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
       : null,
     extracted: artifacts.map((a) => ({ kind: a.kind, value: a.value })),
     alreadyPresent,
+    corrections,
     nextDue: computeNextDue(phase),
   };
 }
