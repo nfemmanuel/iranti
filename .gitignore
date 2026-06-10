@@ -24,7 +24,8 @@ logs/
 bench_logs/
 *.log
 
-# VS Code history
+# VS Code
+.vscode/
 .history/
 
 # build artifacts
