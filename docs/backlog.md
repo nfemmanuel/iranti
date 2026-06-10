@@ -68,9 +68,10 @@ The master PRD §12 and the executed build use **different** phase numbers. This
 | ID | Item | Phase | Status | PRD |
 |---|---|---|---|---|
 | 🟢 CORE-12…14, 27…29 | **Phase 2.5** — single-user HTTP, `attend_log` telemetry + token accounting, Phase 2 hardening (confidence plumbing, reliability tenancy, write-time edges) | 2.5 | shipped | [2.5](prds/phases/phase-2.5-http-telemetry.md) |
+| 🔵 CORE-15…17, 30…34 | **Phase 3** — the Attendant: two-pass retrieval + graph-hop, payload contract (pre/mid/post + breadcrumbs), extraction-primary writes + born-inverted backstop, token budget, corrections, gate items 1–4 | 3 | PRD proposed | [3](prds/phases/phase-3-attendant-retrieval.md) |
 | ⚪ DOC-2 | Flip spec `template` → `complete` as features ship; add master-PRD §12 pointer to the reconciliation table | — | later | n/a |
 
-> **Next action:** write Phase 3 PRD (CORE-15/16 retrieval + graph-hop; requires own PRD gate).
+> **Next action:** NF reviews Phase 3 PRD (proposed 2026-06-10) — gate items 1–4 resolved in-PRD as D1/CORE-34/CORE-33/D4; CORE-18/19 deferred by D10.
 
 ---
 
