@@ -1,6 +1,6 @@
 # PRD: Phase 2.5 — Single-user HTTP, telemetry & Phase 2 hardening
 
-**Status:** proposed
+**Status:** accepted
 **Phase:** 2.5 · **Date:** 2026-06-10 · **Author:** Claude (with NF)
 **Related:** master PRD §3 (goals: negligible overhead, token-cost reduction, self-awareness), §11 (metrics and observability), §12 Phase 5 (MCP/hosts) and Phase 2 (write-path leftovers); [integrations.md](../../engineering/integrations.md) building blocks B3/B4; backlog CORE-12/13/14 + CORE-27/28/29; `phase_2_strategic_review` (2026-06-10); [rag-and-context-engineering](../../research/rag-and-context-engineering.md)
 
@@ -119,5 +119,5 @@ Pulls the single-user slice of master Phase 5 (hosts/HTTP) forward, consistent w
 
 ## Changelog
 - 2026-06-10 — proposed (scope set by NF: original CORE-12/13/14 + strategic-review gaps 1–3 as CORE-27/28/29; gaps 4–5 become gated reminders, not 2.5 scope — AGE decision at Phase 3, self-awareness verification at 2.5 close)
-- _pending_ — accepted
+- 2026-06-10 — accepted
 - _pending_ — shipped

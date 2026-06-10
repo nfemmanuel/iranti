@@ -67,10 +67,10 @@ The master PRD §12 and the executed build use **different** phase numbers. This
 
 | ID | Item | Phase | Status | PRD |
 |---|---|---|---|---|
-| 🔵 CORE-12…14, 27…29 | **Phase 2.5** — single-user HTTP, `attend_log` telemetry + token accounting, Phase 2 hardening (confidence plumbing, reliability tenancy, write-time edges) | 2.5 | PRD proposed | [2.5](prds/phases/phase-2.5-http-telemetry.md) |
+| 🔵 CORE-12…14, 27…29 | **Phase 2.5** — single-user HTTP, `attend_log` telemetry + token accounting, Phase 2 hardening (confidence plumbing, reliability tenancy, write-time edges) | 2.5 | PRD accepted | [2.5](prds/phases/phase-2.5-http-telemetry.md) |
 | ⚪ DOC-2 | Flip spec `template` → `complete` as features ship; add master-PRD §12 pointer to the reconciliation table | — | later | n/a |
 
-> **Recommended next action:** review/accept the **Phase 2.5 PRD**, then build.
+> **Next action:** build Phase 2.5 (PRD accepted 2026-06-10).
 
 ---
 
@@ -93,7 +93,7 @@ Judgment on the write path. PRD: [phase-2b](prds/phases/phase-2b-librarian.md). 
 - **🟢 CORE-10** Source reliability scoring — `source_reliability(source, wins, losses, score)`, updated on every supersession outcome.
 - **🟢 CORE-11** **Server-side semantic extraction** — `HeuristicExtractor` (always-on, 5 decision patterns + 4 preference patterns) + `LocalLlmExtractor` (Ollama, config-gated, degrades to heuristic), pluggable `ExtractorBackend`. Wired into `attend` fire-and-forget. Facts surface on next attend.
 
-### Phase 2.5 — Single-user HTTP, telemetry & Phase 2 hardening  🔵 (PRD proposed)
+### Phase 2.5 — Single-user HTTP, telemetry & Phase 2 hardening  🔵 (PRD accepted)
 
 One engineering effort that unlocks every consumer surface + makes the token-saving story measurable. PRD: [phase-2.5](prds/phases/phase-2.5-http-telemetry.md). Write-safety precondition (CORE-5) satisfied by 2a.
 
@@ -108,13 +108,14 @@ One engineering effort that unlocks every consumer surface + makes the token-sav
 
 ### Phase 3 — Retrieval & cross-platform  ⚪
 
-The retrieval half of the Attendant.
+The retrieval half of the Attendant. Requires its own PRD before build (gate below must be cleared first).
 
 > **⛔ GATE before Phase 3 build (strategic-review gap 4 + carried fixes):**
 > 1. **Decide the Apache AGE parallel track.** Master §12 asked for it alongside Phase 2; consciously deferred (2a PRD). Phase 3 is when retrieval starts consuming the graph — decide now whether the CTE impl carries the load or the AGE build starts. Do not let this default silently.
 > 2. **Fix `getNeighbors` depth>1 before two-pass consumes it** — the recursive-CTE join walks back toward the origin (second OR branch matches `t.source`, should be `t.target`), and `DISTINCT ON (id) ORDER BY id` discards weight ordering before the LIMIT. Both confirmed in the 2026-06-10 code review; latent only because nothing calls depth>1 yet.
 > 3. **Introduce token-budgeted injection** using `attend_log` distribution data (2.5 D3 deferred it here deliberately).
 
+- **CORE-30** `media_objects` schema — `(id, tenant_id, entity_type, entity_id, key, object_url, mime_type, description_text, metadata, created_at)`. Schema-only; no ingest behavior. Needs its own spec (master PRD §252/§551 requires one). Lands here so retrieval (CORE-15/16) can consume it from day one. *(Decision 2026-06-10: deferred from Phase 2.5 — 2.5 already dense; media schema with no consumer would sit inert for two phases.)*
 - **CORE-15** **Two-pass retrieval** — primary = entity + keyword match; secondary = 1–2 hop graph neighbours weighted by edge confidence. *Falls out of CORE-7 nearly for free; answers the master PRD's open question on tier weighting.*
 - **CORE-16** pgvector embeddings + hybrid search (lexical + cosine) — the third rung of the relevance ladder (entity → keyword → vector).
 - **CORE-17** **Full context-window correction** — detect *stale* values in the window and surface the correction, not just suppress (completes §8; Phase 1.2 only suppressed).
@@ -161,4 +162,4 @@ The retrieval half of the Attendant.
 
 ---
 
-_Last updated: 2026-06-10 (Phase 2.5 PRD proposed — CORE-12/13/14 + hardening CORE-27/28/29; gates planted at 2.5 close and Phase 3 entry)._
+_Last updated: 2026-06-10 (Phase 2.5 PRD accepted; CORE-30 media_objects schema deferred to Phase 3 prep by decision)._
