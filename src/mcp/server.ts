@@ -20,7 +20,12 @@ import { pool } from "../db/connection.js";
 import { shutdownContext } from "./context.js";
 import { attend, attendInputSchema } from "./tools/attend.js";
 import { archive, archiveInputSchema } from "./tools/archive.js";
+import { checkpointTool, checkpointInputSchema } from "./tools/checkpoint.js";
+import { history, historyInputSchema } from "./tools/history.js";
+import { query, queryInputSchema } from "./tools/query.js";
+import { search, searchInputSchema } from "./tools/search.js";
 import { write, writeInputSchema } from "./tools/write.js";
+import { writeIssueTool, writeIssueInputSchema } from "./tools/write-issue.js";
 import { writeRuleTool, writeRuleInputSchema } from "./tools/write-rule.js";
 
 const server = new McpServer({
@@ -117,6 +122,101 @@ server.registerTool(
   async (input) => {
     try {
       return asResult(await archive(input));
+    } catch (err) {
+      return asError(err);
+    }
+  },
+);
+
+server.registerTool(
+  "iranti_search",
+  {
+    title: "Search facts",
+    description:
+      "Full-text search over stored facts. Use when you need to find a fact " +
+      "whose exact key is unknown. Searches key and value case-insensitively. " +
+      "Optionally scoped to a specific entity.",
+    inputSchema: searchInputSchema,
+  },
+  async (input) => {
+    try {
+      return asResult(await search(input));
+    } catch (err) {
+      return asError(err);
+    }
+  },
+);
+
+server.registerTool(
+  "iranti_checkpoint",
+  {
+    title: "Save checkpoint",
+    description:
+      "Save where you left off for session resumption. Summarize what you " +
+      "were working on, what is done, what is next, and any blockers. " +
+      "Call at every natural pause point. iranti_attend returns the active " +
+      "checkpoint automatically — a new session picks up where you left off.",
+    inputSchema: checkpointInputSchema,
+  },
+  async (input) => {
+    try {
+      return asResult(await checkpointTool(input));
+    } catch (err) {
+      return asError(err);
+    }
+  },
+);
+
+server.registerTool(
+  "iranti_history",
+  {
+    title: "Fact history",
+    description:
+      "Return the full change history for a fact: every value it has held, " +
+      "newest first. Accepts factId or entityType + entityId + key.",
+    inputSchema: historyInputSchema,
+  },
+  async (input) => {
+    try {
+      return asResult(await history(input));
+    } catch (err) {
+      return asError(err);
+    }
+  },
+);
+
+server.registerTool(
+  "iranti_query",
+  {
+    title: "Query a fact",
+    description:
+      "Exact lookup of one fact by entity + key. Use when you know exactly " +
+      "what you are looking for. Updates access tracking — counts as a retrieval.",
+    inputSchema: queryInputSchema,
+  },
+  async (input) => {
+    try {
+      return asResult(await query(input));
+    } catch (err) {
+      return asError(err);
+    }
+  },
+);
+
+server.registerTool(
+  "iranti_write_issue",
+  {
+    title: "Write issue",
+    description:
+      "Store a structured issue or to-do item. Writing the same title again " +
+      "upserts the issue — updating its status or description. " +
+      "Issues are scoped to an entity: project/my-app for project issues, " +
+      "user/alice for personal to-dos.",
+    inputSchema: writeIssueInputSchema,
+  },
+  async (input) => {
+    try {
+      return asResult(await writeIssueTool(input));
     } catch (err) {
       return asError(err);
     }

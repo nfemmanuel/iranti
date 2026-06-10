@@ -1,6 +1,7 @@
 # AI host profiles
 
-**Status:** draft — researched June 2026, re-verify quarterly (this landscape changes monthly)
+**Status:** draft — researched June 2026; volatile claims re-verified 2026-06-09 (see [integrations.md](integrations.md) § verification deltas). Re-verify quarterly (this landscape changes monthly).
+**Companion doc:** [integrations.md](integrations.md) — the per-host *build plans*, plus profiles for hosts not covered here (Perplexity, Grok, Le Chat, M365 Copilot, JetBrains, Zed/Cline/Roo/Continue, Qwen, Kimi, Meta AI).
 **[Back to map](../MAP.md)**
 
 ---
@@ -140,7 +141,7 @@ Availability: custom connectors are available on free, Pro, Max, Team, and Enter
 Two further constraints reported as of mid-2026: custom connectors have regional gaps (EEA, Switzerland, UK exclusions have applied to some tiers — verify current state before promising anything to EU users), and enabling developer mode can disable ChatGPT's own memory in those chats ([developer mode guide](https://medium.com/@alexeylark/chatgpt-custom-mcp-connectors-with-developer-mode-d791fde17d25)) — which is ironically favorable for iranti (no competing memory) but signals OpenAI treats third-party tools as a trust boundary.
 
 **The write problem.** `iranti_attend` is a read — it fits the read-only tier. `iranti_write` is a write — for Plus/Pro individuals it is blocked in developer mode. Workarounds, in order of preference:
-1. **Custom GPT with Actions**: a GPT with an OpenAPI spec pointing at an iranti HTTP API can call write endpoints on any paid plan (with per-call user confirmation). Cost: users must talk to the iranti GPT rather than vanilla ChatGPT, and GPTs don't combine with the user's other custom GPTs.
+1. **Custom GPT with Actions**: a GPT with an OpenAPI spec pointing at an iranti HTTP API can call write endpoints on any paid plan (with per-call user confirmation). Cost: users must talk to the iranti GPT rather than vanilla ChatGPT, and GPTs don't combine with the user's other custom GPTs. ⚠ *Updated June 2026:* OpenAI announced Workspace Agents (April 22, 2026) and will deprecate Custom GPTs **for business accounts**; individuals keep them. So this workaround is for Plus/Pro individuals only — Team/Business users should use full MCP, which their plan already permits. Also note OpenAI's developer-docs page on developer mode carries stale text claiming full read/write for Plus; the help center (read/fetch-only for individuals) is authoritative.
 2. **Read-only on ChatGPT, write elsewhere**: ChatGPT gets `iranti_attend` only; facts are written from hosts with full support. Memory still *follows* the user to ChatGPT; it just doesn't *learn* there. This is a legitimate degraded mode and is easy to ship.
 3. Business plan users get everything.
 

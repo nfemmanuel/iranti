@@ -1,9 +1,12 @@
 # iranti-core Implementation Reference
 
-> **This document is the single source of truth for every implementation decision in iranti-core.**
-> It must be consulted before writing, changing, or reviewing any code.
-> It must be updated whenever a decision changes.
+> **This document is the living retrospective: the record of every implementation decision actually made in iranti-core, and why.**
+> It must be consulted before writing, changing, or reviewing any code, and updated whenever a decision changes.
 > It exists to prevent knowledge drift across long sessions, context windows, and contributor handoffs.
+>
+> **It is one of four planning documents** — see the [backlog](../backlog.md) for how they fit together. In short: the [master PRD](../rough-notes/iranti-core-prd.md) holds the vision, the [phase PRDs](../prds/phases/) are the contract for each phase (written before build), the [backlog](../backlog.md) is the forward queue, and this file is the past-tense record of what shipped. Forward planning lives in the backlog and PRDs; this file documents what is built.
+>
+> **Phase numbering:** this file uses the executed scheme (0, 1, 1.1, 1.2, 2, …). It differs from the master PRD §12 scheme; the [backlog](../backlog.md#phase-numbering--reconciled) holds the authoritative mapping.
 
 ---
 
@@ -45,8 +48,9 @@ These are explicit out-of-scope boundaries. Do not let scope creep pull us in th
                        │ MCP protocol
                        ▼
 ┌──────────────────────────────────────────────────────────────┐
-│                     MCP Server (Phase 1)                     │
-│  iranti_attend  iranti_write  iranti_search  iranti_relate   │
+│                  MCP Server (Phase 1–1.2)                    │
+│  attend  write  write_rule  archive  search  checkpoint      │
+│  history  query  write_issue            (9 tools, stdio)     │
 └──────────────────────┬───────────────────────────────────────┘
                        │ function calls
                        ▼
@@ -133,19 +137,70 @@ These are explicit out-of-scope boundaries. Do not let scope creep pull us in th
 
 ---
 
+### Phase 1.1 — Tool Realignment
+
+**Goal:** bring the tool surface up to what real use needs and start correcting attend's retrieval ordering.
+
+**Status:** ✅ Shipped. 104/104 tests + 16/16 stdio smoke checks. PRD: `docs/prds/phases/phase-1.1-tool-realignment.md`.
+
+**What changed — tool surface 4 → 9.** Added `iranti_search` (full-text ILIKE over key+value, optionally entity-scoped — reinstating what Phase 1 deferred), `iranti_checkpoint` (dedicated checkpoint tool with a description that tells the agent what to record), `iranti_history` (full change history of a fact via `fact_archive`), `iranti_query` (exact entity+key lookup, access-tracked), and `iranti_write_issue` (structured issues/todos as JSON facts, key `issue:<slug>` from the title, upsert by title). Kept the original four.
+
+**The load-bearing change — retrieval moved from recency to relevance.** Phase 1 ordered facts by `updatedAt DESC`. Phase 1.1 introduced `readRelevantFactsByEntity`: tokenize the message (stop-word filter, min 3 chars), score each fact by keyword overlap (key match 2×, value 1×), pull a 3×-limit candidate pool (max 50), rank by score then recency, access-track only returned rows. A subtle bug was caught: attend re-sorted the merged facts by recency *after* the library ranked them, undoing the ranking — the merge sort is now conditional (no-op when a message is present, recency when absent). **Known limitation:** with multiple entity hints + a message, facts order by hint order, not cross-entity relevance — deferred to Phase 3 (embeddings). This is the first rung of the relevance ladder: entity scope → **keyword** → vector.
+
+**No schema change.** Tool surface only; attend internally swapped `readRecentFactsByEntity` → `readRelevantFactsByEntity`.
+
+---
+
+### Phase 1.2 — Context Window Observation
+
+**Goal:** stop re-injecting what the agent can already see. First slice of master PRD §8.
+
+**Status:** ✅ Shipped. 109/109 tests + 17/17 stdio smoke checks. PRD: `docs/prds/phases/phase-1.2-context-window-observation.md`.
+
+**What changed.** `iranti_attend` gained an optional `currentContext` parameter (the agent's visible window). When present, facts whose value already appears in the window are suppressed **before** the `MAX_TOTAL_FACTS` cap — so the injected budget fills with facts the agent does not already hold — and the response reports an `alreadyPresent` count for token-saving measurement. Presence is a normalized-substring check with an 8-char floor (short values would false-positive) and a 160-char probe (long values still match a verbatim copy). The active checkpoint and all rules are exempt from suppression. Backward compatible: no `currentContext` → Phase 1.1 behaviour exactly.
+
+**Scope boundary.** Phase 1.2 only *suppresses* already-present facts. Detecting and *correcting* stale values in the window (§8's correction case) needs staleness reasoning that doesn't exist yet → Phase 3 (CORE-17). This was the first feature built under the PRD-first process.
+
+---
+
+### Phase 2a — Graph Foundation & Write Safety
+
+**Goal:** graph substrate for learned relevance + serialized writes to close the concurrent-snapshot race.
+
+**Status:** ✅ Shipped. 125/125 tests + 19/19 stdio smoke checks. PRD: `docs/prds/phases/phase-2a-graph-and-write-safety.md`. CORE-5/6/7/8.
+
+**What changed.**
+
+*Write safety (CORE-5):* `writeFact` opens every transaction with `SELECT pg_advisory_xact_lock(hashtext('tenant/type/id/key')::bigint)`. The `::bigint` cast avoids PostgreSQL's ambiguity between the single-bigint and two-int overloads. Concurrent writes to the same `(tenant, entity, key)` are serialized: the second writer reads the first writer's committed value before snapshotting it, so `fact_archive` never contains two snapshots of the same value for the same transition.
+
+*`knowledge_edges` table (CORE-6):* A new table with columns `source_type`, `source_id`, `target_type`, `target_id`, `relation`, `weight` (real), `co_access_count` (int), and a six-column unique constraint (`tenant_id`, `source_type`, `source_id`, `target_type`, `target_id`, `relation`). Two indexes: one on (source_type, source_id) and one on (target_type, target_id). Migration: `drizzle/0003_slimy_donald_blake.sql`.
+
+*`GraphBackend` interface + `PostgresGraphBackend` (CORE-6):* `src/graph/index.ts` exports the interface and a singleton `graph` instance. Four methods: `addEdge` (insert-or-upsert), `reinforceEdge` (strengthen or create), `getNeighbors` (depth-1 flat query or recursive CTE for depth>1), `getEdge` (exact lookup). All methods use Drizzle's standard query builder except `getNeighbors` which uses `db.execute(sql\`...\`)` for the compound OR condition — Drizzle's relational and standard query builders silently drop `or()` with nested `and()` in some combinations.
+
+*Co-access edges (CORE-7):* `attend` records `co_access` edges among all returned facts after assembling the response — fire-and-forget (`void recordAttendEdges(...).catch(...)`), never on the response path. Guard: `returnedFacts.length >= 2 || rules.length > 0`. All-pairs among returned facts → `co_access` edges. `co_access` pairs are canonically ordered by `"type/id"` string so (A,B) and (B,A) always collapse to the same row.
+
+*Governs edges (CORE-8):* `recordAttendEdges` also creates directed `governs` edges from every active rule to every returned fact. These are directional (rule→fact, not canonicalized). Groundwork for graph-proximity rule triggering in Phase 3.
+
+**Key decisions.**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Advisory lock scope | Per `(tenant, entity_type, entity_id, key)` — not per entity | Narrowest lock that prevents duplicate archive snapshots. Different keys on the same entity don't serialize. |
+| `hashtext(key)::bigint` | Explicit `::bigint` cast | Without cast, PostgreSQL sees two overloads (`bigint` and `(int, int)`) and may choose the wrong one. |
+| Canonical pair ordering | Lexicographic on `"type/id"` string | Deterministic, language-agnostic, works across entity types. |
+| `getNeighbors` raw SQL | `db.execute(sql\`...\`)` | Drizzle's OR+AND compound conditions were silently dropped by both the relational and standard query builders in this version (0.45.2). Raw SQL is the reliable path. |
+| `governs` edges fire for single-fact attend | Yes, when `rules.length > 0` | A rule that fired alongside a fact governs that fact regardless of how many other facts were returned. The co_access guard (≥2 facts) is separate from the governs guard (rules.length > 0). |
+
+---
+
 ### Phase 2 — Intelligence Layer
 
 **Goal:** iranti begins to understand what it stores, not just store it.
 
-**Deliverables:**
-- Conflict detection: writing a fact that contradicts an existing one triggers a resolution pass
-- Entity relationship graph: store and query edges between entities
-- `EntityRelationship` table (from old iranti: outbound/inbound traversal, `MEMBER_OF` teams, etc.)
-- `WriteReceipt` table: idempotency for distributed writes
-- `validFrom` / `validUntil` on facts: temporal validity windows
-- `conflictLog` (JSON) on facts: append-only log of detected conflicts
-- Contextual conflict detection (cross-entity consistency checks)
-- Librarian: source reliability scoring — not all sources are equal
+**Deliverables (remaining, post-2a):**
+- Conflict detection: writing a fact that contradicts an existing one triggers a resolution pass (Phase 2b, CORE-9)
+- Source reliability scoring (Phase 2b, CORE-10)
+- Server-side semantic extraction (Phase 2b, CORE-11)
 
 ---
 
@@ -464,7 +519,7 @@ The original iranti grew organically over time. Reading it is like reading the r
 
 ## Current status
 
-**Phase 0 is complete and committed** (`7fadef5`, supplements in `3321c8c`). **Phase 1 (MCP server) is built and verified** — 4 MCP tools over stdio, bidirectional attend, checkpoints, 89/89 tests, end-to-end stdio smoke test. Host integration profiles live in `docs/engineering/hosts.md`.
+**Phases 0 through 2a are complete and verified.** Phase 0 (`7fadef5`, supplements `3321c8c`) — library foundation. Phase 1 (`b506a38`) — MCP server, bidirectional attend, checkpoints. Phase 1.1 — tool surface 4→9 and keyword-relevance retrieval. Phase 1.2 — context window observation (`currentContext` suppression). Phase 2a — graph substrate (`knowledge_edges`), write serialization (advisory lock), co-access + governs edge recording in attend. Current totals: **125/125 vitest tests + 19/19 end-to-end stdio smoke checks.** Forward work is tracked in the [backlog](../backlog.md); host integration profiles live in `docs/engineering/hosts.md`.
 
 | Item | Status |
 |------|--------|
@@ -484,6 +539,13 @@ The original iranti grew organically over time. Reading it is like reading the r
 | CI PostgreSQL service | ✅ `.github/workflows/ci.yml` with `services: postgres:17-alpine` |
 | Implementation reference doc | ✅ This file |
 | Phase 0 committed | ✅ commit `7fadef5` on `iranti-core` |
+| `knowledge_edges` table | ✅ `src/db/schema.ts`, migration `0003_slimy_donald_blake.sql` |
+| `GraphBackend` interface | ✅ `src/graph/index.ts` — addEdge, reinforceEdge, getNeighbors, getEdge |
+| Advisory lock in writeFact | ✅ `pg_advisory_xact_lock(hashtext(key)::bigint)` at transaction start |
+| Co-access edge recording | ✅ fire-and-forget in attend, all-pairs among returned facts |
+| Governs edge recording | ✅ rule→fact directed edges when rule+fact co-fire in attend |
+| Phase 2a test suite | ✅ 125/125 (16 graph tests + 109 prior tests) |
+| Phase 2a smoke test | ✅ 19/19 checks (checks 14+15 added for 2a) |
 
 **Docker note:** iranti-core uses port 5435 (not 5432) because the host machine has native PostgreSQL processes on both 5432 and 5433. The `docker-compose.yml` maps `5435:5432`. The `.env` DATABASE_URL uses port 5435.
 

@@ -38,10 +38,20 @@ console.log("connected to iranti MCP server over stdio\n");
 // 1. Tools list
 const { tools } = await client.listTools();
 const names = tools.map((t) => t.name).sort();
+const expectedTools = [
+  "iranti_archive",
+  "iranti_attend",
+  "iranti_checkpoint",
+  "iranti_history",
+  "iranti_query",
+  "iranti_search",
+  "iranti_write",
+  "iranti_write_issue",
+  "iranti_write_rule",
+];
 check(
-  "four tools registered",
-  JSON.stringify(names) ===
-    JSON.stringify(["iranti_archive", "iranti_attend", "iranti_write", "iranti_write_rule"]),
+  "nine tools registered",
+  JSON.stringify(names) === JSON.stringify(expectedTools),
   names.join(", "),
 );
 
@@ -140,6 +150,177 @@ const bad = await client.callTool({
   arguments: { ...hints, message: "x", surface: "myspace" },
 });
 check("invalid surface rejected", bad.isError === true || /invalid/i.test(bad.content?.[0]?.text ?? ""));
+
+// 8. iranti_search finds the explicit fact we wrote
+const searched = parse(
+  await client.callTool({
+    name: "iranti_search",
+    arguments: { query: "smoke", entityType: "project", entityId: projectId },
+  }),
+);
+check(
+  "search finds facts by keyword",
+  searched.results.some((r) => r.key === "smoke_status" || r.value?.includes("smoke")),
+  `count=${searched.count}`,
+);
+
+// 9. iranti_checkpoint — dedicated tool
+const cp = parse(
+  await client.callTool({
+    name: "iranti_checkpoint",
+    arguments: {
+      entityType: "project",
+      entityId: projectId,
+      text: "smoke test checkpoint via dedicated tool",
+    },
+  }),
+);
+check("checkpoint tool returns factId", typeof cp.factId === "string" && cp.factId.length > 0);
+
+const attend4 = parse(
+  await client.callTool({ name: "iranti_attend", arguments: hints }),
+);
+check(
+  "dedicated checkpoint returned by attend",
+  attend4.checkpoint?.text === "smoke test checkpoint via dedicated tool",
+);
+
+// 10. iranti_history — shows prior values
+await client.callTool({
+  name: "iranti_write",
+  arguments: { entityType: "project", entityId: projectId, key: "smoke_v", value: "v1" },
+});
+await client.callTool({
+  name: "iranti_write",
+  arguments: { entityType: "project", entityId: projectId, key: "smoke_v", value: "v2" },
+});
+const hist = parse(
+  await client.callTool({
+    name: "iranti_history",
+    arguments: { entityType: "project", entityId: projectId, key: "smoke_v" },
+  }),
+);
+check(
+  "history returns current value and prior version",
+  hist.found && hist.current?.value === "v2" && hist.history.some((h) => h.value === "v1"),
+  `current=${hist.current?.value} history=${hist.history.length}`,
+);
+
+// 11. iranti_query — exact lookup
+const q = parse(
+  await client.callTool({
+    name: "iranti_query",
+    arguments: { entityType: "project", entityId: projectId, key: "smoke_v" },
+  }),
+);
+check("query returns exact fact", q.found && q.fact?.value === "v2");
+
+// 12. iranti_write_issue — structured issue storage
+const issue = parse(
+  await client.callTool({
+    name: "iranti_write_issue",
+    arguments: {
+      entityType: "project",
+      entityId: projectId,
+      title: "Smoke test issue",
+      status: "open",
+      priority: "low",
+    },
+  }),
+);
+check(
+  "write_issue returns key and status",
+  issue.key === "issue:smoke-test-issue" && issue.status === "open",
+  `key=${issue.key}`,
+);
+
+// 12b. Upsert same issue with resolved status
+const issueUpdated = parse(
+  await client.callTool({
+    name: "iranti_write_issue",
+    arguments: {
+      entityType: "project",
+      entityId: projectId,
+      title: "Smoke test issue",
+      status: "resolved",
+      priority: "low",
+    },
+  }),
+);
+check("write_issue upserts by title", issueUpdated.status === "resolved");
+
+// 13. Context window observation — a fact already in currentContext is suppressed
+await client.callTool({
+  name: "iranti_write",
+  arguments: {
+    entityType: "project",
+    entityId: projectId,
+    key: "window_fact",
+    value: "the smoke deployment target is fly.io ord region",
+    surface: "dev_cli",
+  },
+});
+const observed = parse(
+  await client.callTool({
+    name: "iranti_attend",
+    arguments: {
+      ...hints,
+      currentContext:
+        "Context recap: the smoke deployment target is fly.io ord region, noted.",
+    },
+  }),
+);
+check(
+  "context window observation suppresses already-present fact",
+  observed.alreadyPresent >= 1 &&
+    !observed.facts.some((f) => f.key === "window_fact"),
+  `alreadyPresent=${observed.alreadyPresent}`,
+);
+
+// 14. Phase 2a — edge recording in effect: two attends that return the same
+// facts should not break anything (the async recording is best-effort).
+// We can't inspect the graph via MCP yet (that's Phase 3), so we just verify
+// the server is still healthy and returns the expected facts.
+const edgeEntityId = `smoke-edge-${randomUUID()}`;
+const edgeHints = { entityHints: [{ entityType: "project", entityId: edgeEntityId }] };
+await client.callTool({
+  name: "iranti_write",
+  arguments: { entityType: "project", entityId: edgeEntityId, key: "edge_fact_a", value: "alpha edge value" },
+});
+await client.callTool({
+  name: "iranti_write",
+  arguments: { entityType: "project", entityId: edgeEntityId, key: "edge_fact_b", value: "beta edge value" },
+});
+// Two attends — co_access edges form async in background.
+const edgeAttend1 = parse(await client.callTool({ name: "iranti_attend", arguments: edgeHints }));
+const edgeAttend2 = parse(await client.callTool({ name: "iranti_attend", arguments: edgeHints }));
+check(
+  "edge recording does not break attend (two attends return facts)",
+  edgeAttend1.facts.length >= 2 && edgeAttend2.facts.length >= 2,
+  `attend1=${edgeAttend1.facts.length} attend2=${edgeAttend2.facts.length} facts`,
+);
+
+// 15. Phase 2a — write safety: update a value twice; history must exist.
+const safetyId = `smoke-safety-${randomUUID()}`;
+await client.callTool({
+  name: "iranti_write",
+  arguments: { entityType: "project", entityId: safetyId, key: "safety_key", value: "initial" },
+});
+await client.callTool({
+  name: "iranti_write",
+  arguments: { entityType: "project", entityId: safetyId, key: "safety_key", value: "updated" },
+});
+const safetyHist = parse(
+  await client.callTool({
+    name: "iranti_history",
+    arguments: { entityType: "project", entityId: safetyId, key: "safety_key" },
+  }),
+);
+check(
+  "write safety: value update produces history (advisory lock in place)",
+  safetyHist.found && safetyHist.current?.value === "updated" && safetyHist.history.some((h) => h.value === "initial"),
+  `current=${safetyHist.current?.value} history=${safetyHist.history.length}`,
+);
 
 await client.close();
 console.log(failures === 0 ? "\nSMOKE TEST PASSED" : `\nSMOKE TEST FAILED (${failures})`);

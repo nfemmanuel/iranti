@@ -16,7 +16,7 @@
 //     This is irreversible in Phase 0.
 //   - Facts are never hard-deleted.
 
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import {
   factArchive,
@@ -91,6 +91,15 @@ export async function writeFact(
   const tenantId = input.tenantId ?? "default";
 
   return db.transaction(async (tx) => {
+    // Advisory lock: serialize concurrent writes to the same (tenant, entity, key)
+    // for the duration of this transaction. Without this, two writers can both
+    // pass the protection check and both snapshot the old value to fact_archive,
+    // producing duplicate history. pg_advisory_xact_lock releases automatically
+    // when the transaction commits or rolls back. The ::bigint cast avoids
+    // ambiguity between the single-bigint and two-int overloads of the function.
+    const lockKey = `${tenantId}/${input.entityType}/${input.entityId}/${input.key}`;
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`);
+
     // Step 1: Check whether a fact already exists for this key within this tenant.
     const existing = await tx.query.facts.findFirst({
       where: and(
@@ -302,6 +311,153 @@ export async function readFactsByEntity(
       // inArray generates a proper "WHERE id IN (...)" clause.
       inArray(facts.id, ids),
     );
+
+  return found;
+}
+
+// ---------------------------------------------------------------------------
+// Relevance-scored retrieval (for iranti_attend)
+// ---------------------------------------------------------------------------
+
+// Tokenize text for keyword overlap scoring.
+// Lowercases, splits on non-alphanumeric boundaries, dedupes, filters tokens
+// that are too short or are common stop words.
+function tokenizeMessage(text: string): string[] {
+  const stop = new Set([
+    "the", "and", "for", "are", "was", "with", "that", "this",
+    "have", "from", "not", "you", "all", "can", "had", "get",
+    "has", "how", "but", "did", "she", "use", "its", "our",
+  ]);
+  return [
+    ...new Set(
+      text
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter((t) => t.length >= 3 && !stop.has(t)),
+    ),
+  ];
+}
+
+// Score a fact's relevance to a set of query tokens.
+// Key token matches weight 2×; value substring matches weight 1×.
+function scoreRelevance(fact: Fact, tokens: string[]): number {
+  if (tokens.length === 0) return 0;
+  const keyTokens = new Set(fact.key.toLowerCase().split(/[^a-z0-9]+/));
+  const valueText = fact.value.slice(0, 300).toLowerCase();
+  let score = 0;
+  for (const t of tokens) {
+    if (keyTokens.has(t)) score += 2;
+    if (valueText.includes(t)) score += 1;
+  }
+  return score;
+}
+
+// Fetch facts relevant to a message for a given entity.
+// When no message is provided, delegates to readRecentFactsByEntity.
+// With a message, fetches a wider candidate pool (up to 3× limit, max 50),
+// scores by keyword overlap in key + value, and returns the top `limit`
+// by score then recency. Access tracking fires only on returned rows.
+export async function readRelevantFactsByEntity(
+  entityType: string,
+  entityId: string,
+  limit: number,
+  message?: string,
+  tenantId: string = "default",
+): Promise<Fact[]> {
+  if (!message) {
+    return readRecentFactsByEntity(entityType, entityId, limit, tenantId);
+  }
+
+  const tokens = tokenizeMessage(message);
+  if (tokens.length === 0) {
+    return readRecentFactsByEntity(entityType, entityId, limit, tenantId);
+  }
+
+  const candidateLimit = Math.min(limit * 3, 50);
+  const candidates = await db.query.facts.findMany({
+    where: and(
+      eq(facts.tenantId, tenantId),
+      eq(facts.entityType, entityType),
+      eq(facts.entityId, entityId),
+      eq(facts.isArchived, false),
+    ),
+    orderBy: desc(facts.updatedAt),
+    limit: candidateLimit,
+  });
+
+  if (candidates.length === 0) return [];
+
+  const scored = candidates.map((f) => ({
+    fact: f,
+    score: scoreRelevance(f, tokens),
+  }));
+  const anyMatch = scored.some((s) => s.score > 0);
+
+  // No keyword match at all — fall back to pure recency.
+  if (!anyMatch) {
+    const top = candidates.slice(0, limit);
+    const ids = top.map((f) => f.id);
+    await db
+      .update(facts)
+      .set({ lastAccessedAt: new Date(), accessCount: sql`${facts.accessCount} + 1` })
+      .where(inArray(facts.id, ids));
+    return top;
+  }
+
+  scored.sort((a, b) =>
+    b.score !== a.score
+      ? b.score - a.score
+      : b.fact.updatedAt.getTime() - a.fact.updatedAt.getTime(),
+  );
+
+  const top = scored.slice(0, limit).map((s) => s.fact);
+  const ids = top.map((f) => f.id);
+  await db
+    .update(facts)
+    .set({ lastAccessedAt: new Date(), accessCount: sql`${facts.accessCount} + 1` })
+    .where(inArray(facts.id, ids));
+
+  return top;
+}
+
+// ---------------------------------------------------------------------------
+// Full-text search (for iranti_search)
+// ---------------------------------------------------------------------------
+
+// Search facts by keyword across all entities or scoped to a specific one.
+// Matches are case-insensitive against key and value.
+// Access-tracks returned results (this is a real retrieval).
+export async function searchFacts(
+  query: string,
+  opts: {
+    entityType?: string;
+    entityId?: string;
+    limit?: number;
+    tenantId?: string;
+  } = {},
+): Promise<Fact[]> {
+  const { entityType, entityId, limit = 10, tenantId = "default" } = opts;
+  const pattern = `%${query}%`;
+
+  const found = await db.query.facts.findMany({
+    where: and(
+      eq(facts.tenantId, tenantId),
+      eq(facts.isArchived, false),
+      or(ilike(facts.key, pattern), ilike(facts.value, pattern)),
+      entityType ? eq(facts.entityType, entityType) : undefined,
+      entityId ? eq(facts.entityId, entityId) : undefined,
+    ),
+    orderBy: desc(facts.updatedAt),
+    limit: Math.min(limit, 50),
+  });
+
+  if (found.length > 0) {
+    const ids = found.map((f) => f.id);
+    await db
+      .update(facts)
+      .set({ lastAccessedAt: new Date(), accessCount: sql`${facts.accessCount} + 1` })
+      .where(inArray(facts.id, ids));
+  }
 
   return found;
 }

@@ -4,6 +4,8 @@ iranti is automatic context engineering for AI agents.
 
 This folder is the map for everything needed to plan, design, and build iranti-core. It is organized by layer: rough thinking at the top, product decisions in the middle, technical design below that, and engineering standards underneath everything. Documents earn their folder when they are ready to be written properly. Everything starts in rough-notes.
 
+**Planning lives in three places:** the [backlog](backlog.md) is the live ordered queue and the authoritative phase sequence, the [phase PRDs](prds/phases/) are the per-phase contracts written before each build, and the [implementation reference](engineering/implementation.md) is the living retrospective of what shipped. **Start with the [backlog](backlog.md) to see current status.**
+
 **Status key:** `draft` · `template` · `deferred` · `complete`
 
 ---

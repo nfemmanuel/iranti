@@ -384,6 +384,8 @@ Direct measurement of successful recall requires reading session content, which 
 
 ## 12. Build sequence
 
+> **Note (2026-06):** the sequence below is the original plan. As executed, MCP integration was pulled forward (to land a runnable loop early) and the foundation/library phases were folded together, so the as-built phase numbers differ from those here. The [backlog](../backlog.md#phase-numbering--reconciled) holds the authoritative phase mapping and is the live source for what is shipped and what is next. This section is preserved as the original intent.
+
 The build is organised into phases. Each phase must be functionally complete before the next one depends on it. Where phases can run in parallel, that is noted. The goal is to have something runnable as early as possible so testing can happen against real behaviour rather than theory.
 
 ### Phase 0: Foundation

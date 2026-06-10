@@ -6,6 +6,7 @@
 // and the rest follows.
 //
 // Phase 0 tables: agents, sessions, entities, facts, fact_archive, rules
+// Phase 2a tables: knowledge_edges
 // Later phases add: relationships, entity_aliases, staff_events, tokens, users
 
 import {
@@ -360,6 +361,76 @@ export const rules = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// knowledge_edges — Phase 2a
+//
+// The graph substrate. An edge connects two nodes (facts, rules, or entities)
+// with a labelled relation and a weight that accumulates over time.
+//
+// Relations in use:
+//   co_access — two facts returned together in the same attend. Weight =
+//               how many times they co-occurred. Stored with canonical pair
+//               ordering so (A,B) and (B,A) are the same row.
+//   governs   — directed edge rule→fact. A rule co-fired with a fact in an
+//               attend. Groundwork for graph-proximity rule triggering (Phase 3).
+//
+// The weight column is raw accumulation (Phase 2a). Normalization and
+// decay are deferred to Phase 3 and Phase 4 respectively.
+//
+// Edge writes are best-effort and never block or fail core read/write paths.
+// ---------------------------------------------------------------------------
+export const knowledgeEdges = pgTable(
+  "knowledge_edges",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+
+    // Tenancy seam — always 'default' until Phase 5.
+    tenantId: text("tenant_id").notNull().default("default"),
+
+    // Source node. 'fact' | 'rule' | 'entity'
+    sourceType: text("source_type").notNull(),
+    sourceId: text("source_id").notNull(),
+
+    // Target node. 'fact' | 'rule' | 'entity'
+    targetType: text("target_type").notNull(),
+    targetId: text("target_id").notNull(),
+
+    // What kind of connection this is. 'co_access' | 'governs'
+    relation: text("relation").notNull(),
+
+    // Accumulated weight. Incremented by reinforceEdge on each co-access.
+    weight: real("weight").notNull().default(1),
+
+    // How many times these two nodes were retrieved together.
+    coAccessCount: integer("co_access_count").notNull().default(0),
+
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+
+    lastReinforcedAt: timestamp("last_reinforced_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // Canonical-pair uniqueness: one row per (tenant, src, tgt, relation).
+    // co_access edges are stored with canonical ordering (smaller key first)
+    // so there is never a duplicate (A→B, B→A) pair for the same relation.
+    unique("knowledge_edges_canonical_pair_uniq").on(
+      t.tenantId,
+      t.sourceType,
+      t.sourceId,
+      t.targetType,
+      t.targetId,
+      t.relation,
+    ),
+    // Primary neighbour lookup: "who did this node co-occur with?"
+    index("knowledge_edges_source_idx").on(t.sourceType, t.sourceId),
+    // Reverse neighbour lookup: needed for undirected traversal.
+    index("knowledge_edges_target_idx").on(t.targetType, t.targetId),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // Inferred TypeScript types
 //
 // Drizzle derives these from the schema above. Use them everywhere instead
@@ -382,3 +453,6 @@ export type NewFactArchive = typeof factArchive.$inferInsert;
 
 export type Rule = typeof rules.$inferSelect;
 export type NewRule = typeof rules.$inferInsert;
+
+export type KnowledgeEdge = typeof knowledgeEdges.$inferSelect;
+export type NewKnowledgeEdge = typeof knowledgeEdges.$inferInsert;

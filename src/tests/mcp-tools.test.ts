@@ -17,7 +17,12 @@ import { getRuleById } from "../library/rules.js";
 import { EXTRACT_SOURCE } from "../mcp/extractor.js";
 import { attend, MAX_TOTAL_FACTS } from "../mcp/tools/attend.js";
 import { archive } from "../mcp/tools/archive.js";
+import { checkpointTool } from "../mcp/tools/checkpoint.js";
+import { history } from "../mcp/tools/history.js";
+import { query } from "../mcp/tools/query.js";
+import { search } from "../mcp/tools/search.js";
 import { write } from "../mcp/tools/write.js";
+import { writeIssueTool } from "../mcp/tools/write-issue.js";
 import { writeRuleTool } from "../mcp/tools/write-rule.js";
 
 afterAll(async () => {
@@ -220,6 +225,428 @@ describe("write_rule", () => {
     expect(rule?.isActive).toBe(true);
     expect(rule?.priority).toBe(100);
     expect(rule?.agentId).not.toBeNull();
+  });
+});
+
+describe("attend — context window observation (Phase 1.2)", () => {
+  it("suppresses a fact whose value is already in currentContext", async () => {
+    const entityId = randomUUID();
+    await writeFact({
+      entityType: "project",
+      entityId,
+      key: "deploy_target",
+      value: "production runs on fly.io in the ord region",
+      source: "test",
+    });
+
+    const result = await attend({
+      entityHints: [{ entityType: "project", entityId }],
+      currentContext:
+        "We already discussed that production runs on fly.io in the ord region earlier.",
+    });
+
+    expect(result.alreadyPresent).toBeGreaterThanOrEqual(1);
+    expect(result.facts.some((f) => f.key === "deploy_target")).toBe(false);
+  });
+
+  it("still returns a relevant fact that is NOT in currentContext", async () => {
+    const entityId = randomUUID();
+    await writeFact({
+      entityType: "project",
+      entityId,
+      key: "secret_sauce",
+      value: "the caching layer uses a two-tier LRU with a redis backstop",
+      source: "test",
+    });
+
+    const result = await attend({
+      entityHints: [{ entityType: "project", entityId }],
+      currentContext: "Totally unrelated window text about lunch plans.",
+    });
+
+    expect(result.facts.some((f) => f.key === "secret_sauce")).toBe(true);
+    expect(result.alreadyPresent).toBe(0);
+  });
+
+  it("no currentContext means no suppression (backward compatible)", async () => {
+    const entityId = randomUUID();
+    await writeFact({
+      entityType: "project",
+      entityId,
+      key: "framework",
+      value: "built on drizzle and postgres.js",
+      source: "test",
+    });
+
+    const result = await attend({
+      entityHints: [{ entityType: "project", entityId }],
+    });
+
+    expect(result.alreadyPresent).toBe(0);
+    expect(result.facts.some((f) => f.key === "framework")).toBe(true);
+  });
+
+  it("never suppresses the checkpoint even when present in currentContext", async () => {
+    const entityId = randomUUID();
+    await writeCheckpoint(
+      "project",
+      entityId,
+      "midway through the auth refactor, next is token rotation",
+    );
+
+    const result = await attend({
+      entityHints: [{ entityType: "project", entityId }],
+      currentContext:
+        "Recall: midway through the auth refactor, next is token rotation.",
+    });
+
+    expect(result.checkpoint?.text).toBe(
+      "midway through the auth refactor, next is token rotation",
+    );
+  });
+
+  it("does not suppress very short values (false-positive floor)", async () => {
+    const entityId = randomUUID();
+    await writeFact({
+      entityType: "project",
+      entityId,
+      key: "ver",
+      value: "v2",
+      source: "test",
+    });
+
+    const result = await attend({
+      entityHints: [{ entityType: "project", entityId }],
+      currentContext: "this window mentions v2 somewhere",
+    });
+
+    // "v2" is below the presence floor, so it is not treated as present.
+    expect(result.facts.some((f) => f.key === "ver")).toBe(true);
+  });
+});
+
+describe("attend — keyword relevance scoring", () => {
+  it("surfaces topically relevant facts ahead of recently written off-topic ones", async () => {
+    const entityId = randomUUID();
+
+    // UX-related facts written first (older updatedAt)
+    await writeFact({
+      entityType: "project",
+      entityId,
+      key: "ux_design_principles",
+      value: "prefer minimal interfaces",
+      source: "test",
+    });
+    await writeFact({
+      entityType: "project",
+      entityId,
+      key: "onboarding_flow",
+      value: "three-step wizard for new users",
+      source: "test",
+    });
+
+    // Rate-limiting fact written last (most recent — would lead under pure recency)
+    await writeFact({
+      entityType: "project",
+      entityId,
+      key: "rate_limit_config",
+      value: "100 requests per minute",
+      source: "test",
+    });
+
+    const result = await attend({
+      entityHints: [{ entityType: "project", entityId }],
+      message: "what are the ux design decisions we made for onboarding",
+    });
+
+    const keys = result.facts.map((f) => f.key);
+    const uxIndex = keys.findIndex(
+      (k) => k === "ux_design_principles" || k === "onboarding_flow",
+    );
+    const rateIndex = keys.findIndex((k) => k === "rate_limit_config");
+
+    // UX fact must appear before the rate limit fact (or rate limit absent entirely)
+    if (uxIndex !== -1 && rateIndex !== -1) {
+      expect(uxIndex).toBeLessThan(rateIndex);
+    } else {
+      expect(
+        keys.some(
+          (k) => k === "ux_design_principles" || k === "onboarding_flow",
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("falls back to recency when no message is provided", async () => {
+    const entityId = randomUUID();
+    await writeFact({
+      entityType: "project",
+      entityId,
+      key: "older_fact",
+      value: "written first",
+      source: "test",
+    });
+    await writeFact({
+      entityType: "project",
+      entityId,
+      key: "newer_fact",
+      value: "written second",
+      source: "test",
+    });
+
+    const result = await attend({
+      entityHints: [{ entityType: "project", entityId }],
+    });
+
+    expect(result.facts[0]?.key).toBe("newer_fact");
+  });
+});
+
+describe("search", () => {
+  it("finds facts by keyword in key", async () => {
+    const entityId = randomUUID();
+    await writeFact({
+      entityType: "project",
+      entityId,
+      key: "auth_provider",
+      value: "oauth2",
+      source: "test",
+    });
+    await writeFact({
+      entityType: "project",
+      entityId,
+      key: "db_host",
+      value: "localhost",
+      source: "test",
+    });
+
+    const result = await search({ query: "auth_provider" });
+    expect(result.results.some((r) => r.key === "auth_provider")).toBe(true);
+  });
+
+  it("finds facts by keyword in value", async () => {
+    const entityId = randomUUID();
+    await writeFact({
+      entityType: "project",
+      entityId,
+      key: "infra_notes",
+      value: "migrate postgres to aurora rds",
+      source: "test",
+    });
+
+    const result = await search({ query: "aurora" });
+    expect(
+      result.results.some(
+        (r) => r.entity === `project/${entityId}` && r.key === "infra_notes",
+      ),
+    ).toBe(true);
+  });
+
+  it("returns empty for a query that matches nothing", async () => {
+    const result = await search({ query: `zzznomatch-${randomUUID()}` });
+    expect(result.count).toBe(0);
+  });
+
+  it("scopes to a specific entity when entityType + entityId provided", async () => {
+    const a = randomUUID();
+    const b = randomUUID();
+    await writeFact({
+      entityType: "project",
+      entityId: a,
+      key: "scope_signal",
+      value: "entity-a",
+      source: "test",
+    });
+    await writeFact({
+      entityType: "project",
+      entityId: b,
+      key: "scope_signal",
+      value: "entity-b",
+      source: "test",
+    });
+
+    const result = await search({
+      query: "scope_signal",
+      entityType: "project",
+      entityId: a,
+    });
+    expect(result.results.every((r) => r.entity === `project/${a}`)).toBe(true);
+  });
+});
+
+describe("iranti_checkpoint (dedicated tool)", () => {
+  it("saves a checkpoint and attend returns it", async () => {
+    const entityId = randomUUID();
+
+    const result = await checkpointTool({
+      entityType: "project",
+      entityId,
+      text: "halfway through refactor, next: update tests",
+    });
+
+    expect(result.factId).toBeTruthy();
+    expect(result.entity).toBe(`project/${entityId}`);
+
+    const attended = await attend({
+      entityHints: [{ entityType: "project", entityId }],
+    });
+    expect(attended.checkpoint?.text).toBe(
+      "halfway through refactor, next: update tests",
+    );
+  });
+
+  it("second checkpoint replaces the first", async () => {
+    const entityId = randomUUID();
+    await checkpointTool({
+      entityType: "project",
+      entityId,
+      text: "first checkpoint",
+    });
+    await checkpointTool({
+      entityType: "project",
+      entityId,
+      text: "second checkpoint",
+    });
+
+    const attended = await attend({
+      entityHints: [{ entityType: "project", entityId }],
+    });
+    expect(attended.checkpoint?.text).toBe("second checkpoint");
+  });
+});
+
+describe("history", () => {
+  it("returns current value and change history after updates", async () => {
+    const entityId = randomUUID();
+    await write({
+      entityType: "project",
+      entityId,
+      key: "status",
+      value: "planning",
+    });
+    await write({
+      entityType: "project",
+      entityId,
+      key: "status",
+      value: "building",
+    });
+    await write({
+      entityType: "project",
+      entityId,
+      key: "status",
+      value: "shipped",
+    });
+
+    const result = await history({
+      entityType: "project",
+      entityId,
+      key: "status",
+    });
+
+    expect(result.found).toBe(true);
+    expect(result.current?.value).toBe("shipped");
+    expect(result.history).toHaveLength(2);
+    expect(result.history.map((h) => h.value)).toContain("building");
+    expect(result.history.map((h) => h.value)).toContain("planning");
+  });
+
+  it("reports not found for a fact that was never written", async () => {
+    const result = await history({
+      entityType: "project",
+      entityId: randomUUID(),
+      key: "never-written",
+    });
+    expect(result.found).toBe(false);
+    expect(result.current).toBeNull();
+    expect(result.history).toHaveLength(0);
+  });
+
+  it("reports an error for insufficient input", async () => {
+    const result = await history({ entityType: "project" });
+    expect(result.found).toBe(false);
+    expect(result.reason).toContain("Provide either");
+  });
+});
+
+describe("query", () => {
+  it("returns the exact current value for a known entity + key", async () => {
+    const entityId = randomUUID();
+    await write({
+      entityType: "project",
+      entityId,
+      key: "language",
+      value: "typescript",
+    });
+
+    const result = await query({
+      entityType: "project",
+      entityId,
+      key: "language",
+    });
+
+    expect(result.found).toBe(true);
+    expect(result.fact?.value).toBe("typescript");
+    expect(result.fact?.entity).toBe(`project/${entityId}`);
+  });
+
+  it("returns found=false for an unknown key", async () => {
+    const result = await query({
+      entityType: "project",
+      entityId: randomUUID(),
+      key: "never-written",
+    });
+    expect(result.found).toBe(false);
+    expect(result.fact).toBeNull();
+  });
+});
+
+describe("write_issue", () => {
+  it("stores a structured issue fact", async () => {
+    const entityId = randomUUID();
+
+    const result = await writeIssueTool({
+      entityType: "project",
+      entityId,
+      title: "Dark mode not working",
+      description: "Setting is ignored on mobile",
+      status: "open",
+      priority: "high",
+    });
+
+    expect(result.key).toBe("issue:dark-mode-not-working");
+    expect(result.status).toBe("open");
+
+    const fact = await findFact(
+      "project",
+      entityId,
+      "issue:dark-mode-not-working",
+    );
+    const parsed = JSON.parse(fact!.value);
+    expect(parsed.title).toBe("Dark mode not working");
+    expect(parsed.priority).toBe("high");
+    expect(parsed.description).toBe("Setting is ignored on mobile");
+  });
+
+  it("same title upserts the issue (status update)", async () => {
+    const entityId = randomUUID();
+    await writeIssueTool({
+      entityType: "project",
+      entityId,
+      title: "Login bug",
+      status: "open",
+      priority: "medium",
+    });
+    await writeIssueTool({
+      entityType: "project",
+      entityId,
+      title: "Login bug",
+      status: "resolved",
+      priority: "medium",
+    });
+
+    const fact = await findFact("project", entityId, "issue:login-bug");
+    const parsed = JSON.parse(fact!.value);
+    expect(parsed.status).toBe("resolved");
   });
 });
 
