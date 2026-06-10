@@ -67,10 +67,10 @@ The master PRD §12 and the executed build use **different** phase numbers. This
 
 | ID | Item | Phase | Status | PRD |
 |---|---|---|---|---|
-| ⚪ CORE-12…14 | **Phase 2.5** — single-user HTTP transport + `attend_log` telemetry | 2.5 | later | n/a |
+| 🔵 CORE-12…14, 27…29 | **Phase 2.5** — single-user HTTP, `attend_log` telemetry + token accounting, Phase 2 hardening (confidence plumbing, reliability tenancy, write-time edges) | 2.5 | PRD proposed | [2.5](prds/phases/phase-2.5-http-telemetry.md) |
 | ⚪ DOC-2 | Flip spec `template` → `complete` as features ship; add master-PRD §12 pointer to the reconciliation table | — | later | n/a |
 
-> **Recommended next action:** implement **Phase 2.5** (single-user HTTP + telemetry) or **Phase 3** (two-pass retrieval).
+> **Recommended next action:** review/accept the **Phase 2.5 PRD**, then build.
 
 ---
 
@@ -93,17 +93,27 @@ Judgment on the write path. PRD: [phase-2b](prds/phases/phase-2b-librarian.md). 
 - **🟢 CORE-10** Source reliability scoring — `source_reliability(source, wins, losses, score)`, updated on every supersession outcome.
 - **🟢 CORE-11** **Server-side semantic extraction** — `HeuristicExtractor` (always-on, 5 decision patterns + 4 preference patterns) + `LocalLlmExtractor` (Ollama, config-gated, degrades to heuristic), pluggable `ExtractorBackend`. Wired into `attend` fire-and-forget. Facts surface on next attend.
 
-### Phase 2.5 — Single-user HTTP + telemetry  ⚪
+### Phase 2.5 — Single-user HTTP, telemetry & Phase 2 hardening  🔵 (PRD proposed)
 
-One engineering effort that unlocks every consumer surface; lands **after** CORE-5 (write safety).
+One engineering effort that unlocks every consumer surface + makes the token-saving story measurable. PRD: [phase-2.5](prds/phases/phase-2.5-http-telemetry.md). Write-safety precondition (CORE-5) satisfied by 2a.
 
-- **CORE-12** Streamable HTTP transport alongside stdio, static bearer token (building block B3 from [integrations.md](engineering/integrations.md)).
-- **CORE-13** `search`/`fetch` alias tools for the ChatGPT connector shim (B4).
-- **CORE-14** `attend_log` table (session_id, injection_size, alreadyPresent, fact_count) + the SQL health views from `performance_metrics_design`. Foundation of the external usage dashboard ("tokens saved this week").
+- **CORE-12** Streamable HTTP transport alongside stdio, static bearer token, off by default (building block B3 from [integrations.md](engineering/integrations.md)).
+- **CORE-13** `search`/`fetch` alias tools for the ChatGPT connector shim (B4), gated by `IRANTI_EXPOSE_OPENAI_ALIASES`.
+- **CORE-14** `attend_log` table (counts, injected/suppressed sizes in chars + token estimate, latency) + `metric_counters` persistence + the SQL health views. Foundation of "tokens saved this week". *Token-budgeted injection is deferred to Phase 3 by decision D3 — 2.5 measures, 3 enforces.*
+- **CORE-27** Confidence plumbing — `writeFact` accepts confidence; extractor confidence (0.85/0.80) stops being dropped; reliability-weighted via `clamp(base × (0.5 + sourceScore))`. *(Strategic-review gap 1; master §12 "apply weighted confidence on write".)*
+- **CORE-28** `source_reliability.tenant_id` + composite PK — the one missing tenancy seam. *(Gap 2.)*
+- **CORE-29** Write-time edges — `co_write` same-session (weight 0.5) + `about` fact→entity, fire-and-forget. *(Gap 3; master §12 "temporal co-occurrence, entity overlap".)*
+
+> **⛔ GATE at 2.5 close (strategic-review gap 5):** before marking 2.5 shipped, verify master §3 self-awareness is real — comprehension counters survive restart, attend latency is *measured* (not asserted), and "tokens saved this week" is answerable by one query. If any of these is missing, 2.5 is not done.
 
 ### Phase 3 — Retrieval & cross-platform  ⚪
 
 The retrieval half of the Attendant.
+
+> **⛔ GATE before Phase 3 build (strategic-review gap 4 + carried fixes):**
+> 1. **Decide the Apache AGE parallel track.** Master §12 asked for it alongside Phase 2; consciously deferred (2a PRD). Phase 3 is when retrieval starts consuming the graph — decide now whether the CTE impl carries the load or the AGE build starts. Do not let this default silently.
+> 2. **Fix `getNeighbors` depth>1 before two-pass consumes it** — the recursive-CTE join walks back toward the origin (second OR branch matches `t.source`, should be `t.target`), and `DISTINCT ON (id) ORDER BY id` discards weight ordering before the LIMIT. Both confirmed in the 2026-06-10 code review; latent only because nothing calls depth>1 yet.
+> 3. **Introduce token-budgeted injection** using `attend_log` distribution data (2.5 D3 deferred it here deliberately).
 
 - **CORE-15** **Two-pass retrieval** — primary = entity + keyword match; secondary = 1–2 hop graph neighbours weighted by edge confidence. *Falls out of CORE-7 nearly for free; answers the master PRD's open question on tier weighting.*
 - **CORE-16** pgvector embeddings + hybrid search (lexical + cosine) — the third rung of the relevance ladder (entity → keyword → vector).
@@ -151,4 +161,4 @@ The retrieval half of the Attendant.
 
 ---
 
-_Last updated: 2026-06-10 (Phase 2b shipped — CORE-9/10/11: conflict detection, source reliability, semantic extraction)._
+_Last updated: 2026-06-10 (Phase 2.5 PRD proposed — CORE-12/13/14 + hardening CORE-27/28/29; gates planted at 2.5 close and Phase 3 entry)._
