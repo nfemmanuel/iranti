@@ -7,6 +7,7 @@
 //
 // Phase 0 tables: agents, sessions, entities, facts, fact_archive, rules
 // Phase 2a tables: knowledge_edges
+// Phase 2b tables: source_reliability, escalations
 // Later phases add: relationships, entity_aliases, staff_events, tokens, users
 
 import {
@@ -431,6 +432,49 @@ export const knowledgeEdges = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// source_reliability — Phase 2b
+//
+// Tracks the track record of each fact source. A source that consistently
+// wins conflict resolutions earns a higher score; a source that consistently
+// loses earns a lower score. This score is used as a confidence weight on
+// subsequent writes, so trusted sources accumulate trust automatically.
+//
+// score = wins / (wins + losses), initialised to 0.5 (neutral).
+// Updated on each conflict resolution — not on every write.
+// ---------------------------------------------------------------------------
+export const sourceReliability = pgTable("source_reliability", {
+  source: text("source").primaryKey(),
+  wins: integer("wins").notNull().default(0),
+  losses: integer("losses").notNull().default(0),
+  score: real("score").notNull().default(0.5),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ---------------------------------------------------------------------------
+// escalations — Phase 2b
+//
+// When a conflicting write cannot be auto-resolved (the existing source is
+// significantly more trusted), the write is blocked and the conflict is
+// recorded here AND in a human-readable markdown file. Phase 4 adds
+// `iranti resolve` to apply human decisions.
+// ---------------------------------------------------------------------------
+export const escalations = pgTable("escalations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantId: text("tenant_id").notNull().default("default"),
+  entityType: text("entity_type").notNull(),
+  entityId: text("entity_id").notNull(),
+  key: text("key").notNull(),
+  existingFactId: uuid("existing_fact_id"),
+  existingValue: text("existing_value").notNull(),
+  newValue: text("new_value").notNull(),
+  existingSource: text("existing_source").notNull(),
+  newSource: text("new_source").notNull(),
+  reason: text("reason").notNull(),
+  status: text("status").notNull().default("pending"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ---------------------------------------------------------------------------
 // Inferred TypeScript types
 //
 // Drizzle derives these from the schema above. Use them everywhere instead
@@ -456,3 +500,9 @@ export type NewRule = typeof rules.$inferInsert;
 
 export type KnowledgeEdge = typeof knowledgeEdges.$inferSelect;
 export type NewKnowledgeEdge = typeof knowledgeEdges.$inferInsert;
+
+export type SourceReliability = typeof sourceReliability.$inferSelect;
+export type NewSourceReliability = typeof sourceReliability.$inferInsert;
+
+export type Escalation = typeof escalations.$inferSelect;
+export type NewEscalation = typeof escalations.$inferInsert;

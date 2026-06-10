@@ -1,7 +1,7 @@
 # PRD: Phase 2b — The Librarian (intelligence on the write path)
 
-**Status:** accepted
-**Phase:** 2b · **Date:** 2026-06-10 · **Author:** Claude (with NF)
+**Status:** shipped
+**Phase:** 2b · **Date:** 2026-06-10 · **Shipped:** 2026-06-10 · **Author:** Claude (with NF)
 **Related:** master PRD §6 (the Librarian), §9 (intelligence: conflict detection, source reliability, autonomous write routing); specs [conflict-detection](../../specs/lifecycle/conflict-detection.md), [source-reliability](../../specs/intelligence/source-reliability.md), [autonomous-write-routing](../../specs/intelligence/autonomous-write-routing.md); backlog CORE-9/10/11; audit `goals_audit_2026_06` divergence 3; `oss_llm_extractor_research_2026_06`
 
 ---

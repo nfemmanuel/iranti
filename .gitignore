@@ -14,6 +14,7 @@ build/
 .iranti-runtime/
 .iranti-write-debt
 escalation/
+iranti-escalations/
 
 # MCP registry tokens
 .mcpregistry_*

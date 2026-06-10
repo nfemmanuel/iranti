@@ -25,6 +25,12 @@ import {
   type FactArchive,
   type NewFact,
 } from "../db/schema.js";
+import {
+  checkConflict,
+  createEscalation,
+  recordSupersession,
+  runDeepConflictCheck,
+} from "./conflicts.js";
 
 // ---------------------------------------------------------------------------
 // Surface validation
@@ -122,6 +128,34 @@ export async function writeFact(
       );
     }
 
+    // Step 2.5 (Phase 2b): Conflict detection. When a value is changing,
+    // compare source reliability scores. If the existing source is
+    // significantly more trusted, escalate instead of superseding.
+    if (existing && existing.value !== input.value) {
+      const outcome = await checkConflict(existing, input.value, input.source);
+      if (outcome === "escalate") {
+        // Block the write. Write an escalation record + markdown file.
+        // The transaction is still committed — we're just returning early
+        // without updating the fact or creating an archive entry.
+        await createEscalation({
+          tenantId,
+          entityType: input.entityType,
+          entityId: input.entityId,
+          key: input.key,
+          existingFact: existing,
+          newValue: input.value,
+          newSource: input.source,
+          reason: "Existing source reliability significantly exceeds new source reliability",
+        });
+        return existing;
+      }
+      // outcome === "supersede": record the win/loss and continue.
+      // recordSupersession runs outside the transaction (best-effort, non-blocking).
+      void recordSupersession(input.source, existing.source).catch((err: unknown) =>
+        console.error("[iranti] reliability update error:", err),
+      );
+    }
+
     // Step 3: If the value is changing, snapshot the old row to fact_archive.
     // We only snapshot when the value actually differs — re-writing the same
     // value with the same key produces no archive row.
@@ -178,6 +212,20 @@ export async function writeFact(
         },
       })
       .returning();
+
+    // Step 5 (Phase 2b): Deep conflict check — fire-and-forget, never blocks.
+    // Checks whether the new value negates a term present in another fact
+    // for this entity. Increments comprehensionMetrics.deepConflictsDetected
+    // for each candidate found, but does not auto-resolve.
+    void runDeepConflictCheck(
+      input.entityType,
+      input.entityId,
+      input.key,
+      input.value,
+      tenantId,
+    ).catch((err: unknown) =>
+      console.error("[iranti] deep conflict check error:", err),
+    );
 
     return fact!;
   });

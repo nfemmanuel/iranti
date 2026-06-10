@@ -57,6 +57,9 @@ The master PRD §12 and the executed build use **different** phase numbers. This
 | 🟢 CORE-6 | `knowledge_edges` table + `GraphBackend` interface + PostgreSQL CTE impl | 2a | done | [2a](prds/phases/phase-2a-graph-and-write-safety.md) |
 | 🟢 CORE-7 | Co-access edge recording in attend (async, fire-and-forget) | 2a | done | [2a](prds/phases/phase-2a-graph-and-write-safety.md) |
 | 🟢 CORE-8 | `governs` edges from rules to co-fired facts | 2a | done | [2a](prds/phases/phase-2a-graph-and-write-safety.md) |
+| 🟢 CORE-9 | Conflict detection — minimal (same-key reliability gap → supersede/escalate) + deep cross-key (comprehension metric) | 2b | done | [2b](prds/phases/phase-2b-librarian.md) |
+| 🟢 CORE-10 | Source reliability scoring — `source_reliability(source, wins, losses, score)` table, updated on every supersession | 2b | done | [2b](prds/phases/phase-2b-librarian.md) |
+| 🟢 CORE-11 | Server-side semantic extraction — `HeuristicExtractor` (always-on) + `LocalLlmExtractor` (Ollama, optional), wired into attend | 2b | done | [2b](prds/phases/phase-2b-librarian.md) |
 
 ---
 
@@ -64,10 +67,10 @@ The master PRD §12 and the executed build use **different** phase numbers. This
 
 | ID | Item | Phase | Status | PRD |
 |---|---|---|---|---|
-| 🔵 CORE-9…11 | **Implement Phase 2b** — conflict detection, source reliability, semantic extraction | 2b | next up | [2b](prds/phases/phase-2b-librarian.md) |
+| ⚪ CORE-12…14 | **Phase 2.5** — single-user HTTP transport + `attend_log` telemetry | 2.5 | later | n/a |
 | ⚪ DOC-2 | Flip spec `template` → `complete` as features ship; add master-PRD §12 pointer to the reconciliation table | — | later | n/a |
 
-> **Recommended next action:** implement **Phase 2b** (CORE-9…11) — the Librarian. Can run in parallel with Phase 2.5 (single-user HTTP).
+> **Recommended next action:** implement **Phase 2.5** (single-user HTTP + telemetry) or **Phase 3** (two-pass retrieval).
 
 ---
 
@@ -82,13 +85,13 @@ Graph substrate + concurrency safety. PRD: [phase-2a](prds/phases/phase-2a-graph
 - **🟢 CORE-7** Co-access edge recording in attend — fire-and-forget, off the response path.
 - **🟢 CORE-8** `governs` edges from rules to the facts they co-fire with.
 
-### Phase 2b — The Librarian  🔵 (PRD accepted)
+### Phase 2b — The Librarian  🟢 shipped
 
-Judgment on the write path. PRD: [phase-2b](prds/phases/phase-2b-librarian.md). Can run in parallel with / after 2.5.
+Judgment on the write path. PRD: [phase-2b](prds/phases/phase-2b-librarian.md). 158/158 tests · 21/21 smoke.
 
-- **CORE-9** Conflict detection — minimal (same-key + confidence/source gap → supersede or escalate-file) **and** deep cross-key semantic detection wired as a **comprehension metric** (flags + measures, never auto-resolves). *Decision A: deep version lands in 2b.*
-- **CORE-10** Source reliability scoring — `source_reliability(source, wins, losses, score)`, weights confidence on write.
-- **CORE-11** **Server-side semantic extraction** — heuristic code baseline (always on) + optional async local OSS-LLM pass (Qwen3 / Gemma 4B-class via Ollama) behind a pluggable, config-gated `ExtractorBackend`. The LLM **proposes facts only**; resolution stays deterministic *(decision B)*. Begins the agent-passive shift (divergence 3); agent write tools become escape hatches.
+- **🟢 CORE-9** Conflict detection — minimal (same-key + confidence/source gap → supersede or escalate-file) **and** deep cross-key semantic detection wired as a **comprehension metric** (flags + measures, never auto-resolves).
+- **🟢 CORE-10** Source reliability scoring — `source_reliability(source, wins, losses, score)`, updated on every supersession outcome.
+- **🟢 CORE-11** **Server-side semantic extraction** — `HeuristicExtractor` (always-on, 5 decision patterns + 4 preference patterns) + `LocalLlmExtractor` (Ollama, config-gated, degrades to heuristic), pluggable `ExtractorBackend`. Wired into `attend` fire-and-forget. Facts surface on next attend.
 
 ### Phase 2.5 — Single-user HTTP + telemetry  ⚪
 
@@ -143,9 +146,9 @@ The retrieval half of the Attendant.
 |---|---|---|
 | 1 | attend lacked relevance + window observation (regression vs v0) | 🟢 **resolved** — keyword scoring (1.1, CORE-2) + window suppression (1.2, CORE-3); full correction → CORE-17 |
 | 2 | Graph is the relevance engine; co-access edges must start in Phase 2 | 🔵 **PRD accepted** — [2a](prds/phases/phase-2a-graph-and-write-safety.md) CORE-7 (edges from day one) + CORE-15 (two-pass, Phase 3) |
-| 3 | 9 agent-driven tools vs agent-passive vision | 🔵 **PRD accepted** — [2b](prds/phases/phase-2b-librarian.md) CORE-11 (server-side extraction; tools become escape hatches) |
+| 3 | 9 agent-driven tools vs agent-passive vision | 🟢 **resolved** — [2b](prds/phases/phase-2b-librarian.md) CORE-11 shipped: server-side extraction; tools are now escape hatches |
 | 4 | Conflicting phase numbering; 31 specs still template | 🟢 **resolved** (numbering, this doc) + ⚪ DOC-2 (spec status hygiene ongoing) |
 
 ---
 
-_Last updated: 2026-06-10 (Phase 1.2 shipped; PRD-first process + backlog established)._
+_Last updated: 2026-06-10 (Phase 2b shipped — CORE-9/10/11: conflict detection, source reliability, semantic extraction)._

@@ -193,14 +193,41 @@ These are explicit out-of-scope boundaries. Do not let scope creep pull us in th
 
 ---
 
-### Phase 2 — Intelligence Layer
+### Phase 2b — The Librarian
 
-**Goal:** iranti begins to understand what it stores, not just store it.
+**Goal:** judgment on the write path — iranti stops taking every fact at face value.
 
-**Deliverables (remaining, post-2a):**
-- Conflict detection: writing a fact that contradicts an existing one triggers a resolution pass (Phase 2b, CORE-9)
-- Source reliability scoring (Phase 2b, CORE-10)
-- Server-side semantic extraction (Phase 2b, CORE-11)
+**Status:** ✅ Shipped. 158/158 tests + 21/21 stdio smoke checks. PRD: `docs/prds/phases/phase-2b-librarian.md`. CORE-9/10/11.
+
+**What changed.**
+
+*Schema (migration 0004):* Two new tables: `source_reliability(source PK, wins, losses, score, updated_at)` and `escalations(id, tenant_id, entity_type, entity_id, key, existing_fact_id, existing_value, new_value, existing_source, new_source, reason, status, created_at)`.
+
+*Source reliability (CORE-10, `src/library/source-reliability.ts`):* `score = wins / (wins + losses)`, initialised at 0.5 (neutral). `recordOutcome(winner, loser)` does two parallel upserts after each supersession. Default score for unknown sources: 0.5. `ESCALATION_THRESHOLD = 0.2`: the existing source must exceed the new source by more than 0.2 before a write is blocked.
+
+*Conflict detection (CORE-9, `src/library/conflicts.ts`):* Two layers:
+- **Minimal (same-key)** — runs synchronously inside `writeFact`'s transaction. When a value is changing, `checkConflict` compares source reliability scores. Gap > 0.2 → `"escalate"`: block the write, create an escalation record + markdown file in `iranti-escalations/`, return the existing fact unchanged. Gap ≤ 0.2 → `"supersede"`: continue to archive + upsert, call `recordSupersession` (best-effort async, updates reliability scores).
+- **Deep (cross-key)** — runs fire-and-forget after the upsert, never blocks. `runDeepConflictCheck` applies six negation-pattern regexes (`/\bnot\s+(?:use|using)\s+(\w+)/i`, etc.) to extract a negated term, then scans other facts for the same entity. Each candidate contradiction increments `comprehensionMetrics.deepConflictsDetected` and logs a warning. **Never auto-resolves** — this is a metric, not a resolution pass.
+- `comprehensionMetrics` export: in-process counters (`minimalConflictsChecked`, `supersessions`, `escalations`, `deepConflictsDetected`). Phase 2.5 wires these into the `attend_log` health views.
+
+*Semantic extraction (CORE-11, `src/extract/index.ts`):* `ExtractorBackend` interface with two implementations:
+- `HeuristicExtractor` — always-on, deterministic. 5 decision patterns (`"decided to use"`, `"we chose"`, `"decision:"`, `"going with"`, `"we're using/adopting"`) → key `decision:<slug>`. 4 preference patterns (`"I prefer"`, `"always use/want/do"`, `"never use/do"`, `"I want you to always"`) → key `preference:<slug>`. Confidence: 0.85. Deduplicates on key.
+- `LocalLlmExtractor` — optional, config-gated (`IRANTI_EXTRACTOR=local`). Calls `${IRANTI_LLM_ENDPOINT}/chat/completions` (default Ollama at `localhost:11434`) with 8s timeout via `AbortSignal.timeout(8000)`. Merges with heuristic results, heuristic wins on key collision. Degrades gracefully to heuristic-only on any error. Confidence: 0.80.
+- `extractor` singleton selected by `IRANTI_EXTRACTOR` env. Default: `heuristic`.
+
+*Integration into attend (`src/mcp/tools/attend.ts`):* `extractAndStore` helper runs fire-and-forget after the response is assembled. Calls `extractor.extract(message)`, upserts the primary entity if any facts are extracted, writes each fact via `writeFact`. Facts surface on the **next** `attend` (async; never blocks this response). The `iranti_attend` test for MCP consumers passes this silently.
+
+**Key decisions.**
+
+| Decision | Choice | Why |
+|---|---|---|
+| LLM proposes facts, never adjudicates (D3) | Conflict resolution is purely deterministic | Keeps every outcome explainable and reproducible from the `source_reliability` table alone. |
+| Deep conflict detection is a metric, not resolution | Increments counter, logs, never auto-resolves | "If iranti can reliably detect contradictions, that is evidence it comprehends its content" — this metric becomes a product KPI in Phase 2.5. |
+| Escalation threshold 0.2 | Existing source must be meaningfully more trusted | Prevents a marginally-better-known source from blocking all updates. Equal or similar sources → supersede (today's behaviour). |
+| `checkConflict` runs inside the transaction | Consistency: reliability check + write are atomic | Prevents TOCTOU: reading the score outside the transaction could see a stale value if another write races. |
+| `createEscalation` writes markdown to `iranti-escalations/` | Human-readable audit trail alongside the DB record | Phase 4's `iranti resolve` CLI reads these files; they survive database migrations and are easy to inspect without a query tool. |
+| `runDeepConflictCheck` is fire-and-forget | Never blocks writes | Deep check is inherently best-effort (heuristic). Latency on the hot path is non-negotiable. |
+| `EDGE_SETTLE_MS = 400ms` in `graph.test.ts` | Increased from 150ms | Phase 2b adds `conflicts.test.ts` + `semantic-extract.test.ts` which saturate the pool under parallel test load. 150ms was enough in isolation; 400ms is enough under concurrent load. |
 
 ---
 

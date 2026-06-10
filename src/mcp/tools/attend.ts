@@ -36,6 +36,7 @@ import {
 } from "../../library/facts.js";
 import { getRulesForAttend } from "../../library/rules.js";
 import { graph } from "../../graph/index.js";
+import { extractor } from "../../extract/index.js";
 import { EXTRACT_SOURCE, extractArtifacts } from "../extractor.js";
 import { ensureContext } from "../context.js";
 
@@ -92,6 +93,36 @@ async function recordAttendEdges(
   }
 
   await Promise.all(ops);
+}
+
+// ---------------------------------------------------------------------------
+// Async semantic extraction — Phase 2b
+// ---------------------------------------------------------------------------
+
+// Extract decision/preference facts from the message and write them to the
+// primary entity. Runs entirely off the response path; extracted facts
+// surface on the *next* attend call.
+async function extractAndStore(
+  message: string,
+  primary: { entityType: string; entityId: string },
+  sessionId: string,
+  agentId: string,
+): Promise<void> {
+  const extracted = await extractor.extract(message);
+  if (extracted.length === 0) return;
+
+  await upsertEntity(primary.entityType, primary.entityId);
+  for (const fact of extracted) {
+    await writeFact({
+      entityType: primary.entityType,
+      entityId: primary.entityId,
+      key: fact.key,
+      value: fact.value,
+      source: fact.source,
+      sessionId,
+      agentId,
+    });
+  }
 }
 
 const entityHintSchema = z.object({
@@ -267,6 +298,15 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
   if (returnedFacts.length >= 2 || rules.length > 0) {
     void recordAttendEdges(returnedFacts, rules).catch((err: unknown) =>
       console.error("[iranti] edge recording error:", err),
+    );
+  }
+
+  // Phase 2b — async semantic extraction. Extracts decision/preference facts
+  // from the message and writes them fire-and-forget. They surface on the
+  // *next* attend. Never blocks the response.
+  if (input.message) {
+    void extractAndStore(input.message, primary, ctx.session.id, ctx.agent.id).catch(
+      (err: unknown) => console.error("[iranti] extraction error:", err),
     );
   }
 

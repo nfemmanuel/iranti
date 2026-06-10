@@ -322,6 +322,55 @@ check(
   `current=${safetyHist.current?.value} history=${safetyHist.history.length}`,
 );
 
+// 16. Phase 2b — semantic extraction: decision marker → fact on next attend
+const extractId = `smoke-extract-${randomUUID()}`;
+const extractHints = { entityHints: [{ entityType: "project", entityId: extractId }] };
+await client.callTool({
+  name: "iranti_attend",
+  arguments: {
+    ...extractHints,
+    message: "we decided to use Vitest as the test runner for this project",
+  },
+});
+// Allow async extraction to flush.
+await new Promise((r) => setTimeout(r, 600));
+const extractAttend = parse(
+  await client.callTool({ name: "iranti_attend", arguments: extractHints }),
+);
+const extractedFact = extractAttend.facts.find(
+  (f) => f.key.startsWith("decision:") && f.value.toLowerCase().includes("vitest"),
+);
+check(
+  "semantic extraction: decision surfaces on next attend",
+  Boolean(extractedFact),
+  extractedFact ? `key=${extractedFact.key}` : "no matching fact found",
+);
+
+// 17. Phase 2b — conflict detection: escalation blocks low-reliability write
+// We can't boost reliability scores through MCP directly, so we verify the
+// basic supersede path works (equal scores → new value wins). The escalation
+// path is covered in vitest integration tests.
+const conflictId = `smoke-conflict-${randomUUID()}`;
+await client.callTool({
+  name: "iranti_write",
+  arguments: { entityType: "project", entityId: conflictId, key: "runtime", value: "node", source: "test" },
+});
+await client.callTool({
+  name: "iranti_write",
+  arguments: { entityType: "project", entityId: conflictId, key: "runtime", value: "bun", source: "test" },
+});
+const conflictQ = parse(
+  await client.callTool({
+    name: "iranti_query",
+    arguments: { entityType: "project", entityId: conflictId, key: "runtime" },
+  }),
+);
+check(
+  "conflict detection: equal-reliability supersede — new value wins",
+  conflictQ.found && conflictQ.fact?.value === "bun",
+  `value=${conflictQ.fact?.value}`,
+);
+
 await client.close();
 console.log(failures === 0 ? "\nSMOKE TEST PASSED" : `\nSMOKE TEST FAILED (${failures})`);
 process.exit(failures === 0 ? 0 : 1);

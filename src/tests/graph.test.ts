@@ -197,7 +197,10 @@ describe("GraphBackend — getEdge", () => {
 
 // The async edge recording in attend uses fire-and-forget. Give it time to
 // flush before asserting. 150 ms is well above the expected DB round-trip.
-const EDGE_SETTLE_MS = 150;
+// 400ms: Phase 2b adds conflicts.test.ts / semantic-extract.test.ts which
+// saturate the connection pool when run concurrently. 150ms was enough in
+// isolation but not under the full parallel test load.
+const EDGE_SETTLE_MS = 400;
 
 describe("attend — co_access edge recording", () => {
   it("records co_access edges among returned facts after attend", async () => {
