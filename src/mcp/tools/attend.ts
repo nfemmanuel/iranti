@@ -50,6 +50,20 @@ export const MAX_MID_TURN_FACTS = 3;
 // Secondary (graph-hop) peripheral facts cap. Separate from primary budget.
 export const MAX_PERIPHERAL_FACTS = 10;
 
+// Token budget for injection. Priority order: rules > checkpoint > primary > peripheral.
+// Override via IRANTI_TOKEN_BUDGET env var (integer, tokens). Default is calibrated to
+// fit a typical session's rules + checkpoint + ~15 facts within a 2k-token window.
+const INJECT_BUDGET_DEFAULT = 2000;
+
+function getInjectionBudget(): number {
+  const env = process.env["IRANTI_TOKEN_BUDGET"];
+  if (env) {
+    const n = parseInt(env, 10);
+    if (!isNaN(n) && n > 0) return n;
+  }
+  return INJECT_BUDGET_DEFAULT;
+}
+
 // Track the last persisted metric values so we only send deltas.
 // Reset to zero on process start; DB holds the cumulative all-time total.
 let lastSyncedMetrics = {
@@ -439,10 +453,50 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
     }
   }
 
+  // ---- CORE-33: token-budgeted injection ----------------------------------
+  // Priority order: rules > checkpoint > primary > peripheral.
+  // Items that exceed the remaining budget are dropped; their char counts
+  // accumulate into suppressedChars so suppressed_tokens_est covers both
+  // context-window suppression (Phase 1.2) and budget truncation (CORE-33).
+  const est = (text: string) => Math.ceil(text.length / 4);
+  const tokenBudget = getInjectionBudget();
+  let budgetRemaining = tokenBudget;
+  let budgetSuppressedChars = 0;
+
+  const budgetedRuleList = rules.filter((r) => {
+    const t = est(r.text);
+    if (budgetRemaining >= t) { budgetRemaining -= t; return true; }
+    budgetSuppressedChars += r.text.length;
+    return false;
+  });
+
+  let budgetedCheckpoint = checkpoint;
+  if (checkpoint) {
+    const t = est(checkpoint.value);
+    if (budgetRemaining >= t) { budgetRemaining -= t; }
+    else { budgetSuppressedChars += checkpoint.value.length; budgetedCheckpoint = null; }
+  }
+
+  const budgetedFacts = returnedFacts.filter((f) => {
+    const t = est(f.value);
+    if (budgetRemaining >= t) { budgetRemaining -= t; return true; }
+    budgetSuppressedChars += f.value.length;
+    return false;
+  });
+
+  const budgetedPeripheral = peripheralFacts.filter((pf) => {
+    const t = est(pf.value);
+    if (budgetRemaining >= t) { budgetRemaining -= t; return true; }
+    budgetSuppressedChars += pf.value.length;
+    return false;
+  });
+
+  suppressedChars += budgetSuppressedChars;
+
   // Phase 2a — async edge recording. Fire-and-forget after the response is
   // assembled so this never adds latency. Errors are logged, never thrown.
-  if (returnedFacts.length >= 2 || rules.length > 0) {
-    void recordAttendEdges(returnedFacts, rules).catch((err: unknown) =>
+  if (budgetedFacts.length >= 2 || budgetedRuleList.length > 0) {
+    void recordAttendEdges(budgetedFacts, budgetedRuleList).catch((err: unknown) =>
       console.error("[iranti] edge recording error:", err),
     );
   }
@@ -452,8 +506,8 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
   // None of these must block the response.
   const latencyMs = Date.now() - startTime;
   const injectedChars =
-    returnedFacts.reduce((s, f) => s + f.value.length, 0) +
-    rules.reduce((s, r) => s + r.text.length, 0);
+    budgetedFacts.reduce((s, f) => s + f.value.length, 0) +
+    budgetedRuleList.reduce((s, r) => s + r.text.length, 0);
 
   // Snapshot metric deltas before the async chain — conflicts may fire
   // during extraction; cursor advances only after persist succeeds.
@@ -491,8 +545,8 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
       sessionId: ctx.session.id,
       agentId: ctx.agent.id,
       surface: input.surface,
-      factCount: returnedFacts.length,
-      ruleCount: rules.length,
+      factCount: budgetedFacts.length,
+      ruleCount: budgetedRuleList.length,
       alreadyPresent,
       injectedChars,
       injectedTokensEst: Math.floor(injectedChars / 4),
@@ -509,24 +563,24 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
   );
 
   return {
-    rules: rules.map((r) => ({
+    rules: budgetedRuleList.map((r) => ({
       entity: entityLabel(r),
       text: r.text,
       priority: r.priority,
     })),
-    facts: returnedFacts.map((f) => ({
+    facts: budgetedFacts.map((f) => ({
       entity: entityLabel(f),
       key: f.key,
       value: f.value,
       source: f.source,
       updatedAt: f.updatedAt.toISOString(),
     })),
-    peripheral: peripheralFacts,
-    checkpoint: checkpoint
+    peripheral: budgetedPeripheral,
+    checkpoint: budgetedCheckpoint
       ? {
-          entity: entityLabel(checkpoint),
-          text: checkpoint.value,
-          updatedAt: checkpoint.updatedAt.toISOString(),
+          entity: entityLabel(budgetedCheckpoint),
+          text: budgetedCheckpoint.value,
+          updatedAt: budgetedCheckpoint.updatedAt.toISOString(),
         }
       : null,
     extracted: artifacts.map((a) => ({ kind: a.kind, value: a.value })),

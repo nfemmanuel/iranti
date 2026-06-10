@@ -720,12 +720,16 @@ describe("attend — CORE-15 two-pass peripheral retrieval", () => {
       key: "database", value: "PostgreSQL 16", source: "test",
     });
 
-    // Create a direct co_access edge between the two facts.
-    await graph.reinforceEdge(
-      { type: "fact", id: factA.id },
-      { type: "fact", id: factB.id },
-      "co_access",
-    );
+    // Create a co_access edge and reinforce it 3× so its weight (3) beats the
+    // about edge (weight 1) that recordWriteEdges creates for each fact.
+    // The secondary pass picks the highest-weight relation, so co_access wins.
+    for (let i = 0; i < 3; i++) {
+      await graph.reinforceEdge(
+        { type: "fact", id: factA.id },
+        { type: "fact", id: factB.id },
+        "co_access",
+      );
+    }
 
     // Attend for entity A only — factB has no keyword overlap with entity A's hint.
     const result = await attend({
@@ -740,7 +744,7 @@ describe("attend — CORE-15 two-pass peripheral retrieval", () => {
     expect(peripheralKeys).toContain("database");
     expect(result.facts.some((f) => f.key === "database")).toBe(false);
 
-    // Peripheral entry carries the relation provenance.
+    // Peripheral entry carries the relation provenance (co_access wins over about).
     const pFact = result.peripheral.find((p) => p.key === "database");
     expect(pFact?.relation).toBe("co_access");
     expect(pFact?.entity).toContain("project/");
@@ -759,6 +763,34 @@ describe("attend — CORE-15 two-pass peripheral retrieval", () => {
     });
 
     expect(result.peripheral).toHaveLength(0);
+  });
+
+  it("2-hop graph path reaches fact two edges away", async () => {
+    const idA = randomUUID(), idB = randomUUID(), idC = randomUUID();
+
+    const factA = await writeFact({
+      entityType: "project", entityId: idA,
+      key: "root", value: "root fact", source: "test",
+    });
+    const factB = await writeFact({
+      entityType: "project", entityId: idB,
+      key: "middle", value: "middle fact", source: "test",
+    });
+    const factC = await writeFact({
+      entityType: "project", entityId: idC,
+      key: "distant", value: "distant fact", source: "test",
+    });
+
+    // A → B (1 hop), B → C (2nd hop from A).
+    await graph.reinforceEdge({ type: "fact", id: factA.id }, { type: "fact", id: factB.id }, "co_access");
+    await graph.reinforceEdge({ type: "fact", id: factB.id }, { type: "fact", id: factC.id }, "co_access");
+
+    const result = await attend({
+      entityHints: [{ entityType: "project", entityId: idA }],
+    });
+
+    // factC (2 hops from A) must appear in peripheral.
+    expect(result.peripheral.some((p) => p.key === "distant")).toBe(true);
   });
 
   it("facts in peripheral[] are not duplicated in primary facts[]", async () => {
@@ -792,5 +824,97 @@ describe("attend — CORE-15 two-pass peripheral retrieval", () => {
     for (const p of result.peripheral) {
       expect(primaryEntries.has(`${p.entity}::${p.key}`)).toBe(false);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3 (CORE-33): token-budgeted injection
+// ---------------------------------------------------------------------------
+
+describe("attend — CORE-33 token-budgeted injection", () => {
+  it("tiny token budget truncates primary facts, returns fewer than stored", async () => {
+    const entityId = randomUUID();
+
+    // Write 5 facts with ~80-char values (each ~20 tokens).
+    const longVal = "x".repeat(80);
+    for (let i = 0; i < 5; i++) {
+      await writeFact({
+        entityType: "project", entityId,
+        key: `fact-${i}`, value: `${longVal}-${i}`, source: "test",
+      });
+    }
+
+    // Budget of 3 tokens is far too small for any fact (80 chars ≈ 20 tokens each).
+    const prev = process.env["IRANTI_TOKEN_BUDGET"];
+    try {
+      process.env["IRANTI_TOKEN_BUDGET"] = "3";
+      const result = await attend({
+        entityHints: [{ entityType: "project", entityId }],
+      });
+      // With a 3-token budget, zero ~20-token facts should fit.
+      expect(result.facts).toHaveLength(0);
+    } finally {
+      if (prev === undefined) delete process.env["IRANTI_TOKEN_BUDGET"];
+      else process.env["IRANTI_TOKEN_BUDGET"] = prev;
+    }
+  });
+
+  it("primary facts have higher priority than peripheral (budget order)", async () => {
+    const entityIdA = randomUUID();
+    const entityIdB = randomUUID();
+
+    // Write a short primary fact (3 tokens ≈ 12 chars) and a short peripheral fact
+    // (3 tokens). Budget = 4: primary (3 tokens) fits, peripheral (3 tokens) does not.
+    const factA = await writeFact({
+      entityType: "project", entityId: entityIdA,
+      key: "prim", value: "x".repeat(12), source: "test",
+    });
+    const factB = await writeFact({
+      entityType: "project", entityId: entityIdB,
+      key: "periph", value: "x".repeat(12), source: "test",
+    });
+
+    // Link A → B so factB surfaces as peripheral.
+    await graph.reinforceEdge(
+      { type: "fact", id: factA.id },
+      { type: "fact", id: factB.id },
+      "co_access",
+    );
+
+    // Budget 4 tokens: enough for the primary fact (ceil(12/4)=3) but not
+    // peripheral after primary consumes most of the budget. Rules and checkpoint
+    // are empty for this entity so all 4 tokens are available to primary facts.
+    const prev = process.env["IRANTI_TOKEN_BUDGET"];
+    try {
+      process.env["IRANTI_TOKEN_BUDGET"] = "4";
+      const result = await attend({
+        entityHints: [{ entityType: "project", entityId: entityIdA }],
+      });
+      // Primary fact survives (higher priority than peripheral).
+      expect(result.facts.some((f) => f.key === "prim")).toBe(true);
+      // Peripheral fact is dropped (budget exhausted).
+      expect(result.peripheral.some((p) => p.key === "periph")).toBe(false);
+    } finally {
+      if (prev === undefined) delete process.env["IRANTI_TOKEN_BUDGET"];
+      else process.env["IRANTI_TOKEN_BUDGET"] = prev;
+    }
+  });
+
+  it("default budget (2000 tokens) does not truncate typical payloads", async () => {
+    const entityId = randomUUID();
+
+    // Write 5 facts with short values — well within the default 2000-token budget.
+    for (let i = 0; i < 5; i++) {
+      await writeFact({
+        entityType: "project", entityId,
+        key: `k${i}`, value: `short value ${i}`, source: "test",
+      });
+    }
+
+    const result = await attend({
+      entityHints: [{ entityType: "project", entityId }],
+    });
+
+    expect(result.facts).toHaveLength(5);
   });
 });
