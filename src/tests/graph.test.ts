@@ -11,7 +11,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { pool } from "../db/connection.js";
 import { writeFact, getFactHistoryByKey, findFact } from "../library/facts.js";
 import { writeRule } from "../library/rules.js";
-import { graph, PostgresGraphBackend } from "../graph/index.js";
+import { graph } from "../graph/index.js";
 import { attend } from "../mcp/tools/attend.js";
 
 afterAll(async () => {

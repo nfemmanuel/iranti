@@ -57,7 +57,7 @@ async function shutdown(signal: string): Promise<void> {
     // Close the HTTP listener first so its socket is released before exit —
     // otherwise the port can linger and reject the next process on restart.
     if (httpServer) {
-      await new Promise<void>((resolve) => httpServer!.close(() => resolve()));
+      await new Promise<void>((resolve) => httpServer.close(() => resolve()));
     }
     await shutdownContext();
     await pool.end({ timeout: 5 });

@@ -47,6 +47,7 @@ export async function startHttpServer(
   });
   await server.connect(transport);
 
+  // eslint-disable-next-line @typescript-eslint/no-misused-promises -- node ignores the handler's returned promise; rejections are caught in the try/catch below
   const httpServer = http.createServer(async (req, res) => {
     // Bearer token check. All paths require auth — the MCP endpoint is the
     // only route this server exposes.

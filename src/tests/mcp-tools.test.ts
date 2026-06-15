@@ -622,7 +622,7 @@ describe("write_issue", () => {
       entityId,
       "issue:dark-mode-not-working",
     );
-    const parsed = JSON.parse(fact!.value);
+    const parsed = JSON.parse(fact!.value) as Record<string, unknown>;
     expect(parsed.title).toBe("Dark mode not working");
     expect(parsed.priority).toBe("high");
     expect(parsed.description).toBe("Setting is ignored on mobile");
@@ -646,7 +646,7 @@ describe("write_issue", () => {
     });
 
     const fact = await findFact("project", entityId, "issue:login-bug");
-    const parsed = JSON.parse(fact!.value);
+    const parsed = JSON.parse(fact!.value) as Record<string, unknown>;
     expect(parsed.status).toBe("resolved");
   });
 });
@@ -982,17 +982,11 @@ describe("attend — CORE-17 stale-context corrections", () => {
       key: "stack:language", value: "Elixir is primary language", source: "test",
     });
 
-    // No context passed — drift is not triggered here, and no context means no
-    // comparison possible.
-    process.env["IRANTI_DRIFT_N"] = "999";
-    try {
-      const result = await attend({
-        entityHints: [{ entityType: "project", entityId }],
-      });
-      expect(result.corrections).toHaveLength(0);
-    } finally {
-      delete process.env["IRANTI_DRIFT_N"];
-    }
+    // No context passed — corrections need a comparison window, so none fire.
+    const result = await attend({
+      entityHints: [{ entityType: "project", entityId }],
+    });
+    expect(result.corrections).toHaveLength(0);
   });
 
   it("no correction when current value is already present in context", async () => {

@@ -25,7 +25,7 @@
 // primary, graph-hop secondary). Phase 4 adds edge decay. Phase 2a only
 // accumulates signal.
 
-import { and, desc, eq, gte, or, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import {
   knowledgeEdges,

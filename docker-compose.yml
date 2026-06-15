@@ -12,10 +12,9 @@
 
 services:
   postgres:
-    # CORE-16 (Phase 3): pgvector/pgvector:pg17-alpine includes the pgvector
-    # extension alongside standard PostgreSQL 17. Switching from postgres:17-alpine
-    # is safe with the existing data volume — same PG version, additive image.
-    # After updating, restart with: pnpm db:down && pnpm db:up
+    # CORE-16 (Phase 3): pgvector/pgvector:pg17 includes the pgvector extension
+    # alongside standard PostgreSQL 17. Switching from postgres:17-alpine requires
+    # a volume reset (musl→glibc): pnpm db:down -v && pnpm db:up
     image: pgvector/pgvector:pg17
     environment:
       POSTGRES_DB: iranti_dev

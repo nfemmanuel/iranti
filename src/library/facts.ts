@@ -590,20 +590,20 @@ export async function readArchivedValuesByFactIds(
     .select({
       factId: factArchive.factId,
       value: factArchive.value,
-      archivedAt: factArchive.archivedAt,
     })
     .from(factArchive)
-    .where(and(eq(factArchive.tenantId, tenantId), inArray(factArchive.factId, ids)));
+    .where(and(eq(factArchive.tenantId, tenantId), inArray(factArchive.factId, ids)))
+    // Newest snapshot first; id breaks ties when two rows share archivedAt so the
+    // winner is deterministic (a fact superseded twice in the same instant must
+    // still resolve to one stable "old value").
+    .orderBy(desc(factArchive.archivedAt), desc(factArchive.id));
 
-  // Keep only the newest snapshot per factId.
-  const best = new Map<string, { value: string; archivedAt: Date }>();
+  // First row seen per factId is the newest, given the ordering above.
+  const best = new Map<string, string>();
   for (const row of rows) {
-    const existing = best.get(row.factId);
-    if (!existing || row.archivedAt > existing.archivedAt) {
-      best.set(row.factId, { value: row.value, archivedAt: row.archivedAt });
-    }
+    if (!best.has(row.factId)) best.set(row.factId, row.value);
   }
-  return new Map(Array.from(best.entries()).map(([id, { value }]) => [id, value]));
+  return best;
 }
 
 // ---------------------------------------------------------------------------

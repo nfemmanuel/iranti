@@ -7,9 +7,9 @@ import { db } from "../db/connection.js";
 import { escalations } from "../db/schema.js";
 import { writeFact, findFact } from "../library/facts.js";
 import { checkConflict } from "../library/conflicts.js";
-import { comprehensionMetrics, runDeepConflictCheck } from "../library/conflicts.js";
+import { comprehensionMetrics } from "../library/conflicts.js";
 import { recordOutcome } from "../library/source-reliability.js";
-import { and, eq, desc } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 afterAll(async () => {
   await pool.end({ timeout: 5 });

@@ -66,22 +66,7 @@ function getInjectionBudget(): number {
   return INJECT_BUDGET_DEFAULT;
 }
 
-// CORE-17: drift heartbeat — stale-context correction.
-// Every IRANTI_DRIFT_N turns the corrections check fires even if the host
-// omits currentContext. In-memory; persisted to sessions.turn_count async.
-const DRIFT_DEFAULT = 5;
 export const MAX_CORRECTIONS = 5;
-
-function getDriftN(): number {
-  const env = process.env["IRANTI_DRIFT_N"];
-  if (env) {
-    const n = parseInt(env, 10);
-    if (!isNaN(n) && n > 0) return n;
-  }
-  return DRIFT_DEFAULT;
-}
-
-let turnCount = 0;
 
 // Track the last persisted metric values so we only send deltas.
 // Reset to zero on process start; DB holds the cumulative all-time total.
@@ -168,6 +153,11 @@ async function extractAndStore(
   if (extracted.length === 0) return 0;
 
   await upsertEntity(primary.entityType, primary.entityId);
+  // Sequential on purpose: two extracted facts can share a key (e.g. two
+  // "decision:" sentences in one message), and writeFact is last-write-wins.
+  // Array order then deterministically decides the survivor; Promise.all would
+  // race them. This runs in the fire-and-forget chain, off the response path,
+  // so the extra round trips cost no user-visible latency.
   let count = 0;
   for (const fact of extracted) {
     await writeFact({
@@ -382,11 +372,6 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
   const phase = input.phase ?? "pre-response";
   const isMidTurn = phase === "mid-turn";
 
-  // CORE-17: advance the per-process turn counter for drift heartbeat.
-  // isDriftTurn is used below to decide whether to run corrections.
-  turnCount++;
-  const isDriftTurn = turnCount % getDriftN() === 0;
-
   // ---- WRITE side: extract artifacts from the message ----------------------
   // Skipped for mid-turn: it's a read-only top-up triggered by discovery.
   // Extracted facts land on the primary entity (first hint). With no hints,
@@ -533,52 +518,43 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
   // Items that exceed the remaining budget are dropped; their char counts
   // accumulate into suppressedChars so suppressed_tokens_est covers both
   // context-window suppression (Phase 1.2) and budget truncation (CORE-33).
+  // est() is a deliberate approximation (~4 chars/token). It over- or
+  // under-counts CJK and code-heavy values, but the budget is a soft guardrail,
+  // not an exact accounting — a real tokenizer isn't worth the dependency here.
   const est = (text: string) => Math.ceil(text.length / 4);
-  const tokenBudget = getInjectionBudget();
-  let budgetRemaining = tokenBudget;
+  let budgetRemaining = getInjectionBudget();
   let budgetSuppressedChars = 0;
 
-  const budgetedRuleList = rules.filter((r) => {
-    const t = est(r.text);
+  // Charge one item against the remaining budget. Deduct and keep when it fits;
+  // otherwise record the dropped chars (for suppressed_tokens_est) and reject.
+  // Called in priority order — rules, then checkpoint, then primary, then
+  // peripheral — so earlier tiers win the budget.
+  const fitsBudget = (text: string): boolean => {
+    const t = est(text);
     if (budgetRemaining >= t) { budgetRemaining -= t; return true; }
-    budgetSuppressedChars += r.text.length;
+    budgetSuppressedChars += text.length;
     return false;
-  });
+  };
+
+  const budgetedRuleList = rules.filter((r) => fitsBudget(r.text));
 
   let budgetedCheckpoint = checkpoint;
-  if (checkpoint) {
-    const t = est(checkpoint.value);
-    if (budgetRemaining >= t) { budgetRemaining -= t; }
-    else { budgetSuppressedChars += checkpoint.value.length; budgetedCheckpoint = undefined; }
-  }
+  if (checkpoint && !fitsBudget(checkpoint.value)) budgetedCheckpoint = undefined;
 
-  const budgetedFacts = returnedFacts.filter((f) => {
-    const t = est(f.value);
-    if (budgetRemaining >= t) { budgetRemaining -= t; return true; }
-    budgetSuppressedChars += f.value.length;
-    return false;
-  });
+  const budgetedFacts = returnedFacts.filter((f) => fitsBudget(f.value));
 
-  const budgetedPeripheral = peripheralFacts.filter((pf) => {
-    const t = est(pf.value);
-    if (budgetRemaining >= t) { budgetRemaining -= t; return true; }
-    budgetSuppressedChars += pf.value.length;
-    return false;
-  });
+  const budgetedPeripheral = peripheralFacts.filter((pf) => fitsBudget(pf.value));
 
   suppressedChars += budgetSuppressedChars;
 
-  // CORE-17: stale-context corrections.
-  // Run when context is provided (always) or when this is a drift turn.
-  // Without context the result is always empty; isDriftTurn ensures the check
-  // fires periodically even when the host skips currentContext for a few turns.
+  // CORE-17: stale-context corrections. Fires when the host provides a
+  // currentContext window; without it there is no comparison source.
   const normalizedContext = input.currentContext
     ? normalizeForContext(input.currentContext)
     : "";
-  const corrections =
-    normalizedContext || isDriftTurn
-      ? await getCorrections(ranked, normalizedContext)
-      : [];
+  const corrections = normalizedContext
+    ? await getCorrections(ranked, normalizedContext)
+    : [];
 
   // Phase 2a — async edge recording. Fire-and-forget after the response is
   // assembled so this never adds latency. Errors are logged, never thrown.
@@ -644,7 +620,9 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
       correctionsCount: corrections.length,
     });
 
-    await incrementTurnCount(ctx.session.id);
+    void incrementTurnCount(ctx.session.id).catch((err: unknown) =>
+      console.error("[iranti] turn count error:", err),
+    );
 
     await persistMetricCounters(metricDelta);
     lastSyncedMetrics = snapshot;

@@ -49,8 +49,10 @@ export async function getOpenSessions(agentId: string): Promise<Session[]> {
 }
 
 // CORE-17: atomically increment the turn counter for a session.
-// Called fire-and-forget in the attend async chain; DB value is for external
-// observability — the in-memory counter in attend.ts is used for drift logic.
+// Called fire-and-forget in the attend async chain. The value is
+// observability-only — nothing in the attend path reads it back (the drift
+// heartbeat that once consumed it was removed). Kept as a turn-volume signal
+// for session diagnostics; safe to drop if no dashboard ever uses it.
 export async function incrementTurnCount(sessionId: string): Promise<void> {
   await db
     .update(sessions)

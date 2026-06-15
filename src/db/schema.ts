@@ -74,8 +74,10 @@ export const sessions = pgTable("sessions", {
 
   metadata: jsonb("metadata"),
 
-  // CORE-17: drift heartbeat turn counter. Incremented on every attend call.
-  // Used to fire the staleness correction check every IRANTI_DRIFT_N turns.
+  // CORE-17: per-session attend counter, incremented on every attend call.
+  // Observability-only — written for turn-volume diagnostics but not read back
+  // by the attend path. (Originally drove a drift heartbeat that was removed;
+  // the column is retained as a cheap session-activity signal.)
   turnCount: integer("turn_count").notNull().default(0),
 });
 
@@ -215,7 +217,9 @@ export const facts = pgTable(
     unique("facts_tenant_entity_key_uniq").on(t.tenantId, t.entityType, t.entityId, t.key),
     // CORE-16: HNSW index for approximate nearest-neighbour search.
     // ef_construction / m use pgvector defaults; tune after benchmarking real data.
-    // The index is empty until embeddings are populated; existence has no cost.
+    // NULL embeddings are not indexed, so while embeddings are disabled every
+    // fact write skips this index entirely — it adds no write cost until the
+    // column is actually populated (IRANTI_EMBEDDINGS=true).
     index("facts_embedding_hnsw_idx")
       .using("hnsw", t.embedding.op("vector_cosine_ops")),
   ],

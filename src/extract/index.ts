@@ -48,6 +48,32 @@ function slugify(text: string, maxLen = 40): string {
     .slice(0, maxLen);
 }
 
+// Most signal classes share the same shape: match a regex, take one capture
+// group as the fact value, prefix the key by category. This runs that pattern
+// so each category is one call instead of a copy-pasted loop. `seen` dedups
+// keys across categories; matches are appended to `out` in call order.
+type SingleCapturePattern = { re: RegExp; capture: number };
+
+function extractSingleCapture(
+  message: string,
+  patterns: SingleCapturePattern[],
+  keyPrefix: string,
+  confidence: number,
+  seen: Set<string>,
+  out: ExtractedFact[],
+): void {
+  for (const { re, capture } of patterns) {
+    const m = message.match(re);
+    if (!m?.[capture]) continue;
+    const raw = m[capture].trim().replace(/\s+/g, " ");
+    if (raw.length < 3 || raw.length > 120) continue;
+    const key = `${keyPrefix}:${slugify(raw)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ key, value: raw, source: "extractor_heuristic", confidence });
+  }
+}
+
 // ---------------------------------------------------------------------------
 // HeuristicExtractor
 // ---------------------------------------------------------------------------
@@ -58,20 +84,20 @@ const DECISION_PATTERNS: Array<{ re: RegExp; capture: number }> = [
   { re: /\bwe\s+chose\s+(.{3,60}?)(?:\s+for|\s+as|[.,;]|$)/i, capture: 1 },
   { re: /\bdecision[:\s]+(.{3,80}?)(?:[.,;]|$)/i, capture: 1 },
   { re: /\bgoing\s+with\s+(.{3,60}?)\s+(?:for|as|because|instead|over)[.,;]?\b/i, capture: 1 },
-  { re: /\bwe(?:'re|\ are)\s+(?:using|adopting|switching\s+to)\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1 },
+  { re: /\bwe(?:'re| are)\s+(?:using|adopting|switching\s+to)\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1 },
   { re: /\blet'?s\s+(?:use|go\s+with)\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1 },
   { re: /\bwe\s+(?:decided|agreed|concluded)\s+(?:that\s+)?(.{3,80}?)(?:[.,;]|$)/i, capture: 1 },
 ];
 
 // Preference patterns: I always want X, prefer Y, never use Z
-const PREFERENCE_PATTERNS: Array<{ re: RegExp; capture: number; prefix: string }> = [
-  { re: /\bi\s+(?:always\s+)?prefer\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1, prefix: "preference" },
-  { re: /\balways\s+(?:use|want|do)\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1, prefix: "preference" },
-  { re: /\bnever\s+(?:use|do)\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1, prefix: "preference" },
-  { re: /\bi\s+(?:want|need)\s+(?:you\s+to\s+)?always\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1, prefix: "preference" },
-  { re: /\bplease\s+(?:always\s+)?(.{3,60}?)(?:\s+when|\s+if|[.,;]|$)/i, capture: 1, prefix: "preference" },
-  { re: /\bmake\s+sure\s+(?:to\s+)?(?:always\s+)?(.{3,60}?)(?:[.,;]|$)/i, capture: 1, prefix: "preference" },
-  { re: /\bi\s+(?:don'?t|do\s+not)\s+(?:want|like)\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1, prefix: "preference" },
+const PREFERENCE_PATTERNS: SingleCapturePattern[] = [
+  { re: /\bi\s+(?:always\s+)?prefer\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1 },
+  { re: /\balways\s+(?:use|want|do)\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1 },
+  { re: /\bnever\s+(?:use|do)\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1 },
+  { re: /\bi\s+(?:want|need)\s+(?:you\s+to\s+)?always\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1 },
+  { re: /\bplease\s+(?:always\s+)?(.{3,60}?)(?:\s+when|\s+if|[.,;]|$)/i, capture: 1 },
+  { re: /\bmake\s+sure\s+(?:to\s+)?(?:always\s+)?(.{3,60}?)(?:[.,;]|$)/i, capture: 1 },
+  { re: /\bi\s+(?:don'?t|do\s+not)\s+(?:want|like)\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1 },
 ];
 
 // Constraint patterns: we can't use X, requirement: X, must not do Y
@@ -98,54 +124,18 @@ const CORRECTION_PATTERNS: Array<{ re: RegExp; capture: string }> = [
 ];
 
 export class HeuristicExtractor implements ExtractorBackend {
-  async extract(message: string): Promise<ExtractedFact[]> {
+  // Synchronous work wrapped in a resolved promise to satisfy the async
+  // ExtractorBackend contract without a needless `async` (no await inside).
+  extract(message: string): Promise<ExtractedFact[]> {
     const results: ExtractedFact[] = [];
     const seen = new Set<string>();
 
-    for (const { re, capture } of DECISION_PATTERNS) {
-      const m = message.match(re);
-      if (!m?.[capture]) continue;
-      const raw = m[capture].trim().replace(/\s+/g, " ");
-      if (raw.length < 3 || raw.length > 120) continue;
-      const key = `decision:${slugify(raw)}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      results.push({ key, value: raw, source: "extractor_heuristic", confidence: 0.85 });
-    }
+    extractSingleCapture(message, DECISION_PATTERNS, "decision", 0.85, seen, results);
+    extractSingleCapture(message, PREFERENCE_PATTERNS, "preference", 0.85, seen, results);
+    extractSingleCapture(message, CONSTRAINT_PATTERNS, "constraint", 0.85, seen, results);
+    extractSingleCapture(message, FAILED_PATTERNS, "failed-approach", 0.80, seen, results);
 
-    for (const { re, capture, prefix } of PREFERENCE_PATTERNS) {
-      const m = message.match(re);
-      if (!m?.[capture]) continue;
-      const raw = m[capture].trim().replace(/\s+/g, " ");
-      if (raw.length < 3 || raw.length > 120) continue;
-      const key = `${prefix}:${slugify(raw)}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      results.push({ key, value: raw, source: "extractor_heuristic", confidence: 0.85 });
-    }
-
-    for (const { re, capture } of CONSTRAINT_PATTERNS) {
-      const m = message.match(re);
-      if (!m?.[capture]) continue;
-      const raw = m[capture].trim().replace(/\s+/g, " ");
-      if (raw.length < 3 || raw.length > 120) continue;
-      const key = `constraint:${slugify(raw)}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      results.push({ key, value: raw, source: "extractor_heuristic", confidence: 0.85 });
-    }
-
-    for (const { re, capture } of FAILED_PATTERNS) {
-      const m = message.match(re);
-      if (!m?.[capture]) continue;
-      const raw = m[capture].trim().replace(/\s+/g, " ");
-      if (raw.length < 3 || raw.length > 120) continue;
-      const key = `failed-approach:${slugify(raw)}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      results.push({ key, value: raw, source: "extractor_heuristic", confidence: 0.80 });
-    }
-
+    // Correction patterns are two-capture ("subject is value") — kept bespoke.
     for (const { re, capture } of CORRECTION_PATTERNS) {
       const m = message.match(re);
       if (!m) continue;
@@ -161,7 +151,7 @@ export class HeuristicExtractor implements ExtractorBackend {
       results.push({ key, value: combined, source: "extractor_heuristic", confidence: 0.85 });
     }
 
-    return results;
+    return Promise.resolve(results);
   }
 }
 
