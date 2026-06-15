@@ -30,7 +30,7 @@ Phase 3 makes the rebuild *the Attendant the master PRD describes* — and close
 - Server-side extraction as the primary write path: expanded extractor corpus + extraction from `currentContext` deltas, not just `latestMessage`.
 - Backstop autowrite (born inverted): unrecorded-signal detection server-side; auto-write at reduced confidence + warn breadcrumb; blocking only behind `IRANTI_ENFORCE=true`.
 - Token-budgeted injection with priority order (rules > checkpoint > primary > secondary), default calibrated from `attend_log`.
-- Periodic drift check every N turns; stale-context corrections (CORE-17) surfaced as a distinct response block; correction:injection ratio queryable.
+- Stale-context corrections (CORE-17) surfaced as a distinct response block; correction:injection ratio queryable. (The periodic drift heartbeat was built then removed in review — see Changelog 2026-06-11.)
 - `getNeighbors` depth>1 correct (forward-only, weight-ordered before LIMIT).
 - `media_objects` table (CORE-30), schema-only.
 - `metric_counters` gains `tenant_id`.
@@ -54,7 +54,7 @@ Phase 3 makes the rebuild *the Attendant the master PRD describes* — and close
 - **CORE-32** extraction as primary write path: extractor corpus expansion (target: the conversational signal classes — decisions, preferences, constraints, failed approaches, corrections), `currentContext` delta extraction, extraction telemetry (facts/attend in `attend_log`).
 - **CORE-33** token-budgeted injection: budget default from `attend_log` distribution (proposal: p75 of observed injection sizes, ~configurable), priority order, truncation accounted in `suppressed_tokens_est`.
 - **CORE-34** graph traversal fix: forward-only join, weight ordering before LIMIT, regression tests at depth 2.
-- Drift heartbeat: server-side turn counter per session; every N turns (default **N=5**, D9) run staleness comparison; counter resets on fire.
+- ~~Drift heartbeat: server-side turn counter per session; every N turns run staleness comparison.~~ **Removed in review (2026-06-11):** on a drift turn there is no `currentContext` to compare against, so the check short-circuited to empty — it was inert. `sessions.turn_count` is retained as an observability counter; real periodic staleness needs a persisted last-context source (deferred).
 - `metric_counters` migration: PK `(tenant_id, name)`.
 - Tests + smoke for all of the above.
 
@@ -88,7 +88,7 @@ Phase 3 makes the rebuild *the Attendant the master PRD describes* — and close
 - **New table `media_objects`** (CORE-30): `id`, `tenant_id`, `entity_type`, `entity_id`, `key`, `object_url`, `mime_type`, `description_text`, `metadata`, `created_at`. No read/write path.
 - **`metric_counters`**: PK → `(tenant_id, name)`; rows migrate to `'default'`.
 - **`attend_log`**: + `corrections_count`, `facts_extracted`, `phase`.
-- **`sessions`**: + `turn_count` (drift heartbeat state).
+- **`sessions`**: + `turn_count` (per-attend counter; observability-only — the drift heartbeat that consumed it was removed in review).
 - **attend input**: + `phase` ('pre-response' | 'mid-turn' | 'post-response', optional, default pre), `latestMessage` alias honored.
 - **attend output**: + `peripheral[]` (tier 2 with relation provenance), `corrections[]`, `nextDue` breadcrumb; all tool responses gain `nextDue`.
 - **`getNeighbors`**: behavior fix only, interface unchanged.
@@ -101,7 +101,7 @@ Phase 3 makes the rebuild *the Attendant the master PRD describes* — and close
 - [ ] A session with extractable signal and zero explicit writes still accumulates facts (backstop); nothing blocks at default enforcement; `IRANTI_ENFORCE=true` blocks.
 - [ ] Injection never exceeds the token budget; rules and checkpoint survive truncation first; trimmed amounts appear in `suppressed_tokens_est`.
 - [ ] When `currentContext` contains a superseded value, `corrections[]` carries the current value (not a duplicate injection); correction:injection ratio is one SQL query.
-- [ ] Drift check fires every N turns (counter visible in `sessions.turn_count`), resets on fire.
+- [~] ~~Drift check fires every N turns, resets on fire.~~ **Dropped in review (2026-06-11):** inert without a persisted comparison window. `sessions.turn_count` still increments as an observability signal.
 - [ ] `phase=mid-turn` dedups facts already injected this turn and skips the rule rescan; `phase=post-response` runs extraction over the turn payload.
 - [ ] Every tool response carries `nextDue`; first attend of a fresh session auto-bootstraps agent + session.
 - [ ] `media_objects` exists and is typed; `metric_counters` is tenant-scoped; embeddings off by default, hybrid search works when enabled.
@@ -137,4 +137,5 @@ Implements §12 Phase 3 (both Attendant halves) with two deliberate departures. 
 - 2026-06-10 — CORE-33 shipped (token-budgeted injection, IRANTI_TOKEN_BUDGET env, priority order)
 - 2026-06-10 — CORE-17 shipped (stale-context corrections[], drift heartbeat, sessions.turn_count, attend_log.corrections_count)
 - 2026-06-10 — CORE-30 shipped (media_objects schema, schema-only)
+- 2026-06-11 — CORE-17 drift heartbeat **removed** in code review: the periodic check short-circuited to empty without a `currentContext` to compare against, so it was dead code. The context-provided correction path remains shipped and tested. `sessions.turn_count` + `attend_log.corrections_count` kept as observability only. Resurrecting periodic staleness requires persisting a last-context window per session (future work).
 - 2026-06-10 — CORE-16 shipped (facts.embedding vector(768) + HNSW index; pgvector/pgvector:pg17 image; config-gated D6)

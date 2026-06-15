@@ -578,7 +578,59 @@ The original iranti grew organically over time. Reading it is like reading the r
 
 ---
 
+## ⚠️ Documentation debt (flagged 2026-06-12)
+
+This file fell behind after Phase 2a. The records below are **NOT yet backfilled** —
+listed so the gap is explicit rather than silently missing. Each must be written from the
+**actual code** (commit history + `src/`), not from memory, before it is trusted:
+
+- [ ] **Phase 2b — The Librarian** (conflict detection, source reliability, semantic extraction). Shipped; record TODO.
+- [ ] **Phase 2.5 — HTTP + telemetry** (CORE-12/13/14/27/28/29). Shipped; record TODO.
+- [ ] **Phase 3 — The Attendant** (CORE-15/16/17/30/31/32/33/34). Shipped; record TODO.
+
+Until backfilled, treat the [phase PRDs](../prds/phases/) + commit history as the source of
+truth for 2b/2.5/3, and the [decision register](../decisions/open-decisions.md) for open decisions.
+
+---
+
+## Session 2026-06-12 — audit, extraction research, decision register
+
+Code-verified record of this session's work (all verifiable in the working tree):
+
+**Phase 3 review fixes (working tree, uncommitted):**
+- CI image `postgres:17-alpine` → `pgvector/pgvector:pg17` (`.github/workflows/ci.yml`) — migration 0010 needs the `vector` extension.
+- Removed the dead drift-heartbeat apparatus from `src/mcp/tools/attend.ts` (`DRIFT_DEFAULT`, `getDriftN`, module-global `turnCount`, `isDriftTurn`); stale-context corrections now require `currentContext`.
+- `incrementTurnCount` made fire-and-forget so a DB error can't abort metric persistence.
+- `readArchivedValuesByFactIds` (`src/library/facts.ts`) given deterministic `ORDER BY archived_at DESC, id DESC`.
+- Fixed 16 pre-existing ESLint errors the broken CI image had masked — CI is now typecheck + lint green.
+- Collapsed 4 budget-filter passes into one `fitsBudget` helper; extracted `extractSingleCapture` in `src/extract/index.ts`.
+
+**Master PRD reword:** §2 agnosticism line → *behavior-agnostic / invocation-tiered* (`docs/rough-notes/iranti-core-prd.md`).
+
+**Diagnostic scripts added (`scripts/`, not part of the build):**
+- `extraction-eval.mts` — heuristic extractor over real Claude+Codex transcripts.
+- `extraction-compare.mts` — heuristic vs LLM (old chunker prompt) A/B.
+- `extraction-local-eval.mts` — local Ollama (qwen2.5:7b) quality test.
+- `mock-extract-eval.mts` — old `iranti@0.4.1` mock extractor over real transcripts.
+- `overhead-report.mts` — `attend_log` injection-token distribution.
+
+**Measured findings (same 50-msg real sample; see register OD-2 + AX-*):**
+- iranti-core regex heuristic: **0 facts**.
+- old `iranti@0.4.1` mock extractor: **0 facts** (it's a benchmark stub — 9 fixture-specific patterns).
+- LLM (Haiku, old chunker prompt): 3–13 facts/msg, clean exact-lookup slots.
+- local `qwen2.5:7b` (schema-constrained, temp 0, seed): 133 facts / 50 msgs, ~50% precision, confidence pinned to 1.0 (broken), ~24 s/msg.
+- **Conclusion:** deterministic pattern extraction does not generalize to real language; the LLM is required for recall; store-side guardrails (AX-1 normalizeKey, AX-4 grounding, AX-7 transient-durable, AX-6 golden-corpus) are what buy precision. Determinism lives downstream, never in extraction.
+
+**Environment:** Ollama 0.30.6 installed (winget); `qwen2.5:7b` pulled. The MCP server serving this session is the **old published `iranti@0.4.1`** (global npm → `localhost:3500`), NOT this repo.
+
+**Process instituted:** the [decision register](../decisions/open-decisions.md) — open decisions OD-1..4 + augmentation experiments AX-1..8, each gated on a proven-improvement test.
+
+---
+
 ## Pending decisions
+
+> **Superseded:** open decisions now live in the [decision register](../decisions/open-decisions.md).
+> The table below is retained as historical record; new decisions go in the register.
 
 These items require a decision before the relevant phase begins. They are listed here so they are not forgotten.
 
