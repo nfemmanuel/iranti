@@ -33,6 +33,7 @@ import {
 } from "./conflicts.js";
 import { getScore } from "./source-reliability.js";
 import { graph } from "../graph/index.js";
+import { normalizeKey, withRawKey } from "./keys.js";
 
 // ---------------------------------------------------------------------------
 // Surface validation
@@ -166,6 +167,15 @@ export async function writeFact(
 
   const tenantId = input.tenantId ?? "default";
 
+  // Normalize the key at the write boundary (AX-1). All lookups, the advisory
+  // lock, and the stored row use normalizedKey; the original spelling is
+  // preserved in metadata.rawKey for provenance if it differs.
+  const normalizedKey = normalizeKey(input.key);
+  const metadata =
+    normalizedKey !== input.key
+      ? withRawKey(input.metadata, input.key)
+      : input.metadata;
+
   return db.transaction(async (tx) => {
     // Advisory lock: serialize concurrent writes to the same (tenant, entity, key)
     // for the duration of this transaction. Without this, two writers can both
@@ -173,7 +183,7 @@ export async function writeFact(
     // producing duplicate history. pg_advisory_xact_lock releases automatically
     // when the transaction commits or rolls back. The ::bigint cast avoids
     // ambiguity between the single-bigint and two-int overloads of the function.
-    const lockKey = `${tenantId}/${input.entityType}/${input.entityId}/${input.key}`;
+    const lockKey = `${tenantId}/${input.entityType}/${input.entityId}/${normalizedKey}`;
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`);
 
     // Step 1: Check whether a fact already exists for this key within this tenant.
@@ -182,7 +192,7 @@ export async function writeFact(
         eq(facts.tenantId, tenantId),
         eq(facts.entityType, input.entityType),
         eq(facts.entityId, input.entityId),
-        eq(facts.key, input.key),
+        eq(facts.key, normalizedKey),
         // Only consider non-archived facts. An archived fact no longer
         // holds the "current value" slot — writing a new fact with the
         // same key after archiving creates a fresh fact.
@@ -193,7 +203,7 @@ export async function writeFact(
     // Step 2: Refuse if protected.
     if (existing?.isProtected) {
       throw new Error(
-        `Fact "${input.entityType}/${input.entityId}/${input.key}" is protected ` +
+        `Fact "${input.entityType}/${input.entityId}/${normalizedKey}" is protected ` +
           `and cannot be overwritten. Use an admin operation to change it.`,
       );
     }
@@ -212,7 +222,7 @@ export async function writeFact(
             tenantId,
             entityType: input.entityType,
             entityId: input.entityId,
-            key: input.key,
+            key: normalizedKey,
             existingFact: existing,
             newValue: input.value,
             newSource: input.source,
@@ -268,6 +278,8 @@ export async function writeFact(
       .insert(facts)
       .values({
         ...input,
+        key: normalizedKey,
+        metadata,
         tenantId,
         confidence: storedConfidence,
         stabilityScore: existing?.stabilityScore ?? 1.0,
@@ -285,7 +297,7 @@ export async function writeFact(
           surface: input.surface,
           sessionId: input.sessionId,
           agentId: input.agentId,
-          metadata: input.metadata,
+          metadata,
           updatedAt: new Date(),
           lastAccessedAt: new Date(),
           // stabilityScore and accessCount are intentionally not reset.
@@ -300,7 +312,7 @@ export async function writeFact(
     void runDeepConflictCheck(
       input.entityType,
       input.entityId,
-      input.key,
+      normalizedKey,
       input.value,
       tenantId,
     ).catch((err: unknown) =>
@@ -340,7 +352,7 @@ export async function readFact(
       eq(facts.tenantId, tenantId),
       eq(facts.entityType, entityType),
       eq(facts.entityId, entityId),
-      eq(facts.key, key),
+      eq(facts.key, normalizeKey(key)),
       eq(facts.isArchived, false),
     ),
   });
@@ -374,7 +386,7 @@ export async function findFact(
       eq(facts.tenantId, tenantId),
       eq(facts.entityType, entityType),
       eq(facts.entityId, entityId),
-      eq(facts.key, key),
+      eq(facts.key, normalizeKey(key)),
       eq(facts.isArchived, false),
     ),
   });
@@ -623,13 +635,16 @@ export async function searchFacts(
   } = {},
 ): Promise<Fact[]> {
   const { entityType, entityId, limit = 10, tenantId = "default" } = opts;
-  const pattern = `%${query}%`;
+  // Key column stores normalized keys — match against the normalized query.
+  // Value column is free-form text — keep the original query for that branch.
+  const keyPattern = `%${normalizeKey(query)}%`;
+  const valPattern = `%${query}%`;
 
   const found = await db.query.facts.findMany({
     where: and(
       eq(facts.tenantId, tenantId),
       eq(facts.isArchived, false),
-      or(ilike(facts.key, pattern), ilike(facts.value, pattern)),
+      or(ilike(facts.key, keyPattern), ilike(facts.value, valPattern)),
       entityType ? eq(facts.entityType, entityType) : undefined,
       entityId ? eq(facts.entityId, entityId) : undefined,
     ),
@@ -721,7 +736,7 @@ export async function getFactHistoryByKey(
       eq(factArchive.tenantId, tenantId),
       eq(factArchive.entityType, entityType),
       eq(factArchive.entityId, entityId),
-      eq(factArchive.key, key),
+      eq(factArchive.key, normalizeKey(key)),
     ),
     orderBy: desc(factArchive.archivedAt),
   });

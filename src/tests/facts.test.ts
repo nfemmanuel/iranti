@@ -7,12 +7,13 @@
 //   readFactsByEntity (ordering, empty entity, tenant scoping)
 //   archiveFact (marks archived, creates archive row, no-op on already-archived)
 //   getFactHistory / getFactHistoryByKey (including tenant scoping)
+//   normalizeKey boundary (AX-1): N spellings → 1 row; round-trip; rawKey metadata
 
 import { randomUUID } from "crypto";
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { db, pool } from "../db/connection.js";
-import { facts } from "../db/schema.js";
+import { factArchive, facts } from "../db/schema.js";
 import {
   VALID_SURFACES,
   archiveFact,
@@ -25,6 +26,7 @@ import {
   readRecentFactsByEntity,
   writeFact,
 } from "../library/facts.js";
+import { normalizeKey } from "../library/keys.js";
 
 afterAll(async () => {
   await pool.end({ timeout: 5 });
@@ -580,5 +582,124 @@ describe("tenantId isolation", () => {
 
     expect(forA.every((f) => f.value === "tenant-a-value")).toBe(true);
     expect(forB.every((f) => f.value === "tenant-b-value")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AX-1 — normalizeKey boundary (integration)
+// ---------------------------------------------------------------------------
+
+describe("AX-1 normalizeKey boundary", () => {
+  it("N spellings of the same key collapse to 1 row + N-1 archive events", async () => {
+    const entityId = randomUUID();
+    const spellings = [
+      "Research Focus",
+      "research_focus",
+      "researchFocus",
+      "research-focus",
+    ];
+
+    for (const spelling of spellings) {
+      await writeFact({
+        entityType: "user",
+        entityId,
+        key: spelling,
+        value: `value-for-${spelling}`,
+        source: "test",
+      });
+    }
+
+    // Exactly 1 surviving active row.
+    const rows = await db.query.facts.findMany({
+      where: eq(facts.entityId, entityId),
+    });
+    const activeRows = rows.filter((r) => !r.isArchived);
+    expect(activeRows).toHaveLength(1);
+    expect(activeRows[0]!.key).toBe("research-focus");
+
+    // N-1 = 3 archive rows.
+    const archiveRows = await db.query.factArchive.findMany({
+      where: eq(factArchive.entityId, entityId),
+    });
+    expect(archiveRows).toHaveLength(spellings.length - 1);
+  });
+
+  it("round-trip: write under mixed-case spelling, read via canonical form → hit", async () => {
+    const entityId = randomUUID();
+
+    await writeFact({
+      entityType: "user",
+      entityId,
+      key: "Research Focus",
+      value: "machine learning",
+      source: "test",
+    });
+
+    const hit = await readFact("user", entityId, "research-focus");
+    expect(hit).toBeDefined();
+    expect(hit!.value).toBe("machine learning");
+    expect(hit!.key).toBe("research-focus");
+  });
+
+  it("round-trip: write canonical, read via camelCase → hit", async () => {
+    const entityId = randomUUID();
+
+    await writeFact({
+      entityType: "user",
+      entityId,
+      key: "research-focus",
+      value: "nlp",
+      source: "test",
+    });
+
+    const hit = await readFact("user", entityId, "researchFocus");
+    expect(hit).toBeDefined();
+    expect(hit!.value).toBe("nlp");
+  });
+
+  it("stores rawKey in metadata when key was not already canonical", async () => {
+    const entityId = randomUUID();
+
+    const fact = await writeFact({
+      entityType: "user",
+      entityId,
+      key: "researchFocus",
+      value: "computer vision",
+      source: "test",
+    });
+
+    expect(fact.key).toBe("research-focus");
+    const meta = fact.metadata as Record<string, unknown>;
+    expect(meta?.rawKey).toBe("researchFocus");
+  });
+
+  it("does NOT inject rawKey when key is already canonical", async () => {
+    const entityId = randomUUID();
+
+    const fact = await writeFact({
+      entityType: "user",
+      entityId,
+      key: "research-focus",
+      value: "robotics",
+      source: "test",
+    });
+
+    const meta = fact.metadata as Record<string, unknown> | null;
+    expect(meta?.rawKey).toBeUndefined();
+  });
+
+  it("producer-emitted keys already equal their normalized form (single import)", () => {
+    // Verifies the heuristic extractor's slugify produces normalizeKey-compatible keys.
+    // Keys from the heuristic are already slug-form (lowercase-hyphen); normalizeKey
+    // applied to them must be a no-op (idempotent).
+    const heuristicKeys = [
+      "decision:use-postgres",
+      "preference:always-y",
+      "preference:node-18",
+      "tool:drizzle-orm",
+    ];
+    for (const k of heuristicKeys) {
+      expect(normalizeKey(k)).toBe(k);
+    }
   });
 });

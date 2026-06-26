@@ -128,7 +128,7 @@ describe("attend — read side", () => {
     await writeFact({
       entityType: "project",
       entityId,
-      key: "tech_stack",
+      key: "tech-stack",
       value: "typescript",
       source: "test",
     });
@@ -140,7 +140,7 @@ describe("attend — read side", () => {
     expect(result.checkpoint?.text).toBe("halfway through migration");
     // The checkpoint must not be duplicated in facts.
     expect(result.facts.every((f) => f.key !== "checkpoint")).toBe(true);
-    expect(result.facts.map((f) => f.key)).toContain("tech_stack");
+    expect(result.facts.map((f) => f.key)).toContain("tech-stack");
   });
 
   it("caps the total facts returned at MAX_TOTAL_FACTS", async () => {
@@ -235,7 +235,7 @@ describe("attend — context window observation (Phase 1.2)", () => {
     await writeFact({
       entityType: "project",
       entityId,
-      key: "deploy_target",
+      key: "deploy-target",
       value: "production runs on fly.io in the ord region",
       source: "test",
     });
@@ -247,7 +247,7 @@ describe("attend — context window observation (Phase 1.2)", () => {
     });
 
     expect(result.alreadyPresent).toBeGreaterThanOrEqual(1);
-    expect(result.facts.some((f) => f.key === "deploy_target")).toBe(false);
+    expect(result.facts.some((f) => f.key === "deploy-target")).toBe(false);
   });
 
   it("still returns a relevant fact that is NOT in currentContext", async () => {
@@ -255,7 +255,7 @@ describe("attend — context window observation (Phase 1.2)", () => {
     await writeFact({
       entityType: "project",
       entityId,
-      key: "secret_sauce",
+      key: "secret-sauce",
       value: "the caching layer uses a two-tier LRU with a redis backstop",
       source: "test",
     });
@@ -265,7 +265,7 @@ describe("attend — context window observation (Phase 1.2)", () => {
       currentContext: "Totally unrelated window text about lunch plans.",
     });
 
-    expect(result.facts.some((f) => f.key === "secret_sauce")).toBe(true);
+    expect(result.facts.some((f) => f.key === "secret-sauce")).toBe(true);
     expect(result.alreadyPresent).toBe(0);
   });
 
@@ -334,14 +334,14 @@ describe("attend — keyword relevance scoring", () => {
     await writeFact({
       entityType: "project",
       entityId,
-      key: "ux_design_principles",
+      key: "ux-design-principles",
       value: "prefer minimal interfaces",
       source: "test",
     });
     await writeFact({
       entityType: "project",
       entityId,
-      key: "onboarding_flow",
+      key: "onboarding-flow",
       value: "three-step wizard for new users",
       source: "test",
     });
@@ -350,7 +350,7 @@ describe("attend — keyword relevance scoring", () => {
     await writeFact({
       entityType: "project",
       entityId,
-      key: "rate_limit_config",
+      key: "rate-limit-config",
       value: "100 requests per minute",
       source: "test",
     });
@@ -362,9 +362,9 @@ describe("attend — keyword relevance scoring", () => {
 
     const keys = result.facts.map((f) => f.key);
     const uxIndex = keys.findIndex(
-      (k) => k === "ux_design_principles" || k === "onboarding_flow",
+      (k) => k === "ux-design-principles" || k === "onboarding-flow",
     );
-    const rateIndex = keys.findIndex((k) => k === "rate_limit_config");
+    const rateIndex = keys.findIndex((k) => k === "rate-limit-config");
 
     // UX fact must appear before the rate limit fact (or rate limit absent entirely)
     if (uxIndex !== -1 && rateIndex !== -1) {
@@ -372,7 +372,7 @@ describe("attend — keyword relevance scoring", () => {
     } else {
       expect(
         keys.some(
-          (k) => k === "ux_design_principles" || k === "onboarding_flow",
+          (k) => k === "ux-design-principles" || k === "onboarding-flow",
         ),
       ).toBe(true);
     }
@@ -383,14 +383,14 @@ describe("attend — keyword relevance scoring", () => {
     await writeFact({
       entityType: "project",
       entityId,
-      key: "older_fact",
+      key: "older-fact",
       value: "written first",
       source: "test",
     });
     await writeFact({
       entityType: "project",
       entityId,
-      key: "newer_fact",
+      key: "newer-fact",
       value: "written second",
       source: "test",
     });
@@ -399,7 +399,7 @@ describe("attend — keyword relevance scoring", () => {
       entityHints: [{ entityType: "project", entityId }],
     });
 
-    expect(result.facts[0]?.key).toBe("newer_fact");
+    expect(result.facts[0]?.key).toBe("newer-fact");
   });
 });
 
@@ -409,20 +409,20 @@ describe("search", () => {
     await writeFact({
       entityType: "project",
       entityId,
-      key: "auth_provider",
+      key: "auth-provider",
       value: "oauth2",
       source: "test",
     });
     await writeFact({
       entityType: "project",
       entityId,
-      key: "db_host",
+      key: "db-host",
       value: "localhost",
       source: "test",
     });
 
-    const result = await search({ query: "auth_provider" });
-    expect(result.results.some((r) => r.key === "auth_provider")).toBe(true);
+    const result = await search({ query: "auth-provider" });
+    expect(result.results.some((r) => r.key === "auth-provider")).toBe(true);
   });
 
   it("finds facts by keyword in value", async () => {
@@ -430,7 +430,7 @@ describe("search", () => {
     await writeFact({
       entityType: "project",
       entityId,
-      key: "infra_notes",
+      key: "infra-notes",
       value: "migrate postgres to aurora rds",
       source: "test",
     });
@@ -438,7 +438,7 @@ describe("search", () => {
     const result = await search({ query: "aurora" });
     expect(
       result.results.some(
-        (r) => r.entity === `project/${entityId}` && r.key === "infra_notes",
+        (r) => r.entity === `project/${entityId}` && r.key === "infra-notes",
       ),
     ).toBe(true);
   });
@@ -454,20 +454,20 @@ describe("search", () => {
     await writeFact({
       entityType: "project",
       entityId: a,
-      key: "scope_signal",
+      key: "scope-signal",
       value: "entity-a",
       source: "test",
     });
     await writeFact({
       entityType: "project",
       entityId: b,
-      key: "scope_signal",
+      key: "scope-signal",
       value: "entity-b",
       source: "test",
     });
 
     const result = await search({
-      query: "scope_signal",
+      query: "scope-signal",
       entityType: "project",
       entityId: a,
     });

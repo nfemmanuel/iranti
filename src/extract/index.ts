@@ -21,6 +21,8 @@
 // It writes extracted facts with source "extractor_heuristic" or
 // "extractor_llm" so they are identifiable and bulk-cleanable if needed.
 
+import { normalizeKey } from "../library/keys.js";
+
 // ---------------------------------------------------------------------------
 // Interface
 // ---------------------------------------------------------------------------
@@ -204,7 +206,7 @@ export class LocalLlmExtractor implements ExtractorBackend {
         for (const item of parsed) {
           if (typeof item.key === "string" && typeof item.value === "string") {
             llmFacts.push({
-              key: item.key.slice(0, 80),
+              key: normalizeKey(item.key.slice(0, 80)),
               value: item.value.slice(0, 300),
               source: "extractor_llm",
               confidence: 0.80,

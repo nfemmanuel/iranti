@@ -82,5 +82,6 @@ How we know it works: test counts, smoke checks, manual validation.
 | [Phase 1.2 — Context Window Observation](phase-1.2-context-window-observation.md) | 1.2 | accepted |
 | [Phase 2a — Graph Foundation & Write Safety](phase-2a-graph-and-write-safety.md) | 2a | accepted |
 | [Phase 2b — The Librarian](phase-2b-librarian.md) | 2b | accepted |
+| [AX-1 — Key Normalization](ax-1-key-normalization.md) | AX-1 (hardening) | shipped |
 
 > Retroactive PRDs (0, 1, 1.1) document phases that shipped before this process existed. They are written from the implementation record and exist so the history is complete and auditable — the standard going forward is PRD-first.
