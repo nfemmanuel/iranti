@@ -177,6 +177,45 @@ describe("normalizeKey — edge cases", () => {
   it("handles leading/trailing spaces", () => {
     expect(normalizeKey("  timezone  ")).toBe("timezone");
   });
+
+  it("returns empty string for a punctuation-only key", () => {
+    // These all collapse to "" — writeFact rejects them so they never collide.
+    expect(normalizeKey("___")).toBe("");
+    expect(normalizeKey("!!!")).toBe("");
+    expect(normalizeKey(":")).toBe("");
+    expect(normalizeKey("--")).toBe("");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Length cap — write/read/extract must agree on long keys
+// ---------------------------------------------------------------------------
+
+describe("normalizeKey — length cap", () => {
+  it("caps a very long key at 80 characters", () => {
+    const long = "a".repeat(200);
+    expect(normalizeKey(long).length).toBe(80);
+  });
+
+  it("leaves no trailing hyphen when the cut lands on a separator", () => {
+    // 79 chars then a separator then more — cut at 80 would land on the hyphen.
+    const raw = "a".repeat(79) + " " + "b".repeat(40);
+    const out = normalizeKey(raw);
+    expect(out.length).toBeLessThanOrEqual(80);
+    expect(out.endsWith("-")).toBe(false);
+  });
+
+  it("is idempotent on a key that hits the cap", () => {
+    const long = "word ".repeat(40); // ~200 chars, many hyphens
+    const once = normalizeKey(long);
+    expect(normalizeKey(once)).toBe(once);
+    expect(once.length).toBeLessThanOrEqual(80);
+  });
+
+  it("does not touch keys at or below the cap", () => {
+    const k = "decision:" + "x".repeat(60);
+    expect(normalizeKey(k)).toBe(k);
+  });
 });
 
 // ---------------------------------------------------------------------------

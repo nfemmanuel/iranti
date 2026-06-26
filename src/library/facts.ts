@@ -171,6 +171,15 @@ export async function writeFact(
   // lock, and the stored row use normalizedKey; the original spelling is
   // preserved in metadata.rawKey for provenance if it differs.
   const normalizedKey = normalizeKey(input.key);
+  // A key made only of punctuation/separators normalizes to "". Storing it would
+  // collapse every such key onto one shared empty slot, silently overwriting
+  // unrelated facts — reject instead. Reads with an empty key simply miss.
+  if (!normalizedKey) {
+    throw new Error(
+      `Fact key "${input.key}" normalizes to an empty string and cannot be stored. ` +
+        `Provide a key with at least one alphanumeric character.`,
+    );
+  }
   const metadata =
     normalizedKey !== input.key
       ? withRawKey(input.metadata, input.key)

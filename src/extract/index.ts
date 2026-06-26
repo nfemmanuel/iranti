@@ -205,8 +205,13 @@ export class LocalLlmExtractor implements ExtractorBackend {
       if (Array.isArray(parsed)) {
         for (const item of parsed) {
           if (typeof item.key === "string" && typeof item.value === "string") {
+            // Pre-slice to bound regex work; normalizeKey caps the result at 80.
+            const key = normalizeKey(item.key.slice(0, 200));
+            // Skip a key that normalizes to empty (punctuation-only) — writeFact
+            // would reject it anyway, and it must never reach the merge/dedup set.
+            if (!key) continue;
             llmFacts.push({
-              key: normalizeKey(item.key.slice(0, 80)),
+              key,
               value: item.value.slice(0, 300),
               source: "extractor_llm",
               confidence: 0.80,

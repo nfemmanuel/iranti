@@ -688,6 +688,39 @@ describe("AX-1 normalizeKey boundary", () => {
     expect(meta?.rawKey).toBeUndefined();
   });
 
+  it("rejects a key that normalizes to an empty string", async () => {
+    const entityId = randomUUID();
+
+    await expect(
+      writeFact({
+        entityType: "user",
+        entityId,
+        key: "___", // punctuation-only → normalizes to ""
+        value: "should not be stored",
+        source: "test",
+      }),
+    ).rejects.toThrow(/empty string/);
+  });
+
+  it("caps a very long key at 80 chars and stays round-trippable", async () => {
+    const entityId = randomUUID();
+    const longKey = "preference:" + "really long preference name ".repeat(10);
+
+    const fact = await writeFact({
+      entityType: "user",
+      entityId,
+      key: longKey,
+      value: "capped",
+      source: "test",
+    });
+
+    expect(fact.key.length).toBeLessThanOrEqual(80);
+    // Reading back with the same raw key normalizes identically → hit.
+    const hit = await readFact("user", entityId, longKey);
+    expect(hit).toBeDefined();
+    expect(hit!.value).toBe("capped");
+  });
+
   it("producer-emitted keys already equal their normalized form (single import)", () => {
     // Verifies the heuristic extractor's slugify produces normalizeKey-compatible keys.
     // Keys from the heuristic are already slug-form (lowercase-hyphen); normalizeKey
