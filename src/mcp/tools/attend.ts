@@ -44,6 +44,7 @@ import { ensureContext } from "../context.js";
 import { writeAttendLog, persistMetricCounters } from "../../library/attend-log.js";
 import { incrementTurnCount } from "../../library/sessions.js";
 import { comprehensionMetrics } from "../../library/conflicts.js";
+import { searchMedia } from "../../library/media.js";
 
 export const MAX_FACTS_PER_ENTITY = 10;
 export const MAX_TOTAL_FACTS = 20;
@@ -277,6 +278,17 @@ export interface AttendResult {
     key: string;
     currentValue: string;
     staleValue: string;
+  }>;
+  // OD-4: media objects whose description/tags keyword-match the message,
+  // scoped to the entity hints in scope. Returns description + pointer only,
+  // never raw bytes — bytes are large; the description is the memory.
+  media: Array<{
+    entity: string;
+    key: string;
+    description: string | null;
+    mime: string;
+    objectUrl: string;
+    tags: string[];
   }>;
   // Phase 3 (CORE-31): protocol breadcrumb — what the host should call next.
   nextDue: string;
@@ -556,6 +568,31 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
     ? await getCorrections(ranked, normalizedContext)
     : [];
 
+  // OD-4: media tier — keyword search over description_text / tags for the
+  // entities in scope. Only fires when there is a message to match against,
+  // and only for pre/post-response phases (skip on mid-turn cheap top-ups).
+  const mediaHits: AttendResult["media"] = [];
+  if (!isMidTurn && input.message) {
+    for (const hint of hints) {
+      const hits = await searchMedia(input.message, {
+        entityType: hint.entityType,
+        entityId: hint.entityId,
+        tenantId: "default",
+        limit: 3,
+      }).catch(() => []);
+      for (const h of hits) {
+        mediaHits.push({
+          entity: h.entity,
+          key: h.key,
+          description: h.description,
+          mime: h.mime,
+          objectUrl: h.objectUrl,
+          tags: h.tags,
+        });
+      }
+    }
+  }
+
   // Phase 2a — async edge recording. Fire-and-forget after the response is
   // assembled so this never adds latency. Errors are logged, never thrown.
   if (budgetedFacts.length >= 2 || budgetedRuleList.length > 0) {
@@ -654,6 +691,7 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
     extracted: artifacts.map((a) => ({ kind: a.kind, value: a.value })),
     alreadyPresent,
     corrections,
+    media: mediaHits,
     nextDue: computeNextDue(phase),
   };
 }

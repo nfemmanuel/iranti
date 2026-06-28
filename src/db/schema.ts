@@ -652,3 +652,52 @@ export const mediaObjects = pgTable(
 
 export type MediaObject = typeof mediaObjects.$inferSelect;
 export type NewMediaObject = typeof mediaObjects.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// extraction_cache — AX-2
+//
+// Durable content-hash cache for the LLM extractor. Caches the full merged
+// ExtractedFact[] so repeated extractions of the same input under the same
+// regime are deterministic and free (zero LLM calls on hit).
+//
+// Cache key = composite PK (tenant_id, input_hash, regime_signature).
+// Entries are permanent (no TTL) — busted by a regime change (model, prompt,
+// normalizer version), never by time.
+//
+// Only the LLM extractor path uses this; the heuristic extractor is already
+// pure/deterministic and would gain nothing from a cache round-trip.
+// ---------------------------------------------------------------------------
+export const extractionCache = pgTable(
+  "extraction_cache",
+  {
+    // Tenancy seam — consistent with every other table.
+    tenantId: text("tenant_id").notNull().default("default"),
+
+    // SHA-256 hex of normalizeForCache(rawText). Never stores the raw text.
+    inputHash: text("input_hash").notNull(),
+
+    // "{extractorMode}|{modelId}|{promptVersion}|{normalizerVersion}"
+    // Any dimension change → guaranteed miss, never a stale hit.
+    regimeSignature: text("regime_signature").notNull(),
+
+    // Cached output: the full merged ExtractedFact[] after heuristic+LLM merge.
+    result: jsonb("result").notNull(),
+
+    // Denormalized from signature for queryability/audit.
+    extractorMode: text("extractor_mode").notNull(),
+    modelId: text("model_id").notNull(),
+    promptVersion: text("prompt_version").notNull(),
+    normalizerVersion: text("normalizer_version").notNull(),
+
+    // Best-effort observability — never read by the extract path.
+    hitCount: integer("hit_count").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastHitAt: timestamp("last_hit_at", { withTimezone: true }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.inputHash, t.regimeSignature] }),
+  ],
+);
+
+export type ExtractionCache = typeof extractionCache.$inferSelect;
+export type NewExtractionCache = typeof extractionCache.$inferInsert;

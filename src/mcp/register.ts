@@ -23,6 +23,7 @@ import {
   fetchAlias,
   fetchAliasInputSchema,
 } from "./tools/aliases.js";
+import { ingestMediaTool, ingestMediaInputSchema } from "./tools/ingest-media.js";
 
 // Phase 3 (CORE-31): default breadcrumb injected into every non-attend result.
 // attend() returns its own nextDue (phase-specific); all other tools get this.
@@ -226,6 +227,28 @@ export function registerIrantiTools(server: McpServer): void {
     async (input) => {
       try {
         return asResult(await writeIssueTool(input));
+      } catch (err) {
+        return asError(err);
+      }
+    },
+  );
+
+  // OD-4: media ingest tool.
+  server.registerTool(
+    "iranti_ingest_media",
+    {
+      title: "Ingest media object",
+      description:
+        "Store a media object (image, PDF, etc.) as durable memory for an entity. " +
+        "Accepts base64 bytes or a local file path plus a MIME type. " +
+        "The object is stored immediately; vision tagging (description + tags) " +
+        "runs asynchronously. Stored objects appear in iranti_attend when their " +
+        "description matches the conversation.",
+      inputSchema: ingestMediaInputSchema,
+    },
+    async (input) => {
+      try {
+        return asResult(await ingestMediaTool(input));
       } catch (err) {
         return asError(err);
       }

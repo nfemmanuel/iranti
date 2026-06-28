@@ -50,7 +50,7 @@ This register supersedes the ad-hoc "Pending decisions" table in
 - **Context:** `media_objects.object_url` is a pointer column; there is **no** storage
   integration (no S3/minio/upload path) — confirmed 2026-06-12.
 - **Options:** local filesystem, S3-compatible (self-host minio / AWS), or defer.
-- **Lean:** ~~defer~~ → **build now** (user override; real use case). **Status:** ✅ **DECIDED → build local-FS now, S3-ready, semantically tagged; needs media-ingest spec** (see Decided below).
+- **Lean:** ~~defer~~ → **build now** (user override; real use case). **Status:** ✅ **DECIDED → build local-FS now, S3-ready, semantically tagged; media-ingest spec drafted (proposed)** → [od4-media-ingest](../prds/phases/od4-media-ingest.md) (see Decided below).
 
 ---
 
@@ -63,7 +63,7 @@ Source: workflow `wf_3fbabf0d-ae1` (24 proposals, 1 refuted), 2026-06-12.
 | # | Experiment | Why | Verify metric | Status |
 |---|------------|-----|---------------|--------|
 | AX-1 | `normalizeKey` at write/read boundary (**keystone**) | store-layer determinism + reliable exact lookup; both old & new match raw key today | distinct-keys-per-entity drops; conflict-detection hits rise on a fixed transcript | ✅ **shipped 2026-06-26** → [ax-1-key-normalization](../prds/phases/ax-1-key-normalization.md) |
-| AX-2 | content-hash extraction cache | replay/re-ingest determinism (byte-identical on repeat) | cache-hit reproducibility = 100% on repeated inputs | not started |
+| AX-2 | content-hash extraction cache | replay/re-ingest determinism (byte-identical on repeat) | cache-hit reproducibility = 100% on repeated inputs | ✅ **shipped 2026-06-28** → [ax-2-content-hash-cache](../prds/phases/ax-2-content-hash-cache.md) |
 | AX-3 | schema-constrained decoding + closed category enum | parse-failure → ~0; structural variance gone | parse-failure rate → 0 on a corpus | not started |
 | AX-4 | grounding gate (verbatim-span check) | every stored LLM fact must quote the source → kills hallucination | 0 stored facts with no source span | not started |
 | AX-5 | exact-`(entity,key)`-first retrieval tier | honors exact-lookup-over-vector; deterministic top tier | rank-of-exact-hit = 1 when a key is named | not started |
@@ -179,4 +179,5 @@ retrievable *as memory*, not dumb blob storage.
   storage interface, the tagging/description mechanism + model, the key scheme, and how retrieval
   surfaces media.
 **Sequencing:** parallel to the extraction work; does **not** block AX-1 (`normalizeKey`). Next
-artifact = the media-ingest spec.
+artifact = the media-ingest spec — **drafted (proposed)** at
+[od4-media-ingest](../prds/phases/od4-media-ingest.md), awaiting NF acceptance.

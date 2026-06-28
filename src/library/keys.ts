@@ -18,6 +18,11 @@
 //   synonym pair is needed. See: docs/prds/phases/ax-1-key-normalization.md
 //
 // Guarantee: normalizeKey(normalizeKey(x)) === normalizeKey(x)
+//
+// AX-2: bump NORMALIZER_VERSION whenever the normalizeKey algorithm changes
+// semantics — this is part of the extraction cache regime signature, so a
+// version bump guarantees cache busting across all tenants.
+export const NORMALIZER_VERSION = "1";
 
 // Upper bound on a stored key. Applied INSIDE normalizeKey so the write side,
 // the read side, and both extractors agree on the same capped key — otherwise a

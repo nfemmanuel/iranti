@@ -17,11 +17,28 @@
 //   heuristic (default) — HeuristicExtractor only
 //   local               — HeuristicExtractor + LocalLlmExtractor
 //
+// AX-2: LocalLlmExtractor is wrapped by an extraction cache (durable,
+// content-hash keyed). Repeat extractions of the same input under the same
+// regime return cached facts with zero LLM calls. Cache misses fall through
+// to normal extraction; cache errors degrade silently to plain extraction.
+//
 // The extractor is wired into attend's write side (async, off response path).
 // It writes extracted facts with source "extractor_heuristic" or
 // "extractor_llm" so they are identifiable and bulk-cleanable if needed.
 
-import { normalizeKey } from "../library/keys.js";
+import { normalizeKey, NORMALIZER_VERSION } from "../library/keys.js";
+import {
+  hashInput,
+  buildRegimeSignature,
+  readCache,
+  writeCache,
+} from "../library/extraction-cache.js";
+
+// AX-2: bump this whenever LLM_SYSTEM_PROMPT or output-affecting decode params
+// change. A version change guarantees cache misses across all tenants so stale
+// facts extracted under the old prompt are never re-served.
+// IMPORTANT: changing LLM_SYSTEM_PROMPT requires a corresponding bump here.
+export const EXTRACTION_PROMPT_VERSION = "1";
 
 // ---------------------------------------------------------------------------
 // Interface
@@ -176,6 +193,42 @@ export class LocalLlmExtractor implements ExtractorBackend {
   }
 
   async extract(message: string): Promise<ExtractedFact[]> {
+    // AX-2: check cache before calling the LLM.
+    const inputHash = hashInput(message);
+    const regimeSig = buildRegimeSignature(
+      "local",
+      this.model,
+      EXTRACTION_PROMPT_VERSION,
+      NORMALIZER_VERSION,
+    );
+
+    try {
+      const cached = await readCache(inputHash, regimeSig);
+      if (cached !== null) return cached;
+    } catch (err) {
+      // Cache read error — degrade to plain extraction, never block.
+      console.error("[iranti] extraction-cache read error:", err);
+    }
+
+    const merged = await this._extractFresh(message);
+
+    // Write result fire-and-forget — a write failure must never surface.
+    void writeCache(
+      inputHash,
+      regimeSig,
+      "local",
+      this.model,
+      EXTRACTION_PROMPT_VERSION,
+      NORMALIZER_VERSION,
+      merged,
+    ).catch((err: unknown) =>
+      console.error("[iranti] extraction-cache write error:", err),
+    );
+
+    return merged;
+  }
+
+  private async _extractFresh(message: string): Promise<ExtractedFact[]> {
     // Heuristic pass always runs first.
     const heuristic = await new HeuristicExtractor().extract(message);
 
