@@ -34,10 +34,12 @@ export const ingestMediaInputSchema = {
   tenantId: z.string().optional().describe("Tenant scope; defaults to 'default'."),
 };
 
-export const ingestMediaInput = z.object(ingestMediaInputSchema).refine(
-  (d) => d.bytes !== undefined || d.filePath !== undefined,
-  { message: "Either bytes or filePath must be provided." },
-);
+// NOTE: the "bytes or filePath" constraint is enforced at runtime inside
+// ingestMediaTool, NOT via a Zod .refine() here. register.ts hands the raw
+// `ingestMediaInputSchema` shape to the MCP SDK, which never runs a refine on
+// the wrapped object — so a refine would be dead at the tool boundary. This
+// object exists only to derive the input type.
+export const ingestMediaInput = z.object(ingestMediaInputSchema);
 
 export type IngestMediaInput = z.infer<typeof ingestMediaInput>;
 

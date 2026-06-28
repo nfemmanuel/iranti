@@ -4,10 +4,18 @@
 // patterns as facts.ts. Reuses normalizeKey (AX-1 boundary rule) at every
 // write/read path so media keys are addressed identically to fact keys.
 
-import { and, eq, ilike, or, sql } from "drizzle-orm";
+import { and, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import { mediaObjects, type MediaObject, type NewMediaObject } from "../db/schema.js";
 import { normalizeKey } from "./keys.js";
+
+// Merge a patch into the existing metadata jsonb (top-level keys overwrite,
+// everything else — sha256/bytes/rawKey provenance from ingestMedia — is
+// preserved). Both vision write paths share this so the COALESCE/|| merge
+// lives in exactly one place.
+function mergeMetadataPatch(patch: Record<string, unknown>): SQL {
+  return sql`COALESCE(${mediaObjects.metadata}, '{}'::jsonb) || ${JSON.stringify(patch)}::jsonb`;
+}
 
 // ---------------------------------------------------------------------------
 // Write
@@ -55,9 +63,7 @@ export async function updateMediaDescription(
     .update(mediaObjects)
     .set({
       descriptionText,
-      // Merge into existing metadata so ingestMedia's sha256/bytes/rawKey
-      // provenance fields are preserved. markVisionFailed uses the same pattern.
-      metadata: sql`COALESCE(${mediaObjects.metadata}, '{}'::jsonb) || jsonb_build_object('tags', ${JSON.stringify(tags)}::jsonb, 'visionStatus', 'ok', 'visionModel', ${visionModel})`,
+      metadata: mergeMetadataPatch({ tags, visionStatus: "ok", visionModel }),
     })
     .where(eq(mediaObjects.id, id));
 }
@@ -66,7 +72,7 @@ export async function markVisionFailed(id: string): Promise<void> {
   await db
     .update(mediaObjects)
     .set({
-      metadata: sql`COALESCE(${mediaObjects.metadata}, '{}'::jsonb) || '{"visionStatus":"failed"}'::jsonb`,
+      metadata: mergeMetadataPatch({ visionStatus: "failed" }),
     })
     .where(eq(mediaObjects.id, id));
 }
