@@ -12,6 +12,8 @@
 //   IRANTI_VISION_MODEL          → model name (default: "llava")
 //   IRANTI_LLM_ENDPOINT          → reuses the extractor endpoint
 
+import { parseLlmJson } from "../library/llm-json.js";
+
 // ---------------------------------------------------------------------------
 // Interface
 // ---------------------------------------------------------------------------
@@ -92,10 +94,7 @@ export class LocalLlmVisionBackend implements VisionBackend {
         choices?: Array<{ message?: { content?: string } }>;
       };
       const content = json.choices?.[0]?.message?.content ?? "";
-      // Strip markdown code fences — llava/qwen2.5-vl often wrap the JSON
-      // in ```json ... ``` despite the "Output valid JSON only" instruction.
-      const stripped = content.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "").trim();
-      const parsed = JSON.parse(stripped) as { description?: string; tags?: unknown };
+      const parsed = parseLlmJson<{ description?: string; tags?: unknown }>(content);
 
       const description = typeof parsed.description === "string" ? parsed.description.slice(0, 500) : "";
       const tags = Array.isArray(parsed.tags)

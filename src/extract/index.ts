@@ -33,6 +33,7 @@ import {
   readCache,
   writeCache,
 } from "../library/extraction-cache.js";
+import { parseLlmJson } from "../library/llm-json.js";
 
 // AX-2: bump this whenever LLM_SYSTEM_PROMPT or output-affecting decode params
 // change. A version change guarantees cache misses across all tenants so stale
@@ -258,7 +259,7 @@ export class LocalLlmExtractor implements ExtractorBackend {
       if (!res.ok) throw new Error(`LLM endpoint returned ${res.status}`);
       const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
       const content = json.choices?.[0]?.message?.content ?? "[]";
-      const parsed = JSON.parse(content) as Array<{ key?: string; value?: string }>;
+      const parsed = parseLlmJson<Array<{ key?: string; value?: string }>>(content);
 
       if (Array.isArray(parsed)) {
         for (const item of parsed) {
