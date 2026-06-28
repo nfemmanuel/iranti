@@ -593,6 +593,12 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
     }
   }
 
+  // Route media hits through fitsBudget at lowest priority (after peripheral)
+  // so they cannot blow the 2000-token injection contract.
+  const budgetedMedia = mediaHits.filter((m) =>
+    fitsBudget((m.description ?? "") + " " + m.tags.join(" ")),
+  );
+
   // Phase 2a — async edge recording. Fire-and-forget after the response is
   // assembled so this never adds latency. Errors are logged, never thrown.
   if (budgetedFacts.length >= 2 || budgetedRuleList.length > 0) {
@@ -691,7 +697,7 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
     extracted: artifacts.map((a) => ({ kind: a.kind, value: a.value })),
     alreadyPresent,
     corrections,
-    media: mediaHits,
+    media: budgetedMedia,
     nextDue: computeNextDue(phase),
   };
 }

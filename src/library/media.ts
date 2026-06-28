@@ -55,11 +55,9 @@ export async function updateMediaDescription(
     .update(mediaObjects)
     .set({
       descriptionText,
-      metadata: {
-        tags,
-        visionStatus: "ok" as const,
-        visionModel,
-      },
+      // Merge into existing metadata so ingestMedia's sha256/bytes/rawKey
+      // provenance fields are preserved. markVisionFailed uses the same pattern.
+      metadata: sql`COALESCE(${mediaObjects.metadata}, '{}'::jsonb) || jsonb_build_object('tags', ${JSON.stringify(tags)}::jsonb, 'visionStatus', 'ok', 'visionModel', ${visionModel})`,
     })
     .where(eq(mediaObjects.id, id));
 }
@@ -128,8 +126,7 @@ export async function searchMedia(
     eq(mediaObjects.tenantId, tenantId),
     or(
       ilike(mediaObjects.descriptionText, pattern),
-      // tags are stored as metadata.tags — cast to text for ilike
-      ilike(mediaObjects.key, pattern),
+      sql`EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(${mediaObjects.metadata}->'tags', '[]'::jsonb)) AS tag WHERE tag ILIKE ${pattern})`,
     ),
   ];
 

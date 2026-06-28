@@ -42,6 +42,9 @@ export const ingestMediaInput = z.object(ingestMediaInputSchema).refine(
 export type IngestMediaInput = z.infer<typeof ingestMediaInput>;
 
 export async function ingestMediaTool(input: IngestMediaInput) {
+  if (!input.bytes && !input.filePath) {
+    throw new Error("Either bytes or filePath must be provided.");
+  }
   let buf: Buffer;
 
   if (input.filePath) {

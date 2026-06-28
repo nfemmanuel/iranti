@@ -210,30 +210,35 @@ export class LocalLlmExtractor implements ExtractorBackend {
       console.error("[iranti] extraction-cache read error:", err);
     }
 
-    const merged = await this._extractFresh(message);
+    const { facts: merged, llmSucceeded } = await this._extractFresh(message);
 
-    // Write result fire-and-forget — a write failure must never surface.
-    void writeCache(
-      inputHash,
-      regimeSig,
-      "local",
-      this.model,
-      EXTRACTION_PROMPT_VERSION,
-      NORMALIZER_VERSION,
-      merged,
-    ).catch((err: unknown) =>
-      console.error("[iranti] extraction-cache write error:", err),
-    );
+    // Only cache when the LLM pass actually ran — a transient outage degrades
+    // _extractFresh to heuristic-only; caching that thin result would poison
+    // every future cache hit for the same input once the LLM recovers.
+    if (llmSucceeded) {
+      void writeCache(
+        inputHash,
+        regimeSig,
+        "local",
+        this.model,
+        EXTRACTION_PROMPT_VERSION,
+        NORMALIZER_VERSION,
+        merged,
+      ).catch((err: unknown) =>
+        console.error("[iranti] extraction-cache write error:", err),
+      );
+    }
 
     return merged;
   }
 
-  private async _extractFresh(message: string): Promise<ExtractedFact[]> {
+  private async _extractFresh(message: string): Promise<{ facts: ExtractedFact[]; llmSucceeded: boolean }> {
     // Heuristic pass always runs first.
     const heuristic = await new HeuristicExtractor().extract(message);
 
     // LLM pass: attempt and degrade gracefully.
     let llmFacts: ExtractedFact[] = [];
+    let llmSucceeded = false;
     try {
       const res = await fetch(`${this.endpoint}/chat/completions`, {
         method: "POST",
@@ -271,6 +276,7 @@ export class LocalLlmExtractor implements ExtractorBackend {
             });
           }
         }
+        llmSucceeded = true;
       }
     } catch {
       // Endpoint unreachable, timeout, JSON parse error — degrade to heuristic only.
@@ -286,7 +292,7 @@ export class LocalLlmExtractor implements ExtractorBackend {
         merged.push(f);
       }
     }
-    return merged;
+    return { facts: merged, llmSucceeded };
   }
 }
 

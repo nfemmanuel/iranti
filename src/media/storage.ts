@@ -135,4 +135,18 @@ function buildStorage(): StorageBackend {
   throw new Error(`IRANTI_MEDIA_BACKEND="${backend}" is not yet implemented. Supported: local`);
 }
 
-export const storage: StorageBackend = buildStorage();
+// Lazy singleton — defers buildStorage() (and its env-var throw) to first use,
+// so a misconfigured backend does not crash the MCP server at import time.
+let _storage: StorageBackend | undefined;
+
+function getStorage(): StorageBackend {
+  if (!_storage) _storage = buildStorage();
+  return _storage;
+}
+
+export const storage: StorageBackend = {
+  put: (bytes, opts) => getStorage().put(bytes, opts),
+  get: (ref) => getStorage().get(ref),
+  delete: (ref) => getStorage().delete(ref),
+  resolveUrl: (ref) => getStorage().resolveUrl(ref),
+};
