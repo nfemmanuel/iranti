@@ -54,16 +54,19 @@ This register supersedes the ad-hoc "Pending decisions" table in
 
 ### OD-5 — Does AX-2's SHA-256 message hash satisfy the §11 behavioral-data-only constraint?
 - **Context:** AX-2 (content-hash extraction cache, shipped 2026-06-28) stores a SHA-256 hash
-  of raw message text in the cache key. Master PRD §11 states "No metric ever includes the
-  content of a fact, conversation, or session. Usage analytics carries behavioural metadata
-  only" as a hard constraint. A SHA-256 hash of message text is derived from content — it is
-  not itself content, but it is not purely behavioural metadata either. Whether this satisfies
-  or violates the §11 constraint has not been decided.
-- **Options:** (a) hash is behavioural metadata (collision-resistant opaque ID — no semantic
-  content recoverable); (b) hash is content-derived and therefore violates §11 — must be
-  scoped to the local store only and excluded from any telemetry path; (c) distinguish use: hash
-  in local cache = fine; hash transmitted in telemetry = violates §11.
-- **Lean:** likely (c), but needs NF decision. **Status:** ⬜ **OPEN — needs NF decision.**
+  of raw message text in the cache key. The audit flagged a possible tension with master §11.
+- **Options:** (a) hash is behavioural metadata; (b) hash is content-derived and violates §11;
+  (c) distinguish by scope: in the user's instance = fine; in developer telemetry = violates §11.
+- **Status:** ✅ **DECIDED 2026-06-28 → (c), via a scope correction.** §11 governs **developer
+  telemetry only** — what the organization collects from users (anonymous behavioural metadata,
+  never content). It does **not** govern the user's own instance, which stores their facts,
+  conversation-derived slots, and media in full — locally and (Phase 5) in their own cloud backup.
+  `extraction_cache` (the hash **and** the cached `ExtractedFact[]`) is user-instance data and is
+  fully allowed; it sits beside facts the user already owns. **Invariant:** neither the hash nor any
+  fact content may ever enter the telemetry/analytics path — `attend_log` and all org-collected
+  metrics stay behavioural-only, including cloud-account-derived analytics for opted-in users.
+  Recorded in master §11 ("Two data planes, never crossed") + AX-2 PRD §6/§9. The audit's original
+  framing (and the AX-2 draft's open question) over-read §11 as a blanket no-content-storage rule.
 
 ---
 

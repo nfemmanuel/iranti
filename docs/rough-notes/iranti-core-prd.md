@@ -334,6 +334,8 @@ The session ledger records all staff events with timestamps and reasons. This pr
 
 Iranti has two distinct measurement audiences. One is operational: is the system healthy and behaving correctly? The other is product: is iranti actually working, and how are people using it? Both matter and they are tracked separately.
 
+**Two data planes, never crossed.** This section governs *telemetry* — the data that flows back to the iranti developer (the organization) — which is anonymous behavioural metadata only. It does **not** govern the user's own instance. A user's iranti instance stores their facts, conversation-derived slots, and media in full — locally, and (Phase 5) in their own cloud backup. That private data plane is the product and is theirs. The analytics plane never reads it: product metrics are derived from behaviour (counts, frequency, latency), and even cloud-account-derived analytics for opted-in users carry behavioural metadata only — never fact values, message content, or anything that would reveal what a user is working on. So "never measure content" is a constraint on *what the developer collects*, not on what the user's instance stores.
+
 ### What iranti must never measure
 
 No metric ever includes the content of a fact, conversation, or session. Usage analytics carries behavioural metadata only. This is a hard constraint, not a preference. It protects users, avoids GDPR exposure, and ensures that even if telemetry is intercepted, it reveals nothing meaningful about what users are working on.
