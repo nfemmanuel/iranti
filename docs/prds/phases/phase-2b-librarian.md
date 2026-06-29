@@ -104,4 +104,4 @@ Implements master §6 (Librarian) and §9 (intelligence) within executed Phase 2
 ## Changelog
 - 2026-06-10 — proposed
 - 2026-06-10 — accepted (decisions: A — deep conflict detection in 2b; B — LLM proposes facts only, resolution deterministic; Q1 — heuristic baseline + optional async local OSS LLM behind a pluggable, config-gated `ExtractorBackend`)
-- _pending_ — shipped
+- 2026-06-10 — shipped (commit 5053ab4f, +fix 9f2bc0dc; conflict detection + source reliability + semantic extraction)

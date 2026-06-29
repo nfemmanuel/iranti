@@ -104,4 +104,4 @@ Aligns with master Phase 2 (Librarian + graph) but deliberately ships the graph 
 ## Changelog
 - 2026-06-10 — proposed
 - 2026-06-10 — accepted (split from Phase 2; scope settled — graph substrate + write safety, no intelligence)
-- _pending_ — shipped
+- 2026-06-10 — shipped (commit 1f7af277; GraphBackend + advisory-lock write safety + co_access/governs edges)

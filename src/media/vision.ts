@@ -33,8 +33,10 @@ export interface VisionBackend {
 // ---------------------------------------------------------------------------
 
 export class NullVisionBackend implements VisionBackend {
-  async describe(_bytes: Buffer, _mime: string): Promise<null> {
-    return null;
+  // No-op backend: accepts the VisionBackend args, ignores them (hence the
+  // `_` prefix), and resolves to null. Not `async` — there is nothing to await.
+  describe(_bytes: Buffer, _mime: string): Promise<null> {
+    return Promise.resolve(null);
   }
 }
 

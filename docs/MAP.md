@@ -4,7 +4,7 @@ iranti is automatic context engineering for AI agents.
 
 This folder is the map for everything needed to plan, design, and build iranti-core. It is organized by layer: rough thinking at the top, product decisions in the middle, technical design below that, and engineering standards underneath everything. Documents earn their folder when they are ready to be written properly. Everything starts in rough-notes.
 
-**Planning lives in three places:** the [backlog](backlog.md) is the live ordered queue and the authoritative phase sequence, the [phase PRDs](prds/phases/) are the per-phase contracts written before each build, and the [implementation reference](engineering/implementation.md) is the living retrospective of what shipped. **Start with the [backlog](backlog.md) to see current status.**
+**Planning lives in four places:** the [backlog](backlog.md) is the live ordered queue and the authoritative phase sequence, the [phase PRDs](prds/phases/) are the per-phase contracts written before each build, the [implementation reference](engineering/implementation.md) is the living retrospective of what shipped, and the [open decisions register](decisions/open-decisions.md) is the primary planning doc for large or hard-to-reverse decisions — read it before acting on any significant design choice. **Start with the [backlog](backlog.md) to see current status.**
 
 **Status key:** `draft` · `template` · `deferred` · `complete`
 
@@ -57,7 +57,7 @@ One PRD per top-level package. iranti-core is the active one. The rest are futur
 | [Knowledge graph](specs/memory-storage/knowledge-graph.md) | 2 | `template` |
 | [Checkpoints](specs/memory-storage/checkpoints.md) | 3 | `template` |
 | [Rules and preferences](specs/memory-storage/rules-and-preferences.md) | 3 | `template` |
-| [Media storage](specs/memory-storage/media-storage.md) | deferred | `deferred` |
+| [Media storage](specs/memory-storage/media-storage.md) | shipped (OD-4) | `complete` |
 
 ### Retrieval
 
@@ -145,7 +145,7 @@ Explicitly parked. Each is noted in section 13 of the iranti-core PRD. No build 
 | Document | Status | Blocked on |
 |---|---|---|
 | [Cloud account](deferred/cloud-account.md) | `deferred` | Full privacy and encryption spec |
-| [Media storage](deferred/media-storage.md) | `deferred` | Own spec before build |
+| [Media storage](deferred/media-storage.md) | `shipped (OD-4)` | Local-FS backend + semantic tagging shipped 2026-06-28; S3 backend and audio transcription remain deferred |
 | [Cold start learning](deferred/cold-start-learning.md) | `deferred` | No decisions made yet |
 | [Team collaboration](deferred/team-collaboration.md) | `deferred` | Access grant and delegation model |
 | [Cloud encryption architecture](deferred/cloud-encryption.md) | `deferred` | Cloud account spec |
@@ -155,10 +155,12 @@ Explicitly parked. Each is noted in section 13 of the iranti-core PRD. No build 
 
 ## Build sequence at a glance
 
+> **Authoritative executed-phase status lives in [docs/backlog.md](backlog.md) (phase-numbering reconciliation table) and [docs/prds/phases/README.md](prds/phases/README.md).** The table below is the original §12 plan; as-built phase numbers differ. Shipped phases as of 2026-06-28: phases 0–3 of the original sequence, plus three additional tracks inserted between them — AX-1 (key normalization), AX-2 (content-hash extraction cache), and OD-4 (media ingest). Check the backlog for current status before planning any new phase.
+
 | Phase | What gets built | Done when |
 |---|---|---|
 | **0: Foundation** | Schema, GraphBackend interface, Docker Compose, TypeScript types, seed script | Schema is designed, types are defined, Docker runs |
-| **1: The Library** | Prisma schema, core CRUD, archive, entity registry | Write a fact, read it back, archive it, query by entity and session |
+| **1: The Library** | Drizzle schema, core CRUD, archive, entity registry | Write a fact, read it back, archive it, query by entity and session |
 | **2: The Librarian** | Write path, conflict detection, source reliability, PostgreSQL graph | Write two facts, see conflict resolution or escalation, query relationships |
 | **3: The Attendant** | Retrieval, handshake, two-pass retrieval, stream observation, write routing, drift check | Bidirectional retrieval and routing without the agent driving either side |
 | **4: The Archivist** | Scheduled scan, memory decay, escalation processing, `iranti resolve` | Full maintenance cycle runs, decay is active, resolved escalations apply |

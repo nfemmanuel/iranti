@@ -1,6 +1,6 @@
 # PRD: Phase 1.2 — Context Window Observation
 
-**Status:** accepted
+**Status:** shipped
 **Phase:** 1.2 · **Date:** 2026-06-10 · **Author:** Claude (with NF)
 **Related:** master PRD §8 (context window observation), [spec: context-window-observation](../../specs/retrieval/context-window-observation.md), backlog `CORE-1`, audit `goals_audit_2026_06` divergence 1
 
@@ -99,4 +99,4 @@ It also continues the standing reframe that attend (not a separate observe daemo
 ## Changelog
 - 2026-06-10 — proposed
 - 2026-06-10 — accepted (design settled in audit discussion; currentContext + dedup, correction deferred to Phase 3)
-- _pending_ — shipped
+- 2026-06-10 — shipped (commit 1f7af277, bundled in the Phase 2a commit; criteria verified in src/mcp/tools/attend.ts — currentContext suppression + alreadyPresent)

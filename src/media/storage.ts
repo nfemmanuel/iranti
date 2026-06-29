@@ -12,9 +12,9 @@
 // Disk layout:
 //   <IRANTI_MEDIA_ROOT>/<tenant>/<entityType>/<entityId>/<normalizedKey>/<uuid>.<ext>
 
-import { createReadStream, createWriteStream } from "node:fs";
+import { createWriteStream } from "node:fs";
 import { mkdir, unlink, readFile } from "node:fs/promises";
-import { join, resolve, extname } from "node:path";
+import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";

@@ -79,9 +79,11 @@ How we know it works: test counts, smoke checks, manual validation.
 | [Phase 0 — Library Foundation](phase-0-foundation.md) | 0 | shipped (retroactive) |
 | [Phase 1 — MCP Server](phase-1-mcp-server.md) | 1 | shipped (retroactive) |
 | [Phase 1.1 — Tool Realignment](phase-1.1-tool-realignment.md) | 1.1 | shipped (retroactive) |
-| [Phase 1.2 — Context Window Observation](phase-1.2-context-window-observation.md) | 1.2 | accepted |
-| [Phase 2a — Graph Foundation & Write Safety](phase-2a-graph-and-write-safety.md) | 2a | accepted |
-| [Phase 2b — The Librarian](phase-2b-librarian.md) | 2b | accepted |
+| [Phase 1.2 — Context Window Observation](phase-1.2-context-window-observation.md) | 1.2 | shipped |
+| [Phase 2a — Graph Foundation & Write Safety](phase-2a-graph-and-write-safety.md) | 2a | shipped |
+| [Phase 2b — The Librarian](phase-2b-librarian.md) | 2b | shipped |
+| [Phase 2.5 — HTTP, Telemetry & Hardening](phase-2.5-http-telemetry.md) | 2.5 | shipped |
+| [Phase 3 — The Attendant: Retrieval](phase-3-attendant-retrieval.md) | 3 | shipped |
 | [AX-1 — Key Normalization](ax-1-key-normalization.md) | AX-1 (hardening) | shipped |
 | [AX-2 — Content-Hash Extraction Cache](ax-2-content-hash-cache.md) | AX-2 (hardening) | shipped |
 | [OD-4 — Media Ingest](od4-media-ingest.md) | OD-4 (Media track) | shipped |

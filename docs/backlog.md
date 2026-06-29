@@ -60,6 +60,10 @@ The master PRD §12 and the executed build use **different** phase numbers. This
 | 🟢 CORE-9 | Conflict detection — minimal (same-key reliability gap → supersede/escalate) + deep cross-key (comprehension metric) | 2b | done | [2b](prds/phases/phase-2b-librarian.md) |
 | 🟢 CORE-10 | Source reliability scoring — `source_reliability(source, wins, losses, score)` table, updated on every supersession | 2b | done | [2b](prds/phases/phase-2b-librarian.md) |
 | 🟢 CORE-11 | Server-side semantic extraction — `HeuristicExtractor` (always-on) + `LocalLlmExtractor` (Ollama, optional), wired into attend | 2b | done | [2b](prds/phases/phase-2b-librarian.md) |
+| 🟢 CORE-12…14, 27…29 | Phase 2.5 — HTTP transport, `attend_log` + health views, confidence plumbing, `source_reliability` tenancy, write-time edges | 2.5 | `086c4941` (+`2e3cccb7`) | [2.5](prds/phases/phase-2.5-http-telemetry.md) |
+| 🟢 CORE-15…17, 30…34 | Phase 3 — two-pass retrieval, graph-hop, payload contract, extraction-primary writes, token budget, stale-context correction, `media_objects` schema, pgvector scaffolding (embedding + HNSW; hybrid-search retrieval path deferred) | 3 | `a26febe7`→`74f5a89a` (+`f01f8e80`) | [3](prds/phases/phase-3-attendant-retrieval.md) |
+| 🟢 AX-1 | Key normalisation — `normalizeKey` at all fact write/read boundaries; migration 0011 | AX | `13190c60` (+`7b6c2089`) | [ax-1](prds/phases/ax-1-key-normalization.md) |
+| 🟢 AX-2 + OD-4 | Content-hash extraction cache (AX-2) + media ingest pipeline (OD-4) | AX / OD | `16ee3916` (+`991ce3bf`, `35e4e0a6`, `c59e608c`) | [ax-2](prds/phases/ax-2-content-hash-cache.md) · [od4](prds/phases/od4-media-ingest.md) |
 
 ---
 
@@ -68,10 +72,12 @@ The master PRD §12 and the executed build use **different** phase numbers. This
 | ID | Item | Phase | Status | PRD |
 |---|---|---|---|---|
 | 🟢 CORE-12…14, 27…29 | **Phase 2.5** — single-user HTTP, `attend_log` telemetry + token accounting, Phase 2 hardening (confidence plumbing, reliability tenancy, write-time edges) | 2.5 | shipped | [2.5](prds/phases/phase-2.5-http-telemetry.md) |
-| 🔵 CORE-15…17, 30…34 | **Phase 3** — the Attendant: two-pass retrieval + graph-hop, payload contract (pre/mid/post + breadcrumbs), extraction-primary writes + born-inverted backstop, token budget, corrections, gate items 1–4 | 3 | PRD proposed | [3](prds/phases/phase-3-attendant-retrieval.md) |
+| 🟢 CORE-15…17, 30…34 | **Phase 3** — the Attendant: two-pass retrieval + graph-hop, payload contract (pre/mid/post + breadcrumbs), extraction-primary writes + born-inverted backstop, token budget, corrections, gate items 1–4 | 3 | shipped | [3](prds/phases/phase-3-attendant-retrieval.md) |
+| 🟢 AX-1 | **AX-1 — Key Normalisation** — `normalizeKey` at all fact write/read boundaries; migration 0012 | AX | shipped | [ax-1](prds/phases/ax-1-key-normalization.md) |
+| 🟢 AX-2 + OD-4 | **AX-2 + OD-4** — content-hash extraction cache + media ingest pipeline | AX / OD | shipped | [ax-2](prds/phases/ax-2-content-hash-cache.md) · [od4](prds/phases/od4-media-ingest.md) |
 | ⚪ DOC-2 | Flip spec `template` → `complete` as features ship; add master-PRD §12 pointer to the reconciliation table | — | later | n/a |
 
-> **Next action:** NF reviews Phase 3 PRD (proposed 2026-06-10) — gate items 1–4 resolved in-PRD as D1/CORE-34/CORE-33/D4; CORE-18/19 deferred by D10.
+> **Current frontier:** Phase 4 (Memory Lifecycle) + AX/OD tracks. Phase 3 and all AX-1/AX-2/OD-4 items are shipped.
 
 ---
 
@@ -105,17 +111,17 @@ One engineering effort that unlocks every consumer surface + makes the token-sav
 - **CORE-28** `source_reliability.tenant_id` + composite PK — the one missing tenancy seam. *(Gap 2.)*
 - **CORE-29** Write-time edges — `co_write` same-session (weight 0.5) + `about` fact→entity, fire-and-forget. *(Gap 3; master §12 "temporal co-occurrence, entity overlap".)*
 
-> **⛔ GATE at 2.5 close (strategic-review gap 5):** before marking 2.5 shipped, verify master §3 self-awareness is real — comprehension counters survive restart, attend latency is *measured* (not asserted), and "tokens saved this week" is answerable by one query. If any of these is missing, 2.5 is not done.
+> **✅ GATE CLEARED (2.5):** "tokens saved this week" — answerable via `SELECT * FROM iranti_health_suppression` (`scripts/health.sql`, view `iranti_health_suppression`). Attend latency measured in `iranti_health_latency`. Comprehension counters wired via `metric_counters` persistence. All three gate conditions satisfied. Phase 2.5 shipped `086c4941`.
 
-### Phase 3 — Retrieval & cross-platform  🟢
+### Phase 3 — Retrieval & cross-platform  🟢 shipped
 
-The retrieval half of the Attendant. Requires its own PRD before build (gate below must be cleared first).
+The retrieval half of the Attendant. PRD: [phase-3](prds/phases/phase-3-attendant-retrieval.md). Ship commit `a26febe7`→`74f5a89a` (+`f01f8e80`).
 
-> **⛔ GATE before Phase 3 build (strategic-review gap 4 + carried fixes):**
-> 1. **Decide the Apache AGE parallel track.** Master §12 asked for it alongside Phase 2; consciously deferred (2a PRD). Phase 3 is when retrieval starts consuming the graph — decide now whether the CTE impl carries the load or the AGE build starts. Do not let this default silently.
-> 2. **Fix `getNeighbors` depth>1 before two-pass consumes it** — the recursive-CTE join walks back toward the origin (second OR branch matches `t.source`, should be `t.target`), and `DISTINCT ON (id) ORDER BY id` discards weight ordering before the LIMIT. Both confirmed in the 2026-06-10 code review; latent only because nothing calls depth>1 yet.
-> 3. **Introduce token-budgeted injection** using `attend_log` distribution data (2.5 D3 deferred it here deliberately).
-> 4. **Decide `metric_counters` tenancy** — the table shipped in 2.5 with a `name`-only PK, unlike `source_reliability`/`attend_log`/`facts` which all carry `tenant_id`; `persistMetricCounters` writes global rows. Confirmed in the 2026-06-10 review. Invisible at single-tenant scale but a disruptive migration later — make the global-vs-per-tenant call here and migrate while the table is small.
+> **✅ GATE CLEARED — Phase 3 shipped.** All four gate items resolved before/during Phase 3 build:
+> 1. **Apache AGE decision** — resolved as D1 in Phase 3 PRD: CTE impl carries the load; AGE deferred until query complexity demands it.
+> 2. **`getNeighbors` depth>1 fix** — resolved as CORE-34 (`a26febe7`): recursive-CTE OR branch corrected; weight ordering preserved before LIMIT.
+> 3. **Token-budgeted injection** — resolved as CORE-33 (`a76de0ea`): priority-ordered budget enforcement using `attend_log` distribution data.
+> 4. **`metric_counters` tenancy** — resolved as D4 / CORE-31 (`3076515e`): `tenant_id` column added; `persistMetricCounters` writes per-tenant rows.
 
 - **CORE-30** `media_objects` schema — `(id, tenant_id, entity_type, entity_id, key, object_url, mime_type, description_text, metadata, created_at)`. Schema-only; no ingest behavior. Needs its own spec (master PRD §252/§551 requires one). Lands here so retrieval (CORE-15/16) can consume it from day one. *(Decision 2026-06-10: deferred from Phase 2.5 — 2.5 already dense; media schema with no consumer would sit inert for two phases.)*
 - **CORE-15** **Two-pass retrieval** — primary = entity + keyword match; secondary = 1–2 hop graph neighbours weighted by edge confidence. *Falls out of CORE-7 nearly for free; answers the master PRD's open question on tier weighting.*
@@ -158,10 +164,10 @@ The retrieval half of the Attendant. Requires its own PRD before build (gate bel
 | # | Divergence | Status |
 |---|---|---|
 | 1 | attend lacked relevance + window observation (regression vs v0) | 🟢 **resolved** — keyword scoring (1.1, CORE-2) + window suppression (1.2, CORE-3); full correction → CORE-17 |
-| 2 | Graph is the relevance engine; co-access edges must start in Phase 2 | 🔵 **PRD accepted** — [2a](prds/phases/phase-2a-graph-and-write-safety.md) CORE-7 (edges from day one) + CORE-15 (two-pass, Phase 3) |
+| 2 | Graph is the relevance engine; co-access edges must start in Phase 2 | 🟢 **resolved** — CORE-7 (Phase 2a, co-access edges from day one) + CORE-15 (Phase 3, two-pass graph-hop retrieval) both shipped |
 | 3 | 9 agent-driven tools vs agent-passive vision | 🟢 **resolved** — [2b](prds/phases/phase-2b-librarian.md) CORE-11 shipped: server-side extraction; tools are now escape hatches |
 | 4 | Conflicting phase numbering; 31 specs still template | 🟢 **resolved** (numbering, this doc) + ⚪ DOC-2 (spec status hygiene ongoing) |
 
 ---
 
-_Last updated: 2026-06-10 (Phase 3 complete — all COREs shipped: CORE-34/31/32/15/33/17/30/16. media_objects schema live; facts.embedding vector(768) + HNSW index pre-placed for hybrid search; pgvector/pgvector:pg17 Docker image.)_
+_Last updated: 2026-06-28 (Phase 3 shipped — CORE-15/17/30/31/33/34 complete. CORE-32: non-blocking auto-write shipped; `IRANTI_ENFORCE` blocking branch deferred. CORE-16: pgvector scaffolding only — `facts.embedding vector(768)` + HNSW index pre-placed (off by default), hybrid-search retrieval path deferred; pgvector/pgvector:pg17 Docker image. AX-1 key normalisation shipped 13190c60 (migration 0011). AX-2 content-hash cache + OD-4 media ingest shipped 16ee3916 (+991ce3bf/35e4e0a6/c59e608c). Phase 2.5 health views completed scripts/health.sql.)_

@@ -114,7 +114,6 @@ export function parseLlmJson<T = unknown>(content: string): T {
 
 function extractBalanced(s: string, startIdx: number): string | null {
   const open = s[startIdx];
-  const close = open === "{" ? "}" : "]";
 
   let depth = 0;
   let inString = false;

@@ -546,7 +546,9 @@ The original iranti grew organically over time. Reading it is like reading the r
 
 ## Current status
 
-**Phases 0 through 2a are complete and verified.** Phase 0 (`7fadef5`, supplements `3321c8c`) — library foundation. Phase 1 (`b506a38`) — MCP server, bidirectional attend, checkpoints. Phase 1.1 — tool surface 4→9 and keyword-relevance retrieval. Phase 1.2 — context window observation (`currentContext` suppression). Phase 2a — graph substrate (`knowledge_edges`), write serialization (advisory lock), co-access + governs edge recording in attend. Current totals: **125/125 vitest tests + 19/19 end-to-end stdio smoke checks.** Forward work is tracked in the [backlog](../backlog.md); host integration profiles live in `docs/engineering/hosts.md`.
+> **As of 2026-06-28 the shipped set is phases 0–3 plus AX-1, AX-2, OD-4; the per-phase detail table below is frozen at Phase 2a pending backfill — see phase PRDs + the forthcoming detailed recap.**
+
+**Phases 0 through 2a are complete and verified.** Phase 0 (`7fadef5`, supplements `3321c8c`) — library foundation. Phase 1 (`b506a38`) — MCP server, bidirectional attend, checkpoints. Phase 1.1 — tool surface 4→9 and keyword-relevance retrieval. Phase 1.2 — context window observation (`currentContext` suppression). Phase 2a — graph substrate (`knowledge_edges`), write serialization (advisory lock), co-access + governs edge recording in attend. Current totals at 2a close: **125/125 vitest tests + 19/19 end-to-end stdio smoke checks.** Forward work is tracked in the [backlog](../backlog.md); host integration profiles live in `docs/engineering/hosts.md`.
 
 | Item | Status |
 |------|--------|
@@ -584,12 +586,15 @@ This file fell behind after Phase 2a. The records below are **NOT yet backfilled
 listed so the gap is explicit rather than silently missing. Each must be written from the
 **actual code** (commit history + `src/`), not from memory, before it is trusted:
 
-- [ ] **Phase 2b — The Librarian** (conflict detection, source reliability, semantic extraction). Shipped; record TODO.
-- [ ] **Phase 2.5 — HTTP + telemetry** (CORE-12/13/14/27/28/29). Shipped; record TODO.
-- [ ] **Phase 3 — The Attendant** (CORE-15/16/17/30/31/32/33/34). Shipped; record TODO.
+- [ ] **Phase 2b — The Librarian** (conflict detection, source reliability, semantic extraction). Shipped `5053ab4f`+`9f2bc0dc`; PRD: [phase-2b](../prds/phases/phase-2b-librarian.md). Record TODO.
+- [ ] **Phase 2.5 — HTTP + telemetry** (CORE-12/13/14/27/28/29). Shipped `086c4941`+`2e3cccb7`; PRD: [phase-2.5](../prds/phases/phase-2.5-http-telemetry.md). Record TODO.
+- [ ] **Phase 3 — The Attendant** (CORE-15/16/17/30/31/32/33/34). Shipped `a26febe7`→`74f5a89a`+`f01f8e80`; PRD: [phase-3](../prds/phases/phase-3-attendant-retrieval.md). Record TODO.
+- [ ] **AX-1 — Key Normalisation** (`normalizeKey` at all write/read boundaries, migration 0012). Shipped `13190c60`+`7b6c2089`; PRD: [ax-1](../prds/phases/ax-1-key-normalization.md). No implementation.md entry yet.
+- [ ] **AX-2 — Content-hash Extraction Cache** (dedup cache keyed on content hash). Shipped `16ee3916`+`991ce3bf`+`35e4e0a6`+`c59e608c`; PRD: [ax-2](../prds/phases/ax-2-content-hash-cache.md). No implementation.md entry yet.
+- [ ] **OD-4 — Media Ingest Pipeline** (media_objects ingest, parseLlmJson, metadata merge). Shipped in same batch as AX-2 above; PRD: [od4](../prds/phases/od4-media-ingest.md). No implementation.md entry yet.
 
 Until backfilled, treat the [phase PRDs](../prds/phases/) + commit history as the source of
-truth for 2b/2.5/3, and the [decision register](../decisions/open-decisions.md) for open decisions.
+truth for 2b/2.5/3/AX-1/AX-2/OD-4, and the [decision register](../decisions/open-decisions.md) for open decisions.
 
 ---
 

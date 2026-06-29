@@ -50,7 +50,20 @@ This register supersedes the ad-hoc "Pending decisions" table in
 - **Context:** `media_objects.object_url` is a pointer column; there is **no** storage
   integration (no S3/minio/upload path) — confirmed 2026-06-12.
 - **Options:** local filesystem, S3-compatible (self-host minio / AWS), or defer.
-- **Lean:** ~~defer~~ → **build now** (user override; real use case). **Status:** ✅ **DECIDED → build local-FS now, S3-ready, semantically tagged; media-ingest spec drafted (proposed)** → [od4-media-ingest](../prds/phases/od4-media-ingest.md) (see Decided below).
+- **Lean:** ~~defer~~ → **build now** (user override; real use case). **Status:** ✅ **SHIPPED 2026-06-28** — local-FS backend, S3-ready abstraction, vision semantic tagging, `iranti_ingest_media` MCP tool, `AttendResult.media[]` tier → [od4-media-ingest](../prds/phases/od4-media-ingest.md) (see Decided below).
+
+### OD-5 — Does AX-2's SHA-256 message hash satisfy the §11 behavioral-data-only constraint?
+- **Context:** AX-2 (content-hash extraction cache, shipped 2026-06-28) stores a SHA-256 hash
+  of raw message text in the cache key. Master PRD §11 states "No metric ever includes the
+  content of a fact, conversation, or session. Usage analytics carries behavioural metadata
+  only" as a hard constraint. A SHA-256 hash of message text is derived from content — it is
+  not itself content, but it is not purely behavioural metadata either. Whether this satisfies
+  or violates the §11 constraint has not been decided.
+- **Options:** (a) hash is behavioural metadata (collision-resistant opaque ID — no semantic
+  content recoverable); (b) hash is content-derived and therefore violates §11 — must be
+  scoped to the local store only and excluded from any telemetry path; (c) distinguish use: hash
+  in local cache = fine; hash transmitted in telemetry = violates §11.
+- **Lean:** likely (c), but needs NF decision. **Status:** ⬜ **OPEN — needs NF decision.**
 
 ---
 
@@ -116,6 +129,8 @@ durable memory and re-surfacing it, with no dedup against what is already in the
   payload incl. the assistant response) as `attendant_autowrite@0.70`. That path must run through
   the durable-slot gate + dedup or it can recreate FM-1. Add a golden-corpus regression that
   feeds a prior response back in and asserts **no verbatim re-injection and no loop**.
+- **CORE-32 IRANTI_ENFORCE blocking** (protocol enforcement for handshake/attend cycle): **deferred** — not built in the current cycle. Needs its own spec before build.
+- **CORE-16 hybrid pgvector search** (retrieval path): schema scaffolding only as of 2026-06-28; the retrieval path itself is **deferred**.
 
 ---
 
@@ -162,22 +177,19 @@ cloud layer for that account. Building toward this now = keep the storage/extrac
 clean so the cloud layer slots on top without touching the local store.
 **Trigger to revisit:** Phase 5 accounts, or a decision to monetize hosted extraction.
 
-### OD-4 — Media object storage → **build now (local-FS, S3-ready, semantically tagged)** — needs a media-ingest spec
+### OD-4 — Media object storage → **SHIPPED 2026-06-28** (local-FS, S3-ready, semantically tagged)
 **Decision (user override of "defer"):** build object storage **now** — a local filesystem
 backend behind an S3-ready abstraction — because there is a real present use case: media
 artifacts are durable memory (e.g. the bug-report screenshots used this session). Hard
 requirement: every object is **properly semantically tagged** (description + tags + key) so it is
 retrievable *as memory*, not dumb blob storage.
-**What this entails (so it's done right, not rushed):**
-- A storage abstraction (interface) with a **local-FS backend now**, **S3-compatible later** —
+**What shipped:**
+- A storage abstraction (interface) with a **local-FS backend**, **S3-compatible later** —
   same pattern as `GraphBackend`, mirroring OD-2 (local default, cloud later).
-- A **semantic-tagging step**: an image needs a text description + tags to be searchable — a
-  description/vision step (e.g. a local vision model: Ollama `llava` / `qwen2.5-vl`) producing
-  `description_text` + tags into the existing `media_objects` columns. (Which vision model =
-  local vs cloud is a sub-decision the spec will settle, consistent with OD-2.)
-- Therefore it needs its own short **media-ingest spec** (the one CORE-30 flagged) defining: the
-  storage interface, the tagging/description mechanism + model, the key scheme, and how retrieval
-  surfaces media.
-**Sequencing:** parallel to the extraction work; does **not** block AX-1 (`normalizeKey`). Next
-artifact = the media-ingest spec — **drafted (proposed)** at
-[od4-media-ingest](../prds/phases/od4-media-ingest.md), awaiting NF acceptance.
+- A **semantic-tagging step**: vision-model description + tags → `description_text` + tags into
+  `media_objects` columns, making media retrievable as memory.
+- `iranti_ingest_media` MCP tool; results surface in `AttendResult.media[]`.
+- Code: `src/media/`, `src/library/media.ts`, `src/mcp/tools/ingest-media.ts`.
+**Commits:** initial implementation 16ee3916; hardening 991ce3bf, 35e4e0a6, c59e608c.
+**Spec:** [od4-media-ingest](../prds/phases/od4-media-ingest.md).
+**Remaining deferred:** S3-compatible cloud backend; audio transcription at ingest.

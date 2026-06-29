@@ -92,7 +92,7 @@ Phase 2.5 does three things. **(1) It takes iranti remote**: the same MCP server
 - [ ] A fact written via stdio surfaces in an attend served over HTTP (one store, two transports).
 - [ ] With `IRANTI_EXPOSE_OPENAI_ALIASES=true`, `search` and `fetch` appear and conform to the connector schema; without it they are absent.
 - [ ] Every attend writes an `attend_log` row with non-zero sizes and a latency; attend latency itself is unchanged (logging is off the response path).
-- [ ] `already_present` suppression is persisted and queryable: "tokens saved this week" is answerable with one SQL query.
+- [ ] `already_present` suppression is persisted and queryable: "tokens saved this week" is answerable with one SQL query. **[COMPLETED 2026-06-28]** Six content-free SQL health views shipped at `scripts/health.sql`: `iranti_health_attends_per_day`, `iranti_health_injection_size`, `iranti_health_suppression` ("tokens saved this week"), `iranti_health_latency`, `iranti_health_escalations`, `iranti_health_reliability`. Columns verified against `src/db/schema.ts`.
 - [ ] Comprehension counters survive a server restart.
 - [ ] An extracted fact stores confidence ≈ 0.85 × reliability multiplier, not 1.0; an explicit write from a neutral source still stores 1.0.
 - [ ] `source_reliability` rows are tenant-scoped; existing rows migrated to `default`.
@@ -121,3 +121,4 @@ Pulls the single-user slice of master Phase 5 (hosts/HTTP) forward, consistent w
 - 2026-06-10 — proposed (scope set by NF: original CORE-12/13/14 + strategic-review gaps 1–3 as CORE-27/28/29; gaps 4–5 become gated reminders, not 2.5 scope — AGE decision at Phase 3, self-awareness verification at 2.5 close)
 - 2026-06-10 — accepted
 - 2026-06-10 — shipped (178 tests green, clean build; co_write bug fixed — prev-fact query now uses ne() to exclude the just-written fact)
+- 2026-06-28 — SQL health views completed (`scripts/health.sql`, 6 views: `iranti_health_attends_per_day`, `iranti_health_injection_size`, `iranti_health_suppression`, `iranti_health_latency`, `iranti_health_escalations`, `iranti_health_reliability`) — closes the deferred §4 health-views scope item.

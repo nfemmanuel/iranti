@@ -161,6 +161,8 @@ A checkpoint is a compressed summary of a task or session state, written by the 
 
 Media such as images, documents, and audio will be stored in object storage rather than in the knowledge base directly. The knowledge base holds the metadata and a generated text description for each media item. On retrieval, the description and metadata surface first. The Attendant escalates to the actual media when the user signals dissatisfaction with what the description provided, or when it judges that the information gap cannot be closed without the real content. Audio media requires transcription at ingest time to be searchable. This is future scope and not in the initial build, but the schema should accommodate it from the start.
 
+> **Note (2026-06-28):** Object storage for media **shipped** via OD-4 in this build cycle — local-FS backend behind an S3-ready abstraction, with vision-model semantic tagging (description + tags) at ingest. Entry point: `iranti_ingest_media` MCP tool; results surface in `AttendResult.media[]`. Code lives in `src/media/`, `src/library/media.ts`, and `src/mcp/tools/ingest-media.ts`. The original vision text above remains intact as the architectural intent. Audio transcription and the cloud (S3) backend remain future scope.
+
 ### Two categories of memory
 
 Iranti stores two fundamentally different categories of memory and manages them differently.
@@ -249,7 +251,7 @@ Each entry is one line of description and one line of why. When a feature is rea
 - **Knowledge graph.** Facts are nodes in a traversable graph with automatically inferred relationships. Why: related facts that share no explicit connection can still be found together through traversal.
 - **Checkpoints.** Compressed task summaries written at meaningful session moments. Why: allows session recovery and faster bulk context retrieval than assembling from individual facts.
 - **Rules and preferences.** User-defined rules stored separately from facts, triggered by context rather than retrieved by similarity. Why: agents should follow consistent user preferences without being re-told them.
-- **Media storage (future).** Images, documents, and audio stored in object storage with metadata and generated description in the knowledge base. Why: agents work with more than text and iranti should extend to everything the user shares.
+- **Media storage.** Images, documents, and audio stored in object storage with metadata and generated description in the knowledge base. Why: agents work with more than text and iranti should extend to everything the user shares. *(Local-FS backend + semantic tagging shipped via OD-4, 2026-06-28. S3 backend and audio transcription remain future scope.)*
 
 ### Retrieval
 - **Two-pass retrieval.** Primary pass for directly relevant facts, secondary pass for peripheral facts that might matter. Why: the answer to a question often depends on context the question did not explicitly ask for.
@@ -384,7 +386,7 @@ Direct measurement of successful recall requires reading session content, which 
 
 ## 12. Build sequence
 
-> **Note (2026-06):** the sequence below is the original plan. As executed, MCP integration was pulled forward (to land a runnable loop early) and the foundation/library phases were folded together, so the as-built phase numbers differ from those here. The [backlog](../backlog.md#phase-numbering--reconciled) holds the authoritative phase mapping and is the live source for what is shipped and what is next. This section is preserved as the original intent.
+> **Note (2026-06):** the sequence below is the original plan. As executed, MCP integration was pulled forward (to land a runnable loop early) and the foundation/library phases were folded together, so the as-built phase numbers differ from those here. The [backlog](../backlog.md#phase-numbering--reconciled) holds the authoritative phase mapping and is the live source for what is shipped and what is next. This section is preserved as the original intent. Three additional shipped tracks were inserted between the original phases and are not reflected in this sequence: AX-1 (key normalization, 2026-06-26), AX-2 (content-hash extraction cache, 2026-06-28), and OD-4 (media ingest, 2026-06-28) — each documented in the backlog and their respective phase PRDs.
 
 The build is organised into phases. Each phase must be functionally complete before the next one depends on it. Where phases can run in parallel, that is noted. The goal is to have something runnable as early as possible so testing can happen against real behaviour rather than theory.
 
@@ -404,7 +406,7 @@ Nothing else starts until Phase 0 is complete and reviewable.
 
 The knowledge store with basic read and write operations. No intelligence yet, just a clean data layer.
 
-- Prisma schema and initial migrations matching the Phase 0 design. Prisma is a TypeScript-friendly database toolkit that makes it straightforward to define the schema, generate type-safe query helpers, and manage schema changes over time through migrations.
+- Drizzle schema and initial migrations matching the Phase 0 design. (Built on Drizzle, not Prisma — see implementation reference.) Drizzle is a TypeScript-first ORM that provides type-safe query helpers and manages schema changes through migrations.
 - Core query functions: create, read, update, archive, find by entity, find by session.
 - The archive table and archival functions (never delete, only archive).
 - Entity registry and alias resolution.
@@ -499,7 +501,7 @@ Session ledger, metrics, and telemetry.
 
 - Apache AGE implementation switchover (development runs parallel from Phase 2, switchover when manual implementation shows limits)
 - Cloud account and backup (requires its own spec first)
-- Media storage (requires its own spec first)
+- Media storage — S3 backend and audio transcription (local-FS + semantic tagging shipped via OD-4, 2026-06-28; cloud storage backend and audio transcription remain deferred)
 - Team collaboration and shared namespaces (requires access grant spec first)
 - Cold start learning
 - Dev mode
@@ -528,7 +530,7 @@ The CLI supports the minimum operational surface: binding iranti to a project, q
 
 Hybrid retrieval triggers are active: both reactive and periodic drift checks run and the correction-to-injection ratio is measurable.
 
-The following are explicitly not required for done enough: cloud account and backup, media storage, Apache AGE implementation, team collaboration and shared namespaces, cold start learning, and dev mode.
+The following are explicitly not required for done enough: cloud account and backup, full media storage (local-FS backend shipped via OD-4; S3 backend and audio transcription remain out of scope), Apache AGE implementation, team collaboration and shared namespaces, cold start learning, and dev mode.
 
 ### Open design decisions
 
@@ -548,7 +550,7 @@ The following are explicitly not required for done enough: cloud account and bac
 
 **Cloud account and backup.** Optional user account enabling cloud backup and cross-device sync. Requires a full privacy and encryption spec first, specifically the client-side decryption flow and key management design. High GDPR sensitivity.
 
-**Media storage.** Images, documents, and audio stored in object storage with metadata and generated descriptions in the knowledge base. Open questions: who decides when to re-inject actual media vs the description, how audio transcription integrates at ingest time, and LLM call cost at ingest. Schema should accommodate this from the start even though it ships later.
+**Media storage (S3 backend + audio transcription).** The local-FS backend, semantic tagging, and MCP ingest tool shipped via OD-4 (2026-06-28). Remaining future scope: S3-compatible cloud backend, audio transcription at ingest, and the escalation path from description to full media. Open questions that survived the OD-4 build: who decides when to re-inject actual media vs the description, and how audio transcription integrates at ingest time.
 
 **Cold start learning.** A fresh iranti installation should learn like an LLM learns: from the people using it and from the system. What this means in practice, how long it takes, and how iranti bootstraps before it has accumulated context are all open. No decisions made yet.
 
