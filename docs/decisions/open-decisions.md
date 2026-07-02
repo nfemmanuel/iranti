@@ -18,6 +18,21 @@ This register supersedes the ad-hoc "Pending decisions" table in
   into clean slots. "Same result every time" is engineered at the **store layer**, not the
   model. (Clarified 2026-06-12; was implicit before.)
 
+- **The three guarantees (G1–G3).** Every design decision serves at least one of these;
+  if a proposed feature trades one away, that trade must be explicit. (Named 2026-06-29.)
+  - **G1 — Deterministic & correctable.** A fact is a *row*: inspectable, editable,
+    supersedable, fully historied (`fact_archive`), deletable. Memory is never opaque or
+    unfixable. This is the reason for the determinism principle above and for never
+    hard-deleting. (Rejects memory-as-model-weights: opaque, uncorrectable.)
+  - **G2 — Host/model portable.** Memory lives *outside* any one model and is reachable by
+    any MCP-capable host. The same knowledge base serves Claude today and Codex tomorrow.
+    Anything that welds memory to one model or tokenizer (fine-tuned adapters, stored
+    token-ids) violates G2 and is rejected.
+  - **G3 — Local-first & private.** Runs free, on the user's machine, with a local model
+    (Ollama), no signup, no API key. The developer collects only anonymous *behavioural*
+    telemetry — never content (see master §11, "Two data planes, never crossed"). The
+    user's instance (local + cloud backup) holds their content in full.
+
 ---
 
 ## Open decisions
@@ -51,22 +66,6 @@ This register supersedes the ad-hoc "Pending decisions" table in
   integration (no S3/minio/upload path) — confirmed 2026-06-12.
 - **Options:** local filesystem, S3-compatible (self-host minio / AWS), or defer.
 - **Lean:** ~~defer~~ → **build now** (user override; real use case). **Status:** ✅ **SHIPPED 2026-06-28** — local-FS backend, S3-ready abstraction, vision semantic tagging, `iranti_ingest_media` MCP tool, `AttendResult.media[]` tier → [od4-media-ingest](../prds/phases/od4-media-ingest.md) (see Decided below).
-
-### OD-5 — Does AX-2's SHA-256 message hash satisfy the §11 behavioral-data-only constraint?
-- **Context:** AX-2 (content-hash extraction cache, shipped 2026-06-28) stores a SHA-256 hash
-  of raw message text in the cache key. The audit flagged a possible tension with master §11.
-- **Options:** (a) hash is behavioural metadata; (b) hash is content-derived and violates §11;
-  (c) distinguish by scope: in the user's instance = fine; in developer telemetry = violates §11.
-- **Status:** ✅ **DECIDED 2026-06-28 → (c), via a scope correction.** §11 governs **developer
-  telemetry only** — what the organization collects from users (anonymous behavioural metadata,
-  never content). It does **not** govern the user's own instance, which stores their facts,
-  conversation-derived slots, and media in full — locally and (Phase 5) in their own cloud backup.
-  `extraction_cache` (the hash **and** the cached `ExtractedFact[]`) is user-instance data and is
-  fully allowed; it sits beside facts the user already owns. **Invariant:** neither the hash nor any
-  fact content may ever enter the telemetry/analytics path — `attend_log` and all org-collected
-  metrics stay behavioural-only, including cloud-account-derived analytics for opted-in users.
-  Recorded in master §11 ("Two data planes, never crossed") + AX-2 PRD §6/§9. The audit's original
-  framing (and the AX-2 draft's open question) over-read §11 as a blanket no-content-storage rule.
 
 ---
 
@@ -196,3 +195,16 @@ retrievable *as memory*, not dumb blob storage.
 **Commits:** initial implementation 16ee3916; hardening 991ce3bf, 35e4e0a6, c59e608c.
 **Spec:** [od4-media-ingest](../prds/phases/od4-media-ingest.md).
 **Remaining deferred:** S3-compatible cloud backend; audio transcription at ingest.
+
+### OD-5 — AX-2 message hash vs §11 → **DECIDED 2026-06-28 → (c), scope correction**
+**Decision:** §11's "behavioral-data-only" rule governs **developer telemetry only** — what the
+organization collects from users (anonymous behavioural metadata, never content). It does **not**
+govern the user's own instance, which stores their facts, conversation-derived slots, and media in
+full — locally and (Phase 5) in their own cloud backup. AX-2's `extraction_cache` (the SHA-256
+`input_hash` **and** the cached `ExtractedFact[]`) is user-instance data and is fully allowed; it
+sits beside facts the user already owns, and the hash is irreversible.
+**Invariant:** neither the hash nor any fact content may ever enter the telemetry/analytics path —
+`attend_log` and all org-collected metrics stay behavioural-only, including cloud-account-derived
+analytics for opted-in users.
+**Recorded:** master §11 ("Two data planes, never crossed") + AX-2 PRD §6/§9. The audit's original
+framing (and the AX-2 draft's open question) over-read §11 as a blanket no-content-storage rule.
