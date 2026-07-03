@@ -93,4 +93,6 @@ How we know it works: test counts, smoke checks, manual validation.
 | [Layer 0d — Rules & Preferences Enforcement](layer-0d-rules-enforcement.md) | Layer 0d (YC foundation) | shipped |
 | [Layer 0e — Checkpoint Criteria & Project-State Rollup](layer-0e-checkpoints.md) | Layer 0e (YC foundation) | shipped |
 
+| [Layer 0f — No-Answer Honesty](layer-0f-no-answer.md) | Layer 0f (YC foundation) | proposed |
+
 > Retroactive PRDs (0, 1, 1.1) document phases that shipped before this process existed. They are written from the implementation record and exist so the history is complete and auditable — the standard going forward is PRD-first.
