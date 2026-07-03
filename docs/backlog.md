@@ -156,6 +156,8 @@ The retrieval half of the Attendant. PRD: [phase-3](prds/phases/phase-3-attendan
 - **DEBT-4** `implementation.md` Hebbian wording redefines edge-reinforcement as fact `stabilityScore`; reconcile at CORE-21.
 - **DEFER-1** **Manual-edit / change-graph.** Account for users editing files outside an agent session — a GitHub/Bitbucket-style change graph so the agent's memory of the codebase doesn't go stale. This is the master PRD §13 "manual edit problem" risk (git integration / file watchers). Parked by explicit decision (2026-06-10); revisit after the core loop is proven.
 - **DEFER-2** **Write-guard → protocol enforcement.** Retire the blocking-per-edit write guard; reintroduce at Phase 7 as *configurable, advisory-by-default* protocol enforcement keyed on findings/turns, not raw edit-events. (Lives in the v0 server, not iranti-core — see `write_guard_recommendation`.)
+- **RULE-1** **Tokenizer short-token floor.** `tokenizeMessage`'s length>=3 filter drops 2-char tokens (S3, PR, UI, CI) from both messages and rule text, so short-codename rules can never match on their defining token (Layer 0d review finding). Fix = measured change: lower/special-case the floor and re-run the full bench, since the tokenizer is shared with fact relevance scoring.
+- **RULE-2** **Teardown vs fire-and-forget chains (production hang risk).** attend()'s detached post-response chain racing `closeDb()` on single-connection PGlite leaves an in-flight query promise pending FOREVER (reproduced in Layer 0d's host-simulation build; pre-existing on main). Tests carry 300ms grace-period workarounds; the root fix is for closeDb/pool.end to await or cancel in-flight chains. A host that shuts down immediately after a turn can hang today.
 
 ---
 

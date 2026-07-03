@@ -4,55 +4,120 @@
   "messages": [
     {
       "text": "Let's go with Tailwind for styling instead of the old CSS modules setup.",
-      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "dashboard-redesign"
+        }
+      ]
     },
     {
       "text": "We chose Zustand for state management over Redux for the new dashboard.",
-      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "dashboard-redesign"
+        }
+      ]
     },
     {
       "text": "Decision: all new components live under src/components/ui, no more scattering.",
-      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "dashboard-redesign"
+        }
+      ]
     },
     {
       "text": "I prefer colocating a component's test file right next to it.",
-      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "dashboard-redesign"
+        }
+      ]
     },
     {
       "text": "Please always add an aria-label to icon-only buttons.",
-      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "dashboard-redesign"
+        }
+      ]
     },
     {
       "text": "We can't use client-side only rendering for the pricing page, it needs to be crawlable.",
-      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "dashboard-redesign"
+        }
+      ]
     },
     {
       "text": "Actually, the breakpoint for tablet is 768px, not 820px like the old spec said.",
-      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "dashboard-redesign"
+        }
+      ]
     },
     {
       "text": "The correct value for the primary brand color is #1a73e8, design just corrected it.",
-      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "dashboard-redesign"
+        }
+      ]
     },
     {
       "text": "We tried CSS-in-JS with runtime styles but it didn't work well with our SSR setup.",
-      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "dashboard-redesign"
+        }
+      ]
     },
     {
       "text": "Failed approach: a single global Redux store for everything, way too much boilerplate.",
-      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "dashboard-redesign"
+        }
+      ]
     },
     {
       "text": "Check src/components/ui/Button.tsx for the button variants pattern.",
-      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "dashboard-redesign"
+        }
+      ]
     },
     {
       "text": "See https://www.figma.com/file/abc123/dashboard-redesign for the latest mocks — everyone just calls it 'the figma file' in Slack.",
-      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "dashboard-redesign"
+        }
+      ]
     },
     {
       "text": "Never ship a component without a loading and an error state.",
-      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "dashboard-redesign"
+        }
+      ]
     }
   ],
   "goldFacts": [
@@ -158,56 +223,115 @@
   "probes": [
     {
       "query": "What are we using for styling?",
-      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }],
-      "expectedKeys": ["decision:tailwind-for-styling-instead-of-the-old-"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "dashboard-redesign"
+        }
+      ],
+      "expectedKeys": [
+        "decision:tailwind-for-styling-instead-of-the-old-"
+      ],
       "note": "direct decision recall"
     },
     {
       "query": "What's the tablet breakpoint?",
-      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }],
-      "expectedKeys": ["correction:the-breakpoint-for-tablet"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "dashboard-redesign"
+        }
+      ],
+      "expectedKeys": [
+        "correction:the-breakpoint-for-tablet"
+      ],
       "note": "must surface the corrected 768px value — confirmation-rate probe"
     },
     {
       "query": "What's the primary brand color?",
-      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }],
-      "expectedKeys": ["correction:the-primary-brand-color"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "dashboard-redesign"
+        }
+      ],
+      "expectedKeys": [
+        "correction:the-primary-brand-color"
+      ],
       "note": "second correction-recall probe"
     },
     {
       "query": "Can the pricing page be client-side only rendered?",
-      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }],
-      "expectedKeys": ["constraint:client-side-only-rendering-for-the-prici"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "dashboard-redesign"
+        }
+      ],
+      "expectedKeys": [
+        "constraint:client-side-only-rendering-for-the-prici"
+      ],
       "note": "constraint recall"
     },
     {
       "query": "What did we try for styling that didn't work with SSR?",
-      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }],
-      "expectedKeys": ["failed-approach:css-in-js-with-runtime-styles"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "dashboard-redesign"
+        }
+      ],
+      "expectedKeys": [
+        "failed-approach:css-in-js-with-runtime-styles"
+      ],
       "note": "failed-approach recall"
     },
     {
       "query": "Where's the figma file?",
-      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }],
-      "expectedKeys": ["alias:the-figma-file"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "dashboard-redesign"
+        }
+      ],
+      "expectedKeys": [
+        "alias:the-figma-file"
+      ],
       "note": "ALIAS PROBE — expected to score 0/low today"
     },
     {
       "query": "Where do new components live?",
-      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }],
-      "expectedKeys": ["decision:all-new-components-live-under-src-compon"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "dashboard-redesign"
+        }
+      ],
+      "expectedKeys": [
+        "decision:all-new-components-live-under-src-compon"
+      ],
       "note": "decision recall"
     },
     {
       "query": "What icon set did the design team pick for the dashboard?",
-      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "dashboard-redesign"
+        }
+      ],
       "expectedKeys": [],
       "negative": true,
       "note": "NEGATIVE PROBE — icons/icon libraries are never mentioned in this transcript (aria-label on icon-only buttons is about accessibility, not an icon set choice); any returned fact is a false positive."
     },
     {
       "query": "What's our target Lighthouse performance score?",
-      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "dashboard-redesign"
+        }
+      ],
       "expectedKeys": [],
       "negative": true,
       "note": "NEGATIVE PROBE — Lighthouse/performance budgets are never mentioned in this transcript."
@@ -239,35 +363,79 @@
   "ruleProbes": [
     {
       "query": "Do icon-only buttons need any accessibility markup?",
-      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }],
-      "expectedRuleTextContains": ["aria-label"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "dashboard-redesign"
+        }
+      ],
+      "expectedRuleTextContains": [
+        "aria-label"
+      ],
       "note": "POSITIVE RULE PROBE — shares 'icon'/'buttons' tokens with the aria-label rule."
     },
     {
       "query": "Can I ship this new card component without an error state for now?",
-      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }],
-      "expectedRuleTextContains": ["loading and an error state"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "dashboard-redesign"
+        }
+      ],
+      "expectedRuleTextContains": [
+        "loading and an error state"
+      ],
       "note": "POSITIVE RULE PROBE — shares 'component'/'error'/'state' tokens with the loading/error-state rule."
     },
     {
       "query": "Is it fine to use a custom icon font we haven't cleared with legal yet?",
-      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign-legal" }],
-      "expectedRuleTextContains": ["cleared by legal"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "dashboard-redesign-legal"
+        }
+      ],
+      "expectedRuleTextContains": [
+        "cleared by legal"
+      ],
       "note": "POSITIVE RULE PROBE — exercises the critical-priority rule on its own entity, unrelated topic on purpose (must still fire per D2)."
     },
     {
       "query": "What breakpoint should the nav collapse at on tablet?",
-      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "dashboard-redesign"
+        }
+      ],
       "expectedRuleTextContains": [],
       "negative": true,
       "note": "NEGATIVE RULE PROBE — shares no vocabulary with either sub-critical rule's text ('aria-label'/'icon-only'/'buttons' or 'loading'/'error'/'state'/'component'); dashboard-redesign has no critical-priority rule so any rule here is unambiguous noise."
     },
     {
       "query": "Should Storybook stories live in a separate top-level folder?",
-      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "dashboard-redesign"
+        }
+      ],
       "expectedRuleTextContains": [],
       "negative": true,
       "note": "NEGATIVE RULE PROBE — 'Storybook'/'folder' share no tokens with either seeded rule text (checked token-by-token, including avoiding 'component', which rule2 contains); deliberately distinct from the extraction-layer 'colocating test files' preference fact elsewhere in this corpus (facts and rules are scored independently)."
+    },
+    {
+      "query": "these toolbar icons don't have any text next to them, is that fine for screen readers?",
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "dashboard-redesign"
+        }
+      ],
+      "expectedRuleTextContains": [
+        "aria-label"
+      ],
+      "note": "HONEST-CAPABILITY PROBE (added in review): textbook aria-label situation phrased realistically ('icons' != 'icon', no stemming) — EXPECTED TO MISS today. Documents the G1 keyword-overlap ceiling as a measured number instead of a footnote; a future deterministic synonym layer closes it as a visible delta."
     }
   ]
 }

@@ -119,9 +119,9 @@
         ]
       },
       "rules": {
-        "ruleProbeCount": 5,
-        "positiveCount": 3,
-        "relevantCount": 3,
+        "ruleProbeCount": 6,
+        "positiveCount": 4,
+        "relevantCount": 4,
         "ruleRelevanceRate": 1,
         "negativeCount": 2,
         "noiseCount": 0,
@@ -166,6 +166,15 @@
             "expectedRuleTextContains": [],
             "negative": true,
             "relevant": false,
+            "noise": false
+          },
+          {
+            "query": "writing a new report query, grabbing all columns for now",
+            "expectedRuleTextContains": [
+              "Never use SELECT *"
+            ],
+            "negative": false,
+            "relevant": true,
             "noise": false
           }
         ]
@@ -290,10 +299,10 @@
         ]
       },
       "rules": {
-        "ruleProbeCount": 5,
-        "positiveCount": 3,
+        "ruleProbeCount": 6,
+        "positiveCount": 4,
         "relevantCount": 3,
-        "ruleRelevanceRate": 1,
+        "ruleRelevanceRate": 0.75,
         "negativeCount": 2,
         "noiseCount": 0,
         "ruleNoiseRate": 0,
@@ -336,6 +345,15 @@
             "query": "How many boosting rounds should the gradient-boosted tree run for?",
             "expectedRuleTextContains": [],
             "negative": true,
+            "relevant": false,
+            "noise": false
+          },
+          {
+            "query": "quick sanity check — mind if I compute the final eval numbers in jupyter before wiring it into the training flow?",
+            "expectedRuleTextContains": [
+              "held-out test set"
+            ],
+            "negative": false,
             "relevant": false,
             "noise": false
           }
@@ -461,10 +479,10 @@
         ]
       },
       "rules": {
-        "ruleProbeCount": 5,
-        "positiveCount": 3,
+        "ruleProbeCount": 6,
+        "positiveCount": 4,
         "relevantCount": 3,
-        "ruleRelevanceRate": 1,
+        "ruleRelevanceRate": 0.75,
         "negativeCount": 2,
         "noiseCount": 0,
         "ruleNoiseRate": 0,
@@ -507,6 +525,15 @@
             "query": "Should Storybook stories live in a separate top-level folder?",
             "expectedRuleTextContains": [],
             "negative": true,
+            "relevant": false,
+            "noise": false
+          },
+          {
+            "query": "these toolbar icons don't have any text next to them, is that fine for screen readers?",
+            "expectedRuleTextContains": [
+              "aria-label"
+            ],
+            "negative": false,
             "relevant": false,
             "noise": false
           }
@@ -632,10 +659,10 @@
         ]
       },
       "rules": {
-        "ruleProbeCount": 5,
-        "positiveCount": 3,
+        "ruleProbeCount": 6,
+        "positiveCount": 4,
         "relevantCount": 3,
-        "ruleRelevanceRate": 1,
+        "ruleRelevanceRate": 0.75,
         "negativeCount": 2,
         "noiseCount": 0,
         "ruleNoiseRate": 0,
@@ -678,6 +705,15 @@
             "query": "who do we ping if the widget goes down over the weekend",
             "expectedRuleTextContains": [],
             "negative": true,
+            "relevant": false,
+            "noise": false
+          },
+          {
+            "query": "can I kick off the weekly data dump job right now",
+            "expectedRuleTextContains": [
+              "export script"
+            ],
+            "negative": false,
             "relevant": false,
             "noise": false
           }
@@ -1088,10 +1124,10 @@
       ]
     },
     "rules": {
-      "ruleProbeCount": 20,
-      "positiveCount": 12,
-      "relevantCount": 12,
-      "ruleRelevanceRate": 1,
+      "ruleProbeCount": 24,
+      "positiveCount": 16,
+      "relevantCount": 13,
+      "ruleRelevanceRate": 0.8125,
       "negativeCount": 8,
       "noiseCount": 0,
       "ruleNoiseRate": 0,
@@ -1138,6 +1174,15 @@
           "noise": false
         },
         {
+          "query": "writing a new report query, grabbing all columns for now",
+          "expectedRuleTextContains": [
+            "Never use SELECT *"
+          ],
+          "negative": false,
+          "relevant": true,
+          "noise": false
+        },
+        {
           "query": "Is it okay to evaluate the final metrics using the notebook directly?",
           "expectedRuleTextContains": [
             "held-out test set"
@@ -1175,6 +1220,15 @@
           "query": "How many boosting rounds should the gradient-boosted tree run for?",
           "expectedRuleTextContains": [],
           "negative": true,
+          "relevant": false,
+          "noise": false
+        },
+        {
+          "query": "quick sanity check — mind if I compute the final eval numbers in jupyter before wiring it into the training flow?",
+          "expectedRuleTextContains": [
+            "held-out test set"
+          ],
+          "negative": false,
           "relevant": false,
           "noise": false
         },
@@ -1220,6 +1274,15 @@
           "noise": false
         },
         {
+          "query": "these toolbar icons don't have any text next to them, is that fine for screen readers?",
+          "expectedRuleTextContains": [
+            "aria-label"
+          ],
+          "negative": false,
+          "relevant": false,
+          "noise": false
+        },
+        {
           "query": "can I run the export script today, it's Friday but this is urgent",
           "expectedRuleTextContains": [
             "never touch the export script on Fridays"
@@ -1257,6 +1320,15 @@
           "query": "who do we ping if the widget goes down over the weekend",
           "expectedRuleTextContains": [],
           "negative": true,
+          "relevant": false,
+          "noise": false
+        },
+        {
+          "query": "can I kick off the weekly data dump job right now",
+          "expectedRuleTextContains": [
+            "export script"
+          ],
+          "negative": false,
           "relevant": false,
           "noise": false
         }

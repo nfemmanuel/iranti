@@ -4,55 +4,120 @@
   "messages": [
     {
       "text": "We decided to use PostgreSQL 16 with Drizzle as the ORM for the payments service.",
-      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "ledger-service"
+        }
+      ]
     },
     {
       "text": "Decision: all internal service-to-service calls go through the gRPC gateway, no direct HTTP.",
-      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "ledger-service"
+        }
+      ]
     },
     {
       "text": "We're using Redis for idempotency keys on the checkout endpoint.",
-      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "ledger-service"
+        }
+      ]
     },
     {
       "text": "Requirement: every migration must be reversible and tested on a staging snapshot first.",
-      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "ledger-service"
+        }
+      ]
     },
     {
       "text": "We can't use MongoDB for the ledger table, compliance requires ACID transactions.",
-      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "ledger-service"
+        }
+      ]
     },
     {
       "text": "Actually, the retry backoff base is 250ms, not 500ms like I said earlier.",
-      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "ledger-service"
+        }
+      ]
     },
     {
       "text": "The correct value for the connection pool size is 20, I misquoted 10 in standup.",
-      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "ledger-service"
+        }
+      ]
     },
     {
       "text": "We tried doing idempotency with a unique constraint alone but it didn't work under concurrent retries.",
-      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "ledger-service"
+        }
+      ]
     },
     {
       "text": "Failed approach: in-memory rate limiting, it doesn't survive a pod restart.",
-      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "ledger-service"
+        }
+      ]
     },
     {
       "text": "Check the schema at src/db/schema.ts for the ledger table shape.",
-      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "ledger-service"
+        }
+      ]
     },
     {
       "text": "See https://github.com/acme/ledger-service/blob/main/docs/reconciliation.md for the reconciliation job — I keep calling it 'the reconciliation doc' in standup, same thing.",
-      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "ledger-service"
+        }
+      ]
     },
     {
       "text": "I always prefer explicit transaction boundaries over relying on ORM auto-commit.",
-      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "ledger-service"
+        }
+      ]
     },
     {
       "text": "Never use SELECT * in the reporting queries, the table has 40 columns and it's slow.",
-      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "ledger-service"
+        }
+      ]
     }
   ],
   "goldFacts": [
@@ -158,56 +223,115 @@
   "probes": [
     {
       "query": "What database and ORM are we using for the payments service?",
-      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }],
-      "expectedKeys": ["decision:to-use-postgresql-16-with-drizzle-as-the"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "ledger-service"
+        }
+      ],
+      "expectedKeys": [
+        "decision:to-use-postgresql-16-with-drizzle-as-the"
+      ],
       "note": "direct recall of a decision fact"
     },
     {
       "query": "What's the connection pool size?",
-      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }],
-      "expectedKeys": ["correction:the-connection-pool-size"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "ledger-service"
+        }
+      ],
+      "expectedKeys": [
+        "correction:the-connection-pool-size"
+      ],
       "note": "must surface the CORRECTED value (20), not a stale one — corrections/confirmation-rate probe"
     },
     {
       "query": "What did we try for idempotency that didn't work?",
-      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }],
-      "expectedKeys": ["failed-approach:doing-idempotency-with-a-unique-constrai"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "ledger-service"
+        }
+      ],
+      "expectedKeys": [
+        "failed-approach:doing-idempotency-with-a-unique-constrai"
+      ],
       "note": "failed-approach recall"
     },
     {
       "query": "Can we use MongoDB for the ledger table?",
-      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }],
-      "expectedKeys": ["constraint:mongodb-for-the-ledger-table"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "ledger-service"
+        }
+      ],
+      "expectedKeys": [
+        "constraint:mongodb-for-the-ledger-table"
+      ],
       "note": "constraint recall"
     },
     {
       "query": "Where's the reconciliation doc?",
-      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }],
-      "expectedKeys": ["alias:the-reconciliation-doc"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "ledger-service"
+        }
+      ],
+      "expectedKeys": [
+        "alias:the-reconciliation-doc"
+      ],
       "note": "ALIAS PROBE — 'the reconciliation doc' never appears verbatim near the URL fact's key; expected to score 0/low today, this is the entity-resolution delta target"
     },
     {
       "query": "Should service-to-service calls use direct HTTP?",
-      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }],
-      "expectedKeys": ["decision:all-internal-service-to-service-calls-go"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "ledger-service"
+        }
+      ],
+      "expectedKeys": [
+        "decision:all-internal-service-to-service-calls-go"
+      ],
       "note": "decision recall, phrased as a question rather than the original statement"
     },
     {
       "query": "What's the retry backoff base?",
-      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }],
-      "expectedKeys": ["correction:the-retry-backoff-base"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "ledger-service"
+        }
+      ],
+      "expectedKeys": [
+        "correction:the-retry-backoff-base"
+      ],
       "note": "second correction-recall probe"
     },
     {
       "query": "What's our Kafka partitioning strategy for payment events?",
-      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "ledger-service"
+        }
+      ],
       "expectedKeys": [],
       "negative": true,
       "note": "NEGATIVE PROBE — Kafka is never mentioned in this transcript; any returned fact is a false positive. Interrogative phrasing deliberately avoids all heuristic extractor patterns so the probe itself writes nothing."
     },
     {
       "query": "Which S3 bucket do the ledger exports land in?",
-      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "ledger-service"
+        }
+      ],
       "expectedKeys": [],
       "negative": true,
       "note": "NEGATIVE PROBE — S3 and exports are never mentioned in this transcript."
@@ -232,35 +356,79 @@
   "ruleProbes": [
     {
       "query": "Can we just SELECT * from the reporting table to debug this faster?",
-      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }],
-      "expectedRuleTextContains": ["Never use SELECT *"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "ledger-service"
+        }
+      ],
+      "expectedRuleTextContains": [
+        "Never use SELECT *"
+      ],
       "note": "POSITIVE RULE PROBE — shares 'SELECT'/'reporting' tokens with the seeded rule; must surface it."
     },
     {
       "query": "Should I write a reporting query that selects every column?",
-      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }],
-      "expectedRuleTextContains": ["Never use SELECT *"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "ledger-service"
+        }
+      ],
+      "expectedRuleTextContains": [
+        "Never use SELECT *"
+      ],
       "note": "POSITIVE RULE PROBE — paraphrased but shares 'reporting' token; tests token-overlap generalizing past the exact phrase."
     },
     {
       "query": "Is it okay to merge a schema change to the ledger migration without review?",
-      "entityHints": [{ "entityType": "project", "entityId": "ledger-service-admin" }],
-      "expectedRuleTextContains": ["Never touch the production ledger migration"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "ledger-service-admin"
+        }
+      ],
+      "expectedRuleTextContains": [
+        "Never touch the production ledger migration"
+      ],
       "note": "POSITIVE RULE PROBE — exercises the critical-priority rule; note this probe's entityHints target ledger-service-admin, the critical rule's own scope, deliberately unrelated in topic (must still fire per D2's priority floor)."
     },
     {
       "query": "What's the idempotency key TTL for the checkout endpoint?",
-      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "ledger-service"
+        }
+      ],
       "expectedRuleTextContains": [],
       "negative": true,
       "note": "NEGATIVE RULE PROBE — the sub-critical SELECT * rule must NOT fire (zero token overlap: 'idempotency'/'checkout'/'endpoint'/'TTL' share nothing with 'select'/'reporting'/'queries'/'slow'). Scoped to ledger-service (no critical-priority rule lives here), so any rule returned is unambiguous situational-filter noise."
     },
     {
       "query": "What connection pool size should the staging environment use?",
-      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "ledger-service"
+        }
+      ],
       "expectedRuleTextContains": [],
       "negative": true,
       "note": "NEGATIVE RULE PROBE — no shared vocabulary with the sub-critical rule's text."
+    },
+    {
+      "query": "writing a new report query, grabbing all columns for now",
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "ledger-service"
+        }
+      ],
+      "expectedRuleTextContains": [
+        "Never use SELECT *"
+      ],
+      "note": "HONEST-CAPABILITY PROBE (added in review): realistic phrasing with genuine partial overlap, no exact-phrase echo. Fires today only via the shared token 'columns' — a near-miss that happens to land. From the reviewer's independently-constructed set."
     }
   ]
 }

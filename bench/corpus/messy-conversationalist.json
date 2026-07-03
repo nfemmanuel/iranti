@@ -4,43 +4,93 @@
   "messages": [
     {
       "text": "so anyway we ended up going with sqlite for the little internal tool, way simpler than standing up postgres for something three people use",
-      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "internal-tools-dashboard"
+        }
+      ]
     },
     {
       "text": "oh also — decision: we're calling it 'the widget' internally even though the doc says 'internal-tools-dashboard', don't let that confuse you",
-      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "internal-tools-dashboard"
+        }
+      ]
     },
     {
       "text": "we tried just cron + a bash script for the nightly sync but it didn't work, kept silently failing and nobody noticed for a week",
-      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "internal-tools-dashboard"
+        }
+      ]
     },
     {
       "text": "requirement: whatever we build next has to send a slack ping if it fails, learned that one the hard way lol",
-      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "internal-tools-dashboard"
+        }
+      ]
     },
     {
       "text": "actually wait, the sync runs at 3am, not midnight, I keep saying midnight but that's wrong",
-      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "internal-tools-dashboard"
+        }
+      ]
     },
     {
       "text": "the correct value for the retry count is 5 attempts, not 3, someone changed it last sprint",
-      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "internal-tools-dashboard"
+        }
+      ]
     },
     {
       "text": "never touch the export script on Fridays, don't ask why",
-      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "internal-tools-dashboard"
+        }
+      ]
     },
     {
       "text": "check the readme at ./scripts/sync/README.md if you're touching that job",
-      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "internal-tools-dashboard"
+        }
+      ]
     },
     {
       "text": "here's the thing, https://internal.acme.example/wiki/sync-job has the full runbook, way more than I can type here, some people call it 'the sync wiki page' too",
-      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "internal-tools-dashboard"
+        }
+      ]
     },
     {
       "text": "I always forget to update the doc after I change the cron schedule, so don't trust the doc, trust the crontab",
-      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "internal-tools-dashboard"
+        }
+      ]
     }
   ],
   "goldFacts": [
@@ -118,56 +168,115 @@
   "probes": [
     {
       "query": "What are we using for the internal tool's database?",
-      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }],
-      "expectedKeys": ["decision:sqlite"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "internal-tools-dashboard"
+        }
+      ],
+      "expectedKeys": [
+        "decision:sqlite"
+      ],
       "note": "direct decision recall despite casual phrasing"
     },
     {
       "query": "Where's the widget's sync job documented?",
-      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }],
-      "expectedKeys": ["alias:the-sync-wiki-page"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "internal-tools-dashboard"
+        }
+      ],
+      "expectedKeys": [
+        "alias:the-sync-wiki-page"
+      ],
       "note": "ALIAS PROBE (compounded: 'the widget' entity alias + 'sync wiki page' fact alias) — expected to score 0 today, the sharpest alias test in the corpus"
     },
     {
       "query": "What time does the sync run?",
-      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }],
-      "expectedKeys": ["correction:sync-run-time"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "internal-tools-dashboard"
+        }
+      ],
+      "expectedKeys": [
+        "correction:sync-run-time"
+      ],
       "note": "CORRECTION-PHRASING PROBE — expected to score 0 today (fact was never extracted, see gold fact note)"
     },
     {
       "query": "What's the retry count?",
-      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }],
-      "expectedKeys": ["correction:the-retry-count"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "internal-tools-dashboard"
+        }
+      ],
+      "expectedKeys": [
+        "correction:the-retry-count"
+      ],
       "note": "confirmation-rate probe on a correction that DID extract"
     },
     {
       "query": "What did we try for the nightly sync that failed?",
-      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }],
-      "expectedKeys": ["failed-approach:just-cron-a-bash-script-for-the-nightly-"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "internal-tools-dashboard"
+        }
+      ],
+      "expectedKeys": [
+        "failed-approach:just-cron-a-bash-script-for-the-nightly-"
+      ],
       "note": "failed-approach recall"
     },
     {
       "query": "Is it okay to touch the export script on Fridays?",
-      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }],
-      "expectedKeys": ["constraint:export-script-fridays"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "internal-tools-dashboard"
+        }
+      ],
+      "expectedKeys": [
+        "constraint:export-script-fridays"
+      ],
       "note": "CONSTRAINT-PHRASING PROBE — expected to score 0 today (fact was never extracted, see gold fact note)"
     },
     {
       "query": "What does the new tool need to do when it fails?",
-      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }],
-      "expectedKeys": ["constraint:whatever-we-build-next-has-to-send-a-sla"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "internal-tools-dashboard"
+        }
+      ],
+      "expectedKeys": [
+        "constraint:whatever-we-build-next-has-to-send-a-sla"
+      ],
       "note": "constraint recall"
     },
     {
       "query": "who's on call for the widget this week?",
-      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "internal-tools-dashboard"
+        }
+      ],
       "expectedKeys": [],
       "negative": true,
       "note": "NEGATIVE PROBE — on-call/rotations are never mentioned in this transcript; any returned fact is a false positive. Lowercase in-voice phrasing."
     },
     {
       "query": "what port does the widget's admin panel run on?",
-      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "internal-tools-dashboard"
+        }
+      ],
       "expectedKeys": [],
       "negative": true,
       "note": "NEGATIVE PROBE — ports and an admin panel are never mentioned in this transcript."
@@ -192,35 +301,79 @@
   "ruleProbes": [
     {
       "query": "can I run the export script today, it's Friday but this is urgent",
-      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }],
-      "expectedRuleTextContains": ["never touch the export script on Fridays"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "internal-tools-dashboard"
+        }
+      ],
+      "expectedRuleTextContains": [
+        "never touch the export script on Fridays"
+      ],
       "note": "POSITIVE RULE PROBE — shares 'export'/'script'/'Friday' tokens with the seeded rule."
     },
     {
       "query": "is today an okay day to touch the export script?",
-      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }],
-      "expectedRuleTextContains": ["never touch the export script on Fridays"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "internal-tools-dashboard"
+        }
+      ],
+      "expectedRuleTextContains": [
+        "never touch the export script on Fridays"
+      ],
       "note": "POSITIVE RULE PROBE — paraphrased, still shares 'export'/'script' tokens."
     },
     {
       "query": "can someone paste the .env file contents into the shared doc for reference?",
-      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard-secrets" }],
-      "expectedRuleTextContains": ["never commit the .env file"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "internal-tools-dashboard-secrets"
+        }
+      ],
+      "expectedRuleTextContains": [
+        "never commit the .env file"
+      ],
       "note": "POSITIVE RULE PROBE — exercises the critical-priority rule on its own entity (must fire per D2's priority floor; also genuinely shares the 'env'/'file' tokens here)."
     },
     {
       "query": "does the nightly sync job need a bigger retry count now that traffic is up",
-      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "internal-tools-dashboard"
+        }
+      ],
       "expectedRuleTextContains": [],
       "negative": true,
       "note": "NEGATIVE RULE PROBE — shares no tokens with 'never touch the export script on fridays don't ask why'; internal-tools-dashboard has no critical-priority rule so any rule here is unambiguous noise."
     },
     {
       "query": "who do we ping if the widget goes down over the weekend",
-      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "internal-tools-dashboard"
+        }
+      ],
       "expectedRuleTextContains": [],
       "negative": true,
       "note": "NEGATIVE RULE PROBE — 'weekend' deliberately avoided colliding with 'friday'; no shared tokens with the seeded rule's text."
+    },
+    {
+      "query": "can I kick off the weekly data dump job right now",
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "internal-tools-dashboard"
+        }
+      ],
+      "expectedRuleTextContains": [
+        "export script"
+      ],
+      "note": "HONEST-CAPABILITY PROBE (added in review, reviewer's own example): a real host would want the Friday-export rule surfaced here, but no token overlaps the rule text. EXPECTED TO MISS today."
     }
   ]
 }

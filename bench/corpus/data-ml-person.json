@@ -4,51 +4,111 @@
   "messages": [
     {
       "text": "We decided to use a gradient-boosted tree instead of the neural net for the churn model, way easier to explain to stakeholders.",
-      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "churn-model"
+        }
+      ]
     },
     {
       "text": "Decision: features get versioned in the feature store, no more ad-hoc CSV pulls.",
-      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "churn-model"
+        }
+      ]
     },
     {
       "text": "We're using Optuna for hyperparameter search on the ranking model.",
-      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "churn-model"
+        }
+      ]
     },
     {
       "text": "Requirement: every model artifact must log its training data hash for reproducibility.",
-      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "churn-model"
+        }
+      ]
     },
     {
       "text": "We can't use raw user IDs as a feature, that's a leakage risk the privacy review flagged.",
-      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "churn-model"
+        }
+      ]
     },
     {
       "text": "Actually, the validation AUC was 0.81, not 0.86 like I reported this morning, I had a leak in the split.",
-      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "churn-model"
+        }
+      ]
     },
     {
       "text": "The correct value for the learning rate in the final run is 0.003.",
-      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "churn-model"
+        }
+      ]
     },
     {
       "text": "We tried oversampling the minority class but it didn't work, it just overfit to duplicates.",
-      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "churn-model"
+        }
+      ]
     },
     {
       "text": "Failed approach: manual feature selection by eyeballing correlations, missed interaction effects.",
-      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "churn-model"
+        }
+      ]
     },
     {
       "text": "Check notebooks/churn_eda.ipynb for the exploratory analysis.",
-      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "churn-model"
+        }
+      ]
     },
     {
       "text": "See https://wandb.ai/acme/churn-model/runs/xyz for the full run comparison — I just call it 'the dashboard run' when I mention it in meetings.",
-      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "churn-model"
+        }
+      ]
     },
     {
       "text": "I always want a held-out test set that never touches the notebook, only the pipeline.",
-      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }]
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "churn-model"
+        }
+      ]
     }
   ],
   "goldFacts": [
@@ -147,56 +207,115 @@
   "probes": [
     {
       "query": "What model are we using for churn prediction?",
-      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }],
-      "expectedKeys": ["decision:to-use-a-gradient-boosted-tree-instead-o"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "churn-model"
+        }
+      ],
+      "expectedKeys": [
+        "decision:to-use-a-gradient-boosted-tree-instead-o"
+      ],
       "note": "direct decision recall"
     },
     {
       "query": "What's the validation AUC?",
-      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }],
-      "expectedKeys": ["correction:validation-auc"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "churn-model"
+        }
+      ],
+      "expectedKeys": [
+        "correction:validation-auc"
+      ],
       "note": "CORRECTION-PHRASING PROBE — expected to score 0 today since the fact was never extracted (see gold fact note); measures the 'was X not Y' phrasing gap"
     },
     {
       "query": "What's the learning rate for the final run?",
-      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }],
-      "expectedKeys": ["correction:the-learning-rate-in-the-final-run"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "churn-model"
+        }
+      ],
+      "expectedKeys": [
+        "correction:the-learning-rate-in-the-final-run"
+      ],
       "note": "confirmation-rate probe on a correction that DID extract"
     },
     {
       "query": "Can we use raw user IDs as a feature?",
-      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }],
-      "expectedKeys": ["constraint:raw-user-ids-as-a-feature"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "churn-model"
+        }
+      ],
+      "expectedKeys": [
+        "constraint:raw-user-ids-as-a-feature"
+      ],
       "note": "constraint recall"
     },
     {
       "query": "What did we try for class imbalance that didn't work?",
-      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }],
-      "expectedKeys": ["failed-approach:oversampling-the-minority-class"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "churn-model"
+        }
+      ],
+      "expectedKeys": [
+        "failed-approach:oversampling-the-minority-class"
+      ],
       "note": "failed-approach recall"
     },
     {
       "query": "Where's the dashboard run?",
-      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }],
-      "expectedKeys": ["alias:the-dashboard-run"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "churn-model"
+        }
+      ],
+      "expectedKeys": [
+        "alias:the-dashboard-run"
+      ],
       "note": "ALIAS PROBE — expected to score 0/low today"
     },
     {
       "query": "How are features versioned?",
-      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }],
-      "expectedKeys": ["decision:features-get-versioned-in-the-feature-st"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "churn-model"
+        }
+      ],
+      "expectedKeys": [
+        "decision:features-get-versioned-in-the-feature-st"
+      ],
       "note": "decision recall"
     },
     {
       "query": "Which GPU cluster does the training job run on?",
-      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "churn-model"
+        }
+      ],
       "expectedKeys": [],
       "negative": true,
       "note": "NEGATIVE PROBE — GPUs/compute infrastructure are never mentioned in this transcript; any returned fact is a false positive."
     },
     {
       "query": "What drift-detection threshold did the team pick for production monitoring?",
-      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "churn-model"
+        }
+      ],
       "expectedKeys": [],
       "negative": true,
       "note": "NEGATIVE PROBE — drift detection and production monitoring are never mentioned in this transcript."
@@ -228,35 +347,79 @@
   "ruleProbes": [
     {
       "query": "Is it okay to evaluate the final metrics using the notebook directly?",
-      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }],
-      "expectedRuleTextContains": ["held-out test set"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "churn-model"
+        }
+      ],
+      "expectedRuleTextContains": [
+        "held-out test set"
+      ],
       "note": "POSITIVE RULE PROBE — shares 'notebook' token with the held-out-test-set rule."
     },
     {
       "query": "Can we add the customer's raw email as a feature to boost recall?",
-      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }],
-      "expectedRuleTextContains": ["leak into the feature matrix"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "churn-model"
+        }
+      ],
+      "expectedRuleTextContains": [
+        "leak into the feature matrix"
+      ],
       "note": "POSITIVE RULE PROBE — shares 'feature'/'email' tokens with the leakage rule."
     },
     {
       "query": "Can we push this model straight to production before the compliance review finishes?",
-      "entityHints": [{ "entityType": "project", "entityId": "churn-model-compliance" }],
-      "expectedRuleTextContains": ["sign-off from the compliance team"],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "churn-model-compliance"
+        }
+      ],
+      "expectedRuleTextContains": [
+        "sign-off from the compliance team"
+      ],
       "note": "POSITIVE RULE PROBE — exercises the critical-priority rule on its own entity (must fire per D2's priority floor; also genuinely shares 'compliance'/'production' tokens here)."
     },
     {
       "query": "What batch size worked best for the Optuna hyperparameter sweep?",
-      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "churn-model"
+        }
+      ],
       "expectedRuleTextContains": [],
       "negative": true,
       "note": "NEGATIVE RULE PROBE — shares no tokens with either sub-critical rule's text; churn-model has no critical-priority rule so any rule here is unambiguous noise."
     },
     {
       "query": "How many boosting rounds should the gradient-boosted tree run for?",
-      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }],
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "churn-model"
+        }
+      ],
       "expectedRuleTextContains": [],
       "negative": true,
       "note": "NEGATIVE RULE PROBE — no shared vocabulary with either seeded rule's text."
+    },
+    {
+      "query": "quick sanity check — mind if I compute the final eval numbers in jupyter before wiring it into the training flow?",
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "churn-model"
+        }
+      ],
+      "expectedRuleTextContains": [
+        "held-out test set"
+      ],
+      "note": "HONEST-CAPABILITY PROBE (added in review): 'jupyter' for notebook, 'training flow' for pipeline — zero shared tokens with the rule text. EXPECTED TO MISS today; the synonym/vocabulary gap made measurable."
     }
   ]
 }

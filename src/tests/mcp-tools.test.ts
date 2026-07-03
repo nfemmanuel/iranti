@@ -28,6 +28,11 @@ import { writeIssueTool } from "../mcp/tools/write-issue.js";
 import { writeRuleTool } from "../mcp/tools/write-rule.js";
 
 afterAll(async () => {
+  // Grace period for attend()'s fire-and-forget post-response chains still
+  // settling (same reasoning as it-runs.test.ts / host-simulation.test.ts):
+  // closing the single PGlite connection mid-query can leave that query's
+  // promise pending forever, not just noisy — see backlog RULE-2.
+  await new Promise((resolve) => setTimeout(resolve, 300));
   await pool.end({ timeout: 5 });
 });
 
