@@ -64,6 +64,23 @@ export function renderReport(report: BenchReport, deltas: MetricDelta[]): string
           `false-positive-rate ${fpDelta ? fmtDelta(fpDelta) : "n/a"}`,
       );
     }
+    // Layer 0d — rules dimension. Only printed when the persona defines
+    // ruleProbes (ruleProbeCount > 0) so pre-Layer-0d corpora (none today,
+    // but the field is optional) don't print a meaningless 0/0 line.
+    if (p.rules.ruleProbeCount > 0) {
+      lines.push(
+        `    rules        rule-relevance-rate=${pct(p.rules.ruleRelevanceRate)} (${p.rules.relevantCount}/${p.rules.positiveCount})` +
+          `  rule-noise-rate=${pct(p.rules.ruleNoiseRate)} (${p.rules.noiseCount}/${p.rules.negativeCount} negative rule probes; lower is better)`,
+      );
+      const relDelta = deltaByMetric.get(`${p.persona}.rules.ruleRelevanceRate`);
+      const noiseDelta = deltaByMetric.get(`${p.persona}.rules.ruleNoiseRate`);
+      if (relDelta || noiseDelta) {
+        lines.push(
+          `      vs baseline: rule-relevance-rate ${relDelta ? fmtDelta(relDelta) : "n/a"}, ` +
+            `rule-noise-rate ${noiseDelta ? fmtDelta(noiseDelta) : "n/a"}`,
+        );
+      }
+    }
     lines.push("");
   }
 
@@ -81,12 +98,20 @@ export function renderReport(report: BenchReport, deltas: MetricDelta[]): string
   lines.push(
     `  no-answer    false-positive-rate=${padRight(pct(o.retrieval.falsePositiveRate), 7)} (${o.retrieval.falsePositiveCount}/${o.retrieval.negativeCount} negative probes; lower is better)`,
   );
+  if (o.rules.ruleProbeCount > 0) {
+    lines.push(
+      `  rules        rule-relevance-rate=${padRight(pct(o.rules.ruleRelevanceRate), 7)} (${o.rules.relevantCount}/${o.rules.positiveCount})` +
+        `  rule-noise-rate=${padRight(pct(o.rules.ruleNoiseRate), 7)} (${o.rules.noiseCount}/${o.rules.negativeCount} negative rule probes; lower is better)`,
+    );
+  }
   const overallDeltas = [
     deltaByMetric.get("overall.extraction.recall"),
     deltaByMetric.get("overall.extraction.precision"),
     deltaByMetric.get("overall.retrieval.hitRate"),
     deltaByMetric.get("overall.retrieval.confirmationRate"),
     deltaByMetric.get("overall.retrieval.falsePositiveRate"),
+    deltaByMetric.get("overall.rules.ruleRelevanceRate"),
+    deltaByMetric.get("overall.rules.ruleNoiseRate"),
   ].filter((d): d is MetricDelta => d !== undefined);
   if (overallDeltas.length > 0) {
     lines.push("  vs baseline:");

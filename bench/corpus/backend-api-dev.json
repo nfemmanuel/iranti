@@ -212,5 +212,55 @@
       "negative": true,
       "note": "NEGATIVE PROBE — S3 and exports are never mentioned in this transcript."
     }
+  ],
+  "rules": [
+    {
+      "entityType": "project",
+      "entityId": "ledger-service",
+      "text": "Never use SELECT * in the reporting queries, the table has 40 columns and it's slow.",
+      "priority": 10,
+      "note": "Layer 0d — seeded via the real writeRule path, mirroring the standing rule the transcript's own message 13 declares in prose. Sub-critical priority so this is a situational-relevance test case, not an always-on floor case. entityId deliberately matches the negative rule probes' entity below, so a negative probe's noise reading is an honest test of the SITUATIONAL filter, not diluted by an always-on rule that would fire regardless (see the ruleNoiseRate design note in the PRD's D6)."
+    },
+    {
+      "entityType": "project",
+      "entityId": "ledger-service-admin",
+      "text": "Never touch the production ledger migration outside a reviewed PR, no exceptions.",
+      "priority": 100,
+      "note": "Layer 0d — critical-priority (>=100) rule, on a SEPARATE entity from the negative rule probes so its by-design always-on behavior never contaminates the ruleNoiseRate measurement below. Probed only by the one positive case (the priority-floor test)."
+    }
+  ],
+  "ruleProbes": [
+    {
+      "query": "Can we just SELECT * from the reporting table to debug this faster?",
+      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }],
+      "expectedRuleTextContains": ["Never use SELECT *"],
+      "note": "POSITIVE RULE PROBE — shares 'SELECT'/'reporting' tokens with the seeded rule; must surface it."
+    },
+    {
+      "query": "Should I write a reporting query that selects every column?",
+      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }],
+      "expectedRuleTextContains": ["Never use SELECT *"],
+      "note": "POSITIVE RULE PROBE — paraphrased but shares 'reporting' token; tests token-overlap generalizing past the exact phrase."
+    },
+    {
+      "query": "Is it okay to merge a schema change to the ledger migration without review?",
+      "entityHints": [{ "entityType": "project", "entityId": "ledger-service-admin" }],
+      "expectedRuleTextContains": ["Never touch the production ledger migration"],
+      "note": "POSITIVE RULE PROBE — exercises the critical-priority rule; note this probe's entityHints target ledger-service-admin, the critical rule's own scope, deliberately unrelated in topic (must still fire per D2's priority floor)."
+    },
+    {
+      "query": "What's the idempotency key TTL for the checkout endpoint?",
+      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }],
+      "expectedRuleTextContains": [],
+      "negative": true,
+      "note": "NEGATIVE RULE PROBE — the sub-critical SELECT * rule must NOT fire (zero token overlap: 'idempotency'/'checkout'/'endpoint'/'TTL' share nothing with 'select'/'reporting'/'queries'/'slow'). Scoped to ledger-service (no critical-priority rule lives here), so any rule returned is unambiguous situational-filter noise."
+    },
+    {
+      "query": "What connection pool size should the staging environment use?",
+      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }],
+      "expectedRuleTextContains": [],
+      "negative": true,
+      "note": "NEGATIVE RULE PROBE — no shared vocabulary with the sub-critical rule's text."
+    }
   ]
 }

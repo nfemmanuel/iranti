@@ -11,7 +11,7 @@
 
 import { normalizeKey } from "../library/keys.js";
 import type { Corpus, GoldFact } from "./types.js";
-import type { PersonaIngestResult, ProbeFactResult } from "./ingest.js";
+import type { PersonaIngestResult, ProbeFactResult, RuleProbeOutcome } from "./ingest.js";
 
 // --------------------------------------------------------------------------
 // Value matching — deliberately lenient (PRD §9 risk, documented here too).
@@ -202,6 +202,83 @@ export function scoreRetrieval(result: PersonaIngestResult): RetrievalScore {
 }
 
 // --------------------------------------------------------------------------
+// Rule relevance / noise (Layer 0d) — mirrors the retrieval section above.
+// --------------------------------------------------------------------------
+
+export interface RuleProbeScore {
+  query: string;
+  expectedRuleTextContains: string[];
+  negative: boolean;
+  // True if some returned rule's text contains one of the expected
+  // substrings (case-insensitive). Always false for negative probes.
+  relevant: boolean;
+  // Negative rule probes only: attend() injected one or more rules for a
+  // situation where none of this entity's active rules should have fired.
+  // Always false for positive probes.
+  noise: boolean;
+}
+
+export interface RuleRetrievalScore {
+  ruleProbeCount: number; // all rule probes, positive + negative
+  positiveCount: number;
+  relevantCount: number;
+  // expected rule surfaced / positive rule probe count (higher is better).
+  ruleRelevanceRate: number;
+  negativeCount: number;
+  noiseCount: number;
+  // rule injected on a negative rule probe / negative rule probe count
+  // (lower is better) — exact mirror of falsePositiveRate's shape.
+  ruleNoiseRate: number;
+  perRuleProbe: RuleProbeScore[];
+}
+
+function containsSubstring(haystack: string, needle: string): boolean {
+  return haystack.toLowerCase().includes(needle.toLowerCase());
+}
+
+export function scoreRules(ruleProbeOutcomes: RuleProbeOutcome[]): RuleRetrievalScore {
+  const perRuleProbe: RuleProbeScore[] = ruleProbeOutcomes.map((outcome) => {
+    if (outcome.negative) {
+      return {
+        query: outcome.query,
+        expectedRuleTextContains: outcome.expectedRuleTextContains,
+        negative: true,
+        relevant: false,
+        noise: outcome.returnedRuleTexts.length > 0,
+      };
+    }
+    const relevant = outcome.expectedRuleTextContains.some((needle) =>
+      outcome.returnedRuleTexts.some((text) => containsSubstring(text, needle)),
+    );
+    return {
+      query: outcome.query,
+      expectedRuleTextContains: outcome.expectedRuleTextContains,
+      negative: false,
+      relevant,
+      noise: false,
+    };
+  });
+
+  const positives = perRuleProbe.filter((p) => !p.negative);
+  const negatives = perRuleProbe.filter((p) => p.negative);
+  const positiveCount = positives.length;
+  const relevantCount = positives.filter((p) => p.relevant).length;
+  const negativeCount = negatives.length;
+  const noiseCount = negatives.filter((p) => p.noise).length;
+
+  return {
+    ruleProbeCount: perRuleProbe.length,
+    positiveCount,
+    relevantCount,
+    ruleRelevanceRate: positiveCount > 0 ? relevantCount / positiveCount : 0,
+    negativeCount,
+    noiseCount,
+    ruleNoiseRate: negativeCount > 0 ? noiseCount / negativeCount : 0,
+    perRuleProbe,
+  };
+}
+
+// --------------------------------------------------------------------------
 // Per-persona + overall report shape
 // --------------------------------------------------------------------------
 
@@ -209,6 +286,7 @@ export interface PersonaReport {
   persona: string;
   extraction: ExtractionScore;
   retrieval: RetrievalScore;
+  rules: RuleRetrievalScore;
 }
 
 export interface OverallReport {
@@ -217,6 +295,7 @@ export interface OverallReport {
   // personas have different corpus sizes.
   extraction: ExtractionScore;
   retrieval: RetrievalScore;
+  rules: RuleRetrievalScore;
 }
 
 export interface BenchReport {
@@ -229,6 +308,7 @@ export function scorePersona(corpus: Corpus, result: PersonaIngestResult): Perso
     persona: corpus.persona,
     extraction: scoreExtraction(corpus.goldFacts, result.allFactsAfterIngest),
     retrieval: scoreRetrieval(result),
+    rules: scoreRules(result.ruleProbeOutcomes),
   };
 }
 
@@ -273,5 +353,22 @@ export function buildOverallReport(personas: PersonaReport[]): OverallReport {
     perProbe: personas.flatMap((p) => p.retrieval.perProbe),
   };
 
-  return { extraction, retrieval };
+  // Layer 0d — micro-averaged exactly like retrieval above.
+  const rulePositiveCount = personas.reduce((s, p) => s + p.rules.positiveCount, 0);
+  const ruleRelevantCount = personas.reduce((s, p) => s + p.rules.relevantCount, 0);
+  const ruleNegativeCount = personas.reduce((s, p) => s + p.rules.negativeCount, 0);
+  const ruleNoiseCount = personas.reduce((s, p) => s + p.rules.noiseCount, 0);
+
+  const rules: RuleRetrievalScore = {
+    ruleProbeCount: personas.reduce((s, p) => s + p.rules.ruleProbeCount, 0),
+    positiveCount: rulePositiveCount,
+    relevantCount: ruleRelevantCount,
+    ruleRelevanceRate: rulePositiveCount > 0 ? ruleRelevantCount / rulePositiveCount : 0,
+    negativeCount: ruleNegativeCount,
+    noiseCount: ruleNoiseCount,
+    ruleNoiseRate: ruleNegativeCount > 0 ? ruleNoiseCount / ruleNegativeCount : 0,
+    perRuleProbe: personas.flatMap((p) => p.rules.perRuleProbe),
+  };
+
+  return { extraction, retrieval, rules };
 }

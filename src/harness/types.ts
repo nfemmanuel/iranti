@@ -59,6 +59,37 @@ export interface CorpusProbe {
   note?: string;
 }
 
+// Layer 0d: a rule the corpus author declares via the REAL write path
+// (writeRule), seeded before ingest. Rules have no extraction path (unlike
+// facts, they are never inferred from transcript prose — see the Layer 0d
+// PRD §9 for why that gap is intentionally NOT closed here), so a corpus
+// must declare them explicitly rather than embed them in `messages` and
+// hope an extractor promotes them.
+export interface CorpusRule {
+  entityType: string;
+  entityId: string; // "global" for entityType "system"
+  text: string;
+  priority: number;
+}
+
+// A rule probe: after seeding + ingest, this message is run through attend()
+// and the resulting `rules[]` array is checked for situational relevance.
+export interface RuleProbe {
+  // The message text passed to attend() as `message`.
+  query: string;
+  entityHints: Array<{ entityType: string; entityId: string }>;
+  // Substrings (case-insensitive) expected to appear in some rule's `text`
+  // within attend()'s returned rules[]. Usually one. Empty + negative:true
+  // for negative probes.
+  expectedRuleTextContains: string[];
+  // A negative (no-rule-should-fire) probe: the entity in scope DOES have
+  // active rules, but this message shares no vocabulary with any of them —
+  // any rule returned here is noise (see scorer.ts ruleNoiseRate). Mirrors
+  // CorpusProbe.negative's role for facts' falsePositiveRate.
+  negative?: boolean;
+  note?: string;
+}
+
 export interface Corpus {
   // Stable persona id -- used as part of the fresh-store project entityId
   // namespace and as the report's row label. Keep short, kebab-case.
@@ -69,4 +100,8 @@ export interface Corpus {
   messages: CorpusMessage[];
   goldFacts: GoldFact[];
   probes: CorpusProbe[];
+  // Layer 0d — optional so pre-existing corpus shape is untouched wherever a
+  // persona doesn't (yet) define rules. All 4 shipped personas define both.
+  rules?: CorpusRule[];
+  ruleProbes?: RuleProbe[];
 }

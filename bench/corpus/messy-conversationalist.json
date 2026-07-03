@@ -172,5 +172,55 @@
       "negative": true,
       "note": "NEGATIVE PROBE — ports and an admin panel are never mentioned in this transcript."
     }
+  ],
+  "rules": [
+    {
+      "entityType": "project",
+      "entityId": "internal-tools-dashboard",
+      "text": "never touch the export script on Fridays, don't ask why",
+      "priority": 10,
+      "note": "Layer 0d — seeded via the real writeRule path, mirroring the transcript's own message 7. That message is a DOCUMENTED extractor MISS (see the goldFacts note on constraint:export-script-fridays) — this rule probe demonstrates the rules path succeeding at exactly the situation the fact-extraction path fails on: 'never touch X on Y' has no heuristic pattern match, but as an explicitly-written RULE it is enforced by attend() regardless of what the extractor could or couldn't parse from prose."
+    },
+    {
+      "entityType": "project",
+      "entityId": "internal-tools-dashboard-secrets",
+      "text": "never commit the .env file for this tool, no exceptions, it has the on-call pager key in it",
+      "priority": 100,
+      "note": "Layer 0d — critical-priority rule on a SEPARATE entity so the negative rule probes below (scoped to internal-tools-dashboard) are an unpolluted test of situational filtering."
+    }
+  ],
+  "ruleProbes": [
+    {
+      "query": "can I run the export script today, it's Friday but this is urgent",
+      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }],
+      "expectedRuleTextContains": ["never touch the export script on Fridays"],
+      "note": "POSITIVE RULE PROBE — shares 'export'/'script'/'Friday' tokens with the seeded rule."
+    },
+    {
+      "query": "is today an okay day to touch the export script?",
+      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }],
+      "expectedRuleTextContains": ["never touch the export script on Fridays"],
+      "note": "POSITIVE RULE PROBE — paraphrased, still shares 'export'/'script' tokens."
+    },
+    {
+      "query": "can someone paste the .env file contents into the shared doc for reference?",
+      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard-secrets" }],
+      "expectedRuleTextContains": ["never commit the .env file"],
+      "note": "POSITIVE RULE PROBE — exercises the critical-priority rule on its own entity (must fire per D2's priority floor; also genuinely shares the 'env'/'file' tokens here)."
+    },
+    {
+      "query": "does the nightly sync job need a bigger retry count now that traffic is up",
+      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }],
+      "expectedRuleTextContains": [],
+      "negative": true,
+      "note": "NEGATIVE RULE PROBE — shares no tokens with 'never touch the export script on fridays don't ask why'; internal-tools-dashboard has no critical-priority rule so any rule here is unambiguous noise."
+    },
+    {
+      "query": "who do we ping if the widget goes down over the weekend",
+      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }],
+      "expectedRuleTextContains": [],
+      "negative": true,
+      "note": "NEGATIVE RULE PROBE — 'weekend' deliberately avoided colliding with 'friday'; no shared tokens with the seeded rule's text."
+    }
   ]
 }

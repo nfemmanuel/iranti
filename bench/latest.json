@@ -117,6 +117,58 @@
             "falsePositive": true
           }
         ]
+      },
+      "rules": {
+        "ruleProbeCount": 5,
+        "positiveCount": 3,
+        "relevantCount": 3,
+        "ruleRelevanceRate": 1,
+        "negativeCount": 2,
+        "noiseCount": 0,
+        "ruleNoiseRate": 0,
+        "perRuleProbe": [
+          {
+            "query": "Can we just SELECT * from the reporting table to debug this faster?",
+            "expectedRuleTextContains": [
+              "Never use SELECT *"
+            ],
+            "negative": false,
+            "relevant": true,
+            "noise": false
+          },
+          {
+            "query": "Should I write a reporting query that selects every column?",
+            "expectedRuleTextContains": [
+              "Never use SELECT *"
+            ],
+            "negative": false,
+            "relevant": true,
+            "noise": false
+          },
+          {
+            "query": "Is it okay to merge a schema change to the ledger migration without review?",
+            "expectedRuleTextContains": [
+              "Never touch the production ledger migration"
+            ],
+            "negative": false,
+            "relevant": true,
+            "noise": false
+          },
+          {
+            "query": "What's the idempotency key TTL for the checkout endpoint?",
+            "expectedRuleTextContains": [],
+            "negative": true,
+            "relevant": false,
+            "noise": false
+          },
+          {
+            "query": "What connection pool size should the staging environment use?",
+            "expectedRuleTextContains": [],
+            "negative": true,
+            "relevant": false,
+            "noise": false
+          }
+        ]
       }
     },
     {
@@ -234,6 +286,58 @@
             "hit": false,
             "confirmed": false,
             "falsePositive": true
+          }
+        ]
+      },
+      "rules": {
+        "ruleProbeCount": 5,
+        "positiveCount": 3,
+        "relevantCount": 3,
+        "ruleRelevanceRate": 1,
+        "negativeCount": 2,
+        "noiseCount": 0,
+        "ruleNoiseRate": 0,
+        "perRuleProbe": [
+          {
+            "query": "Is it okay to evaluate the final metrics using the notebook directly?",
+            "expectedRuleTextContains": [
+              "held-out test set"
+            ],
+            "negative": false,
+            "relevant": true,
+            "noise": false
+          },
+          {
+            "query": "Can we add the customer's raw email as a feature to boost recall?",
+            "expectedRuleTextContains": [
+              "leak into the feature matrix"
+            ],
+            "negative": false,
+            "relevant": true,
+            "noise": false
+          },
+          {
+            "query": "Can we push this model straight to production before the compliance review finishes?",
+            "expectedRuleTextContains": [
+              "sign-off from the compliance team"
+            ],
+            "negative": false,
+            "relevant": true,
+            "noise": false
+          },
+          {
+            "query": "What batch size worked best for the Optuna hyperparameter sweep?",
+            "expectedRuleTextContains": [],
+            "negative": true,
+            "relevant": false,
+            "noise": false
+          },
+          {
+            "query": "How many boosting rounds should the gradient-boosted tree run for?",
+            "expectedRuleTextContains": [],
+            "negative": true,
+            "relevant": false,
+            "noise": false
           }
         ]
       }
@@ -355,6 +459,58 @@
             "falsePositive": true
           }
         ]
+      },
+      "rules": {
+        "ruleProbeCount": 5,
+        "positiveCount": 3,
+        "relevantCount": 3,
+        "ruleRelevanceRate": 1,
+        "negativeCount": 2,
+        "noiseCount": 0,
+        "ruleNoiseRate": 0,
+        "perRuleProbe": [
+          {
+            "query": "Do icon-only buttons need any accessibility markup?",
+            "expectedRuleTextContains": [
+              "aria-label"
+            ],
+            "negative": false,
+            "relevant": true,
+            "noise": false
+          },
+          {
+            "query": "Can I ship this new card component without an error state for now?",
+            "expectedRuleTextContains": [
+              "loading and an error state"
+            ],
+            "negative": false,
+            "relevant": true,
+            "noise": false
+          },
+          {
+            "query": "Is it fine to use a custom icon font we haven't cleared with legal yet?",
+            "expectedRuleTextContains": [
+              "cleared by legal"
+            ],
+            "negative": false,
+            "relevant": true,
+            "noise": false
+          },
+          {
+            "query": "What breakpoint should the nav collapse at on tablet?",
+            "expectedRuleTextContains": [],
+            "negative": true,
+            "relevant": false,
+            "noise": false
+          },
+          {
+            "query": "Should Storybook stories live in a separate top-level folder?",
+            "expectedRuleTextContains": [],
+            "negative": true,
+            "relevant": false,
+            "noise": false
+          }
+        ]
       }
     },
     {
@@ -472,6 +628,58 @@
             "hit": false,
             "confirmed": false,
             "falsePositive": true
+          }
+        ]
+      },
+      "rules": {
+        "ruleProbeCount": 5,
+        "positiveCount": 3,
+        "relevantCount": 3,
+        "ruleRelevanceRate": 1,
+        "negativeCount": 2,
+        "noiseCount": 0,
+        "ruleNoiseRate": 0,
+        "perRuleProbe": [
+          {
+            "query": "can I run the export script today, it's Friday but this is urgent",
+            "expectedRuleTextContains": [
+              "never touch the export script on Fridays"
+            ],
+            "negative": false,
+            "relevant": true,
+            "noise": false
+          },
+          {
+            "query": "is today an okay day to touch the export script?",
+            "expectedRuleTextContains": [
+              "never touch the export script on Fridays"
+            ],
+            "negative": false,
+            "relevant": true,
+            "noise": false
+          },
+          {
+            "query": "can someone paste the .env file contents into the shared doc for reference?",
+            "expectedRuleTextContains": [
+              "never commit the .env file"
+            ],
+            "negative": false,
+            "relevant": true,
+            "noise": false
+          },
+          {
+            "query": "does the nightly sync job need a bigger retry count now that traffic is up",
+            "expectedRuleTextContains": [],
+            "negative": true,
+            "relevant": false,
+            "noise": false
+          },
+          {
+            "query": "who do we ping if the widget goes down over the weekend",
+            "expectedRuleTextContains": [],
+            "negative": true,
+            "relevant": false,
+            "noise": false
           }
         ]
       }
@@ -876,6 +1084,181 @@
           "hit": false,
           "confirmed": false,
           "falsePositive": true
+        }
+      ]
+    },
+    "rules": {
+      "ruleProbeCount": 20,
+      "positiveCount": 12,
+      "relevantCount": 12,
+      "ruleRelevanceRate": 1,
+      "negativeCount": 8,
+      "noiseCount": 0,
+      "ruleNoiseRate": 0,
+      "perRuleProbe": [
+        {
+          "query": "Can we just SELECT * from the reporting table to debug this faster?",
+          "expectedRuleTextContains": [
+            "Never use SELECT *"
+          ],
+          "negative": false,
+          "relevant": true,
+          "noise": false
+        },
+        {
+          "query": "Should I write a reporting query that selects every column?",
+          "expectedRuleTextContains": [
+            "Never use SELECT *"
+          ],
+          "negative": false,
+          "relevant": true,
+          "noise": false
+        },
+        {
+          "query": "Is it okay to merge a schema change to the ledger migration without review?",
+          "expectedRuleTextContains": [
+            "Never touch the production ledger migration"
+          ],
+          "negative": false,
+          "relevant": true,
+          "noise": false
+        },
+        {
+          "query": "What's the idempotency key TTL for the checkout endpoint?",
+          "expectedRuleTextContains": [],
+          "negative": true,
+          "relevant": false,
+          "noise": false
+        },
+        {
+          "query": "What connection pool size should the staging environment use?",
+          "expectedRuleTextContains": [],
+          "negative": true,
+          "relevant": false,
+          "noise": false
+        },
+        {
+          "query": "Is it okay to evaluate the final metrics using the notebook directly?",
+          "expectedRuleTextContains": [
+            "held-out test set"
+          ],
+          "negative": false,
+          "relevant": true,
+          "noise": false
+        },
+        {
+          "query": "Can we add the customer's raw email as a feature to boost recall?",
+          "expectedRuleTextContains": [
+            "leak into the feature matrix"
+          ],
+          "negative": false,
+          "relevant": true,
+          "noise": false
+        },
+        {
+          "query": "Can we push this model straight to production before the compliance review finishes?",
+          "expectedRuleTextContains": [
+            "sign-off from the compliance team"
+          ],
+          "negative": false,
+          "relevant": true,
+          "noise": false
+        },
+        {
+          "query": "What batch size worked best for the Optuna hyperparameter sweep?",
+          "expectedRuleTextContains": [],
+          "negative": true,
+          "relevant": false,
+          "noise": false
+        },
+        {
+          "query": "How many boosting rounds should the gradient-boosted tree run for?",
+          "expectedRuleTextContains": [],
+          "negative": true,
+          "relevant": false,
+          "noise": false
+        },
+        {
+          "query": "Do icon-only buttons need any accessibility markup?",
+          "expectedRuleTextContains": [
+            "aria-label"
+          ],
+          "negative": false,
+          "relevant": true,
+          "noise": false
+        },
+        {
+          "query": "Can I ship this new card component without an error state for now?",
+          "expectedRuleTextContains": [
+            "loading and an error state"
+          ],
+          "negative": false,
+          "relevant": true,
+          "noise": false
+        },
+        {
+          "query": "Is it fine to use a custom icon font we haven't cleared with legal yet?",
+          "expectedRuleTextContains": [
+            "cleared by legal"
+          ],
+          "negative": false,
+          "relevant": true,
+          "noise": false
+        },
+        {
+          "query": "What breakpoint should the nav collapse at on tablet?",
+          "expectedRuleTextContains": [],
+          "negative": true,
+          "relevant": false,
+          "noise": false
+        },
+        {
+          "query": "Should Storybook stories live in a separate top-level folder?",
+          "expectedRuleTextContains": [],
+          "negative": true,
+          "relevant": false,
+          "noise": false
+        },
+        {
+          "query": "can I run the export script today, it's Friday but this is urgent",
+          "expectedRuleTextContains": [
+            "never touch the export script on Fridays"
+          ],
+          "negative": false,
+          "relevant": true,
+          "noise": false
+        },
+        {
+          "query": "is today an okay day to touch the export script?",
+          "expectedRuleTextContains": [
+            "never touch the export script on Fridays"
+          ],
+          "negative": false,
+          "relevant": true,
+          "noise": false
+        },
+        {
+          "query": "can someone paste the .env file contents into the shared doc for reference?",
+          "expectedRuleTextContains": [
+            "never commit the .env file"
+          ],
+          "negative": false,
+          "relevant": true,
+          "noise": false
+        },
+        {
+          "query": "does the nightly sync job need a bigger retry count now that traffic is up",
+          "expectedRuleTextContains": [],
+          "negative": true,
+          "relevant": false,
+          "noise": false
+        },
+        {
+          "query": "who do we ping if the widget goes down over the weekend",
+          "expectedRuleTextContains": [],
+          "negative": true,
+          "relevant": false,
+          "noise": false
         }
       ]
     }

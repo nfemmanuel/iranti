@@ -52,6 +52,16 @@ export interface ProbeOutcome {
   returnedFacts: ProbeFactResult[];
 }
 
+// Layer 0d — mirrors ProbeOutcome's shape for the rules dimension.
+export interface RuleProbeOutcome {
+  query: string;
+  expectedRuleTextContains: string[];
+  negative: boolean;
+  // Every rule text attend() returned for this probe (rules[], budget-capped,
+  // priority-ordered — see mcp/tools/attend.ts).
+  returnedRuleTexts: string[];
+}
+
 export interface PersonaIngestResult {
   persona: string;
   // Every fact present in the store after ingest, across all entities the
@@ -59,6 +69,9 @@ export interface PersonaIngestResult {
   allFactsAfterIngest: ProbeFactResult[];
   // One outcome per probe, in corpus order.
   probeOutcomes: ProbeOutcome[];
+  // Layer 0d — one outcome per ruleProbe, in corpus order. Empty when the
+  // corpus defines no ruleProbes (optional field — see types.ts).
+  ruleProbeOutcomes: RuleProbeOutcome[];
 }
 
 // A stripped-down signature so this module doesn't need to import vitest's
@@ -101,6 +114,25 @@ export async function runPersonaIngest(
     // this harness's side-channel verification reads were affected).
     const { resolveCurrentProject } = await import("../library/projects.js");
     const harnessProject = (await resolveCurrentProject()).id;
+
+    // ---- Layer 0d: seed corpus-declared rules via the REAL write path. -----
+    // Rules have no extraction path (see PRD layer-0d-rules-enforcement.md
+    // §9) — a corpus declares them explicitly and they are written through
+    // writeRule exactly as iranti_write_rule would, BEFORE any transcript
+    // message or probe runs, so every probe sees the fully-seeded rule set.
+    if (corpus.rules && corpus.rules.length > 0) {
+      const { writeRule } = await import("../library/rules.js");
+      for (const rule of corpus.rules) {
+        await writeRule({
+          entityType: rule.entityType,
+          entityId: rule.entityId,
+          text: rule.text,
+          priority: rule.priority,
+          source: "bench-seed",
+          project: harnessProject,
+        });
+      }
+    }
 
     // ---- Ingest: feed every transcript message through attend(). ----------
     // Using attend() (not write()) for every message mirrors how a real host
@@ -219,7 +251,28 @@ export async function runPersonaIngest(
       });
     }
 
-    return { persona: corpus.persona, allFactsAfterIngest, probeOutcomes };
+    // ---- Layer 0d: run every ruleProbe through attend(), record rules[]. ---
+    // Same attend() call shape as the fact probes above — a ruleProbe is
+    // just another attend() call whose result is scored on rules[] instead
+    // of facts[]. Runs after the fact probes so it never affects fact
+    // scoring; rule seeding already happened before ingest, above.
+    const ruleProbeOutcomes: RuleProbeOutcome[] = [];
+    for (const ruleProbe of corpus.ruleProbes ?? []) {
+      const result = await attend({
+        entityHints: ruleProbe.entityHints,
+        message: ruleProbe.query,
+        agentName: `bench-${corpus.persona}`,
+        phase: "pre-response",
+      });
+      ruleProbeOutcomes.push({
+        query: ruleProbe.query,
+        expectedRuleTextContains: ruleProbe.expectedRuleTextContains,
+        negative: ruleProbe.negative === true,
+        returnedRuleTexts: result.rules.map((r) => r.text),
+      });
+    }
+
+    return { persona: corpus.persona, allFactsAfterIngest, probeOutcomes, ruleProbeOutcomes };
   } finally {
     // Best-effort close + cleanup. A failure here must not mask a real test
     // failure above, so errors are swallowed (same posture as

@@ -56,6 +56,12 @@ export function diffReports(baseline: BenchReport | null, current: BenchReport):
     // NaN-coalesced (not ?? 0) so a baseline generated before the negative-
     // probe class existed reports "(no baseline)" instead of a fake +delta.
     { name: "overall.retrieval.falsePositiveRate", get: (r) => r.overall.retrieval.falsePositiveRate ?? NaN },
+    // Layer 0d — new metric class. NaN-coalesced for the same reason: any
+    // baseline generated before this PRD shipped has no `rules` field at
+    // all, so this must print "(no baseline)" rather than a fabricated
+    // delta against `undefined`.
+    { name: "overall.rules.ruleRelevanceRate", get: (r) => r.overall.rules?.ruleRelevanceRate ?? NaN },
+    { name: "overall.rules.ruleNoiseRate", get: (r) => r.overall.rules?.ruleNoiseRate ?? NaN },
   ];
 
   for (const p of current.personas) {
@@ -65,6 +71,8 @@ export function diffReports(baseline: BenchReport | null, current: BenchReport):
       { name: `${p.persona}.retrieval.hitRate`, get: (r) => r.personas.find((x) => x.persona === p.persona)?.retrieval.hitRate ?? NaN },
       { name: `${p.persona}.retrieval.confirmationRate`, get: (r) => r.personas.find((x) => x.persona === p.persona)?.retrieval.confirmationRate ?? NaN },
       { name: `${p.persona}.retrieval.falsePositiveRate`, get: (r) => r.personas.find((x) => x.persona === p.persona)?.retrieval.falsePositiveRate ?? NaN },
+      { name: `${p.persona}.rules.ruleRelevanceRate`, get: (r) => r.personas.find((x) => x.persona === p.persona)?.rules?.ruleRelevanceRate ?? NaN },
+      { name: `${p.persona}.rules.ruleNoiseRate`, get: (r) => r.personas.find((x) => x.persona === p.persona)?.rules?.ruleNoiseRate ?? NaN },
     );
   }
 

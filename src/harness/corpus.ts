@@ -49,6 +49,33 @@ function assertCorpusShape(value: unknown, file: string): asserts value is Corpu
       );
     }
   }
+
+  // Layer 0d: same authoring guard, applied to the optional ruleProbes array
+  // — a negative rule probe with expectedRuleTextContains (or a positive one
+  // without) would silently corrupt ruleRelevanceRate/ruleNoiseRate.
+  if (c["ruleProbes"] !== undefined) {
+    if (!Array.isArray(c["ruleProbes"])) {
+      throw new Error(`Corpus file ${file} ("${c["persona"]}"): "ruleProbes" must be an array.`);
+    }
+    for (const probe of c["ruleProbes"] as Array<Record<string, unknown>>) {
+      const isNegative = probe["negative"] === true;
+      const expected = probe["expectedRuleTextContains"];
+      const hasExpected = Array.isArray(expected) && expected.length > 0;
+      if (isNegative && hasExpected) {
+        throw new Error(
+          `Corpus file ${file} ("${c["persona"]}"): negative rule probe "${String(probe["query"])}" must have empty expectedRuleTextContains.`,
+        );
+      }
+      if (!isNegative && !hasExpected) {
+        throw new Error(
+          `Corpus file ${file} ("${c["persona"]}"): rule probe "${String(probe["query"])}" has no expectedRuleTextContains and is not marked negative.`,
+        );
+      }
+    }
+  }
+  if (c["rules"] !== undefined && !Array.isArray(c["rules"])) {
+    throw new Error(`Corpus file ${file} ("${c["persona"]}"): "rules" must be an array.`);
+  }
 }
 
 // Load every *.json file in bench/corpus, sorted by filename so run order

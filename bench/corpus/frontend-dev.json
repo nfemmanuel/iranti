@@ -212,5 +212,62 @@
       "negative": true,
       "note": "NEGATIVE PROBE — Lighthouse/performance budgets are never mentioned in this transcript."
     }
+  ],
+  "rules": [
+    {
+      "entityType": "project",
+      "entityId": "dashboard-redesign",
+      "text": "Always add an aria-label to icon-only buttons.",
+      "priority": 10,
+      "note": "Layer 0d — seeded via the real writeRule path, mirroring the transcript's own message 5 standing preference. Sub-critical: a situational-relevance test case."
+    },
+    {
+      "entityType": "project",
+      "entityId": "dashboard-redesign",
+      "text": "Never ship a component without a loading and an error state.",
+      "priority": 10,
+      "note": "Layer 0d — second sub-critical rule, mirroring the transcript's own message 13. Two sub-critical rules on the same entity lets the budget/priority tests exercise more than one situational rule at once."
+    },
+    {
+      "entityType": "project",
+      "entityId": "dashboard-redesign-legal",
+      "text": "Never use a third-party font that isn't cleared by legal for commercial use.",
+      "priority": 100,
+      "note": "Layer 0d — critical-priority rule on a SEPARATE entity so the negative rule probes below (scoped to dashboard-redesign) are an unpolluted test of situational filtering."
+    }
+  ],
+  "ruleProbes": [
+    {
+      "query": "Do icon-only buttons need any accessibility markup?",
+      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }],
+      "expectedRuleTextContains": ["aria-label"],
+      "note": "POSITIVE RULE PROBE — shares 'icon'/'buttons' tokens with the aria-label rule."
+    },
+    {
+      "query": "Can I ship this new card component without an error state for now?",
+      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }],
+      "expectedRuleTextContains": ["loading and an error state"],
+      "note": "POSITIVE RULE PROBE — shares 'component'/'error'/'state' tokens with the loading/error-state rule."
+    },
+    {
+      "query": "Is it fine to use a custom icon font we haven't cleared with legal yet?",
+      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign-legal" }],
+      "expectedRuleTextContains": ["cleared by legal"],
+      "note": "POSITIVE RULE PROBE — exercises the critical-priority rule on its own entity, unrelated topic on purpose (must still fire per D2)."
+    },
+    {
+      "query": "What breakpoint should the nav collapse at on tablet?",
+      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }],
+      "expectedRuleTextContains": [],
+      "negative": true,
+      "note": "NEGATIVE RULE PROBE — shares no vocabulary with either sub-critical rule's text ('aria-label'/'icon-only'/'buttons' or 'loading'/'error'/'state'/'component'); dashboard-redesign has no critical-priority rule so any rule here is unambiguous noise."
+    },
+    {
+      "query": "Should Storybook stories live in a separate top-level folder?",
+      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }],
+      "expectedRuleTextContains": [],
+      "negative": true,
+      "note": "NEGATIVE RULE PROBE — 'Storybook'/'folder' share no tokens with either seeded rule text (checked token-by-token, including avoiding 'component', which rule2 contains); deliberately distinct from the extraction-layer 'colocating test files' preference fact elsewhere in this corpus (facts and rules are scored independently)."
+    }
   ]
 }

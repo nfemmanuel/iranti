@@ -201,5 +201,62 @@
       "negative": true,
       "note": "NEGATIVE PROBE — drift detection and production monitoring are never mentioned in this transcript."
     }
+  ],
+  "rules": [
+    {
+      "entityType": "project",
+      "entityId": "churn-model",
+      "text": "Always keep a held-out test set that never touches the notebook, only the pipeline.",
+      "priority": 10,
+      "note": "Layer 0d — seeded via the real writeRule path, mirroring the transcript's own message 12 standing preference. Sub-critical: a situational-relevance test case."
+    },
+    {
+      "entityType": "project",
+      "entityId": "churn-model",
+      "text": "Never let raw user IDs or emails leak into the feature matrix, privacy review flagged this as a hard blocker.",
+      "priority": 10,
+      "note": "Layer 0d — second sub-critical rule, mirroring the transcript's own message 5 leakage constraint."
+    },
+    {
+      "entityType": "project",
+      "entityId": "churn-model-compliance",
+      "text": "Never deploy a model to production without sign-off from the compliance team, no exceptions.",
+      "priority": 100,
+      "note": "Layer 0d — critical-priority rule on a SEPARATE entity so the negative rule probes below (scoped to churn-model) are an unpolluted test of situational filtering."
+    }
+  ],
+  "ruleProbes": [
+    {
+      "query": "Is it okay to evaluate the final metrics using the notebook directly?",
+      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }],
+      "expectedRuleTextContains": ["held-out test set"],
+      "note": "POSITIVE RULE PROBE — shares 'notebook' token with the held-out-test-set rule."
+    },
+    {
+      "query": "Can we add the customer's raw email as a feature to boost recall?",
+      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }],
+      "expectedRuleTextContains": ["leak into the feature matrix"],
+      "note": "POSITIVE RULE PROBE — shares 'feature'/'email' tokens with the leakage rule."
+    },
+    {
+      "query": "Can we push this model straight to production before the compliance review finishes?",
+      "entityHints": [{ "entityType": "project", "entityId": "churn-model-compliance" }],
+      "expectedRuleTextContains": ["sign-off from the compliance team"],
+      "note": "POSITIVE RULE PROBE — exercises the critical-priority rule on its own entity (must fire per D2's priority floor; also genuinely shares 'compliance'/'production' tokens here)."
+    },
+    {
+      "query": "What batch size worked best for the Optuna hyperparameter sweep?",
+      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }],
+      "expectedRuleTextContains": [],
+      "negative": true,
+      "note": "NEGATIVE RULE PROBE — shares no tokens with either sub-critical rule's text; churn-model has no critical-priority rule so any rule here is unambiguous noise."
+    },
+    {
+      "query": "How many boosting rounds should the gradient-boosted tree run for?",
+      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }],
+      "expectedRuleTextContains": [],
+      "negative": true,
+      "note": "NEGATIVE RULE PROBE — no shared vocabulary with either seeded rule's text."
+    }
   ]
 }
