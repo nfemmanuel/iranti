@@ -1,6 +1,6 @@
 # PRD: Layer 0 — Zero-Infra Foundation & Folder-Scoped Projects
 
-**Status:** accepted
+**Status:** shipped (one criterion partial: the `iranti init` bin wiring is a cutover-step item — see §7)
 **Phase:** Layer 0 (YC foundation track) · **Date:** 2026-07-02 · **Author:** NF + Claude
 **Related:** OD-6 (embedded store), OD-2/OD-3 (local-default, cloud-later), `embedded_store_pglite_feasibility`, `repo_state_branches_verified`, `must_build_for_update_and_pitch`. Sibling: **Layer 0b — Minimal Measurement Harness** (separate PRD). Downstream: the cutover / npm publish (a later step, not this PRD).
 
@@ -69,13 +69,13 @@ Two blockers sit under everything:
 
 ## 7. Acceptance criteria
 
-- [ ] From a clean checkout with **no Postgres and no `DATABASE_URL`**, iranti boots over stdio and auto-creates + migrates an embedded PGlite store on first run.
-- [ ] **The "it runs" gate:** an automated smoke test in a fresh temp dir does `attend` (writes a fact) → a later `attend` → the fact is returned. End-to-end against PGlite.
-- [ ] Two sibling folders under a Projects root are **separate projects**: a fact written while in folder A does **not** surface for folder B by default.
-- [ ] `combine(A,B)` makes A's facts retrievable from B; `exclude(C)` stops C from being tracked. Both reversible.
-- [ ] `IRANTI_DB_ENGINE=postgres` + `DATABASE_URL` still uses the server pool; the existing DB-backed test suite passes unchanged against a real Postgres.
-- [ ] A **one-command setup** configures a host (writes MCP config + Projects root) with no DB server step.
-- [ ] `pnpm typecheck` + `pnpm lint` clean; new PGlite + project-scoping paths have tests; full suite green.
+- [x] From a clean checkout with **no Postgres and no `DATABASE_URL`**, iranti boots over stdio and auto-creates + migrates an embedded PGlite store on first run. *(Layer 0a, `feat/layer0a-pglite`; re-proven from a fresh clone in the 2026-07-03 whole-system pass.)*
+- [x] **The "it runs" gate:** an automated smoke test in a fresh temp dir does `attend` (writes a fact) → a later `attend` → the fact is returned. End-to-end against PGlite. *(`src/tests/it-runs.test.ts`.)*
+- [x] Two sibling folders under a Projects root are **separate projects**: a fact written while in folder A does **not** surface for folder B by default. *(`projects-isolation.test.ts`, 16 adversarial cases incl. the factId-path leak found and closed in review.)*
+- [x] `combine(A,B)` makes A's facts retrievable from B; `exclude(C)` stops C from being tracked. Both reversible. *(Same suite; registry rows never deleted.)*
+- [x] `IRANTI_DB_ENGINE=postgres` + `DATABASE_URL` still uses the server pool; the existing DB-backed test suite passes unchanged against a real Postgres. *(mcp-tools 46/46 ×3 on Postgres 17; migrations 0013/0014 verified on both engines.)*
+- [ ] A **one-command setup** configures a host (writes MCP config + Projects root) with no DB server step. *(PARTIAL: `runInit` library + config I/O + 7 tests shipped; the `bin` wiring is blocked by the documented Node strip-types limitation — plain `node` cannot run this repo's TS source. Deferred to the cutover/publish step, where a build output exists for `bin` to point at.)*
+- [x] `pnpm typecheck` + `pnpm lint` clean; new PGlite + project-scoping paths have tests; full suite green. *(All gauntlet gates, re-verified per feature.)*
 
 ## 8. Deltas from the master PRD
 

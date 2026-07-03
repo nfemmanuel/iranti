@@ -87,7 +87,7 @@ How we know it works: test counts, smoke checks, manual validation.
 | [AX-1 — Key Normalization](ax-1-key-normalization.md) | AX-1 (hardening) | shipped |
 | [AX-2 — Content-Hash Extraction Cache](ax-2-content-hash-cache.md) | AX-2 (hardening) | shipped |
 | [OD-4 — Media Ingest](od4-media-ingest.md) | OD-4 (Media track) | shipped |
-| [Layer 0 — Zero-Infra Foundation & Folder-Scoped Projects](layer-0-foundation.md) | Layer 0 (YC foundation) | accepted |
+| [Layer 0 — Zero-Infra Foundation & Folder-Scoped Projects](layer-0-foundation.md) | Layer 0 (YC foundation) | shipped (init bin = cutover item) |
 | [Layer 0b — Minimal Measurement Harness](layer-0b-harness.md) | Layer 0b (YC foundation) | shipped |
 | [Layer 0c — Entity Resolution](layer-0c-entity-resolution.md) | Layer 0c (YC foundation) | shipped |
 | [Layer 0d — Rules & Preferences Enforcement](layer-0d-rules-enforcement.md) | Layer 0d (YC foundation) | shipped |
