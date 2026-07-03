@@ -1,0 +1,53 @@
+// Corpus loading — Layer 0b.
+//
+// Reads bench/corpus/*.json off disk and validates the minimal shape the
+// harness depends on. Deliberately no zod dependency here: the harness's own
+// constraint is "no new runtime deps unless truly necessary" (PRD
+// Constraints) and this validation is a handful of array/string checks.
+
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import type { Corpus } from "./types.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// src/harness/corpus.ts -> ../../bench/corpus
+export const CORPUS_DIR = path.resolve(__dirname, "../../bench/corpus");
+
+function assertCorpusShape(value: unknown, file: string): asserts value is Corpus {
+  if (typeof value !== "object" || value === null) {
+    throw new Error(`Corpus file ${file} did not parse to an object.`);
+  }
+  const c = value as Record<string, unknown>;
+  if (typeof c["persona"] !== "string" || c["persona"].length === 0) {
+    throw new Error(`Corpus file ${file} is missing a non-empty "persona" string.`);
+  }
+  if (!Array.isArray(c["messages"]) || c["messages"].length === 0) {
+    throw new Error(`Corpus file ${file} ("${c["persona"]}") has no messages.`);
+  }
+  if (!Array.isArray(c["goldFacts"])) {
+    throw new Error(`Corpus file ${file} ("${c["persona"]}") is missing "goldFacts" array.`);
+  }
+  if (!Array.isArray(c["probes"]) || c["probes"].length === 0) {
+    throw new Error(`Corpus file ${file} ("${c["persona"]}") has no probes.`);
+  }
+}
+
+// Load every *.json file in bench/corpus, sorted by filename so run order
+// (and therefore report row order) is stable across machines and runs.
+export function loadCorpora(): Corpus[] {
+  const files = readdirSync(CORPUS_DIR)
+    .filter((f) => f.endsWith(".json"))
+    .sort();
+
+  if (files.length === 0) {
+    throw new Error(`No corpus files found in ${CORPUS_DIR}`);
+  }
+
+  return files.map((file) => {
+    const full = path.join(CORPUS_DIR, file);
+    const parsed: unknown = JSON.parse(readFileSync(full, "utf-8"));
+    assertCorpusShape(parsed, file);
+    return parsed;
+  });
+}

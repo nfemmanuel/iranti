@@ -1,0 +1,202 @@
+{
+  "persona": "frontend-dev",
+  "description": "UI-focused developer working on a dashboard redesign. Talks in visual/design terms, component structure, accessibility. Warmer tone than the backend persona, still concrete.",
+  "messages": [
+    {
+      "text": "Let's go with Tailwind for styling instead of the old CSS modules setup.",
+      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }]
+    },
+    {
+      "text": "We chose Zustand for state management over Redux for the new dashboard.",
+      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }]
+    },
+    {
+      "text": "Decision: all new components live under src/components/ui, no more scattering.",
+      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }]
+    },
+    {
+      "text": "I prefer colocating a component's test file right next to it.",
+      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }]
+    },
+    {
+      "text": "Please always add an aria-label to icon-only buttons.",
+      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }]
+    },
+    {
+      "text": "We can't use client-side only rendering for the pricing page, it needs to be crawlable.",
+      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }]
+    },
+    {
+      "text": "Actually, the breakpoint for tablet is 768px, not 820px like the old spec said.",
+      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }]
+    },
+    {
+      "text": "The correct value for the primary brand color is #1a73e8, design just corrected it.",
+      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }]
+    },
+    {
+      "text": "We tried CSS-in-JS with runtime styles but it didn't work well with our SSR setup.",
+      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }]
+    },
+    {
+      "text": "Failed approach: a single global Redux store for everything, way too much boilerplate.",
+      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }]
+    },
+    {
+      "text": "Check src/components/ui/Button.tsx for the button variants pattern.",
+      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }]
+    },
+    {
+      "text": "See https://www.figma.com/file/abc123/dashboard-redesign for the latest mocks — everyone just calls it 'the figma file' in Slack.",
+      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }]
+    },
+    {
+      "text": "Never ship a component without a loading and an error state.",
+      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }]
+    }
+  ],
+  "goldFacts": [
+    {
+      "entityType": "project",
+      "entityId": "dashboard-redesign",
+      "key": "decision:tailwind-for-styling-instead-of-the-old-",
+      "value": "Tailwind for styling",
+      "note": "message 1 — heuristic 'let's go with X' pattern"
+    },
+    {
+      "entityType": "project",
+      "entityId": "dashboard-redesign",
+      "key": "decision:zustand",
+      "value": "Zustand",
+      "note": "message 2 — heuristic 'we chose X' pattern"
+    },
+    {
+      "entityType": "project",
+      "entityId": "dashboard-redesign",
+      "key": "decision:all-new-components-live-under-src-compon",
+      "value": "all new components live under src/components/ui",
+      "note": "message 3 — heuristic decision colon pattern"
+    },
+    {
+      "entityType": "project",
+      "entityId": "dashboard-redesign",
+      "key": "preference:colocating-a-component-s-test-file-right",
+      "value": "colocating a component's test file right next to it",
+      "note": "message 4 — heuristic 'I prefer X' pattern"
+    },
+    {
+      "entityType": "project",
+      "entityId": "dashboard-redesign",
+      "key": "preference:add-an-aria-label-to-icon-only-buttons",
+      "value": "add an aria-label to icon-only buttons",
+      "note": "message 5 — heuristic 'please always X' pattern"
+    },
+    {
+      "entityType": "project",
+      "entityId": "dashboard-redesign",
+      "key": "constraint:client-side-only-rendering-for-the-prici",
+      "value": "client-side only rendering for the pricing page",
+      "note": "message 6 — heuristic 'we can't use X' constraint pattern"
+    },
+    {
+      "entityType": "project",
+      "entityId": "dashboard-redesign",
+      "key": "correction:the-breakpoint-for-tablet",
+      "value": "the breakpoint for tablet is 768px",
+      "note": "CORRECTION CASE 1 — message 7, corrects an earlier claim of 820px"
+    },
+    {
+      "entityType": "project",
+      "entityId": "dashboard-redesign",
+      "key": "correction:the-primary-brand-color",
+      "value": "the primary brand color is #1a73e8",
+      "note": "CORRECTION CASE 2 — message 8"
+    },
+    {
+      "entityType": "project",
+      "entityId": "dashboard-redesign",
+      "key": "failed-approach:css-in-js-with-runtime-styles",
+      "value": "CSS-in-JS with runtime styles",
+      "note": "message 9 — heuristic failed-approach pattern"
+    },
+    {
+      "entityType": "project",
+      "entityId": "dashboard-redesign",
+      "key": "failed-approach:a-single-global-redux-store-for-everythi",
+      "value": "a single global Redux store for everything",
+      "note": "message 10 — heuristic failed-approach colon pattern"
+    },
+    {
+      "entityType": "project",
+      "entityId": "dashboard-redesign",
+      "key": "referenced_file:button_variants_pattern",
+      "value": "src/components/ui/Button.tsx",
+      "note": "message 11 — 'Check X for the pattern' phrasing does NOT trigger any heuristic pattern, and src/components/ui/Button.tsx is NOT extracted by extractArtifacts (relative path without leading ./ or /, not matched by UNIX_PATH_PATTERN due to the lookbehind rule). INTENTIONALLY a miss today — the file-path-in-prose gap."
+    },
+    {
+      "entityType": "project",
+      "entityId": "dashboard-redesign",
+      "key": "shared_url:c775f2cd79ed",
+      "value": "https://www.figma.com/file/abc123/dashboard-redesign",
+      "note": "message 12 — deterministic URL artifact extraction"
+    },
+    {
+      "entityType": "project",
+      "entityId": "dashboard-redesign",
+      "key": "alias:the-figma-file",
+      "value": "https://www.figma.com/file/abc123/dashboard-redesign",
+      "note": "ALIAS CASE 1 — message 12 also calls the URL 'the figma file'. No entity resolution exists yet; a probe on the alias alone will not find the fact. INTENTIONALLY scores 0 today."
+    },
+    {
+      "entityType": "project",
+      "entityId": "dashboard-redesign",
+      "key": "alias:the-dashboard",
+      "value": "dashboard-redesign",
+      "note": "ALIAS CASE 2 — the project itself is referred to informally as 'the dashboard' or 'the new dashboard' across messages 2 and elsewhere but is only ever stored under entityId 'dashboard-redesign'. A probe phrased around 'the dashboard' with no entity hint would not resolve to this project. Documents the project-alias gap (distinct from fact-value aliasing) — not separately probed since entityHints are supplied explicitly by every probe in this harness (see PRD non-goals: no entity-resolution probing without hints yet)."
+    }
+  ],
+  "probes": [
+    {
+      "query": "What are we using for styling?",
+      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }],
+      "expectedKeys": ["decision:tailwind-for-styling-instead-of-the-old-"],
+      "note": "direct decision recall"
+    },
+    {
+      "query": "What's the tablet breakpoint?",
+      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }],
+      "expectedKeys": ["correction:the-breakpoint-for-tablet"],
+      "note": "must surface the corrected 768px value — confirmation-rate probe"
+    },
+    {
+      "query": "What's the primary brand color?",
+      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }],
+      "expectedKeys": ["correction:the-primary-brand-color"],
+      "note": "second correction-recall probe"
+    },
+    {
+      "query": "Can the pricing page be client-side only rendered?",
+      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }],
+      "expectedKeys": ["constraint:client-side-only-rendering-for-the-prici"],
+      "note": "constraint recall"
+    },
+    {
+      "query": "What did we try for styling that didn't work with SSR?",
+      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }],
+      "expectedKeys": ["failed-approach:css-in-js-with-runtime-styles"],
+      "note": "failed-approach recall"
+    },
+    {
+      "query": "Where's the figma file?",
+      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }],
+      "expectedKeys": ["alias:the-figma-file"],
+      "note": "ALIAS PROBE — expected to score 0/low today"
+    },
+    {
+      "query": "Where do new components live?",
+      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }],
+      "expectedKeys": ["decision:all-new-components-live-under-src-compon"],
+      "note": "decision recall"
+    }
+  ]
+}

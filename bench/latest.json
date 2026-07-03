@@ -1,0 +1,607 @@
+{
+  "personas": [
+    {
+      "persona": "backend-api-dev",
+      "extraction": {
+        "goldCount": 14,
+        "storedCount": 12,
+        "identityHits": 11,
+        "matchedCount": 11,
+        "recall": 0.7857142857142857,
+        "precision": 1
+      },
+      "retrieval": {
+        "probeCount": 7,
+        "hitCount": 6,
+        "confirmedCount": 4,
+        "hitRate": 0.8571428571428571,
+        "confirmationRate": 0.5714285714285714,
+        "perProbe": [
+          {
+            "query": "What database and ORM are we using for the payments service?",
+            "expectedKeys": [
+              "decision:to-use-postgresql-16-with-drizzle-as-the"
+            ],
+            "rank": 2,
+            "hit": true,
+            "confirmed": false
+          },
+          {
+            "query": "What's the connection pool size?",
+            "expectedKeys": [
+              "correction:the-connection-pool-size"
+            ],
+            "rank": 1,
+            "hit": true,
+            "confirmed": true
+          },
+          {
+            "query": "What did we try for idempotency that didn't work?",
+            "expectedKeys": [
+              "failed-approach:doing-idempotency-with-a-unique-constrai"
+            ],
+            "rank": 2,
+            "hit": true,
+            "confirmed": false
+          },
+          {
+            "query": "Can we use MongoDB for the ledger table?",
+            "expectedKeys": [
+              "constraint:mongodb-for-the-ledger-table"
+            ],
+            "rank": 1,
+            "hit": true,
+            "confirmed": true
+          },
+          {
+            "query": "Where's the reconciliation doc?",
+            "expectedKeys": [
+              "alias:the-reconciliation-doc"
+            ],
+            "rank": null,
+            "hit": false,
+            "confirmed": false
+          },
+          {
+            "query": "Should service-to-service calls use direct HTTP?",
+            "expectedKeys": [
+              "decision:all-internal-service-to-service-calls-go"
+            ],
+            "rank": 1,
+            "hit": true,
+            "confirmed": true
+          },
+          {
+            "query": "What's the retry backoff base?",
+            "expectedKeys": [
+              "correction:the-retry-backoff-base"
+            ],
+            "rank": 1,
+            "hit": true,
+            "confirmed": true
+          }
+        ]
+      }
+    },
+    {
+      "persona": "data-ml-person",
+      "extraction": {
+        "goldCount": 13,
+        "storedCount": 11,
+        "identityHits": 10,
+        "matchedCount": 10,
+        "recall": 0.7692307692307693,
+        "precision": 1
+      },
+      "retrieval": {
+        "probeCount": 7,
+        "hitCount": 5,
+        "confirmedCount": 3,
+        "hitRate": 0.7142857142857143,
+        "confirmationRate": 0.42857142857142855,
+        "perProbe": [
+          {
+            "query": "What model are we using for churn prediction?",
+            "expectedKeys": [
+              "decision:to-use-a-gradient-boosted-tree-instead-o"
+            ],
+            "rank": 3,
+            "hit": true,
+            "confirmed": false
+          },
+          {
+            "query": "What's the validation AUC?",
+            "expectedKeys": [
+              "correction:validation-auc"
+            ],
+            "rank": null,
+            "hit": false,
+            "confirmed": false
+          },
+          {
+            "query": "What's the learning rate for the final run?",
+            "expectedKeys": [
+              "correction:the-learning-rate-in-the-final-run"
+            ],
+            "rank": 1,
+            "hit": true,
+            "confirmed": true
+          },
+          {
+            "query": "Can we use raw user IDs as a feature?",
+            "expectedKeys": [
+              "constraint:raw-user-ids-as-a-feature"
+            ],
+            "rank": 1,
+            "hit": true,
+            "confirmed": true
+          },
+          {
+            "query": "What did we try for class imbalance that didn't work?",
+            "expectedKeys": [
+              "failed-approach:oversampling-the-minority-class"
+            ],
+            "rank": 2,
+            "hit": true,
+            "confirmed": false
+          },
+          {
+            "query": "Where's the dashboard run?",
+            "expectedKeys": [
+              "alias:the-dashboard-run"
+            ],
+            "rank": null,
+            "hit": false,
+            "confirmed": false
+          },
+          {
+            "query": "How are features versioned?",
+            "expectedKeys": [
+              "decision:features-get-versioned-in-the-feature-st"
+            ],
+            "rank": 1,
+            "hit": true,
+            "confirmed": true
+          }
+        ]
+      }
+    },
+    {
+      "persona": "frontend-dev",
+      "extraction": {
+        "goldCount": 14,
+        "storedCount": 12,
+        "identityHits": 11,
+        "matchedCount": 11,
+        "recall": 0.7857142857142857,
+        "precision": 1
+      },
+      "retrieval": {
+        "probeCount": 7,
+        "hitCount": 6,
+        "confirmedCount": 5,
+        "hitRate": 0.8571428571428571,
+        "confirmationRate": 0.7142857142857143,
+        "perProbe": [
+          {
+            "query": "What are we using for styling?",
+            "expectedKeys": [
+              "decision:tailwind-for-styling-instead-of-the-old-"
+            ],
+            "rank": 1,
+            "hit": true,
+            "confirmed": true
+          },
+          {
+            "query": "What's the tablet breakpoint?",
+            "expectedKeys": [
+              "correction:the-breakpoint-for-tablet"
+            ],
+            "rank": 1,
+            "hit": true,
+            "confirmed": true
+          },
+          {
+            "query": "What's the primary brand color?",
+            "expectedKeys": [
+              "correction:the-primary-brand-color"
+            ],
+            "rank": 1,
+            "hit": true,
+            "confirmed": true
+          },
+          {
+            "query": "Can the pricing page be client-side only rendered?",
+            "expectedKeys": [
+              "constraint:client-side-only-rendering-for-the-prici"
+            ],
+            "rank": 1,
+            "hit": true,
+            "confirmed": true
+          },
+          {
+            "query": "What did we try for styling that didn't work with SSR?",
+            "expectedKeys": [
+              "failed-approach:css-in-js-with-runtime-styles"
+            ],
+            "rank": 5,
+            "hit": true,
+            "confirmed": false
+          },
+          {
+            "query": "Where's the figma file?",
+            "expectedKeys": [
+              "alias:the-figma-file"
+            ],
+            "rank": null,
+            "hit": false,
+            "confirmed": false
+          },
+          {
+            "query": "Where do new components live?",
+            "expectedKeys": [
+              "decision:all-new-components-live-under-src-compon"
+            ],
+            "rank": 1,
+            "hit": true,
+            "confirmed": true
+          }
+        ]
+      }
+    },
+    {
+      "persona": "messy-conversationalist",
+      "extraction": {
+        "goldCount": 10,
+        "storedCount": 7,
+        "identityHits": 6,
+        "matchedCount": 6,
+        "recall": 0.6,
+        "precision": 1
+      },
+      "retrieval": {
+        "probeCount": 7,
+        "hitCount": 4,
+        "confirmedCount": 3,
+        "hitRate": 0.5714285714285714,
+        "confirmationRate": 0.42857142857142855,
+        "perProbe": [
+          {
+            "query": "What are we using for the internal tool's database?",
+            "expectedKeys": [
+              "decision:sqlite"
+            ],
+            "rank": 7,
+            "hit": true,
+            "confirmed": false
+          },
+          {
+            "query": "Where's the widget's sync job documented?",
+            "expectedKeys": [
+              "alias:the-sync-wiki-page"
+            ],
+            "rank": null,
+            "hit": false,
+            "confirmed": false
+          },
+          {
+            "query": "What time does the sync run?",
+            "expectedKeys": [
+              "correction:sync-run-time"
+            ],
+            "rank": null,
+            "hit": false,
+            "confirmed": false
+          },
+          {
+            "query": "What's the retry count?",
+            "expectedKeys": [
+              "correction:the-retry-count"
+            ],
+            "rank": 1,
+            "hit": true,
+            "confirmed": true
+          },
+          {
+            "query": "What did we try for the nightly sync that failed?",
+            "expectedKeys": [
+              "failed-approach:just-cron-a-bash-script-for-the-nightly-"
+            ],
+            "rank": 1,
+            "hit": true,
+            "confirmed": true
+          },
+          {
+            "query": "Is it okay to touch the export script on Fridays?",
+            "expectedKeys": [
+              "constraint:export-script-fridays"
+            ],
+            "rank": null,
+            "hit": false,
+            "confirmed": false
+          },
+          {
+            "query": "What does the new tool need to do when it fails?",
+            "expectedKeys": [
+              "constraint:whatever-we-build-next-has-to-send-a-sla"
+            ],
+            "rank": 1,
+            "hit": true,
+            "confirmed": true
+          }
+        ]
+      }
+    }
+  ],
+  "overall": {
+    "extraction": {
+      "goldCount": 51,
+      "storedCount": 42,
+      "identityHits": 38,
+      "matchedCount": 38,
+      "recall": 0.7450980392156863,
+      "precision": 1
+    },
+    "retrieval": {
+      "probeCount": 28,
+      "hitCount": 21,
+      "confirmedCount": 15,
+      "hitRate": 0.75,
+      "confirmationRate": 0.5357142857142857,
+      "perProbe": [
+        {
+          "query": "What database and ORM are we using for the payments service?",
+          "expectedKeys": [
+            "decision:to-use-postgresql-16-with-drizzle-as-the"
+          ],
+          "rank": 2,
+          "hit": true,
+          "confirmed": false
+        },
+        {
+          "query": "What's the connection pool size?",
+          "expectedKeys": [
+            "correction:the-connection-pool-size"
+          ],
+          "rank": 1,
+          "hit": true,
+          "confirmed": true
+        },
+        {
+          "query": "What did we try for idempotency that didn't work?",
+          "expectedKeys": [
+            "failed-approach:doing-idempotency-with-a-unique-constrai"
+          ],
+          "rank": 2,
+          "hit": true,
+          "confirmed": false
+        },
+        {
+          "query": "Can we use MongoDB for the ledger table?",
+          "expectedKeys": [
+            "constraint:mongodb-for-the-ledger-table"
+          ],
+          "rank": 1,
+          "hit": true,
+          "confirmed": true
+        },
+        {
+          "query": "Where's the reconciliation doc?",
+          "expectedKeys": [
+            "alias:the-reconciliation-doc"
+          ],
+          "rank": null,
+          "hit": false,
+          "confirmed": false
+        },
+        {
+          "query": "Should service-to-service calls use direct HTTP?",
+          "expectedKeys": [
+            "decision:all-internal-service-to-service-calls-go"
+          ],
+          "rank": 1,
+          "hit": true,
+          "confirmed": true
+        },
+        {
+          "query": "What's the retry backoff base?",
+          "expectedKeys": [
+            "correction:the-retry-backoff-base"
+          ],
+          "rank": 1,
+          "hit": true,
+          "confirmed": true
+        },
+        {
+          "query": "What model are we using for churn prediction?",
+          "expectedKeys": [
+            "decision:to-use-a-gradient-boosted-tree-instead-o"
+          ],
+          "rank": 3,
+          "hit": true,
+          "confirmed": false
+        },
+        {
+          "query": "What's the validation AUC?",
+          "expectedKeys": [
+            "correction:validation-auc"
+          ],
+          "rank": null,
+          "hit": false,
+          "confirmed": false
+        },
+        {
+          "query": "What's the learning rate for the final run?",
+          "expectedKeys": [
+            "correction:the-learning-rate-in-the-final-run"
+          ],
+          "rank": 1,
+          "hit": true,
+          "confirmed": true
+        },
+        {
+          "query": "Can we use raw user IDs as a feature?",
+          "expectedKeys": [
+            "constraint:raw-user-ids-as-a-feature"
+          ],
+          "rank": 1,
+          "hit": true,
+          "confirmed": true
+        },
+        {
+          "query": "What did we try for class imbalance that didn't work?",
+          "expectedKeys": [
+            "failed-approach:oversampling-the-minority-class"
+          ],
+          "rank": 2,
+          "hit": true,
+          "confirmed": false
+        },
+        {
+          "query": "Where's the dashboard run?",
+          "expectedKeys": [
+            "alias:the-dashboard-run"
+          ],
+          "rank": null,
+          "hit": false,
+          "confirmed": false
+        },
+        {
+          "query": "How are features versioned?",
+          "expectedKeys": [
+            "decision:features-get-versioned-in-the-feature-st"
+          ],
+          "rank": 1,
+          "hit": true,
+          "confirmed": true
+        },
+        {
+          "query": "What are we using for styling?",
+          "expectedKeys": [
+            "decision:tailwind-for-styling-instead-of-the-old-"
+          ],
+          "rank": 1,
+          "hit": true,
+          "confirmed": true
+        },
+        {
+          "query": "What's the tablet breakpoint?",
+          "expectedKeys": [
+            "correction:the-breakpoint-for-tablet"
+          ],
+          "rank": 1,
+          "hit": true,
+          "confirmed": true
+        },
+        {
+          "query": "What's the primary brand color?",
+          "expectedKeys": [
+            "correction:the-primary-brand-color"
+          ],
+          "rank": 1,
+          "hit": true,
+          "confirmed": true
+        },
+        {
+          "query": "Can the pricing page be client-side only rendered?",
+          "expectedKeys": [
+            "constraint:client-side-only-rendering-for-the-prici"
+          ],
+          "rank": 1,
+          "hit": true,
+          "confirmed": true
+        },
+        {
+          "query": "What did we try for styling that didn't work with SSR?",
+          "expectedKeys": [
+            "failed-approach:css-in-js-with-runtime-styles"
+          ],
+          "rank": 5,
+          "hit": true,
+          "confirmed": false
+        },
+        {
+          "query": "Where's the figma file?",
+          "expectedKeys": [
+            "alias:the-figma-file"
+          ],
+          "rank": null,
+          "hit": false,
+          "confirmed": false
+        },
+        {
+          "query": "Where do new components live?",
+          "expectedKeys": [
+            "decision:all-new-components-live-under-src-compon"
+          ],
+          "rank": 1,
+          "hit": true,
+          "confirmed": true
+        },
+        {
+          "query": "What are we using for the internal tool's database?",
+          "expectedKeys": [
+            "decision:sqlite"
+          ],
+          "rank": 7,
+          "hit": true,
+          "confirmed": false
+        },
+        {
+          "query": "Where's the widget's sync job documented?",
+          "expectedKeys": [
+            "alias:the-sync-wiki-page"
+          ],
+          "rank": null,
+          "hit": false,
+          "confirmed": false
+        },
+        {
+          "query": "What time does the sync run?",
+          "expectedKeys": [
+            "correction:sync-run-time"
+          ],
+          "rank": null,
+          "hit": false,
+          "confirmed": false
+        },
+        {
+          "query": "What's the retry count?",
+          "expectedKeys": [
+            "correction:the-retry-count"
+          ],
+          "rank": 1,
+          "hit": true,
+          "confirmed": true
+        },
+        {
+          "query": "What did we try for the nightly sync that failed?",
+          "expectedKeys": [
+            "failed-approach:just-cron-a-bash-script-for-the-nightly-"
+          ],
+          "rank": 1,
+          "hit": true,
+          "confirmed": true
+        },
+        {
+          "query": "Is it okay to touch the export script on Fridays?",
+          "expectedKeys": [
+            "constraint:export-script-fridays"
+          ],
+          "rank": null,
+          "hit": false,
+          "confirmed": false
+        },
+        {
+          "query": "What does the new tool need to do when it fails?",
+          "expectedKeys": [
+            "constraint:whatever-we-build-next-has-to-send-a-sla"
+          ],
+          "rank": 1,
+          "hit": true,
+          "confirmed": true
+        }
+      ]
+    }
+  }
+}

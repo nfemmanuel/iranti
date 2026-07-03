@@ -1,0 +1,202 @@
+{
+  "persona": "backend-api-dev",
+  "description": "Terse, technical backend engineer working on a payments/ledger service. Talks in decisions, requirements, and postmortems. Low-affect, high-density.",
+  "messages": [
+    {
+      "text": "We decided to use PostgreSQL 16 with Drizzle as the ORM for the payments service.",
+      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }]
+    },
+    {
+      "text": "Decision: all internal service-to-service calls go through the gRPC gateway, no direct HTTP.",
+      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }]
+    },
+    {
+      "text": "We're using Redis for idempotency keys on the checkout endpoint.",
+      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }]
+    },
+    {
+      "text": "Requirement: every migration must be reversible and tested on a staging snapshot first.",
+      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }]
+    },
+    {
+      "text": "We can't use MongoDB for the ledger table, compliance requires ACID transactions.",
+      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }]
+    },
+    {
+      "text": "Actually, the retry backoff base is 250ms, not 500ms like I said earlier.",
+      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }]
+    },
+    {
+      "text": "The correct value for the connection pool size is 20, I misquoted 10 in standup.",
+      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }]
+    },
+    {
+      "text": "We tried doing idempotency with a unique constraint alone but it didn't work under concurrent retries.",
+      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }]
+    },
+    {
+      "text": "Failed approach: in-memory rate limiting, it doesn't survive a pod restart.",
+      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }]
+    },
+    {
+      "text": "Check the schema at src/db/schema.ts for the ledger table shape.",
+      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }]
+    },
+    {
+      "text": "See https://github.com/acme/ledger-service/blob/main/docs/reconciliation.md for the reconciliation job — I keep calling it 'the reconciliation doc' in standup, same thing.",
+      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }]
+    },
+    {
+      "text": "I always prefer explicit transaction boundaries over relying on ORM auto-commit.",
+      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }]
+    },
+    {
+      "text": "Never use SELECT * in the reporting queries, the table has 40 columns and it's slow.",
+      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }]
+    }
+  ],
+  "goldFacts": [
+    {
+      "entityType": "project",
+      "entityId": "ledger-service",
+      "key": "decision:to-use-postgresql-16-with-drizzle-as-the",
+      "value": "PostgreSQL 16 with Drizzle",
+      "note": "message 1 — heuristic decision pattern"
+    },
+    {
+      "entityType": "project",
+      "entityId": "ledger-service",
+      "key": "decision:all-internal-service-to-service-calls-go",
+      "value": "gRPC gateway",
+      "note": "message 2 — heuristic decision pattern (colon form)"
+    },
+    {
+      "entityType": "project",
+      "entityId": "ledger-service",
+      "key": "decision:redis-for-idempotency-keys-on-the-checko",
+      "value": "Redis for idempotency keys",
+      "note": "message 3 — heuristic 'we're using X' pattern"
+    },
+    {
+      "entityType": "project",
+      "entityId": "ledger-service",
+      "key": "constraint:every-migration-must-be-reversible-and-t",
+      "value": "every migration must be reversible",
+      "note": "message 4 — heuristic requirement pattern"
+    },
+    {
+      "entityType": "project",
+      "entityId": "ledger-service",
+      "key": "constraint:mongodb-for-the-ledger-table",
+      "value": "MongoDB for the ledger table",
+      "note": "message 5 — heuristic constraint pattern"
+    },
+    {
+      "entityType": "project",
+      "entityId": "ledger-service",
+      "key": "correction:the-retry-backoff-base",
+      "value": "the retry backoff base is 250ms",
+      "note": "CORRECTION CASE 1 — message 6 corrects an earlier (unstated-in-corpus) claim of 500ms; scores on the corrected value landing, not on cross-message correction tracking (iranti has no such feature yet)"
+    },
+    {
+      "entityType": "project",
+      "entityId": "ledger-service",
+      "key": "correction:the-connection-pool-size",
+      "value": "the connection pool size is 20",
+      "note": "CORRECTION CASE 2 — message 7"
+    },
+    {
+      "entityType": "project",
+      "entityId": "ledger-service",
+      "key": "failed-approach:doing-idempotency-with-a-unique-constrai",
+      "value": "doing idempotency with a unique constraint alone",
+      "note": "message 8 — heuristic failed-approach pattern"
+    },
+    {
+      "entityType": "project",
+      "entityId": "ledger-service",
+      "key": "failed-approach:in-memory-rate-limiting",
+      "value": "in-memory rate limiting",
+      "note": "message 9 — heuristic failed-approach colon pattern"
+    },
+    {
+      "entityType": "project",
+      "entityId": "ledger-service",
+      "key": "referenced_file:823c3ef0b4b3",
+      "value": "src/db/schema.ts",
+      "note": "message 10 — the file path is NOT extracted by extractArtifacts (no leading ./ or / and not preceded appropriately for UNIX_PATH_PATTERN); INTENTIONALLY set up to score as a miss today. This is the file-path-in-prose gap, distinct from the alias gap."
+    },
+    {
+      "entityType": "project",
+      "entityId": "ledger-service",
+      "key": "shared_url:2cd71924e17b",
+      "value": "https://github.com/acme/ledger-service/blob/main/docs/reconciliation.md",
+      "note": "message 11 — deterministic URL artifact extraction (always-on, not the heuristic extractor)"
+    },
+    {
+      "entityType": "project",
+      "entityId": "ledger-service",
+      "key": "alias:the-reconciliation-doc",
+      "value": "https://github.com/acme/ledger-service/blob/main/docs/reconciliation.md",
+      "note": "ALIAS CASE 1 — message 11 also calls the same URL 'the reconciliation doc'. iranti has no entity/alias resolution yet, so a probe using only the alias phrase will NOT find the URL fact. INTENTIONALLY scores 0 today — this is the entity-resolution gap the harness exists to measure as a future delta."
+    },
+    {
+      "entityType": "project",
+      "entityId": "ledger-service",
+      "key": "preference:explicit-transaction-boundaries",
+      "value": "explicit transaction boundaries over relying on ORM auto-commit",
+      "note": "ALIAS/MISS CASE — message 12 uses 'I always prefer X over Y' which does NOT match any PREFERENCE_PATTERNS regex (patterns require 'prefer' immediately followed by the value, not 'prefer X over Y' framing). INTENTIONALLY set up as a heuristic-extractor miss to keep the corpus honest about pattern coverage gaps, separate from the alias/correction gaps."
+    },
+    {
+      "entityType": "project",
+      "entityId": "ledger-service",
+      "key": "preference:select-in-the-reporting-queries",
+      "value": "SELECT * in the reporting queries",
+      "note": "message 13 — heuristic 'never use X' pattern (filed under preference: by the extractor's own PREFERENCE_PATTERNS, not a bug in the corpus)"
+    }
+  ],
+  "probes": [
+    {
+      "query": "What database and ORM are we using for the payments service?",
+      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }],
+      "expectedKeys": ["decision:to-use-postgresql-16-with-drizzle-as-the"],
+      "note": "direct recall of a decision fact"
+    },
+    {
+      "query": "What's the connection pool size?",
+      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }],
+      "expectedKeys": ["correction:the-connection-pool-size"],
+      "note": "must surface the CORRECTED value (20), not a stale one — corrections/confirmation-rate probe"
+    },
+    {
+      "query": "What did we try for idempotency that didn't work?",
+      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }],
+      "expectedKeys": ["failed-approach:doing-idempotency-with-a-unique-constrai"],
+      "note": "failed-approach recall"
+    },
+    {
+      "query": "Can we use MongoDB for the ledger table?",
+      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }],
+      "expectedKeys": ["constraint:mongodb-for-the-ledger-table"],
+      "note": "constraint recall"
+    },
+    {
+      "query": "Where's the reconciliation doc?",
+      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }],
+      "expectedKeys": ["alias:the-reconciliation-doc"],
+      "note": "ALIAS PROBE — 'the reconciliation doc' never appears verbatim near the URL fact's key; expected to score 0/low today, this is the entity-resolution delta target"
+    },
+    {
+      "query": "Should service-to-service calls use direct HTTP?",
+      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }],
+      "expectedKeys": ["decision:all-internal-service-to-service-calls-go"],
+      "note": "decision recall, phrased as a question rather than the original statement"
+    },
+    {
+      "query": "What's the retry backoff base?",
+      "entityHints": [{ "entityType": "project", "entityId": "ledger-service" }],
+      "expectedKeys": ["correction:the-retry-backoff-base"],
+      "note": "second correction-recall probe"
+    }
+  ]
+}

@@ -1,0 +1,191 @@
+{
+  "persona": "data-ml-person",
+  "description": "Data scientist / ML engineer working on a churn model. Jargon-dense (AUC, feature store, leakage), reflective about mistakes (self-corrections on metrics), methodical.",
+  "messages": [
+    {
+      "text": "We decided to use a gradient-boosted tree instead of the neural net for the churn model, way easier to explain to stakeholders.",
+      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }]
+    },
+    {
+      "text": "Decision: features get versioned in the feature store, no more ad-hoc CSV pulls.",
+      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }]
+    },
+    {
+      "text": "We're using Optuna for hyperparameter search on the ranking model.",
+      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }]
+    },
+    {
+      "text": "Requirement: every model artifact must log its training data hash for reproducibility.",
+      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }]
+    },
+    {
+      "text": "We can't use raw user IDs as a feature, that's a leakage risk the privacy review flagged.",
+      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }]
+    },
+    {
+      "text": "Actually, the validation AUC was 0.81, not 0.86 like I reported this morning, I had a leak in the split.",
+      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }]
+    },
+    {
+      "text": "The correct value for the learning rate in the final run is 0.003.",
+      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }]
+    },
+    {
+      "text": "We tried oversampling the minority class but it didn't work, it just overfit to duplicates.",
+      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }]
+    },
+    {
+      "text": "Failed approach: manual feature selection by eyeballing correlations, missed interaction effects.",
+      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }]
+    },
+    {
+      "text": "Check notebooks/churn_eda.ipynb for the exploratory analysis.",
+      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }]
+    },
+    {
+      "text": "See https://wandb.ai/acme/churn-model/runs/xyz for the full run comparison — I just call it 'the dashboard run' when I mention it in meetings.",
+      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }]
+    },
+    {
+      "text": "I always want a held-out test set that never touches the notebook, only the pipeline.",
+      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }]
+    }
+  ],
+  "goldFacts": [
+    {
+      "entityType": "project",
+      "entityId": "churn-model",
+      "key": "decision:to-use-a-gradient-boosted-tree-instead-o",
+      "value": "gradient-boosted tree instead of the neural net",
+      "note": "message 1 — heuristic decision pattern"
+    },
+    {
+      "entityType": "project",
+      "entityId": "churn-model",
+      "key": "decision:features-get-versioned-in-the-feature-st",
+      "value": "features get versioned in the feature store",
+      "note": "message 2 — heuristic decision colon pattern"
+    },
+    {
+      "entityType": "project",
+      "entityId": "churn-model",
+      "key": "decision:optuna-for-hyperparameter-search-on-the-",
+      "value": "Optuna for hyperparameter search",
+      "note": "message 3 — heuristic 'we're using X' pattern"
+    },
+    {
+      "entityType": "project",
+      "entityId": "churn-model",
+      "key": "constraint:every-model-artifact-must-log-its-traini",
+      "value": "every model artifact must log its training data hash",
+      "note": "message 4 — heuristic requirement pattern"
+    },
+    {
+      "entityType": "project",
+      "entityId": "churn-model",
+      "key": "constraint:raw-user-ids-as-a-feature",
+      "value": "raw user IDs as a feature",
+      "note": "message 5 — heuristic 'we can't use X' constraint pattern"
+    },
+    {
+      "entityType": "project",
+      "entityId": "churn-model",
+      "key": "correction:validation-auc",
+      "value": "the validation AUC was 0.81",
+      "note": "CORRECTION CASE 1 (MISS BY DESIGN) — message 6's phrasing ('Actually, the validation AUC was X, not Y like I reported') does NOT match the two-capture CORRECTION_PATTERNS regex (those require '<subject> is/should be <value>' shape; 'was' is not matched, and this sentence structure has no 'is' clause). The heuristic extractor produces NOTHING for this sentence. INTENTIONALLY included as a correction-phrasing gap distinct from the alias gap — 'was' vs 'is' phrasing sensitivity is itself a measurable extractor limitation."
+    },
+    {
+      "entityType": "project",
+      "entityId": "churn-model",
+      "key": "correction:the-learning-rate-in-the-final-run",
+      "value": "the learning rate in the final run is 0.003",
+      "note": "CORRECTION CASE 2 — message 7, DOES match ('the correct value for X is Y' pattern)"
+    },
+    {
+      "entityType": "project",
+      "entityId": "churn-model",
+      "key": "failed-approach:oversampling-the-minority-class",
+      "value": "oversampling the minority class",
+      "note": "message 8 — heuristic failed-approach pattern"
+    },
+    {
+      "entityType": "project",
+      "entityId": "churn-model",
+      "key": "failed-approach:manual-feature-selection-by-eyeballing-c",
+      "value": "manual feature selection by eyeballing correlations",
+      "note": "message 9 — heuristic failed-approach colon pattern"
+    },
+    {
+      "entityType": "project",
+      "entityId": "churn-model",
+      "key": "referenced_file:churn_eda_notebook",
+      "value": "notebooks/churn_eda.ipynb",
+      "note": "message 10 — 'Check X for the analysis' phrasing has no heuristic match, and notebooks/churn_eda.ipynb is NOT extracted by extractArtifacts (no leading ./ or / segment marker). INTENTIONALLY a miss today — file-path-in-prose gap."
+    },
+    {
+      "entityType": "project",
+      "entityId": "churn-model",
+      "key": "shared_url:c60beb73e25c",
+      "value": "https://wandb.ai/acme/churn-model/runs/xyz",
+      "note": "message 11 — deterministic URL artifact extraction"
+    },
+    {
+      "entityType": "project",
+      "entityId": "churn-model",
+      "key": "alias:the-dashboard-run",
+      "value": "https://wandb.ai/acme/churn-model/runs/xyz",
+      "note": "ALIAS CASE 1 — message 11 also refers to the same URL as 'the dashboard run'. No entity resolution exists; a probe on the alias alone will not find the fact. INTENTIONALLY scores 0 today."
+    },
+    {
+      "entityType": "project",
+      "entityId": "churn-model",
+      "key": "preference:a-held-out-test-set-that-never-touches-t",
+      "value": "a held-out test set that never touches the notebook",
+      "note": "message 12 — heuristic 'I always want X' preference pattern"
+    }
+  ],
+  "probes": [
+    {
+      "query": "What model are we using for churn prediction?",
+      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }],
+      "expectedKeys": ["decision:to-use-a-gradient-boosted-tree-instead-o"],
+      "note": "direct decision recall"
+    },
+    {
+      "query": "What's the validation AUC?",
+      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }],
+      "expectedKeys": ["correction:validation-auc"],
+      "note": "CORRECTION-PHRASING PROBE — expected to score 0 today since the fact was never extracted (see gold fact note); measures the 'was X not Y' phrasing gap"
+    },
+    {
+      "query": "What's the learning rate for the final run?",
+      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }],
+      "expectedKeys": ["correction:the-learning-rate-in-the-final-run"],
+      "note": "confirmation-rate probe on a correction that DID extract"
+    },
+    {
+      "query": "Can we use raw user IDs as a feature?",
+      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }],
+      "expectedKeys": ["constraint:raw-user-ids-as-a-feature"],
+      "note": "constraint recall"
+    },
+    {
+      "query": "What did we try for class imbalance that didn't work?",
+      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }],
+      "expectedKeys": ["failed-approach:oversampling-the-minority-class"],
+      "note": "failed-approach recall"
+    },
+    {
+      "query": "Where's the dashboard run?",
+      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }],
+      "expectedKeys": ["alias:the-dashboard-run"],
+      "note": "ALIAS PROBE — expected to score 0/low today"
+    },
+    {
+      "query": "How are features versioned?",
+      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }],
+      "expectedKeys": ["decision:features-get-versioned-in-the-feature-st"],
+      "note": "decision recall"
+    }
+  ]
+}

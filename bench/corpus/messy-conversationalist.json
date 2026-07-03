@@ -1,0 +1,162 @@
+{
+  "persona": "messy-conversationalist",
+  "description": "Unstructured, tangential internal-tools maintainer. Run-on sentences, lowercase, asides, weak sentence boundaries. Stress-tests the heuristic extractor's precision-over-recall stance against messy real-world phrasing.",
+  "messages": [
+    {
+      "text": "so anyway we ended up going with sqlite for the little internal tool, way simpler than standing up postgres for something three people use",
+      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }]
+    },
+    {
+      "text": "oh also — decision: we're calling it 'the widget' internally even though the doc says 'internal-tools-dashboard', don't let that confuse you",
+      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }]
+    },
+    {
+      "text": "we tried just cron + a bash script for the nightly sync but it didn't work, kept silently failing and nobody noticed for a week",
+      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }]
+    },
+    {
+      "text": "requirement: whatever we build next has to send a slack ping if it fails, learned that one the hard way lol",
+      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }]
+    },
+    {
+      "text": "actually wait, the sync runs at 3am, not midnight, I keep saying midnight but that's wrong",
+      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }]
+    },
+    {
+      "text": "the correct value for the retry count is 5 attempts, not 3, someone changed it last sprint",
+      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }]
+    },
+    {
+      "text": "never touch the export script on Fridays, don't ask why",
+      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }]
+    },
+    {
+      "text": "check the readme at ./scripts/sync/README.md if you're touching that job",
+      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }]
+    },
+    {
+      "text": "here's the thing, https://internal.acme.example/wiki/sync-job has the full runbook, way more than I can type here, some people call it 'the sync wiki page' too",
+      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }]
+    },
+    {
+      "text": "I always forget to update the doc after I change the cron schedule, so don't trust the doc, trust the crontab",
+      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }]
+    }
+  ],
+  "goldFacts": [
+    {
+      "entityType": "project",
+      "entityId": "internal-tools-dashboard",
+      "key": "decision:sqlite",
+      "value": "sqlite",
+      "note": "message 1 — heuristic 'going with X' decision pattern fires on the trailing clause"
+    },
+    {
+      "entityType": "project",
+      "entityId": "internal-tools-dashboard",
+      "key": "alias:the-widget",
+      "value": "internal-tools-dashboard",
+      "note": "ALIAS CASE 1 (MISS BY DESIGN) — message 2 explicitly declares 'the widget' as a nickname for this project, but the heuristic extractor has no concept of entity aliasing; it does not match 'decision: we're calling it X' as a decision pattern at all (the DECISION_PATTERNS require 'use'/'chose'/'going with'/'decided'/'agreed'/'concluded' shapes, not 'calling it'). A probe using only 'the widget' will not resolve to this project. This is the sharpest alias case in the corpus — the entity itself, not just one fact, is aliased."
+    },
+    {
+      "entityType": "project",
+      "entityId": "internal-tools-dashboard",
+      "key": "failed-approach:just-cron-a-bash-script-for-the-nightly-",
+      "value": "just cron + a bash script for the nightly sync",
+      "note": "message 3 — heuristic failed-approach pattern"
+    },
+    {
+      "entityType": "project",
+      "entityId": "internal-tools-dashboard",
+      "key": "constraint:whatever-we-build-next-has-to-send-a-sla",
+      "value": "whatever we build next has to send a slack ping if it fails",
+      "note": "message 4 — heuristic requirement pattern (lowercase 'requirement:' still matches, case-insensitive)"
+    },
+    {
+      "entityType": "project",
+      "entityId": "internal-tools-dashboard",
+      "key": "correction:sync-run-time",
+      "value": "the sync runs at 3am",
+      "note": "CORRECTION CASE (MISS BY DESIGN) — message 5's 'actually wait, X, not Y' phrasing has no 'is'/'should be' clause, so CORRECTION_PATTERNS does not match. Nothing is extracted. This is the same 'actually...not...' phrasing gap seen in the data-ml persona's AUC correction, confirming it's a systemic pattern-coverage gap rather than one-off phrasing."
+    },
+    {
+      "entityType": "project",
+      "entityId": "internal-tools-dashboard",
+      "key": "correction:the-retry-count",
+      "value": "the retry count is 5 attempts",
+      "note": "message 6 — DOES match ('the correct value for X is Y' pattern)"
+    },
+    {
+      "entityType": "project",
+      "entityId": "internal-tools-dashboard",
+      "key": "constraint:export-script-fridays",
+      "value": "never touch the export script on Fridays",
+      "note": "CONSTRAINT CASE (MISS BY DESIGN) — message 7's 'never touch X on Y' does not match any CONSTRAINT_PATTERNS (those require can't/cannot/must not/should not/won't/requirement:/constraint:/have to/must/not allowed to) nor FAILED_PATTERNS (require 'didn't work'/'failed' framing). Nothing is extracted. Documents a real constraint-phrasing gap distinct from the 'never use X' PREFERENCE_PATTERNS match seen elsewhere (that pattern only fires for 'never use'/'never do', not 'never touch')."
+    },
+    {
+      "entityType": "project",
+      "entityId": "internal-tools-dashboard",
+      "key": "referenced_file:debcee17e628",
+      "value": "./scripts/sync/README.md",
+      "note": "message 8 — deterministic relative-path artifact extraction (leading ./ matches RELATIVE_PATH_PATTERN)"
+    },
+    {
+      "entityType": "project",
+      "entityId": "internal-tools-dashboard",
+      "key": "shared_url:8443fee0c18d",
+      "value": "https://internal.acme.example/wiki/sync-job",
+      "note": "message 9 — deterministic URL artifact extraction"
+    },
+    {
+      "entityType": "project",
+      "entityId": "internal-tools-dashboard",
+      "key": "alias:the-sync-wiki-page",
+      "value": "https://internal.acme.example/wiki/sync-job",
+      "note": "ALIAS CASE 2 — message 9 also refers to the same URL as 'the sync wiki page'. No entity resolution exists; a probe on the alias alone will not find the fact. INTENTIONALLY scores 0 today."
+    }
+  ],
+  "probes": [
+    {
+      "query": "What are we using for the internal tool's database?",
+      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }],
+      "expectedKeys": ["decision:sqlite"],
+      "note": "direct decision recall despite casual phrasing"
+    },
+    {
+      "query": "Where's the widget's sync job documented?",
+      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }],
+      "expectedKeys": ["alias:the-sync-wiki-page"],
+      "note": "ALIAS PROBE (compounded: 'the widget' entity alias + 'sync wiki page' fact alias) — expected to score 0 today, the sharpest alias test in the corpus"
+    },
+    {
+      "query": "What time does the sync run?",
+      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }],
+      "expectedKeys": ["correction:sync-run-time"],
+      "note": "CORRECTION-PHRASING PROBE — expected to score 0 today (fact was never extracted, see gold fact note)"
+    },
+    {
+      "query": "What's the retry count?",
+      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }],
+      "expectedKeys": ["correction:the-retry-count"],
+      "note": "confirmation-rate probe on a correction that DID extract"
+    },
+    {
+      "query": "What did we try for the nightly sync that failed?",
+      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }],
+      "expectedKeys": ["failed-approach:just-cron-a-bash-script-for-the-nightly-"],
+      "note": "failed-approach recall"
+    },
+    {
+      "query": "Is it okay to touch the export script on Fridays?",
+      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }],
+      "expectedKeys": ["constraint:export-script-fridays"],
+      "note": "CONSTRAINT-PHRASING PROBE — expected to score 0 today (fact was never extracted, see gold fact note)"
+    },
+    {
+      "query": "What does the new tool need to do when it fails?",
+      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }],
+      "expectedKeys": ["constraint:whatever-we-build-next-has-to-send-a-sla"],
+      "note": "constraint recall"
+    }
+  ]
+}
