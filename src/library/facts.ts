@@ -185,7 +185,22 @@ export async function writeFact(
       ? withRawKey(input.metadata, input.key)
       : input.metadata;
 
-  return db.transaction(async (tx) => {
+  // Step 5/6 below (deep conflict check, write-time edges) are fire-and-forget
+  // side effects that must never block the write. They used to be fired from
+  // *inside* this transaction's callback (before `return fact!`), which is
+  // safe on postgres-js (a connection pool — the detached query runs on a
+  // different physical connection than the one mid-transaction) but is NOT
+  // safe on embedded PGlite (Layer 0): PGlite is single-connection, and
+  // firing a query on the module-level `db` while `tx`'s own COMMIT is still
+  // being dispatched on that same connection races the transaction's commit
+  // sequencing and can wedge the process (confirmed via reproduction while
+  // building the PGlite engine switch — see connection.ts). So these two are
+  // collected here and fired only after `db.transaction(...)` has fully
+  // resolved (i.e., after commit), which is safe and equivalent in intent on
+  // both engines — they were never meant to run before commit anyway.
+  let postCommitFactId: string | undefined;
+  let postCommitSupersession: { newSource: string; existingSource: string } | undefined;
+  const result = await db.transaction(async (tx) => {
     // Advisory lock: serialize concurrent writes to the same (tenant, entity, key)
     // for the duration of this transaction. Without this, two writers can both
     // pass the protection check and both snapshot the old value to fact_archive,
@@ -221,7 +236,7 @@ export async function writeFact(
     // compare source reliability scores. If the existing source is
     // significantly more trusted, escalate instead of superseding.
     if (existing && existing.value !== input.value) {
-      const outcome = await checkConflict(existing, input.value, input.source, tenantId);
+      const outcome = await checkConflict(existing, input.value, input.source, tenantId, tx);
       if (outcome === "escalate") {
         // Block the write. Write an escalation record + markdown file.
         // The transaction is still committed — we're just returning early
@@ -242,10 +257,10 @@ export async function writeFact(
         return existing;
       }
       // outcome === "supersede": record the win/loss and continue.
-      // recordSupersession runs outside the transaction (best-effort, non-blocking).
-      void recordSupersession(input.source, existing.source, tenantId).catch(
-        (err: unknown) => console.error("[iranti] reliability update error:", err),
-      );
+      // recordSupersession is fired after this transaction resolves (see the
+      // comment above db.transaction(...) — same single-connection-on-PGlite
+      // reasoning), best-effort and non-blocking either way.
+      postCommitSupersession = { newSource: input.source, existingSource: existing.source };
     }
 
     // Step 3: If the value is changing, snapshot the old row to fact_archive.
@@ -275,7 +290,7 @@ export async function writeFact(
     // Apply D7 formula: stored = clamp(base × (0.5 + sourceScore)).
     // A neutral source (score 0.5) is identity-preserving (× 1.0), so
     // unchallenged explicit writes behave exactly as before.
-    const sourceScore = await getScore(input.source, tenantId);
+    const sourceScore = await getScore(input.source, tenantId, tx);
     const storedConfidence = applyConfidenceFormula(input.confidence ?? 1.0, sourceScore);
 
     // Step 4: Upsert the fact.
@@ -314,10 +329,28 @@ export async function writeFact(
       })
       .returning();
 
-    // Step 5 (Phase 2b): Deep conflict check — fire-and-forget, never blocks.
-    // Checks whether the new value negates a term present in another fact
-    // for this entity. Increments comprehensionMetrics.deepConflictsDetected
-    // for each candidate found, but does not auto-resolve.
+    // Steps 5/6 (deep conflict check, write-time edges) are fired after this
+    // transaction resolves — see the comment above db.transaction(...) for
+    // why. Stash the new fact's id so the caller can fire them post-commit.
+    postCommitFactId = fact!.id;
+    return fact!;
+  });
+
+  if (postCommitSupersession) {
+    void recordSupersession(
+      postCommitSupersession.newSource,
+      postCommitSupersession.existingSource,
+      tenantId,
+    ).catch((err: unknown) => console.error("[iranti] reliability update error:", err));
+  }
+
+  // Step 5 (Phase 2b): Deep conflict check — fire-and-forget, never blocks.
+  // Checks whether the new value negates a term present in another fact
+  // for this entity. Increments comprehensionMetrics.deepConflictsDetected
+  // for each candidate found, but does not auto-resolve. Skipped on the
+  // escalate-and-return-early path (postCommitFactId stays unset there,
+  // since no new fact was written — see the escalate branch above).
+  if (postCommitFactId) {
     void runDeepConflictCheck(
       input.entityType,
       input.entityId,
@@ -331,7 +364,7 @@ export async function writeFact(
     // Step 6 (Phase 2.5, CORE-29): Write-time edges — fire-and-forget.
     // about: fact→entity hub. co_write: fact→prev fact in same session.
     void recordWriteEdges(
-      fact!.id,
+      postCommitFactId,
       input.entityType,
       input.entityId,
       input.sessionId,
@@ -339,9 +372,9 @@ export async function writeFact(
     ).catch((err: unknown) =>
       console.error("[iranti] write edge error:", err),
     );
+  }
 
-    return fact!;
-  });
+  return result;
 }
 
 // ---------------------------------------------------------------------------

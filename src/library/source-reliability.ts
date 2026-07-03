@@ -28,13 +28,26 @@ export const DEFAULT_SCORE = 0.5;
 // marginally) before we block a write. Default: supersede on equal or unknown.
 export const ESCALATION_THRESHOLD = 0.2;
 
+// `dbClient` lets a caller already inside a transaction (writeFact,
+// checkConflict, createEscalation) pass that transaction through instead of
+// implicitly querying on the module-level `db`. On postgres-js (a pool of
+// up to 10 connections) querying `db` while a `tx` is open on another
+// connection is harmless. On embedded PGlite (single connection, Layer 0)
+// it is NOT harmless: the same underlying connection is mid-transaction, so
+// a `db` query queues behind it — and if the open transaction is itself
+// awaiting that query's result (as writeFact's confidence-formula step
+// does), the two await each other and the process hangs forever. Only
+// `.query` is needed, so the type is narrowed — both `db` and a Drizzle
+// transaction satisfy it.
+
 // Fetch a source's current reliability score. Returns DEFAULT_SCORE if the
 // source has no recorded history.
 export async function getScore(
   source: string,
   tenantId = "default",
+  dbClient: Pick<typeof db, "query"> = db,
 ): Promise<number> {
-  const row = await db.query.sourceReliability.findFirst({
+  const row = await dbClient.query.sourceReliability.findFirst({
     where: and(
       eq(sourceReliability.tenantId, tenantId),
       eq(sourceReliability.source, source),
@@ -44,11 +57,13 @@ export async function getScore(
 }
 
 // Get reliability row (full record), or undefined if not yet in the table.
+// See getScore's dbClient comment above — same single-connection rationale.
 export async function getReliabilityRow(
   source: string,
   tenantId = "default",
+  dbClient: Pick<typeof db, "query"> = db,
 ): Promise<{ wins: number; losses: number; score: number } | undefined> {
-  const row = await db.query.sourceReliability.findFirst({
+  const row = await dbClient.query.sourceReliability.findFirst({
     where: and(
       eq(sourceReliability.tenantId, tenantId),
       eq(sourceReliability.source, source),

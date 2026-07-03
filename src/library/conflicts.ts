@@ -49,19 +49,28 @@ export type ConflictOutcome = "no_conflict" | "supersede" | "escalate";
 
 // Decide whether a new write should supersede the existing fact or be
 // escalated. Returns "no_conflict" when values are identical.
+//
+// `dbClient` (see getScore's comment in source-reliability.ts) lets writeFact
+// pass its open transaction through. checkConflict runs synchronously inside
+// writeFact's `db.transaction(...)` callback, so on embedded PGlite
+// (single connection) querying module-level `db` here — instead of the
+// passed transaction — would deadlock: the open transaction awaits this
+// call, and this call would queue behind the very connection the open
+// transaction is holding.
 export async function checkConflict(
   existing: Fact,
   newValue: string,
   newSource: string,
   tenantId = "default",
+  dbClient: Pick<typeof db, "query"> = db,
 ): Promise<ConflictOutcome> {
   if (existing.value === newValue) return "no_conflict";
 
   comprehensionMetrics.minimalConflictsChecked++;
 
   const [existingScore, newScore] = await Promise.all([
-    getScore(existing.source, tenantId),
-    getScore(newSource, tenantId),
+    getScore(existing.source, tenantId, dbClient),
+    getScore(newSource, tenantId, dbClient),
   ]);
 
   if (existingScore - newScore > ESCALATION_THRESHOLD) {
@@ -78,8 +87,11 @@ export async function checkConflict(
 // commits or rolls back atomically with the write that triggered it. Without
 // it, the row would be written on the module-level connection and survive an
 // outer rollback, orphaning a "pending" escalation against a fact that never
-// changed. Only the `.insert` capability is needed, so the type is narrowed —
-// both `db` and a Drizzle transaction satisfy it.
+// changed. Both `.insert` (the escalation row) and `.query` (the reliability
+// scores rendered into the markdown file below) are needed — both `db` and a
+// Drizzle transaction satisfy this. On embedded PGlite (single connection),
+// using module-level `db` here while the caller's transaction is still open
+// would deadlock (see getScore's comment in source-reliability.ts).
 export async function createEscalation(
   opts: {
     tenantId: string;
@@ -91,7 +103,7 @@ export async function createEscalation(
     newSource: string;
     reason: string;
   },
-  dbClient: Pick<typeof db, "insert"> = db,
+  dbClient: Pick<typeof db, "insert" | "query"> = db,
 ): Promise<void> {
   comprehensionMetrics.escalations++;
 
@@ -118,8 +130,8 @@ export async function createEscalation(
   await fs.mkdir(dir, { recursive: true });
 
   const [existingScore, newScore] = await Promise.all([
-    getScore(opts.existingFact.source, opts.tenantId),
-    getScore(opts.newSource, opts.tenantId),
+    getScore(opts.existingFact.source, opts.tenantId, dbClient),
+    getScore(opts.newSource, opts.tenantId, dbClient),
   ]);
 
   const ts = new Date().toISOString().replace(/[:.]/g, "-");

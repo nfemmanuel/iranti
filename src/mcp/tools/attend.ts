@@ -599,14 +599,6 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
     fitsBudget((m.description ?? "") + " " + m.tags.join(" ")),
   );
 
-  // Phase 2a — async edge recording. Fire-and-forget after the response is
-  // assembled so this never adds latency. Errors are logged, never thrown.
-  if (budgetedFacts.length >= 2 || budgetedRuleList.length > 0) {
-    void recordAttendEdges(budgetedFacts, budgetedRuleList).catch((err: unknown) =>
-      console.error("[iranti] edge recording error:", err),
-    );
-  }
-
   // Phase 2.5 / CORE-32 — fire-and-forget chain: extraction → log → metrics.
   // Chained so facts_extracted in the log reflects the actual write count.
   // None of these must block the response.
@@ -627,7 +619,23 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
       snapshot.deepConflictsDetected - lastSyncedMetrics.deepConflictsDetected,
   };
 
+  // Phase 2a — async edge recording — and the extraction/log/metrics chain
+  // above are collected into ONE detached, sequential chain rather than
+  // several independent `void`-fired ones. All of it is still fire-and-forget
+  // relative to the response (this whole IIFE runs after `return` below, off
+  // the response path), so response latency is unaffected either way. But
+  // several independent detached chains hitting the DB concurrently is safe
+  // on postgres-js (a connection pool) and NOT safe on embedded PGlite
+  // (Layer 0, single connection) — running them concurrently was observed to
+  // wedge the process during PGlite engine testing. Sequencing them here
+  // costs nothing (nobody awaits this chain) and is correct on both engines.
   void (async () => {
+    if (budgetedFacts.length >= 2 || budgetedRuleList.length > 0) {
+      await recordAttendEdges(budgetedFacts, budgetedRuleList).catch(
+        (err: unknown) => console.error("[iranti] edge recording error:", err),
+      );
+    }
+
     let factsExtracted = 0;
 
     // CORE-32: extraction is the primary write path.
@@ -663,7 +671,7 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
       correctionsCount: corrections.length,
     });
 
-    void incrementTurnCount(ctx.session.id).catch((err: unknown) =>
+    await incrementTurnCount(ctx.session.id).catch((err: unknown) =>
       console.error("[iranti] turn count error:", err),
     );
 
