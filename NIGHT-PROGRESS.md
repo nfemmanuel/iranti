@@ -12,7 +12,7 @@ only copy of anything. Continue from the first unchecked item in "Next".
 
 ---
 
-## Status: PHASE 3 — Feature 4 (entity resolution) in progress
+## Status: PHASE 3 — Feature 5 (rules & preferences enforcement) in progress
 
 ## Done
 - [x] Mandate activated + recorded to iranti memory (`overnight_mandate_active`)
@@ -70,10 +70,30 @@ only copy of anything. Continue from the first unchecked item in "Next".
       started it via pnpm db:up) — dual-engine verification available; old ECONNREFUSED
       baseline obsolete. Dormant iranti_dev_container untouched net-net.
 
+- [x] **Feature 4/6 MERGED → main @ `cca66390`** — `feat/entity-resolution`, 7 commits;
+      baseline advanced @ `a65740dd`.
+      Entity resolution (Layer 0c PRD, shipped): entity_aliases table (migration 0014,
+      both engines, no override), deterministic quoted-nickname learning (extractAliases),
+      exact whole-phrase resolution at attend time, alias surfaces as rank-1
+      "alias:<name>" view of the target fact. Project-scoped from birth (leak hunt: clean).
+      **EFFICACY — first measured quality improvement in iranti history:
+      hit-rate 75.0%→85.7% (+10.7pp), confirmation-rate 53.6%→64.3% (+10.7pp)**,
+      extraction + falsePositiveRate 0.0pp, corpus byte-locked, determinism held.
+      3 of 4 alias probes flip to rank-1; the 4th (paraphrase, never contains the alias
+      phrase) is a disclosed G1 boundary — closing it needs fuzzy matching, forbidden.
+      Gauntlet: independent verify ✅ (deltas reproduced exactly) · fresh-eyes review
+      (0 BLOCKER — isolation held; 3 MAJOR: same-id alias view fed self-loop co_access
+      edges + duplicate corrections, greedy unquoted-aka learned garbage aliases;
+      2 MINOR: substring matching lacked word boundaries, equal-length tie was
+      physical-row-order nondeterministic — ALL 5 FIXED + 5 regression tests) ✅ ·
+      post-fix gates ✅ (extractor 27/27, aliases 17/17, mcp-tools 51/51, isolation 16/16,
+      bench +10.7pp held). Baseline regenerated post-merge so Features 5–6 diff against
+      the new 85.7/64.3 floor.
+
 ## In-flight
-- [ ] Feature 4 — `feat/entity-resolution`: alias→entity links, learned once, applied at
-      retrieval forever. Efficacy gate = the 0b harness's alias probes (all scoring 0 today
-      BY DESIGN) must flip to hits — the delta IS the proof. Scope doc first.
+- [ ] Feature 5 — `feat/rules-enforcement`: NF's #1 — standing rules injected with
+      situational relevance, demonstrably shaping behavior; proven by scripted
+      host-simulation + a harness rules metric. Scope doc first.
 - [ ] Feature 4 — `feat/entity-resolution`: alias→entity links (the "textbook" fix) → gauntlet → merge
 - [ ] Feature 5 — `feat/rules-enforcement`: situational rules & preferences enforcement → gauntlet → merge
 - [ ] Feature 6 — `feat/checkpoints`: checkpoint criteria + project-state rollup → gauntlet → merge
