@@ -12,7 +12,7 @@ only copy of anything. Continue from the first unchecked item in "Next".
 
 ---
 
-## Status: PHASE 3 — Feature 5 (rules & preferences enforcement) in progress
+## Status: PHASE 3 — Feature 6 (checkpoints & project-state) in progress
 
 ## Done
 - [x] Mandate activated + recorded to iranti memory (`overnight_mandate_active`)
@@ -90,10 +90,28 @@ only copy of anything. Continue from the first unchecked item in "Next".
       bench +10.7pp held). Baseline regenerated post-merge so Features 5–6 diff against
       the new 85.7/64.3 floor.
 
+- [x] **Feature 5/6 MERGED → main @ `884f1b7d`** — `feat/rules-enforcement`, 7 commits;
+      baseline advanced @ `42db7dd5`. NF's #1 feature.
+      Rules enforcement (Layer 0d PRD, shipped): deterministic token-overlap situational
+      relevance (shared tokenizer with facts), critical-priority (>=100) bypass,
+      MAX_RULES_PER_ATTEND=5 budget, no schema change, backward-compatible.
+      Proven TWO ways: harness rules dimension (ruleRelevanceRate + ruleNoiseRate) +
+      scripted host-simulation 3/3 (surface-when-relevant / silent-when-not /
+      deactivate / cross-project fails-closed / restart persistence).
+      **Gauntlet's defining moment: review proved the day-one 100% relevance score was
+      a probe-authorship artifact (every "paraphrase" retained an exact rule keyword;
+      reviewer's realistic phrasings missed 2 of 3). Fixed by making the INSTRUMENT
+      honest, not the number pretty: 4 low-overlap HONEST-CAPABILITY probes added →
+      ruleRelevanceRate 81.3% (13/16), noise 0% (0/8) — the real day-one floor,
+      disclosed in PRD §9.** Existing 5 metrics 0.0pp throughout; determinism held.
+      Also: found real closeDb-after-attend infinite-hang race (pre-existing) —
+      worked around consistently in tests, root fix tracked as backlog RULE-2;
+      tokenizer short-token floor (S3/PR never match) disclosed + tracked as RULE-1.
+
 ## In-flight
-- [ ] Feature 5 — `feat/rules-enforcement`: NF's #1 — standing rules injected with
-      situational relevance, demonstrably shaping behavior; proven by scripted
-      host-simulation + a harness rules metric. Scope doc first.
+- [ ] Feature 6 — `feat/checkpoints`: task-completion checkpoint criteria + stages +
+      AX-7 status-as-checkpoint-tag + project-state rollup ("where did we leave off?",
+      including after a long gap). Scope doc first.
 - [ ] Feature 4 — `feat/entity-resolution`: alias→entity links (the "textbook" fix) → gauntlet → merge
 - [ ] Feature 5 — `feat/rules-enforcement`: situational rules & preferences enforcement → gauntlet → merge
 - [ ] Feature 6 — `feat/checkpoints`: checkpoint criteria + project-state rollup → gauntlet → merge
