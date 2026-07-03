@@ -13,10 +13,10 @@
       "retrieval": {
         "probeCount": 9,
         "positiveCount": 7,
-        "hitCount": 6,
-        "confirmedCount": 4,
-        "hitRate": 0.8571428571428571,
-        "confirmationRate": 0.5714285714285714,
+        "hitCount": 7,
+        "confirmedCount": 5,
+        "hitRate": 1,
+        "confirmationRate": 0.7142857142857143,
         "negativeCount": 2,
         "falsePositiveCount": 2,
         "falsePositiveRate": 1,
@@ -71,9 +71,9 @@
               "alias:the-reconciliation-doc"
             ],
             "negative": false,
-            "rank": null,
-            "hit": false,
-            "confirmed": false,
+            "rank": 1,
+            "hit": true,
+            "confirmed": true,
             "falsePositive": false
           },
           {
@@ -132,10 +132,10 @@
       "retrieval": {
         "probeCount": 9,
         "positiveCount": 7,
-        "hitCount": 5,
-        "confirmedCount": 3,
-        "hitRate": 0.7142857142857143,
-        "confirmationRate": 0.42857142857142855,
+        "hitCount": 6,
+        "confirmedCount": 4,
+        "hitRate": 0.8571428571428571,
+        "confirmationRate": 0.5714285714285714,
         "negativeCount": 2,
         "falsePositiveCount": 2,
         "falsePositiveRate": 1,
@@ -201,9 +201,9 @@
               "alias:the-dashboard-run"
             ],
             "negative": false,
-            "rank": null,
-            "hit": false,
-            "confirmed": false,
+            "rank": 1,
+            "hit": true,
+            "confirmed": true,
             "falsePositive": false
           },
           {
@@ -251,10 +251,10 @@
       "retrieval": {
         "probeCount": 9,
         "positiveCount": 7,
-        "hitCount": 6,
-        "confirmedCount": 5,
-        "hitRate": 0.8571428571428571,
-        "confirmationRate": 0.7142857142857143,
+        "hitCount": 7,
+        "confirmedCount": 6,
+        "hitRate": 1,
+        "confirmationRate": 0.8571428571428571,
         "negativeCount": 2,
         "falsePositiveCount": 2,
         "falsePositiveRate": 1,
@@ -320,9 +320,9 @@
               "alias:the-figma-file"
             ],
             "negative": false,
-            "rank": null,
-            "hit": false,
-            "confirmed": false,
+            "rank": 1,
+            "hit": true,
+            "confirmed": true,
             "falsePositive": false
           },
           {
@@ -489,10 +489,10 @@
     "retrieval": {
       "probeCount": 36,
       "positiveCount": 28,
-      "hitCount": 21,
-      "confirmedCount": 15,
-      "hitRate": 0.75,
-      "confirmationRate": 0.5357142857142857,
+      "hitCount": 24,
+      "confirmedCount": 18,
+      "hitRate": 0.8571428571428571,
+      "confirmationRate": 0.6428571428571429,
       "negativeCount": 8,
       "falsePositiveCount": 8,
       "falsePositiveRate": 1,
@@ -547,9 +547,9 @@
             "alias:the-reconciliation-doc"
           ],
           "negative": false,
-          "rank": null,
-          "hit": false,
-          "confirmed": false,
+          "rank": 1,
+          "hit": true,
+          "confirmed": true,
           "falsePositive": false
         },
         {
@@ -653,9 +653,9 @@
             "alias:the-dashboard-run"
           ],
           "negative": false,
-          "rank": null,
-          "hit": false,
-          "confirmed": false,
+          "rank": 1,
+          "hit": true,
+          "confirmed": true,
           "falsePositive": false
         },
         {
@@ -748,9 +748,9 @@
             "alias:the-figma-file"
           ],
           "negative": false,
-          "rank": null,
-          "hit": false,
-          "confirmed": false,
+          "rank": 1,
+          "hit": true,
+          "confirmed": true,
           "falsePositive": false
         },
         {
