@@ -165,6 +165,88 @@ describe("getRulesForAttend", () => {
 });
 
 // ---------------------------------------------------------------------------
+// getRulesForAttend — situational relevance (Layer 0d)
+// ---------------------------------------------------------------------------
+
+describe("getRulesForAttend — situational relevance", () => {
+  it("with no message: returns every entity-scoped rule unfiltered (pre-Layer-0d behavior)", async () => {
+    const entityId = randomUUID();
+    const marker = randomUUID();
+
+    await writeRule({
+      entityType: "project",
+      entityId,
+      text: `unrelated-topic-${marker} — this text shares nothing with any probe`,
+      source: "test",
+      priority: 10,
+    });
+
+    const rules = await getRulesForAttend([{ entityType: "project", entityId }]);
+    expect(rules.some((r) => r.text.includes(marker))).toBe(true);
+  });
+
+  it("with a message: a sub-critical rule fires when the message shares a keyword with its text", async () => {
+    const entityId = randomUUID();
+
+    await writeRule({
+      entityType: "project",
+      entityId,
+      text: "Never use SELECT * in the reporting queries.",
+      source: "test",
+      priority: 10,
+    });
+
+    const rules = await getRulesForAttend(
+      [{ entityType: "project", entityId }],
+      "default",
+      "default",
+      "Should I write a SELECT * query against the reporting table?",
+    );
+    expect(rules.some((r) => r.text.includes("SELECT *"))).toBe(true);
+  });
+
+  it("with a message: a sub-critical rule does NOT fire when the message shares no keyword with its text", async () => {
+    const entityId = randomUUID();
+
+    await writeRule({
+      entityType: "project",
+      entityId,
+      text: "Never use SELECT * in the reporting queries.",
+      source: "test",
+      priority: 10,
+    });
+
+    const rules = await getRulesForAttend(
+      [{ entityType: "project", entityId }],
+      "default",
+      "default",
+      "What's our Redis eviction policy?",
+    );
+    expect(rules.some((r) => r.text.includes("SELECT *"))).toBe(false);
+  });
+
+  it("with a message: a critical-priority rule (>=100) always fires regardless of topic", async () => {
+    const entityId = randomUUID();
+
+    await writeRule({
+      entityType: "project",
+      entityId,
+      text: "Never mention the codename for this project to outsiders.",
+      source: "test",
+      priority: 100,
+    });
+
+    const rules = await getRulesForAttend(
+      [{ entityType: "project", entityId }],
+      "default",
+      "default",
+      "What's the weather like today?",
+    );
+    expect(rules.some((r) => r.text.includes("codename"))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // deactivateRule
 // ---------------------------------------------------------------------------
 

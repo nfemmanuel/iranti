@@ -56,6 +56,13 @@ export const MAX_TOTAL_FACTS = 20;
 export const MAX_MID_TURN_FACTS = 3;
 // Secondary (graph-hop) peripheral facts cap. Separate from primary budget.
 export const MAX_PERIPHERAL_FACTS = 10;
+// Layer 0d: rules are imperative and meant to be actively read/obeyed every
+// turn, not browsed like facts — a long rules block defeats its own purpose
+// (the "dumped every turn" failure mode). Applied AFTER situational relevance
+// filtering + the existing priority-DESC sort, so critical (priority >= 100)
+// rules always occupy the top slots and the highest-scoring relevant rules
+// fill the rest. See PRD layer-0d-rules-enforcement.md D4.
+export const MAX_RULES_PER_ATTEND = 5;
 
 // Token budget for injection. Priority order: rules > checkpoint > primary > peripheral.
 // Override via IRANTI_TOKEN_BUDGET env var (integer, tokens). Default is calibrated to
@@ -449,7 +456,18 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
   // ---- READ side: rules + recent facts + checkpoint ------------------------
   // Mid-turn skips the rule rescan (rules don't change within a turn and the
   // rescan was already done by the pre-response attend).
-  const rules = isMidTurn ? [] : await getRulesForAttend(hints, "default", effectiveProjectIds);
+  // Layer 0d: input.message activates situational relevance filtering inside
+  // getRulesForAttend (undefined when no message is present preserves the
+  // pre-Layer-0d unfiltered behavior — see rules.ts's header comment). The
+  // result is then capped at MAX_RULES_PER_ATTEND, after the priority-DESC
+  // sort getRulesForAttend already applies, so the cap always keeps the
+  // highest-priority/most-relevant rules first.
+  const rules = isMidTurn
+    ? []
+    : (await getRulesForAttend(hints, "default", effectiveProjectIds, input.message)).slice(
+        0,
+        MAX_RULES_PER_ATTEND,
+      );
 
   // Mid-turn uses a smaller fact budget: it's a discovery top-up, not a full
   // context load. Per-entity cap is also reduced proportionally.

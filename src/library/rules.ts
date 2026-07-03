@@ -41,6 +41,60 @@ import type { SQL } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import { rules, type NewRule, type Rule } from "../db/schema.js";
 import { normalizeProjectId } from "./projects.js";
+import { tokenizeMessage } from "./facts.js";
+
+// ─── Situational relevance (Layer 0d) ────────────────────────────────────────
+//
+// A rule that is in scope (system/global, or an entity in the hints list) is
+// not automatically injected on every attend() call — that is the "dumped
+// every turn" failure mode the Layer 0d PRD exists to fix. When the caller
+// provides a message, a rule is injected only if EITHER:
+//
+//   1. It is a critical/hard-constraint rule (priority >= CRITICAL_RULE_PRIORITY).
+//      The existing priority-scale doc comment above already calls this tier
+//      "critical (tone, safety, hard constraints)" — those apply on every
+//      turn by the author's own declaration, not situationally.
+//   2. The message shares at least one keyword token with the rule's text
+//      (scoreRuleRelevance > 0) — deterministic, no embeddings, no LLM call
+//      (G1). Reuses facts.ts's tokenizeMessage so "relevance" means the same
+//      thing for facts and rules.
+//
+// With NO message (existing callers: rules.test.ts, projects-isolation.test.ts,
+// mcp-tools.test.ts's no-message rules assertion), no filtering happens at all
+// — exactly today's behavior. This mirrors readRelevantFactsByEntity's own
+// "no message -> no filtering, fall back to unfiltered" contract and is what
+// keeps every pre-Layer-0d test passing unchanged.
+export const CRITICAL_RULE_PRIORITY = 100;
+
+// Score a rule's relevance to a set of query tokens — keyword overlap against
+// the rule's own free-text `text` field (rules have no separate key/value
+// split the way facts do, so there is only one field to score against).
+//
+// The rule's text is tokenized with the SAME tokenizeMessage used for the
+// query, and matching is set-membership (whole-token), not raw substring —
+// a raw `ruleText.includes(t)` would match query token "button" inside rule
+// text "buttons" (or worse, arbitrary short substrings inside unrelated
+// words), which is exactly the over-eager-match failure class Layer 0c's
+// alias resolver already had to guard against with boundary matching.
+export function scoreRuleRelevance(rule: Pick<Rule, "text">, tokens: string[]): number {
+  if (tokens.length === 0) return 0;
+  const ruleTokens = new Set(tokenizeMessage(rule.text));
+  let score = 0;
+  for (const t of tokens) {
+    if (ruleTokens.has(t)) score += 1;
+  }
+  return score;
+}
+
+// Situational relevance gate. Exported for direct unit testing independent of
+// the DB round-trip in getRulesForAttend.
+export function isRuleSituationallyRelevant(
+  rule: Pick<Rule, "text" | "priority">,
+  tokens: string[],
+): boolean {
+  if (rule.priority >= CRITICAL_RULE_PRIORITY) return true;
+  return scoreRuleRelevance(rule, tokens) > 0;
+}
 
 // See facts.ts's projectFilter — same rationale: a single-element effective
 // set degenerates to a plain equality, and every id is normalized so a
@@ -135,10 +189,19 @@ export async function getRulesForEntity(
 // this whole query (including the system/global branch) is scoped by the
 // effective project set like every other retrieval path; there is no
 // install-wide "global rules" concept in Layer 0.
+//
+// Layer 0d: `message`, when provided, activates situational relevance
+// filtering (see isRuleSituationallyRelevant above) — a rule below the
+// critical-priority floor is returned only if it shares a keyword with the
+// message. Omitting `message` (the default) returns every entity-scoped
+// active rule unfiltered, exactly as before Layer 0d — this is what keeps
+// every pre-existing caller (rules.test.ts, projects-isolation.test.ts,
+// mcp-tools.test.ts's no-message case) unchanged.
 export async function getRulesForAttend(
   entityHints: Array<{ entityType: string; entityId: string }>,
   tenantId: string = "default",
   project: string | string[] = "default",
+  message?: string,
 ): Promise<Rule[]> {
   // Always start with system/global. De-duplicate in case the caller
   // already included it in the hints list.
@@ -158,7 +221,7 @@ export async function getRulesForAttend(
 
   // Single query: active rules for this tenant + project matching any of the
   // scoped entities.
-  return db.query.rules.findMany({
+  const scoped = await db.query.rules.findMany({
     where: and(
       eq(rules.tenantId, tenantId),
       projectFilter(project),
@@ -168,6 +231,14 @@ export async function getRulesForAttend(
     ),
     orderBy: desc(rules.priority),
   });
+
+  if (message === undefined) return scoped;
+
+  // Situational relevance gate (Layer 0d). Priority order is preserved —
+  // relevance is a pass/fail filter, not a re-sort — so among relevant rules
+  // the existing priority-DESC contract still decides injection order.
+  const tokens = tokenizeMessage(message);
+  return scoped.filter((r) => isRuleSituationallyRelevant(r, tokens));
 }
 
 // ---------------------------------------------------------------------------

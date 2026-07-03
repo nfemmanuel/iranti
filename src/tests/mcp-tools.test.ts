@@ -311,6 +311,57 @@ describe("attend — read side", () => {
     expect(result.facts).toEqual([]);
     expect(result.checkpoint).toBeNull();
   });
+
+  // Layer 0d — situational relevance: a sub-critical rule is injected when
+  // the current message shares vocabulary with the rule's text, and stays
+  // silent on an unrelated message. See PRD layer-0d-rules-enforcement.md.
+  it("injects a sub-critical rule when the message is situationally relevant to it", async () => {
+    const entityId = randomUUID();
+
+    await writeRuleTool({
+      entityType: "project",
+      entityId,
+      text: "Never use SELECT * in the reporting queries.",
+      priority: 10,
+    });
+
+    const relevant = await attend({
+      entityHints: [{ entityType: "project", entityId }],
+      message: "Should I write a SELECT * query against the reporting table?",
+    });
+    expect(relevant.rules.some((r) => r.text.includes("SELECT *"))).toBe(true);
+
+    const unrelated = await attend({
+      entityHints: [{ entityType: "project", entityId }],
+      message: "What's our Redis eviction policy?",
+    });
+    expect(unrelated.rules.some((r) => r.text.includes("SELECT *"))).toBe(false);
+  });
+
+  it("caps injected rules at MAX_RULES_PER_ATTEND, keeping priority order", async () => {
+    const entityId = randomUUID();
+
+    // 7 rules that all share the keyword "deploy" with the probe message —
+    // more than MAX_RULES_PER_ATTEND (5) should qualify on relevance alone.
+    for (let i = 0; i < 7; i++) {
+      await writeRuleTool({
+        entityType: "project",
+        entityId,
+        text: `Deploy rule number ${i}.`,
+        priority: i, // ascending, so rule 6 is highest priority
+      });
+    }
+
+    const result = await attend({
+      entityHints: [{ entityType: "project", entityId }],
+      message: "Are we ready to deploy today?",
+    });
+
+    const projectRules = result.rules.filter((r) => r.entity === `project/${entityId}`);
+    expect(projectRules.length).toBeLessThanOrEqual(5);
+    // Highest-priority relevant rule must be present (priority-DESC survives the cap).
+    expect(projectRules.some((r) => r.text.includes("rule number 6"))).toBe(true);
+  });
 });
 
 describe("write", () => {

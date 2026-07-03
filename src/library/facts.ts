@@ -569,7 +569,10 @@ export async function readFactsByEntity(
 // Tokenize text for keyword overlap scoring.
 // Lowercases, splits on non-alphanumeric boundaries, dedupes, filters tokens
 // that are too short or are common stop words.
-function tokenizeMessage(text: string): string[] {
+// Exported (Layer 0d): rules.ts's situational relevance filter reuses this
+// exact tokenizer so "relevance" means the same thing for facts and rules
+// codebase-wide — one tokenizer, not two independently-drifting copies.
+export function tokenizeMessage(text: string): string[] {
   const stop = new Set([
     "the", "and", "for", "are", "was", "with", "that", "this",
     "have", "from", "not", "you", "all", "can", "had", "get",
