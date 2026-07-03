@@ -47,6 +47,19 @@ export function getGapThresholdMs(): number {
 const RECENT_DECISIONS_LIMIT = 5;
 const OPEN_ITEMS_LIMIT = 5;
 
+// Per-field character cap: the rollup is attached to attend's response
+// OUTSIDE the fitsBudget token accounting (review finding), so its text
+// fields are clamped at the source to keep the whole payload
+// write-scale-independent — a project with sprawling checkpoint prose or
+// long decision values can never dwarf the budgeted rules+facts sections.
+const PROJECT_STATE_FIELD_CAP = 300;
+
+function clampField(text: string): string {
+  return text.length <= PROJECT_STATE_FIELD_CAP
+    ? text
+    : `${text.slice(0, PROJECT_STATE_FIELD_CAP - 1)}…`;
+}
+
 export interface ProjectStateCheckpoint {
   entity: string;
   text: string;
@@ -101,7 +114,10 @@ async function findLatestCheckpointInProject(
         eqOp(f.key, CHECKPOINT_KEY),
         eqOp(f.isArchived, false),
       ),
-    orderBy: (f, { desc: descOp }) => descOp(f.updatedAt),
+    // Secondary id tiebreaker: updatedAt alone leaves same-microsecond
+    // writes SQL-order-unspecified — nondeterministic "latest" pick under
+    // exact-timestamp ties (review finding; G1).
+    orderBy: (f, { desc: descOp }) => [descOp(f.updatedAt), descOp(f.id)],
     limit: 1,
   });
   return rows[0];
@@ -122,7 +138,8 @@ async function findRecentByKeyPrefix(
         eqOp(f.isArchived, false),
         like(f.key, `${keyPrefix}%`),
       ),
-    orderBy: (f, { desc: descOp }) => descOp(f.updatedAt),
+    // Same deterministic tiebreaker as findLatestCheckpointInProject.
+    orderBy: (f, { desc: descOp }) => [descOp(f.updatedAt), descOp(f.id)],
     limit,
   });
 }
@@ -139,7 +156,8 @@ async function findMostRecentActivity(
         ids.length === 1 ? eqOp(f.project, ids[0]!) : inArray(f.project, ids),
         eqOp(f.isArchived, false),
       ),
-    orderBy: (f, { desc: descOp }) => descOp(f.updatedAt),
+    // Same deterministic tiebreaker as findLatestCheckpointInProject.
+    orderBy: (f, { desc: descOp }) => [descOp(f.updatedAt), descOp(f.id)],
     limit: 1,
   });
   return rows[0];
@@ -207,7 +225,7 @@ export async function getProjectState(
   const latestCheckpoint: ProjectStateCheckpoint | null = checkpointFact
     ? {
         entity: entityLabel(checkpointFact),
-        text: checkpointFact.value,
+        text: clampField(checkpointFact.value),
         ...(() => {
           const { stage, status } = readCheckpointStage(checkpointFact);
           return { stage, status };
@@ -219,7 +237,7 @@ export async function getProjectState(
   const recentDecisions: ProjectStateDecision[] = decisionFacts.map((f) => ({
     entity: entityLabel(f),
     key: f.key,
-    value: f.value,
+    value: clampField(f.value),
     updatedAt: f.updatedAt.toISOString(),
   }));
 
@@ -231,7 +249,7 @@ export async function getProjectState(
       const item: ProjectStateOpenItem = {
         entity: entityLabel(f),
         key: f.key,
-        title: parsed.title,
+        title: clampField(parsed.title),
         status: parsed.status,
         priority: parsed.priority,
         updatedAt: f.updatedAt.toISOString(),

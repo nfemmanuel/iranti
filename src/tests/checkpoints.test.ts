@@ -8,6 +8,7 @@ import {
   clearCheckpoint,
   getActiveCheckpoint,
   getCheckpoint,
+  readCheckpointStage,
   writeCheckpoint,
 } from "../library/checkpoints.js";
 import { getFactHistory } from "../library/facts.js";
@@ -89,5 +90,67 @@ describe("clearCheckpoint", () => {
 
   it("returns false when there is nothing to clear", async () => {
     expect(await clearCheckpoint("project", randomUUID())).toBe(false);
+  });
+});
+
+// Layer 0e review follow-through: the PRD promised direct unit coverage of
+// the stage/status round-trip in THIS file (not only indirectly via
+// project-state.test.ts's scripted scenario) — these are those tests.
+describe("checkpoint stage/status metadata (Layer 0e)", () => {
+  it("round-trips explicit stage + status through write and read", async () => {
+    const entityId = randomUUID();
+    const written = await writeCheckpoint("project", entityId, "mid-migration", {
+      source: "checkpoint",
+      stage: "blocked",
+      status: "waiting on schema sign-off",
+    });
+
+    const { stage, status, stageSetAt } = readCheckpointStage(written);
+    expect(stage).toBe("blocked");
+    expect(status).toBe("waiting on schema sign-off");
+    // Server-stamped, parseable timestamp — never caller-supplied.
+    expect(stageSetAt).toBeTruthy();
+    expect(Number.isNaN(Date.parse(stageSetAt!))).toBe(false);
+  });
+
+  it("defaults stage to in_progress when omitted", async () => {
+    const entityId = randomUUID();
+    const written = await writeCheckpoint("project", entityId, "just checkpointing");
+    const { stage, status } = readCheckpointStage(written);
+    expect(stage).toBe("in_progress");
+    expect(status).toBeNull();
+  });
+
+  it("reads a pre-Layer-0e checkpoint (no stage metadata) as 'unknown', not a default", () => {
+    // Simulate a legacy checkpoint fact: metadata without stage keys —
+    // absence must read as UNKNOWN_CHECKPOINT_STAGE so it can never be
+    // confused with an explicitly-set value (PRD Decision 2).
+    const legacyShapes = [{ metadata: null }, { metadata: {} }, { metadata: { rawKey: "Checkpoint" } }];
+    for (const legacy of legacyShapes) {
+      const { stage, status, stageSetAt } = readCheckpointStage(legacy);
+      expect(stage).toBe("unknown");
+      expect(status).toBeNull();
+      expect(stageSetAt).toBeNull();
+    }
+  });
+
+  it("stage/status survive checkpoint rotation into the archive round-trip", async () => {
+    const entityId = randomUUID();
+    await writeCheckpoint("project", entityId, "phase one", {
+      source: "checkpoint",
+      stage: "planning",
+      status: "scoping",
+    });
+    const second = await writeCheckpoint("project", entityId, "phase two", {
+      source: "checkpoint",
+      stage: "in_progress",
+    });
+
+    // Live checkpoint carries the NEW stage...
+    expect(readCheckpointStage(second).stage).toBe("in_progress");
+    // ...and the rotated-out predecessor's text is preserved in history
+    // (rotation goes through archiveFact — value snapshot guaranteed).
+    const history = await getFactHistory(second.id);
+    expect(history.some((h) => h.value === "phase one")).toBe(true);
   });
 });

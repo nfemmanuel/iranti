@@ -603,15 +603,27 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
 
   const checkpoint = await getActiveCheckpoint(hints, "default", effectiveProjectIds);
 
-  // Layer 0e: compute the project-state rollup ONLY on the first attend of
-  // this process, and only surface it when the gap since last activity is
-  // long — see PRD Decision 5/6. The latch flips regardless of phase so a
-  // mid-turn or post-response call never accidentally becomes "the first"
-  // after a pre-response call already claimed it.
-  const isFirstAttendThisProcess = !hasAttendedThisProcess;
-  hasAttendedThisProcess = true;
+  // Layer 0e: compute the project-state rollup ONLY on the first
+  // non-mid-turn attend of this process, and only surface it when the gap
+  // since last activity is long — see PRD Decision 5/6. Mid-turn calls
+  // neither compute the rollup nor claim the latch (they're deliberately
+  // cheap top-ups, same reasoning as the peripheral-facts skip below) — a
+  // host whose first call in a fresh process happens to be mid-turn must
+  // not burn the one-shot surfacing before its real pre-response arrives
+  // (review finding).
+  //
+  // TRANSPORT SCOPE (review finding): this latch is module-level, i.e.
+  // once per PROCESS. Under the stdio transport (one process per host
+  // session) that equals once per session — the intended semantics. Under
+  // the HTTP transport (src/mcp/http.ts, one long-lived process serving
+  // many callers) the rollup fires at most once for the server's lifetime:
+  // no cross-project leak (the process is pinned to one project by
+  // ensureContext), but reorientation-after-a-gap is effectively a
+  // stdio-only guarantee until HTTP grows per-session identity. Documented
+  // in the PRD §9.
   let projectState: ProjectStateSummary | null = null;
-  if (isFirstAttendThisProcess) {
+  if (!isMidTurn && !hasAttendedThisProcess) {
+    hasAttendedThisProcess = true;
     const rollup = await getProjectState(effectiveProjectIds);
     if (rollup.isLongGap) projectState = rollup;
   }
