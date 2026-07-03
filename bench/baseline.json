@@ -20,6 +20,8 @@
         "negativeCount": 2,
         "falsePositiveCount": 2,
         "falsePositiveRate": 1,
+        "falsePositiveRawCount": 2,
+        "falsePositiveRateRaw": 1,
         "perProbe": [
           {
             "query": "What database and ORM are we using for the payments service?",
@@ -30,7 +32,8 @@
             "rank": 2,
             "hit": true,
             "confirmed": false,
-            "falsePositive": false
+            "falsePositive": false,
+            "falsePositiveRaw": false
           },
           {
             "query": "What's the connection pool size?",
@@ -41,7 +44,8 @@
             "rank": 1,
             "hit": true,
             "confirmed": true,
-            "falsePositive": false
+            "falsePositive": false,
+            "falsePositiveRaw": false
           },
           {
             "query": "What did we try for idempotency that didn't work?",
@@ -52,7 +56,8 @@
             "rank": 2,
             "hit": true,
             "confirmed": false,
-            "falsePositive": false
+            "falsePositive": false,
+            "falsePositiveRaw": false
           },
           {
             "query": "Can we use MongoDB for the ledger table?",
@@ -63,7 +68,8 @@
             "rank": 1,
             "hit": true,
             "confirmed": true,
-            "falsePositive": false
+            "falsePositive": false,
+            "falsePositiveRaw": false
           },
           {
             "query": "Where's the reconciliation doc?",
@@ -74,7 +80,8 @@
             "rank": 1,
             "hit": true,
             "confirmed": true,
-            "falsePositive": false
+            "falsePositive": false,
+            "falsePositiveRaw": false
           },
           {
             "query": "Should service-to-service calls use direct HTTP?",
@@ -85,7 +92,8 @@
             "rank": 1,
             "hit": true,
             "confirmed": true,
-            "falsePositive": false
+            "falsePositive": false,
+            "falsePositiveRaw": false
           },
           {
             "query": "What's the retry backoff base?",
@@ -96,7 +104,8 @@
             "rank": 1,
             "hit": true,
             "confirmed": true,
-            "falsePositive": false
+            "falsePositive": false,
+            "falsePositiveRaw": false
           },
           {
             "query": "What's our Kafka partitioning strategy for payment events?",
@@ -105,7 +114,8 @@
             "rank": null,
             "hit": false,
             "confirmed": false,
-            "falsePositive": true
+            "falsePositive": true,
+            "falsePositiveRaw": true
           },
           {
             "query": "Which S3 bucket do the ledger exports land in?",
@@ -114,7 +124,8 @@
             "rank": null,
             "hit": false,
             "confirmed": false,
-            "falsePositive": true
+            "falsePositive": true,
+            "falsePositiveRaw": true
           }
         ]
       },
@@ -200,6 +211,8 @@
         "negativeCount": 2,
         "falsePositiveCount": 2,
         "falsePositiveRate": 1,
+        "falsePositiveRawCount": 2,
+        "falsePositiveRateRaw": 1,
         "perProbe": [
           {
             "query": "What model are we using for churn prediction?",
@@ -210,7 +223,8 @@
             "rank": 3,
             "hit": true,
             "confirmed": false,
-            "falsePositive": false
+            "falsePositive": false,
+            "falsePositiveRaw": false
           },
           {
             "query": "What's the validation AUC?",
@@ -221,7 +235,8 @@
             "rank": null,
             "hit": false,
             "confirmed": false,
-            "falsePositive": false
+            "falsePositive": false,
+            "falsePositiveRaw": false
           },
           {
             "query": "What's the learning rate for the final run?",
@@ -232,7 +247,8 @@
             "rank": 1,
             "hit": true,
             "confirmed": true,
-            "falsePositive": false
+            "falsePositive": false,
+            "falsePositiveRaw": false
           },
           {
             "query": "Can we use raw user IDs as a feature?",
@@ -243,7 +259,8 @@
             "rank": 1,
             "hit": true,
             "confirmed": true,
-            "falsePositive": false
+            "falsePositive": false,
+            "falsePositiveRaw": false
           },
           {
             "query": "What did we try for class imbalance that didn't work?",
@@ -254,7 +271,8 @@
             "rank": 2,
             "hit": true,
             "confirmed": false,
-            "falsePositive": false
+            "falsePositive": false,
+            "falsePositiveRaw": false
           },
           {
             "query": "Where's the dashboard run?",
@@ -265,7 +283,8 @@
             "rank": 1,
             "hit": true,
             "confirmed": true,
-            "falsePositive": false
+            "falsePositive": false,
+            "falsePositiveRaw": false
           },
           {
             "query": "How are features versioned?",
@@ -276,7 +295,8 @@
             "rank": 1,
             "hit": true,
             "confirmed": true,
-            "falsePositive": false
+            "falsePositive": false,
+            "falsePositiveRaw": false
           },
           {
             "query": "Which GPU cluster does the training job run on?",
@@ -285,7 +305,8 @@
             "rank": null,
             "hit": false,
             "confirmed": false,
-            "falsePositive": true
+            "falsePositive": true,
+            "falsePositiveRaw": true
           },
           {
             "query": "What drift-detection threshold did the team pick for production monitoring?",
@@ -294,7 +315,8 @@
             "rank": null,
             "hit": false,
             "confirmed": false,
-            "falsePositive": true
+            "falsePositive": true,
+            "falsePositiveRaw": true
           }
         ]
       },
@@ -380,6 +402,8 @@
         "negativeCount": 2,
         "falsePositiveCount": 2,
         "falsePositiveRate": 1,
+        "falsePositiveRawCount": 2,
+        "falsePositiveRateRaw": 1,
         "perProbe": [
           {
             "query": "What are we using for styling?",
@@ -390,7 +414,8 @@
             "rank": 1,
             "hit": true,
             "confirmed": true,
-            "falsePositive": false
+            "falsePositive": false,
+            "falsePositiveRaw": false
           },
           {
             "query": "What's the tablet breakpoint?",
@@ -401,7 +426,8 @@
             "rank": 1,
             "hit": true,
             "confirmed": true,
-            "falsePositive": false
+            "falsePositive": false,
+            "falsePositiveRaw": false
           },
           {
             "query": "What's the primary brand color?",
@@ -412,7 +438,8 @@
             "rank": 1,
             "hit": true,
             "confirmed": true,
-            "falsePositive": false
+            "falsePositive": false,
+            "falsePositiveRaw": false
           },
           {
             "query": "Can the pricing page be client-side only rendered?",
@@ -423,7 +450,8 @@
             "rank": 1,
             "hit": true,
             "confirmed": true,
-            "falsePositive": false
+            "falsePositive": false,
+            "falsePositiveRaw": false
           },
           {
             "query": "What did we try for styling that didn't work with SSR?",
@@ -434,7 +462,8 @@
             "rank": 5,
             "hit": true,
             "confirmed": false,
-            "falsePositive": false
+            "falsePositive": false,
+            "falsePositiveRaw": false
           },
           {
             "query": "Where's the figma file?",
@@ -445,7 +474,8 @@
             "rank": 1,
             "hit": true,
             "confirmed": true,
-            "falsePositive": false
+            "falsePositive": false,
+            "falsePositiveRaw": false
           },
           {
             "query": "Where do new components live?",
@@ -456,7 +486,8 @@
             "rank": 1,
             "hit": true,
             "confirmed": true,
-            "falsePositive": false
+            "falsePositive": false,
+            "falsePositiveRaw": false
           },
           {
             "query": "What icon set did the design team pick for the dashboard?",
@@ -465,7 +496,8 @@
             "rank": null,
             "hit": false,
             "confirmed": false,
-            "falsePositive": true
+            "falsePositive": true,
+            "falsePositiveRaw": true
           },
           {
             "query": "What's our target Lighthouse performance score?",
@@ -474,7 +506,8 @@
             "rank": null,
             "hit": false,
             "confirmed": false,
-            "falsePositive": true
+            "falsePositive": true,
+            "falsePositiveRaw": true
           }
         ]
       },
@@ -558,8 +591,10 @@
         "hitRate": 0.5714285714285714,
         "confirmationRate": 0.42857142857142855,
         "negativeCount": 2,
-        "falsePositiveCount": 2,
-        "falsePositiveRate": 1,
+        "falsePositiveCount": 0,
+        "falsePositiveRate": 0,
+        "falsePositiveRawCount": 2,
+        "falsePositiveRateRaw": 1,
         "perProbe": [
           {
             "query": "What are we using for the internal tool's database?",
@@ -570,7 +605,8 @@
             "rank": 7,
             "hit": true,
             "confirmed": false,
-            "falsePositive": false
+            "falsePositive": false,
+            "falsePositiveRaw": false
           },
           {
             "query": "Where's the widget's sync job documented?",
@@ -581,7 +617,8 @@
             "rank": null,
             "hit": false,
             "confirmed": false,
-            "falsePositive": false
+            "falsePositive": false,
+            "falsePositiveRaw": false
           },
           {
             "query": "What time does the sync run?",
@@ -592,7 +629,8 @@
             "rank": null,
             "hit": false,
             "confirmed": false,
-            "falsePositive": false
+            "falsePositive": false,
+            "falsePositiveRaw": false
           },
           {
             "query": "What's the retry count?",
@@ -603,7 +641,8 @@
             "rank": 1,
             "hit": true,
             "confirmed": true,
-            "falsePositive": false
+            "falsePositive": false,
+            "falsePositiveRaw": false
           },
           {
             "query": "What did we try for the nightly sync that failed?",
@@ -614,7 +653,8 @@
             "rank": 1,
             "hit": true,
             "confirmed": true,
-            "falsePositive": false
+            "falsePositive": false,
+            "falsePositiveRaw": false
           },
           {
             "query": "Is it okay to touch the export script on Fridays?",
@@ -625,7 +665,8 @@
             "rank": null,
             "hit": false,
             "confirmed": false,
-            "falsePositive": false
+            "falsePositive": false,
+            "falsePositiveRaw": false
           },
           {
             "query": "What does the new tool need to do when it fails?",
@@ -636,7 +677,8 @@
             "rank": 1,
             "hit": true,
             "confirmed": true,
-            "falsePositive": false
+            "falsePositive": false,
+            "falsePositiveRaw": false
           },
           {
             "query": "who's on call for the widget this week?",
@@ -645,7 +687,8 @@
             "rank": null,
             "hit": false,
             "confirmed": false,
-            "falsePositive": true
+            "falsePositive": false,
+            "falsePositiveRaw": true
           },
           {
             "query": "what port does the widget's admin panel run on?",
@@ -654,7 +697,8 @@
             "rank": null,
             "hit": false,
             "confirmed": false,
-            "falsePositive": true
+            "falsePositive": false,
+            "falsePositiveRaw": true
           }
         ]
       },
@@ -738,8 +782,10 @@
       "hitRate": 0.8571428571428571,
       "confirmationRate": 0.6428571428571429,
       "negativeCount": 8,
-      "falsePositiveCount": 8,
-      "falsePositiveRate": 1,
+      "falsePositiveCount": 6,
+      "falsePositiveRate": 0.75,
+      "falsePositiveRawCount": 8,
+      "falsePositiveRateRaw": 1,
       "perProbe": [
         {
           "query": "What database and ORM are we using for the payments service?",
@@ -750,7 +796,8 @@
           "rank": 2,
           "hit": true,
           "confirmed": false,
-          "falsePositive": false
+          "falsePositive": false,
+          "falsePositiveRaw": false
         },
         {
           "query": "What's the connection pool size?",
@@ -761,7 +808,8 @@
           "rank": 1,
           "hit": true,
           "confirmed": true,
-          "falsePositive": false
+          "falsePositive": false,
+          "falsePositiveRaw": false
         },
         {
           "query": "What did we try for idempotency that didn't work?",
@@ -772,7 +820,8 @@
           "rank": 2,
           "hit": true,
           "confirmed": false,
-          "falsePositive": false
+          "falsePositive": false,
+          "falsePositiveRaw": false
         },
         {
           "query": "Can we use MongoDB for the ledger table?",
@@ -783,7 +832,8 @@
           "rank": 1,
           "hit": true,
           "confirmed": true,
-          "falsePositive": false
+          "falsePositive": false,
+          "falsePositiveRaw": false
         },
         {
           "query": "Where's the reconciliation doc?",
@@ -794,7 +844,8 @@
           "rank": 1,
           "hit": true,
           "confirmed": true,
-          "falsePositive": false
+          "falsePositive": false,
+          "falsePositiveRaw": false
         },
         {
           "query": "Should service-to-service calls use direct HTTP?",
@@ -805,7 +856,8 @@
           "rank": 1,
           "hit": true,
           "confirmed": true,
-          "falsePositive": false
+          "falsePositive": false,
+          "falsePositiveRaw": false
         },
         {
           "query": "What's the retry backoff base?",
@@ -816,7 +868,8 @@
           "rank": 1,
           "hit": true,
           "confirmed": true,
-          "falsePositive": false
+          "falsePositive": false,
+          "falsePositiveRaw": false
         },
         {
           "query": "What's our Kafka partitioning strategy for payment events?",
@@ -825,7 +878,8 @@
           "rank": null,
           "hit": false,
           "confirmed": false,
-          "falsePositive": true
+          "falsePositive": true,
+          "falsePositiveRaw": true
         },
         {
           "query": "Which S3 bucket do the ledger exports land in?",
@@ -834,7 +888,8 @@
           "rank": null,
           "hit": false,
           "confirmed": false,
-          "falsePositive": true
+          "falsePositive": true,
+          "falsePositiveRaw": true
         },
         {
           "query": "What model are we using for churn prediction?",
@@ -845,7 +900,8 @@
           "rank": 3,
           "hit": true,
           "confirmed": false,
-          "falsePositive": false
+          "falsePositive": false,
+          "falsePositiveRaw": false
         },
         {
           "query": "What's the validation AUC?",
@@ -856,7 +912,8 @@
           "rank": null,
           "hit": false,
           "confirmed": false,
-          "falsePositive": false
+          "falsePositive": false,
+          "falsePositiveRaw": false
         },
         {
           "query": "What's the learning rate for the final run?",
@@ -867,7 +924,8 @@
           "rank": 1,
           "hit": true,
           "confirmed": true,
-          "falsePositive": false
+          "falsePositive": false,
+          "falsePositiveRaw": false
         },
         {
           "query": "Can we use raw user IDs as a feature?",
@@ -878,7 +936,8 @@
           "rank": 1,
           "hit": true,
           "confirmed": true,
-          "falsePositive": false
+          "falsePositive": false,
+          "falsePositiveRaw": false
         },
         {
           "query": "What did we try for class imbalance that didn't work?",
@@ -889,7 +948,8 @@
           "rank": 2,
           "hit": true,
           "confirmed": false,
-          "falsePositive": false
+          "falsePositive": false,
+          "falsePositiveRaw": false
         },
         {
           "query": "Where's the dashboard run?",
@@ -900,7 +960,8 @@
           "rank": 1,
           "hit": true,
           "confirmed": true,
-          "falsePositive": false
+          "falsePositive": false,
+          "falsePositiveRaw": false
         },
         {
           "query": "How are features versioned?",
@@ -911,7 +972,8 @@
           "rank": 1,
           "hit": true,
           "confirmed": true,
-          "falsePositive": false
+          "falsePositive": false,
+          "falsePositiveRaw": false
         },
         {
           "query": "Which GPU cluster does the training job run on?",
@@ -920,7 +982,8 @@
           "rank": null,
           "hit": false,
           "confirmed": false,
-          "falsePositive": true
+          "falsePositive": true,
+          "falsePositiveRaw": true
         },
         {
           "query": "What drift-detection threshold did the team pick for production monitoring?",
@@ -929,7 +992,8 @@
           "rank": null,
           "hit": false,
           "confirmed": false,
-          "falsePositive": true
+          "falsePositive": true,
+          "falsePositiveRaw": true
         },
         {
           "query": "What are we using for styling?",
@@ -940,7 +1004,8 @@
           "rank": 1,
           "hit": true,
           "confirmed": true,
-          "falsePositive": false
+          "falsePositive": false,
+          "falsePositiveRaw": false
         },
         {
           "query": "What's the tablet breakpoint?",
@@ -951,7 +1016,8 @@
           "rank": 1,
           "hit": true,
           "confirmed": true,
-          "falsePositive": false
+          "falsePositive": false,
+          "falsePositiveRaw": false
         },
         {
           "query": "What's the primary brand color?",
@@ -962,7 +1028,8 @@
           "rank": 1,
           "hit": true,
           "confirmed": true,
-          "falsePositive": false
+          "falsePositive": false,
+          "falsePositiveRaw": false
         },
         {
           "query": "Can the pricing page be client-side only rendered?",
@@ -973,7 +1040,8 @@
           "rank": 1,
           "hit": true,
           "confirmed": true,
-          "falsePositive": false
+          "falsePositive": false,
+          "falsePositiveRaw": false
         },
         {
           "query": "What did we try for styling that didn't work with SSR?",
@@ -984,7 +1052,8 @@
           "rank": 5,
           "hit": true,
           "confirmed": false,
-          "falsePositive": false
+          "falsePositive": false,
+          "falsePositiveRaw": false
         },
         {
           "query": "Where's the figma file?",
@@ -995,7 +1064,8 @@
           "rank": 1,
           "hit": true,
           "confirmed": true,
-          "falsePositive": false
+          "falsePositive": false,
+          "falsePositiveRaw": false
         },
         {
           "query": "Where do new components live?",
@@ -1006,7 +1076,8 @@
           "rank": 1,
           "hit": true,
           "confirmed": true,
-          "falsePositive": false
+          "falsePositive": false,
+          "falsePositiveRaw": false
         },
         {
           "query": "What icon set did the design team pick for the dashboard?",
@@ -1015,7 +1086,8 @@
           "rank": null,
           "hit": false,
           "confirmed": false,
-          "falsePositive": true
+          "falsePositive": true,
+          "falsePositiveRaw": true
         },
         {
           "query": "What's our target Lighthouse performance score?",
@@ -1024,7 +1096,8 @@
           "rank": null,
           "hit": false,
           "confirmed": false,
-          "falsePositive": true
+          "falsePositive": true,
+          "falsePositiveRaw": true
         },
         {
           "query": "What are we using for the internal tool's database?",
@@ -1035,7 +1108,8 @@
           "rank": 7,
           "hit": true,
           "confirmed": false,
-          "falsePositive": false
+          "falsePositive": false,
+          "falsePositiveRaw": false
         },
         {
           "query": "Where's the widget's sync job documented?",
@@ -1046,7 +1120,8 @@
           "rank": null,
           "hit": false,
           "confirmed": false,
-          "falsePositive": false
+          "falsePositive": false,
+          "falsePositiveRaw": false
         },
         {
           "query": "What time does the sync run?",
@@ -1057,7 +1132,8 @@
           "rank": null,
           "hit": false,
           "confirmed": false,
-          "falsePositive": false
+          "falsePositive": false,
+          "falsePositiveRaw": false
         },
         {
           "query": "What's the retry count?",
@@ -1068,7 +1144,8 @@
           "rank": 1,
           "hit": true,
           "confirmed": true,
-          "falsePositive": false
+          "falsePositive": false,
+          "falsePositiveRaw": false
         },
         {
           "query": "What did we try for the nightly sync that failed?",
@@ -1079,7 +1156,8 @@
           "rank": 1,
           "hit": true,
           "confirmed": true,
-          "falsePositive": false
+          "falsePositive": false,
+          "falsePositiveRaw": false
         },
         {
           "query": "Is it okay to touch the export script on Fridays?",
@@ -1090,7 +1168,8 @@
           "rank": null,
           "hit": false,
           "confirmed": false,
-          "falsePositive": false
+          "falsePositive": false,
+          "falsePositiveRaw": false
         },
         {
           "query": "What does the new tool need to do when it fails?",
@@ -1101,7 +1180,8 @@
           "rank": 1,
           "hit": true,
           "confirmed": true,
-          "falsePositive": false
+          "falsePositive": false,
+          "falsePositiveRaw": false
         },
         {
           "query": "who's on call for the widget this week?",
@@ -1110,7 +1190,8 @@
           "rank": null,
           "hit": false,
           "confirmed": false,
-          "falsePositive": true
+          "falsePositive": false,
+          "falsePositiveRaw": true
         },
         {
           "query": "what port does the widget's admin panel run on?",
@@ -1119,7 +1200,8 @@
           "rank": null,
           "hit": false,
           "confirmed": false,
-          "falsePositive": true
+          "falsePositive": false,
+          "falsePositiveRaw": true
         }
       ]
     },
