@@ -24,6 +24,7 @@ import {
   fetchAliasInputSchema,
 } from "./tools/aliases.js";
 import { ingestMediaTool, ingestMediaInputSchema } from "./tools/ingest-media.js";
+import { projectStateTool, projectStateInputSchema } from "./tools/project-state.js";
 import {
   projectStatus,
   projectStatusInputSchema,
@@ -261,6 +262,28 @@ export function registerIrantiTools(server: McpServer): void {
     async (input) => {
       try {
         return asResult(await ingestMediaTool(input));
+      } catch (err) {
+        return asError(err);
+      }
+    },
+  );
+
+  // Layer 0e: deterministic "where did we leave off?" rollup.
+  server.registerTool(
+    "iranti_project_state",
+    {
+      title: "Project state rollup",
+      description:
+        "Answer 'where did we leave off?' for the current project: the " +
+        "latest checkpoint (with stage/status), recent decisions, open " +
+        "issues, and how long it's been since any activity. Read-only. " +
+        "Call this at the start of a session after a gap to reorient " +
+        "without re-running individual fact lookups.",
+      inputSchema: projectStateInputSchema,
+    },
+    async (input) => {
+      try {
+        return asResult(await projectStateTool(input));
       } catch (err) {
         return asError(err);
       }

@@ -30,6 +30,10 @@ import {
 } from "../../library/checkpoints.js";
 import { upsertEntity } from "../../library/entities.js";
 import {
+  getProjectState,
+  type ProjectStateSummary,
+} from "../../library/project-state.js";
+import {
   VALID_SURFACES,
   findFact,
   readArchivedValuesByFactIds,
@@ -88,6 +92,20 @@ let lastSyncedMetrics = {
   escalations: 0,
   deepConflictsDetected: 0,
 };
+
+// ---------------------------------------------------------------------------
+// Layer 0e — project-state rollup surfacing
+// ---------------------------------------------------------------------------
+
+// "First attend of a session" latch. sessions.turnCount exists in the schema
+// but is a fire-and-forget observability counter never read back by this
+// module (see sessions.ts's header comment) — using it here would require an
+// extra DB round trip on every attend just to check a value this in-process
+// flag already knows for free. Module-level state resets naturally on
+// process restart (and on vi.resetModules() in tests), which is exactly the
+// semantics wanted: "first attend since this server started serving." Mirrors
+// the lastSyncedMetrics pattern immediately above.
+let hasAttendedThisProcess = false;
 
 // ---------------------------------------------------------------------------
 // Async edge recording — best-effort, never blocks the response
@@ -308,6 +326,13 @@ export interface AttendResult {
   }>;
   // Phase 3 (CORE-31): protocol breadcrumb — what the host should call next.
   nextDue: string;
+  // Layer 0e: "where did we leave off?" rollup. Populated ONLY on the first
+  // attend of this process (a fresh session) AND only when the gap since
+  // last project activity exceeds the deterministic threshold — otherwise
+  // null. This mirrors Layer 0d's "don't dump it every turn" posture for
+  // rules: the rollup is valuable exactly once, at reorientation time, not
+  // on every subsequent call.
+  projectState: ProjectStateSummary | null;
 }
 
 function entityLabel(f: { entityType: string; entityId: string }): string {
@@ -578,6 +603,19 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
 
   const checkpoint = await getActiveCheckpoint(hints, "default", effectiveProjectIds);
 
+  // Layer 0e: compute the project-state rollup ONLY on the first attend of
+  // this process, and only surface it when the gap since last activity is
+  // long — see PRD Decision 5/6. The latch flips regardless of phase so a
+  // mid-turn or post-response call never accidentally becomes "the first"
+  // after a pre-response call already claimed it.
+  const isFirstAttendThisProcess = !hasAttendedThisProcess;
+  hasAttendedThisProcess = true;
+  let projectState: ProjectStateSummary | null = null;
+  if (isFirstAttendThisProcess) {
+    const rollup = await getProjectState(effectiveProjectIds);
+    if (rollup.isLongGap) projectState = rollup;
+  }
+
   // ---- SECONDARY PASS: graph-hop peripheral retrieval (CORE-15) ------------
   // Walk up to 2 hops from each primary fact. Collect fact-type neighbor IDs,
   // deduplicate against primary hits, sort by edge weight, cap, look up.
@@ -832,5 +870,6 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
     corrections,
     media: budgetedMedia,
     nextDue: computeNextDue(phase),
+    projectState,
   };
 }
