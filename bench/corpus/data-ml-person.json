@@ -120,7 +120,7 @@
       "entityId": "churn-model",
       "key": "referenced_file:churn_eda_notebook",
       "value": "notebooks/churn_eda.ipynb",
-      "note": "message 10 — 'Check X for the analysis' phrasing has no heuristic match, and notebooks/churn_eda.ipynb is NOT extracted by extractArtifacts (no leading ./ or / segment marker). INTENTIONALLY a miss today — file-path-in-prose gap."
+      "note": "message 10 — 'Check X for the analysis' phrasing has no heuristic match, and notebooks/churn_eda.ipynb is NOT extracted by extractArtifacts (no leading ./ or / segment marker). INTENTIONALLY a miss today — file-path-in-prose gap. KEY FORMAT PLACEHOLDER: this hand-written slug is NOT the 12-hex content-hash key extractArtifacts() would produce; if path extraction is ever widened to catch this path, recompute this gold key as the real content hash or the improvement will be silently masked as a continued miss."
     },
     {
       "entityType": "project",

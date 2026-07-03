@@ -69,7 +69,13 @@ export function scoreExtraction(
 
   const storedByIdentity = new Map<string, ProbeFactResult[]>();
   for (const f of storedFacts) {
-    const [entityType, entityId] = f.entity.split("/", 2) as [string, string];
+    // Only the FIRST "/" separates entityType from entityId. split("/", 2)
+    // would TRUNCATE an entityId containing further slashes (JS's limit
+    // drops the remainder, unlike Python's), silently zeroing recall for
+    // e.g. org/repo-style ids — review finding.
+    const sep = f.entity.indexOf("/");
+    const entityType = f.entity.slice(0, sep);
+    const entityId = f.entity.slice(sep + 1);
     const id = factIdentity(entityType, entityId, f.key);
     const list = storedByIdentity.get(id) ?? [];
     list.push(f);

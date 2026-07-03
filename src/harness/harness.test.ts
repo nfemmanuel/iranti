@@ -36,10 +36,12 @@ import { scorePersona, buildOverallReport, type BenchReport } from "./scorer.js"
 import { loadBaseline, writeBaseline, writeLatest, diffReports } from "./baseline.js";
 import { renderReport } from "./report.js";
 
-// pnpm bench --update-baseline (or UPDATE_BASELINE=1 pnpm bench) regenerates
-// bench/baseline.json from the current run instead of diffing against it.
-const UPDATE_BASELINE =
-  process.env["UPDATE_BASELINE"] === "1" || process.argv.includes("--update-baseline");
+// UPDATE_BASELINE=1 pnpm bench regenerates bench/baseline.json from the
+// current run instead of diffing against it. Env var ONLY — a
+// `--update-baseline` CLI flag cannot work here because vitest's own CLI
+// parser rejects unknown options with a CACError before this file ever
+// loads (review finding: the previously-documented flag form crashed).
+const UPDATE_BASELINE = process.env["UPDATE_BASELINE"] === "1";
 
 async function runFullBench(): Promise<BenchReport> {
   const corpora = loadCorpora();

@@ -131,7 +131,7 @@
       "entityId": "dashboard-redesign",
       "key": "referenced_file:button_variants_pattern",
       "value": "src/components/ui/Button.tsx",
-      "note": "message 11 — 'Check X for the pattern' phrasing does NOT trigger any heuristic pattern, and src/components/ui/Button.tsx is NOT extracted by extractArtifacts (relative path without leading ./ or /, not matched by UNIX_PATH_PATTERN due to the lookbehind rule). INTENTIONALLY a miss today — the file-path-in-prose gap."
+      "note": "message 11 — 'Check X for the pattern' phrasing does NOT trigger any heuristic pattern, and src/components/ui/Button.tsx is NOT extracted by extractArtifacts (relative path without leading ./ or /, not matched by UNIX_PATH_PATTERN due to the lookbehind rule). INTENTIONALLY a miss today — the file-path-in-prose gap. KEY FORMAT PLACEHOLDER: this hand-written slug is NOT the 12-hex content-hash key extractArtifacts() would produce; if path extraction is ever widened to catch this path, recompute this gold key as the real content hash or the improvement will be silently masked as a continued miss."
     },
     {
       "entityType": "project",
