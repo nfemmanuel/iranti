@@ -1,6 +1,6 @@
 # PRD: Layer 0e — Checkpoint Criteria & Project-State Rollup
 
-**Status:** accepted
+**Status:** shipped
 **Phase:** Layer 0e (YC foundation) · **Date:** 2026-07-03 · **Author:** Claude Fable 5 (overnight build)
 **Related:** master PRD §9 (Features), docs/specs/memory-storage/checkpoints.md, docs/prds/phases/layer-0-foundation.md §11, docs/decisions/open-decisions.md (AX-7)
 
@@ -164,4 +164,9 @@ One correction is recorded (see §5 Decision 0): the build brief's claim that "A
 
 ## Changelog
 - 2026-07-03 — accepted (pre-authorized by the overnight build mandate; PRD-first, written before code)
-- 2026-07-03 — shipped (commit(s) TBD at gate time, test results TBD)
+- 2026-07-03 — shipped (`c686d000` PRD, `8e58209c` checkpoint stage/status, `0db1da74` rollup + tool + attend surfacing, `63166800` efficacy suite).
+  Gates: tsc 0, lint 0; checkpoints 8/8, host-simulation 3/3, rules-relevance 10/10, aliases 17/17,
+  projects-isolation 16/16, mcp-tools 53/53 (+1 new `iranti_project_state` tool, additive),
+  facts 33/33, it-runs 1/1; new `project-state.test.ts` 4/4. `pnpm bench`: all metrics 0.0pp vs
+  baseline across every persona and the overall micro-average, determinism confirmed by the
+  harness's own re-run diff.
