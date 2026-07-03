@@ -89,5 +89,6 @@ How we know it works: test counts, smoke checks, manual validation.
 | [OD-4 — Media Ingest](od4-media-ingest.md) | OD-4 (Media track) | shipped |
 | [Layer 0 — Zero-Infra Foundation & Folder-Scoped Projects](layer-0-foundation.md) | Layer 0 (YC foundation) | accepted |
 | [Layer 0b — Minimal Measurement Harness](layer-0b-harness.md) | Layer 0b (YC foundation) | shipped |
+| [Layer 0c — Entity Resolution](layer-0c-entity-resolution.md) | Layer 0c (YC foundation) | accepted |
 
 > Retroactive PRDs (0, 1, 1.1) document phases that shipped before this process existed. They are written from the implementation record and exist so the history is complete and auditable — the standard going forward is PRD-first.
