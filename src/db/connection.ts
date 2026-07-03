@@ -47,7 +47,7 @@ import { PGlite } from "@electric-sql/pglite";
 import postgres from "postgres";
 import { homedir } from "node:os";
 import path from "node:path";
-import { settleBackground } from "../library/background.js";
+import { pendingBackgroundCount, settleBackground } from "../library/background.js";
 import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
 import * as schema from "./schema.js";
@@ -117,13 +117,21 @@ if (usePostgres) {
       if (closed) return;
       closed = true;
       // RULE-2 root fix: settle detached fire-and-forget chains (attend's
-      // post-response chain, writeFact's post-commit side effects) BEFORE
-      // closing the single connection. Closing mid-query leaves that
-      // query's promise pending FOREVER (PGlite neither resolves nor
-      // rejects it) — a real host shutting down right after a turn hung
-      // exactly here. Bounded: after 5s we close anyway (a bounded wait
-      // beats both an unbounded hang and a blind close).
-      await settleBackground(5000);
+      // post-response chain, writeFact's post-commit side effects, the
+      // extraction-cache writes) BEFORE closing the single connection.
+      // Closing mid-query leaves that query's promise pending FOREVER
+      // (PGlite neither resolves nor rejects it) — a real host shutting
+      // down right after a turn hung exactly here. Bounded: after 5s we
+      // close anyway (a bounded wait beats both an unbounded hang and a
+      // blind close). This shim is the ONLY settle point on the PGlite
+      // path — closeDb() deliberately does not settle again (review
+      // finding: double-settling made a genuinely-stuck chain cost ~10s
+      // against the documented 5s bound).
+      if (!(await settleBackground(5000))) {
+        console.error(
+          `[iranti] teardown: ${pendingBackgroundCount()} background chain(s) did not settle within 5s; closing anyway`,
+        );
+      }
       await client.close();
     },
   };
@@ -280,10 +288,20 @@ export { db, pool };
 // sites are left as-is (see module comment above) — this is just the
 // preferred name going forward.
 export async function closeDb(): Promise<void> {
-  // Settle here too (not only in the PGlite end shim) so the server-Postgres
-  // path also drains detached chains before pool teardown — postgres-js
-  // survives in-flight teardown, but draining removes the benign-yet-noisy
-  // CONNECTION_ENDED stderr spam from chains losing the race (RULE-2).
-  await settleBackground(5000);
+  // Engine-aware single settle (review finding: settling here AND in the
+  // PGlite end shim doubled the worst-case stuck-chain wait to ~10s):
+  // - PGlite: the pool.end shim settles — nothing to do here.
+  // - postgres: the raw postgres-js pool has no shim, so drain here.
+  //   postgres-js survives in-flight teardown, but draining removes the
+  //   benign-yet-noisy CONNECTION_ENDED stderr spam from chains losing
+  //   the race (RULE-2). Direct pool.end() callers on the postgres path
+  //   skip this drain — acceptable: no hang risk on a pooled engine.
+  if (usePostgres) {
+    if (!(await settleBackground(5000))) {
+      console.error(
+        `[iranti] teardown: ${pendingBackgroundCount()} background chain(s) did not settle within 5s; closing anyway`,
+      );
+    }
+  }
   await pool.end({ timeout: 5 });
 }

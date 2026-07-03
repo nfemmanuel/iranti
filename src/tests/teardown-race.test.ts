@@ -65,3 +65,35 @@ describe("teardown vs fire-and-forget chains (RULE-2)", () => {
     await closeDb();
   });
 });
+
+describe("extraction-cache detached writes are tracked (RULE-2 review BLOCKER)", () => {
+  it("a cache-hit's hit_count bump is registered and settles before close", async () => {
+    // Fresh store for this describe (previous one closed its connection).
+    const cacheDir = mkdtempSync(path.join(tmpdir(), "iranti-teardown-cache-"));
+    process.env["IRANTI_DATA_DIR"] = cacheDir;
+    const { vi } = await import("vitest");
+    vi.resetModules();
+
+    const { writeCache, readCache } = await import("../library/extraction-cache.js");
+    const { closeDb } = await import("../db/connection.js");
+    const { pendingBackgroundCount, settleBackground } = await import(
+      "../library/background.js"
+    );
+
+    await writeCache("hash-teardown", "sig-teardown", "local", "test-model", "v1", "v1", []);
+
+    // The hit fires the detached hit_count bump — the fifth fire site the
+    // review found untracked (it could still be in flight after settle
+    // reported drained, reproducing the hang on the cache-hit path).
+    const hit = await readCache("hash-teardown", "sig-teardown");
+    expect(hit).not.toBeNull();
+
+    // Tracked means: visible to the registry until it lands, and drained
+    // by an explicit settle (and therefore by closeDb's settle too).
+    await settleBackground(5000);
+    expect(pendingBackgroundCount()).toBe(0);
+
+    await closeDb();
+    rmSync(cacheDir, { recursive: true, force: true });
+  });
+});

@@ -34,6 +34,7 @@ import {
   writeCache,
 } from "../library/extraction-cache.js";
 import { parseLlmJson } from "../library/llm-json.js";
+import { trackBackground } from "../library/background.js";
 
 // AX-2: bump this whenever LLM_SYSTEM_PROMPT or output-affecting decode params
 // change. A version change guarantees cache misses across all tenants so stale
@@ -217,16 +218,20 @@ export class LocalLlmExtractor implements ExtractorBackend {
     // _extractFresh to heuristic-only; caching that thin result would poison
     // every future cache hit for the same input once the LLM recovers.
     if (llmSucceeded) {
-      void writeCache(
-        inputHash,
-        regimeSig,
-        "local",
-        this.model,
-        EXTRACTION_PROMPT_VERSION,
-        NORMALIZER_VERSION,
-        merged,
-      ).catch((err: unknown) =>
-        console.error("[iranti] extraction-cache write error:", err),
+      // Tracked (RULE-2 audit): detached DB write must be visible to
+      // teardown's settleBackground — see background.ts.
+      trackBackground(
+        writeCache(
+          inputHash,
+          regimeSig,
+          "local",
+          this.model,
+          EXTRACTION_PROMPT_VERSION,
+          NORMALIZER_VERSION,
+          merged,
+        ).catch((err: unknown) =>
+          console.error("[iranti] extraction-cache write error:", err),
+        ),
       );
     }
 

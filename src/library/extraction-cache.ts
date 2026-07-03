@@ -19,6 +19,7 @@ import { db } from "../db/connection.js";
 import { extractionCache } from "../db/schema.js";
 import { eq, and, sql } from "drizzle-orm";
 import type { ExtractedFact } from "../extract/index.js";
+import { trackBackground } from "./background.js";
 
 // Trim and normalize line endings so minor whitespace differences in the same
 // logical message don't produce different hashes. This is minimal/lossless:
@@ -59,23 +60,29 @@ export async function readCache(
 
   if (rows.length === 0) return null;
 
-  // Best-effort hit_count increment — fire-and-forget, never blocking.
-  void db
-    .update(extractionCache)
-    .set({
-      hitCount: sql`${extractionCache.hitCount} + 1`,
-      lastHitAt: new Date(),
-    })
-    .where(
-      and(
-        eq(extractionCache.tenantId, tenantId),
-        eq(extractionCache.inputHash, inputHash),
-        eq(extractionCache.regimeSignature, regimeSignature),
+  // Best-effort hit_count increment — fire-and-forget, never blocking, but
+  // TRACKED (RULE-2 review BLOCKER): this was the fifth detached DB write,
+  // reachable from attend's post-response chain on every cache hit, and it
+  // could still be in flight after teardown's settle reported drained —
+  // reproducing the exact hang the registry exists to prevent.
+  trackBackground(
+    db
+      .update(extractionCache)
+      .set({
+        hitCount: sql`${extractionCache.hitCount} + 1`,
+        lastHitAt: new Date(),
+      })
+      .where(
+        and(
+          eq(extractionCache.tenantId, tenantId),
+          eq(extractionCache.inputHash, inputHash),
+          eq(extractionCache.regimeSignature, regimeSignature),
+        ),
+      )
+      .catch((err: unknown) =>
+        console.error("[iranti] extraction-cache hit_count update error:", err),
       ),
-    )
-    .catch((err: unknown) =>
-      console.error("[iranti] extraction-cache hit_count update error:", err),
-    );
+  );
 
   return rows[0]!.result as ExtractedFact[];
 }
