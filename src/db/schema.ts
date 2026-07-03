@@ -845,3 +845,95 @@ export const projectLinks = pgTable(
 
 export type ProjectLink = typeof projectLinks.$inferSelect;
 export type NewProjectLink = typeof projectLinks.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// entity_aliases — Layer 0c (entity resolution, the "textbook" fix)
+//
+// A durable link from an alias phrase ("the figma file") to the fact it
+// resolves to, scoped per entity. Learned ONCE (heuristic, deterministic —
+// see src/extract/index.ts's ALIAS_PATTERNS) from an explicit declarative
+// signal in a message, then applied at every retrieval thereafter via exact
+// stored-alias lookup (src/library/aliases.ts's resolveAlias) — never fuzzy/
+// embedding similarity (G1 determinism).
+//
+// factKey (not factId) is the stored pointer: resolving to "the live fact
+// for this entity+key" means an alias survives its target fact being
+// superseded (a new value written to the same key) without needing to be
+// re-learned — the same durable-identity treatment every other part of
+// iranti gives (entityType, entityId, key).
+//
+// Layer 0 (D6/D7): project-scoped exactly like facts/rules/knowledge_edges.
+// An alias learned in project A must not resolve in project B — resolving
+// across the boundary would leak the existence/content of a project-private
+// fact, which is exactly what getFactById's project-scoped guard exists to
+// prevent for direct id lookups. An alias must not become a side-door
+// around that guard. See docs/prds/phases/layer-0c-entity-resolution.md §11.6-equivalent.
+//
+// Never hard-deleted (G1): archiveAlias() sets isActive = false, matching
+// rules.deactivateRule / facts.archiveFact's posture exactly.
+// ---------------------------------------------------------------------------
+export const entityAliases = pgTable(
+  "entity_aliases",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+
+    tenantId: text("tenant_id").notNull().default("default"),
+    project: text("project").notNull().default("default"),
+
+    entityType: text("entity_type").notNull(),
+    entityId: text("entity_id").notNull(),
+
+    // Normalized (lowercased, whitespace-collapsed) alias phrase — the
+    // lookup key at resolve time.
+    alias: text("alias").notNull(),
+
+    // Original phrasing as written, preserved for provenance/display —
+    // mirrors keys.ts's rawKey pattern for facts.
+    rawAlias: text("raw_alias").notNull(),
+
+    // The normalized key of the fact this alias resolves to (NOT a fact id
+    // — see header comment on why this follows supersession).
+    factKey: text("fact_key").notNull(),
+
+    // What learned this alias. Layer 0c only ever writes "extractor_heuristic".
+    source: text("source").notNull(),
+
+    confidence: real("confidence").notNull().default(0.85),
+
+    // Deactivated aliases are not applied by resolveAlias. The record is
+    // kept (G1) — archiveAlias() is the only way to retire one.
+    isActive: boolean("is_active").notNull().default(true),
+
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // One target per alias per entity per project — re-learning the SAME
+    // alias text for the same entity is an upsert (see learnAlias), not a
+    // duplicate row.
+    unique("entity_aliases_tenant_project_entity_alias_uniq").on(
+      t.tenantId,
+      t.project,
+      t.entityType,
+      t.entityId,
+      t.alias,
+    ),
+    // Primary resolve-path lookup: "does this entity have any active
+    // aliases in this project?"
+    index("entity_aliases_lookup_idx").on(
+      t.tenantId,
+      t.project,
+      t.entityType,
+      t.entityId,
+      t.isActive,
+    ),
+  ],
+);
+
+export type EntityAlias = typeof entityAliases.$inferSelect;
+export type NewEntityAlias = typeof entityAliases.$inferInsert;
