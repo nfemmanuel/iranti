@@ -426,3 +426,81 @@ describe("Layer 0 — exclude / include", () => {
     expect(row?.isExcluded).toBe(false);
   });
 });
+
+// Regression for the review-gauntlet BLOCKER: the factId lookup path was the
+// ONE retrieval surface the project boundary didn't cover — a caller in
+// project B could read (getFactById/getFactHistory) or archive (archiveFact)
+// project A's fact by raw UUID alone. These tests drive the library functions
+// with explicit project scopes, same approach as the suite above.
+describe("Layer 0 — factId paths respect the project boundary", () => {
+  it("getFactById and getFactHistory return nothing for another project's factId", async () => {
+    const { writeFact, archiveFact, getFactById, getFactHistory } = await import(
+      "../library/facts.js"
+    );
+
+    const projectA = `/fake/projects/${randomUUID()}`;
+    const projectB = `/fake/projects/${randomUUID()}`;
+
+    const written = await writeFact({
+      entityType: "project",
+      entityId: "factid-leak-check",
+      key: "secret-by-id",
+      value: "SECRET-VIA-UUID-FROM-A",
+      source: "test",
+      project: projectA,
+    });
+    // Give the fact some history so getFactHistory has rows to (not) leak.
+    await writeFact({
+      entityType: "project",
+      entityId: "factid-leak-check",
+      key: "secret-by-id",
+      value: "SECRET-VIA-UUID-FROM-A-v2",
+      source: "test",
+      project: projectA,
+    });
+
+    // From project B's effective scope: indistinguishable from a bad id.
+    expect(await getFactById(written.id, [projectB])).toBeUndefined();
+    expect(await getFactHistory(written.id, [projectB])).toEqual([]);
+
+    // From project A's own scope: fully visible.
+    const own = await getFactById(written.id, [projectA]);
+    expect(own?.value).toBe("SECRET-VIA-UUID-FROM-A-v2");
+    const ownHistory = await getFactHistory(written.id, [projectA]);
+    expect(ownHistory.length).toBeGreaterThan(0);
+
+    // Cross-project archive must refuse (returns false, fact stays live)...
+    expect(await archiveFact(written.id, [projectB])).toBe(false);
+    expect((await getFactById(written.id, [projectA]))?.isArchived).toBe(false);
+
+    // ...while the owning project can archive it (returns true).
+    expect(await archiveFact(written.id, [projectA])).toBe(true);
+    expect((await getFactById(written.id, [projectA]))?.isArchived).toBe(true);
+    // Second archive of an already-archived fact reports false, not success.
+    expect(await archiveFact(written.id, [projectA])).toBe(false);
+  });
+
+  it("a combined partner's scope CAN see the fact by id (effective set, not single project)", async () => {
+    const { writeFact, getFactById } = await import("../library/facts.js");
+    const { combineProjects, getEffectiveProjectIds, normalizeProjectId } = await import(
+      "../library/projects.js"
+    );
+
+    const projectA = `/fake/projects/${randomUUID()}`;
+    const projectB = `/fake/projects/${randomUUID()}`;
+
+    const written = await writeFact({
+      entityType: "project",
+      entityId: "factid-combine-check",
+      key: "shared-after-combine",
+      value: "VISIBLE-TO-COMBINED-PARTNER",
+      source: "test",
+      project: projectA,
+    });
+
+    await combineProjects(projectA, projectB);
+    const bEffective = await getEffectiveProjectIds(normalizeProjectId(projectB));
+    const viaCombined = await getFactById(written.id, bEffective);
+    expect(viaCombined?.value).toBe("VISIBLE-TO-COMBINED-PARTNER");
+  });
+});

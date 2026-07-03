@@ -42,6 +42,7 @@ export interface ArchiveResult {
 
 export async function archive(input: ArchiveInput): Promise<ArchiveResult> {
   const ctx = await ensureContext(input.agentName);
+  const projectIds = await getEffectiveProjectIds(ctx.project.id);
 
   let factId = input.factId ?? null;
 
@@ -54,7 +55,6 @@ export async function archive(input: ArchiveInput): Promise<ArchiveResult> {
           "Provide either factId, or all of entityType + entityId + key.",
       };
     }
-    const projectIds = await getEffectiveProjectIds(ctx.project.id);
     const fact = await findFact(
       input.entityType,
       input.entityId,
@@ -72,6 +72,18 @@ export async function archive(input: ArchiveInput): Promise<ArchiveResult> {
     factId = fact.id;
   }
 
-  await archiveFact(factId);
-  return { archived: true, factId, reason: "Archived." };
+  // Effective project ids passed so a factId from another project (or an
+  // unknown/already-archived id) reports archived:false instead of blindly
+  // claiming success — cross-project archive was the write-side twin of the
+  // history factId leak (review MAJOR, Layer 0 gauntlet). Not-found and
+  // out-of-scope are deliberately indistinguishable.
+  const didArchive = await archiveFact(factId, projectIds);
+  return didArchive
+    ? { archived: true, factId, reason: "Archived." }
+    : {
+        archived: false,
+        factId,
+        reason:
+          "No active fact with that id in your project scope (unknown id, already archived, or outside this project).",
+      };
 }

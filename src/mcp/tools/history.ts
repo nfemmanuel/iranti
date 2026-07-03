@@ -49,9 +49,12 @@ export async function history(input: HistoryInput): Promise<HistoryResult> {
   const projectIds = await getEffectiveProjectIds(ctx.project.id);
 
   if (input.factId) {
+    // Effective project ids passed so a factId from another project reads
+    // as not-found — the factId branch was the one retrieval path the
+    // project boundary didn't cover (review BLOCKER, Layer 0 gauntlet).
     const [fact, rows] = await Promise.all([
-      getFactById(input.factId),
-      getFactHistory(input.factId),
+      getFactById(input.factId, projectIds),
+      getFactHistory(input.factId, projectIds),
     ]);
     return {
       found: fact !== undefined || rows.length > 0,

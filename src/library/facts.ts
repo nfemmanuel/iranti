@@ -784,15 +784,38 @@ export async function searchFacts(
 //
 // This is the permanent operation in Phase 0. Once archived, a fact cannot
 // be unarchived. Its full value history survives in fact_archive.
-export async function archiveFact(factId: string): Promise<void> {
-  await db.transaction(async (tx) => {
+// Returns true only when a live fact was actually archived by this call.
+//
+// `project` is the caller's effective project scope (Layer 0 isolation). When
+// provided, a fact belonging to a project OUTSIDE that scope is treated
+// exactly like a nonexistent fact (returns false) — deliberately
+// indistinguishable, so a caller can't probe another project's fact ids for
+// existence. MCP tool paths MUST pass the caller's effective project ids;
+// omitting the param is for trusted in-process/internal use only (e.g.
+// checkpoint rotation, tests), matching getFactById/getFactHistory below.
+export async function archiveFact(
+  factId: string,
+  project?: string | string[],
+): Promise<boolean> {
+  return db.transaction(async (tx) => {
     // Get the current live fact.
     const fact = await tx.query.facts.findFirst({
       where: eq(facts.id, factId),
     });
 
     // Nothing to do if the fact doesn't exist or is already archived.
-    if (!fact || fact.isArchived) return;
+    if (!fact || fact.isArchived) return false;
+
+    // Cross-project boundary check (see doc comment above). Normalize the
+    // caller's ids before comparing — the stored fact.project is always the
+    // normalized form (same rule as projectFilter; comparing raw paths here
+    // would wrongly refuse the owner's own archive).
+    if (project !== undefined) {
+      const allowed = (Array.isArray(project) ? project : [project]).map(
+        normalizeProjectId,
+      );
+      if (!allowed.includes(fact.project)) return false;
+    }
 
     // Snapshot the current value to fact_archive before marking it inactive.
     await tx.insert(factArchive).values({
@@ -815,6 +838,7 @@ export async function archiveFact(factId: string): Promise<void> {
 
     // Mark the fact as archived.
     await tx.update(facts).set({ isArchived: true }).where(eq(facts.id, factId));
+    return true;
   });
 }
 
@@ -828,11 +852,30 @@ export async function archiveFact(factId: string): Promise<void> {
 //
 // Example: a fact whose timezone was changed UTC → UTC+1 → UTC+2 will
 // return two rows: [{value: "UTC+1", archivedReason: "superseded"}, {value: "UTC", ...}]
-export async function getFactHistory(factId: string): Promise<FactArchive[]> {
-  return db.query.factArchive.findMany({
-    where: eq(factArchive.factId, factId),
-    orderBy: desc(factArchive.archivedAt),
-  });
+// `project`: the caller's effective project scope. When provided, history
+// rows whose live fact belongs to another project are filtered out (join
+// through facts.project — same pattern and rationale as getFactHistoryByKey
+// below; fact_archive itself has no project column). A factId from another
+// project returns [] — indistinguishable from an unknown id, so ids can't be
+// probed across the boundary. MCP tool paths MUST pass this; omitting is for
+// trusted in-process/test use only.
+export async function getFactHistory(
+  factId: string,
+  project?: string | string[],
+): Promise<FactArchive[]> {
+  if (project === undefined) {
+    return db.query.factArchive.findMany({
+      where: eq(factArchive.factId, factId),
+      orderBy: desc(factArchive.archivedAt),
+    });
+  }
+  const rows = await db
+    .select({ archive: factArchive })
+    .from(factArchive)
+    .innerJoin(facts, eq(factArchive.factId, facts.id))
+    .where(and(eq(factArchive.factId, factId), projectFilter(project)))
+    .orderBy(desc(factArchive.archivedAt));
+  return rows.map((r) => r.archive);
 }
 
 // Get the history of a fact by entity + key, without needing the factId.
@@ -878,8 +921,19 @@ export async function getFactHistoryByKey(
 
 // Get a fact by ID without updating any counters.
 // Used in tests and internal tooling where you want the raw record.
-export async function getFactById(factId: string): Promise<Fact | undefined> {
+//
+// `project`: the caller's effective project scope. When provided, a fact
+// belonging to another project resolves to undefined — indistinguishable
+// from a nonexistent id (no cross-project existence probing). MCP tool
+// paths MUST pass this; omitting is for trusted in-process/test use only.
+export async function getFactById(
+  factId: string,
+  project?: string | string[],
+): Promise<Fact | undefined> {
   return db.query.facts.findFirst({
-    where: eq(facts.id, factId),
+    where:
+      project === undefined
+        ? eq(facts.id, factId)
+        : and(eq(facts.id, factId), projectFilter(project)),
   });
 }
