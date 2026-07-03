@@ -38,6 +38,7 @@
     "vitest": "^3.0.0"
   },
   "dependencies": {
+    "@electric-sql/pglite": "^0.5.3",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "drizzle-orm": "^0.45.2",
     "postgres": "^3.4.9",

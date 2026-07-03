@@ -37,6 +37,15 @@ import {
 // builder (db.select().from().where()) so the WHERE clause is always
 // compiled exactly as written.
 
+// db.execute()'s return shape differs by engine: postgres-js resolves an
+// array-like RowList<T[]> (has .map directly); PGlite resolves a
+// Results<T> object (`{ rows: T[], fields, affectedRows }`). Since `db` is
+// now a union of both engines (Layer 0 engine switch), normalize to a plain
+// row array here rather than at every call site.
+function rowsOf<T>(result: T[] | { rows: T[] }): T[] {
+  return Array.isArray(result) ? result : result.rows;
+}
+
 
 export type { KnowledgeEdge };
 
@@ -237,7 +246,7 @@ export class PostgresGraphBackend implements GraphBackend {
         last_reinforced_at: Date | string;
       };
 
-      const rows = await db.execute<Row>(sql`
+      const result = await db.execute<Row>(sql`
         SELECT id, tenant_id, source_type, source_id, target_type, target_id,
                relation, weight, co_access_count, created_at, last_reinforced_at
         FROM knowledge_edges
@@ -252,7 +261,7 @@ export class PostgresGraphBackend implements GraphBackend {
         LIMIT ${limit}
       `);
 
-      return rows.map((r) => ({
+      return rowsOf(result).map((r) => ({
         id: r.id,
         tenantId: r.tenant_id,
         sourceType: r.source_type,
@@ -293,7 +302,7 @@ export class PostgresGraphBackend implements GraphBackend {
     // end explicitly and JOIN on frontier_* in the recursive term.
     // Second bug: DISTINCT ON (id) ORDER BY id LIMIT applied the cap before
     // weight ordering. Fix: dedup in a subquery, then ORDER BY weight DESC LIMIT.
-    const rows = await db.execute<RawEdgeRow>(sql`
+    const result = await db.execute<RawEdgeRow>(sql`
       WITH RECURSIVE traversal AS (
         -- Depth 1: direct edges from the origin node.
         -- frontier_type/id tracks the far end to expand from next hop.
@@ -349,7 +358,7 @@ export class PostgresGraphBackend implements GraphBackend {
       LIMIT ${limit}
     `);
 
-    return rows.map((r) => ({
+    return rowsOf(result).map((r) => ({
       id: r.id,
       tenantId: r.tenant_id,
       sourceType: r.source_type,
