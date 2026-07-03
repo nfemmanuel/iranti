@@ -15,13 +15,19 @@
 // open. That is expected: getOpenSessions() exists to detect exactly this.
 // We close the session on SIGINT/SIGTERM when we get the chance.
 
-import type { Agent, Session } from "../db/schema.js";
+import type { Agent, ProjectRow, Session } from "../db/schema.js";
 import { registerAgent } from "../library/agents.js";
 import { closeSession, openSession } from "../library/sessions.js";
+import { resolveCurrentProject } from "../library/projects.js";
 
 export interface McpContext {
   agent: Agent;
   session: Session;
+  // Layer 0 (D5/D6): the project this server's cwd resolves to. Resolved
+  // once per process alongside the agent/session handshake below — an MCP
+  // host never chdir()s its server mid-process, so re-resolving per call
+  // would be wasted work and could never observe a different answer anyway.
+  project: ProjectRow;
 }
 
 // The default agent name when the host doesn't provide one.
@@ -45,7 +51,8 @@ export async function ensureContext(agentName?: string): Promise<McpContext> {
       metadata: { transport: "stdio", phase: 1 },
     });
     const session = await openSession(agent.id, { transport: "stdio" });
-    current = { agent, session };
+    const project = await resolveCurrentProject();
+    current = { agent, session, project };
     return current;
   })();
 

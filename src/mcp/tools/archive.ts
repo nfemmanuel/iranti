@@ -10,6 +10,7 @@
 import { z } from "zod";
 import { archiveFact, findFact } from "../../library/facts.js";
 import { ensureContext } from "../context.js";
+import { getEffectiveProjectIds } from "../../library/projects.js";
 
 export const archiveInputSchema = {
   factId: z
@@ -40,7 +41,7 @@ export interface ArchiveResult {
 }
 
 export async function archive(input: ArchiveInput): Promise<ArchiveResult> {
-  await ensureContext(input.agentName);
+  const ctx = await ensureContext(input.agentName);
 
   let factId = input.factId ?? null;
 
@@ -53,7 +54,14 @@ export async function archive(input: ArchiveInput): Promise<ArchiveResult> {
           "Provide either factId, or all of entityType + entityId + key.",
       };
     }
-    const fact = await findFact(input.entityType, input.entityId, input.key);
+    const projectIds = await getEffectiveProjectIds(ctx.project.id);
+    const fact = await findFact(
+      input.entityType,
+      input.entityId,
+      input.key,
+      "default",
+      projectIds,
+    );
     if (!fact) {
       return {
         archived: false,

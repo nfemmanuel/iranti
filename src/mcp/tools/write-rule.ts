@@ -59,6 +59,7 @@ export async function writeRuleTool(
     source: `mcp:${ctx.agent.name}`,
     sessionId: ctx.session.id,
     agentId: ctx.agent.id,
+    project: ctx.project.id,
   });
 
   return {

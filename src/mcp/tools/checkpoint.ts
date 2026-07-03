@@ -57,6 +57,7 @@ export async function checkpointTool(
       surface: input.surface,
       sessionId: ctx.session.id,
       agentId: ctx.agent.id,
+      project: ctx.project.id,
     },
   );
 

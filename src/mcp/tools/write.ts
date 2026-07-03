@@ -62,6 +62,7 @@ export async function write(input: WriteInput): Promise<WriteResult> {
     surface: input.surface,
     sessionId: ctx.session.id,
     agentId: ctx.agent.id,
+    project: ctx.project.id,
   });
 
   return {

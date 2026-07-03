@@ -45,6 +45,7 @@ import { writeAttendLog, persistMetricCounters } from "../../library/attend-log.
 import { incrementTurnCount } from "../../library/sessions.js";
 import { comprehensionMetrics } from "../../library/conflicts.js";
 import { searchMedia } from "../../library/media.js";
+import { getEffectiveProjectIds } from "../../library/projects.js";
 
 export const MAX_FACTS_PER_ENTITY = 10;
 export const MAX_TOTAL_FACTS = 20;
@@ -94,6 +95,7 @@ async function recordAttendEdges(
   returnedFacts: Fact[],
   returnedRules: Rule[],
   tenantId = "default",
+  project = "default",
 ): Promise<void> {
   const ops: Promise<void>[] = [];
 
@@ -107,6 +109,7 @@ async function recordAttendEdges(
           "co_access",
           1,
           tenantId,
+          project,
         ),
       );
     }
@@ -122,6 +125,7 @@ async function recordAttendEdges(
           "governs",
           1,
           tenantId,
+          project,
         ),
       );
     }
@@ -147,6 +151,7 @@ async function extractAndStore(
   primary: { entityType: string; entityId: string },
   sessionId: string,
   agentId: string,
+  project: string,
   sourceOverride?: string,
   confidenceOverride?: number,
 ): Promise<number> {
@@ -170,6 +175,7 @@ async function extractAndStore(
       confidence: confidenceOverride ?? fact.confidence,
       sessionId,
       agentId,
+      project,
     });
     count++;
   }
@@ -384,6 +390,13 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
   const phase = input.phase ?? "pre-response";
   const isMidTurn = phase === "mid-turn";
 
+  // Layer 0 (D5/D6/D7): the writing project is always the single current
+  // project (writes never target the combined/effective set — combine
+  // affects reads only, §11.6). Reads span the effective set: the current
+  // project plus anything actively combined with it.
+  const currentProject = ctx.project.id;
+  const effectiveProjectIds = await getEffectiveProjectIds(currentProject);
+
   // ---- WRITE side: extract artifacts from the message ----------------------
   // Skipped for mid-turn: it's a read-only top-up triggered by discovery.
   // Extracted facts land on the primary entity (first hint). With no hints,
@@ -407,6 +420,7 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
         surface: input.surface,
         sessionId: ctx.session.id,
         agentId: ctx.agent.id,
+        project: currentProject,
       });
     }
   }
@@ -414,7 +428,7 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
   // ---- READ side: rules + recent facts + checkpoint ------------------------
   // Mid-turn skips the rule rescan (rules don't change within a turn and the
   // rescan was already done by the pre-response attend).
-  const rules = isMidTurn ? [] : await getRulesForAttend(hints);
+  const rules = isMidTurn ? [] : await getRulesForAttend(hints, "default", effectiveProjectIds);
 
   // Mid-turn uses a smaller fact budget: it's a discovery top-up, not a full
   // context load. Per-entity cap is also reduced proportionally.
@@ -430,6 +444,8 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
         h.entityId,
         perEntityCap,
         input.message,
+        "default",
+        effectiveProjectIds,
       ),
     ),
   );
@@ -466,7 +482,7 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
 
   const returnedFacts = visible.slice(0, totalBudget);
 
-  const checkpoint = await getActiveCheckpoint(hints);
+  const checkpoint = await getActiveCheckpoint(hints, "default", effectiveProjectIds);
 
   // ---- SECONDARY PASS: graph-hop peripheral retrieval (CORE-15) ------------
   // Walk up to 2 hops from each primary fact. Collect fact-type neighbor IDs,
@@ -479,7 +495,12 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
 
     const edgeLists = await Promise.all(
       returnedFacts.map((f) =>
-        graph.getNeighbors({ type: "fact", id: f.id }, { depth: 2, limit: 20 }),
+        graph.getNeighbors(
+          { type: "fact", id: f.id },
+          { depth: 2, limit: 20 },
+          "default",
+          effectiveProjectIds,
+        ),
       ),
     );
 
@@ -507,7 +528,11 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
         .sort((a, b) => b[1].weight - a[1].weight)
         .slice(0, MAX_PERIPHERAL_FACTS);
 
-      const neighborFacts = await readFactsByIds(sorted.map(([id]) => id));
+      const neighborFacts = await readFactsByIds(
+        sorted.map(([id]) => id),
+        "default",
+        effectiveProjectIds,
+      );
       const factById = new Map(neighborFacts.map((f) => [f.id, f]));
 
       for (const [id, meta] of sorted) {
@@ -578,6 +603,7 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
         entityType: hint.entityType,
         entityId: hint.entityId,
         tenantId: "default",
+        project: effectiveProjectIds,
         limit: 3,
       }).catch(() => []);
       for (const h of hits) {
@@ -631,7 +657,12 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
   // costs nothing (nobody awaits this chain) and is correct on both engines.
   void (async () => {
     if (budgetedFacts.length >= 2 || budgetedRuleList.length > 0) {
-      await recordAttendEdges(budgetedFacts, budgetedRuleList).catch(
+      // Layer 0 (D7): edges are tagged to the ATTENDING project (currentProject),
+      // never a combined partner — this edge records "these were co-accessed
+      // while attending in project X," which is true regardless of whether
+      // some of the source facts physically live in a combined partner
+      // project. Writes never target the effective/combined set (§11.6).
+      await recordAttendEdges(budgetedFacts, budgetedRuleList, "default", currentProject).catch(
         (err: unknown) => console.error("[iranti] edge recording error:", err),
       );
     }
@@ -645,12 +676,12 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
     // reduced confidence so auto-writes are distinguishable in reliability scoring.
     if (!isMidTurn && input.message) {
       factsExtracted += await extractAndStore(
-        input.message, primary, ctx.session.id, ctx.agent.id,
+        input.message, primary, ctx.session.id, ctx.agent.id, currentProject,
       );
     }
     if (phase === "post-response" && input.currentContext) {
       factsExtracted += await extractAndStore(
-        input.currentContext, primary, ctx.session.id, ctx.agent.id,
+        input.currentContext, primary, ctx.session.id, ctx.agent.id, currentProject,
         AUTOWRITE_SOURCE, AUTOWRITE_CONFIDENCE,
       );
     }

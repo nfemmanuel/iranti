@@ -13,6 +13,7 @@ import {
   getFactHistoryByKey,
 } from "../../library/facts.js";
 import { ensureContext } from "../context.js";
+import { getEffectiveProjectIds } from "../../library/projects.js";
 
 export const historyInputSchema = {
   factId: z.string().uuid().optional().describe("The fact UUID, if known."),
@@ -44,7 +45,8 @@ export interface HistoryResult {
 }
 
 export async function history(input: HistoryInput): Promise<HistoryResult> {
-  await ensureContext(input.agentName);
+  const ctx = await ensureContext(input.agentName);
+  const projectIds = await getEffectiveProjectIds(ctx.project.id);
 
   if (input.factId) {
     const [fact, rows] = await Promise.all([
@@ -79,8 +81,8 @@ export async function history(input: HistoryInput): Promise<HistoryResult> {
   }
 
   const [fact, rows] = await Promise.all([
-    findFact(input.entityType, input.entityId, input.key),
-    getFactHistoryByKey(input.entityType, input.entityId, input.key),
+    findFact(input.entityType, input.entityId, input.key, "default", projectIds),
+    getFactHistoryByKey(input.entityType, input.entityId, input.key, "default", projectIds),
   ]);
 
   return {

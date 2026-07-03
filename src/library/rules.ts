@@ -36,10 +36,17 @@
 //   1–49   soft preferences
 //   0      default (no explicit ordering)
 
-import { and, desc, eq, or } from "drizzle-orm";
+import { and, desc, eq, inArray, or } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import { rules, type NewRule, type Rule } from "../db/schema.js";
+
+// See facts.ts's projectFilter — same rationale: a single-element effective
+// set degenerates to a plain equality.
+function projectFilter(project: string | string[]) {
+  const ids = Array.isArray(project) ? project : [project];
+  return ids.length === 1 ? eq(rules.project, ids[0]!) : inArray(rules.project, ids);
+}
 
 // ---------------------------------------------------------------------------
 // Write
@@ -57,6 +64,7 @@ export async function writeRule(
     | "source"
     | "priority"
     | "tenantId"
+    | "project"
     | "agentId"
     | "sessionId"
     | "metadata"
@@ -80,10 +88,12 @@ export async function getRulesForEntity(
   entityType: string,
   entityId: string,
   tenantId: string = "default",
+  project: string | string[] = "default",
 ): Promise<Rule[]> {
   return db.query.rules.findMany({
     where: and(
       eq(rules.tenantId, tenantId),
+      projectFilter(project),
       eq(rules.entityType, entityType),
       eq(rules.entityId, entityId),
       eq(rules.isActive, true),
@@ -108,9 +118,17 @@ export async function getRulesForEntity(
 //     { entityType: "project", entityId: "iranti-core"  },
 //   ])
 //   → returns: all system/global + all user/nf + all project/iranti-core rules
+// Layer 0 (D7): "system/global" means global WITHIN a project, not across
+// all projects on the install — isolation is the default, and a rule
+// written while in project A firing in project B would be exactly the kind
+// of cross-project leak the PRD's adversarial isolation tests target. So
+// this whole query (including the system/global branch) is scoped by the
+// effective project set like every other retrieval path; there is no
+// install-wide "global rules" concept in Layer 0.
 export async function getRulesForAttend(
   entityHints: Array<{ entityType: string; entityId: string }>,
   tenantId: string = "default",
+  project: string | string[] = "default",
 ): Promise<Rule[]> {
   // Always start with system/global. De-duplicate in case the caller
   // already included it in the hints list.
@@ -128,10 +146,12 @@ export async function getRulesForAttend(
     )
     .filter((c): c is SQL => c !== undefined);
 
-  // Single query: active rules for this tenant matching any of the scoped entities.
+  // Single query: active rules for this tenant + project matching any of the
+  // scoped entities.
   return db.query.rules.findMany({
     where: and(
       eq(rules.tenantId, tenantId),
+      projectFilter(project),
       eq(rules.isActive, true),
       // or() with a single element works the same as that element alone.
       or(...entityConditions),

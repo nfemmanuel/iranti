@@ -7,6 +7,7 @@
 import { z } from "zod";
 import { readFile } from "node:fs/promises";
 import { ingestMedia, MEDIA_MAX_BYTES } from "../../media/index.js";
+import { ensureContext } from "../context.js";
 
 export const ingestMediaInputSchema = {
   entityType: z.string().min(1).describe("Entity type, e.g. 'project', 'user'."),
@@ -62,6 +63,8 @@ export async function ingestMediaTool(input: IngestMediaInput) {
     );
   }
 
+  const ctx = await ensureContext();
+
   const result = await ingestMedia({
     bytes: buf,
     mime: input.mime,
@@ -69,6 +72,7 @@ export async function ingestMediaTool(input: IngestMediaInput) {
     entityId: input.entityId,
     key: input.key,
     tenantId: input.tenantId,
+    project: ctx.project.id,
   });
 
   return {

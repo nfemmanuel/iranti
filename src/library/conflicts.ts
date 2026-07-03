@@ -209,13 +209,22 @@ export async function runDeepConflictCheck(
   key: string,
   newValue: string,
   tenantId: string = "default",
+  project: string = "default",
 ): Promise<void> {
   const negatedTerm = extractNegatedTerm(newValue);
   if (!negatedTerm) return;
 
+  // Layer 0 (D7): scoped to the writing project only — a deep-conflict scan
+  // must never compare a project-A write against a project-B fact just
+  // because they share an entity name. This intentionally does NOT expand to
+  // the combined effective set: a "candidate contradiction" heuristic
+  // reaching into a combined partner project would be surprising and is not
+  // required by any acceptance criterion, so the conservative (isolated)
+  // reading is used here.
   const otherFacts = await db.query.facts.findMany({
     where: and(
       eq(facts.tenantId, tenantId),
+      eq(facts.project, project),
       eq(facts.entityType, entityType),
       eq(facts.entityId, entityId),
       eq(facts.isArchived, false),

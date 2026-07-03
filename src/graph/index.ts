@@ -69,6 +69,7 @@ export interface GraphBackend {
   // Insert or upsert an edge. On conflict, increments weight + coAccessCount.
   addEdge(edge: {
     tenantId?: string;
+    project?: string;
     sourceType: string;
     sourceId: string;
     targetType: string;
@@ -77,7 +78,9 @@ export interface GraphBackend {
     weight?: number;
   }): Promise<KnowledgeEdge>;
 
-  // Strengthen an existing edge (or create it if absent).
+  // Strengthen an existing edge (or create it if absent). Always writes to a
+  // single project (Layer 0, D7 — combine affects reads, not write
+  // attribution), never the effective/combined set.
   // co_access edges are automatically canonicalized (smaller key first).
   // governs edges preserve direction (source = rule, target = fact).
   reinforceEdge(
@@ -86,15 +89,19 @@ export interface GraphBackend {
     relation: string,
     delta?: number,
     tenantId?: string,
+    project?: string,
   ): Promise<void>;
 
   // Return neighbours of a node. Depth 1 uses a simple query; depth > 1
   // uses a recursive CTE so the same interface works for multi-hop traversal
-  // in Phase 3 without changing call sites.
+  // in Phase 3 without changing call sites. `project` accepts either a single
+  // id or the effective (combined) set of ids — an array spans every project
+  // in the set, exactly like facts.ts's projectFilter.
   getNeighbors(
     node: GraphNode,
     opts?: GetNeighborsOpts,
     tenantId?: string,
+    project?: string | string[],
   ): Promise<KnowledgeEdge[]>;
 
   // Return the single edge between two nodes for a given relation, or
@@ -104,6 +111,7 @@ export interface GraphBackend {
     b: GraphNode,
     relation: string,
     tenantId?: string,
+    project?: string,
   ): Promise<KnowledgeEdge | undefined>;
 }
 
@@ -126,6 +134,7 @@ function canonicalize(a: GraphNode, b: GraphNode): [GraphNode, GraphNode] {
 export class PostgresGraphBackend implements GraphBackend {
   async addEdge(edge: {
     tenantId?: string;
+    project?: string;
     sourceType: string;
     sourceId: string;
     targetType: string;
@@ -134,6 +143,7 @@ export class PostgresGraphBackend implements GraphBackend {
     weight?: number;
   }): Promise<KnowledgeEdge> {
     const tenantId = edge.tenantId ?? "default";
+    const project = edge.project ?? "default";
     const w = edge.weight ?? 1;
 
     // Canonicalize undirected relations so addEdge and getEdge agree on the row key.
@@ -146,6 +156,7 @@ export class PostgresGraphBackend implements GraphBackend {
       .insert(knowledgeEdges)
       .values({
         tenantId,
+        project,
         sourceType: src.type,
         sourceId: src.id,
         targetType: tgt.type,
@@ -157,6 +168,7 @@ export class PostgresGraphBackend implements GraphBackend {
       .onConflictDoUpdate({
         target: [
           knowledgeEdges.tenantId,
+          knowledgeEdges.project,
           knowledgeEdges.sourceType,
           knowledgeEdges.sourceId,
           knowledgeEdges.targetType,
@@ -183,6 +195,7 @@ export class PostgresGraphBackend implements GraphBackend {
     relation: string,
     delta = 1,
     tenantId = "default",
+    project = "default",
   ): Promise<void> {
     // Canonicalize undirected relations so (A,B) and (B,A) are the same row.
     // governs and about edges are directed — preserve their direction.
@@ -193,6 +206,7 @@ export class PostgresGraphBackend implements GraphBackend {
       .insert(knowledgeEdges)
       .values({
         tenantId,
+        project,
         sourceType: src.type,
         sourceId: src.id,
         targetType: tgt.type,
@@ -204,6 +218,7 @@ export class PostgresGraphBackend implements GraphBackend {
       .onConflictDoUpdate({
         target: [
           knowledgeEdges.tenantId,
+          knowledgeEdges.project,
           knowledgeEdges.sourceType,
           knowledgeEdges.sourceId,
           knowledgeEdges.targetType,
@@ -224,8 +239,22 @@ export class PostgresGraphBackend implements GraphBackend {
     node: GraphNode,
     opts: GetNeighborsOpts = {},
     tenantId = "default",
+    project: string | string[] = "default",
   ): Promise<KnowledgeEdge[]> {
     const { depth = 1, minWeight = 0, limit = 20 } = opts;
+    const projectIds = Array.isArray(project) ? project : [project];
+    // Built as an explicit IN (...) list of individually-bound params rather
+    // than `= ANY(${array})`: postgres-js and PGlite may not agree on array
+    // parameter serialization through a tagged-template placeholder, and
+    // this codebase has no existing precedent for passing a raw JS array as
+    // one bound param (see rowsOf()'s comment on the two engines already
+    // disagreeing on result shapes). sql.join over individually-bound scalars
+    // is the same technique Drizzle's own inArray() compiles down to, so it
+    // is known-safe on both engines.
+    const projectClause = sql`project IN (${sql.join(
+      projectIds.map((p) => sql`${p}`),
+      sql`, `,
+    )})`;
 
     if (depth <= 1) {
       // Use raw SQL to guarantee the OR condition is not dropped.
@@ -235,6 +264,7 @@ export class PostgresGraphBackend implements GraphBackend {
       type Row = {
         id: string;
         tenant_id: string;
+        project: string;
         source_type: string;
         source_id: string;
         target_type: string;
@@ -247,10 +277,11 @@ export class PostgresGraphBackend implements GraphBackend {
       };
 
       const result = await db.execute<Row>(sql`
-        SELECT id, tenant_id, source_type, source_id, target_type, target_id,
+        SELECT id, tenant_id, project, source_type, source_id, target_type, target_id,
                relation, weight, co_access_count, created_at, last_reinforced_at
         FROM knowledge_edges
         WHERE tenant_id = ${tenantId}
+          AND ${projectClause}
           AND weight >= ${minWeight}
           AND (
             (source_type = ${node.type} AND source_id = ${node.id})
@@ -264,6 +295,7 @@ export class PostgresGraphBackend implements GraphBackend {
       return rowsOf(result).map((r) => ({
         id: r.id,
         tenantId: r.tenant_id,
+        project: r.project,
         sourceType: r.source_type,
         sourceId: r.source_id,
         targetType: r.target_type,
@@ -284,6 +316,7 @@ export class PostgresGraphBackend implements GraphBackend {
     type RawEdgeRow = {
       id: string;
       tenant_id: string;
+      project: string;
       source_type: string;
       source_id: string;
       target_type: string;
@@ -306,7 +339,7 @@ export class PostgresGraphBackend implements GraphBackend {
       WITH RECURSIVE traversal AS (
         -- Depth 1: direct edges from the origin node.
         -- frontier_type/id tracks the far end to expand from next hop.
-        SELECT e.id, e.tenant_id, e.source_type, e.source_id,
+        SELECT e.id, e.tenant_id, e.project, e.source_type, e.source_id,
                e.target_type, e.target_id, e.relation, e.weight,
                e.co_access_count, e.created_at, e.last_reinforced_at,
                1 AS depth,
@@ -316,6 +349,7 @@ export class PostgresGraphBackend implements GraphBackend {
                     THEN e.target_id   ELSE e.source_id   END AS frontier_id
         FROM knowledge_edges e
         WHERE e.tenant_id = ${tenantId}
+          AND e.${projectClause}
           AND e.weight >= ${minWeight}
           AND (
             (e.source_type = ${node.type} AND e.source_id = ${node.id})
@@ -326,7 +360,7 @@ export class PostgresGraphBackend implements GraphBackend {
 
         -- Depth N+1: edges from the frontier of the previous depth.
         -- JOIN on t.frontier_* (the far end), not t.source_* (the origin side).
-        SELECT e.id, e.tenant_id, e.source_type, e.source_id,
+        SELECT e.id, e.tenant_id, e.project, e.source_type, e.source_id,
                e.target_type, e.target_id, e.relation, e.weight,
                e.co_access_count, e.created_at, e.last_reinforced_at,
                t.depth + 1,
@@ -341,14 +375,15 @@ export class PostgresGraphBackend implements GraphBackend {
         )
         WHERE t.depth < ${depth}
           AND e.tenant_id = ${tenantId}
+          AND e.${projectClause}
           AND e.weight >= ${minWeight}
       )
-      SELECT id, tenant_id, source_type, source_id,
+      SELECT id, tenant_id, project, source_type, source_id,
              target_type, target_id, relation, weight, co_access_count,
              created_at, last_reinforced_at
       FROM (
         SELECT DISTINCT ON (id)
-               id, tenant_id, source_type, source_id,
+               id, tenant_id, project, source_type, source_id,
                target_type, target_id, relation, weight, co_access_count,
                created_at, last_reinforced_at
         FROM traversal
@@ -361,6 +396,7 @@ export class PostgresGraphBackend implements GraphBackend {
     return rowsOf(result).map((r) => ({
       id: r.id,
       tenantId: r.tenant_id,
+      project: r.project,
       sourceType: r.source_type,
       sourceId: r.source_id,
       targetType: r.target_type,
@@ -381,6 +417,7 @@ export class PostgresGraphBackend implements GraphBackend {
     b: GraphNode,
     relation: string,
     tenantId = "default",
+    project = "default",
   ): Promise<KnowledgeEdge | undefined> {
     // Canonicalize undirected relations so (A,B) and (B,A) find the same row.
     const [src, tgt] =
@@ -392,6 +429,7 @@ export class PostgresGraphBackend implements GraphBackend {
       .where(
         and(
           eq(knowledgeEdges.tenantId, tenantId),
+          eq(knowledgeEdges.project, project),
           eq(knowledgeEdges.sourceType, src.type),
           eq(knowledgeEdges.sourceId, src.id),
           eq(knowledgeEdges.targetType, tgt.type),

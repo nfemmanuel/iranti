@@ -32,6 +32,7 @@ export interface IngestMediaInput {
   entityId: string;
   key?: string;          // semantic slot; normalized via normalizeKey
   tenantId?: string;
+  project?: string;      // Layer 0 (D6): dedicated project scope
   ext?: string;          // file extension hint (inferred from mime if omitted)
 }
 
@@ -70,6 +71,7 @@ export async function ingestMedia(input: IngestMediaInput): Promise<IngestMediaR
   // 2. Write the row synchronously so the object is retrievable immediately.
   const row = await writeMediaObject({
     tenantId,
+    project: input.project ?? "default",
     entityType: input.entityType,
     entityId: input.entityId,
     key,

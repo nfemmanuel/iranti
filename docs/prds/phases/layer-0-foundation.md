@@ -121,11 +121,22 @@ additional, independent scope dimension, not a replacement.
   entity_id, key)` — two projects can hold independent values for the same
   entity+key, matching the isolation-by-default goal (§3, D7).
 - `fact_archive`, `source_reliability`, `escalations`, `attend_log`,
-  `metric_counters`, `media_objects`, `extraction_cache` are **not** given a
-  `project` column in this slice. They are audit/telemetry/cache tables, not
-  retrieval surfaces — nothing reads them filtered by "current project" today,
-  and adding the column now with no reader would be speculative schema. Flagged
-  as a follow-up if/when those tables grow project-aware readers.
+  `metric_counters`, `extraction_cache` are **not** given a `project` column
+  in this slice. They are audit/telemetry/cache tables with no current-project
+  reader — adding the column now would be speculative schema. Flagged as a
+  follow-up if/when those tables grow project-aware readers.
+  `fact_archive` specifically is reached safely without its own column: every
+  archive row denormalizes `fact_id`, which still points at a live `facts`
+  row carrying the real `project` — history lookups join through that.
+- **Correction during build:** `media_objects` WAS initially placed in the
+  "no column needed" bucket above under the reasoning "nothing reads it
+  filtered by current project today." That reasoning was wrong —
+  `iranti_attend`'s OD-4 media tier (`mcp/tools/attend.ts`) calls
+  `searchMedia()` scoped only by `entityType`/`entityId`, which collide
+  across projects exactly like every other entity-scoped lookup. `media_objects`
+  DOES get a `project` column (`text NOT NULL DEFAULT 'default'`), the same
+  shape as `facts`/`rules`/`knowledge_edges`, to close what would otherwise
+  have been a real cross-project leak in the media tier.
 - New table `projects` (the registry): `id text PRIMARY KEY` (the deterministic
   project id from §11.2), `label text`, `source text NOT NULL` (`"git-root" |
   "projects-root-child" | "fallback"`), `first_seen_at timestamptz NOT NULL

@@ -9,6 +9,7 @@
 import { z } from "zod";
 import { readFact } from "../../library/facts.js";
 import { ensureContext } from "../context.js";
+import { getEffectiveProjectIds } from "../../library/projects.js";
 
 export const queryInputSchema = {
   entityType: z.string().min(1).describe("The entity type."),
@@ -33,9 +34,16 @@ export interface QueryResult {
 }
 
 export async function query(input: QueryInput): Promise<QueryResult> {
-  await ensureContext(input.agentName);
+  const ctx = await ensureContext(input.agentName);
+  const projectIds = await getEffectiveProjectIds(ctx.project.id);
 
-  const fact = await readFact(input.entityType, input.entityId, input.key);
+  const fact = await readFact(
+    input.entityType,
+    input.entityId,
+    input.key,
+    "default",
+    projectIds,
+  );
 
   if (!fact) {
     return { found: false, fact: null };

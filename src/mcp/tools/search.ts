@@ -11,6 +11,7 @@
 import { z } from "zod";
 import { searchFacts } from "../../library/facts.js";
 import { ensureContext } from "../context.js";
+import { getEffectiveProjectIds } from "../../library/projects.js";
 
 export const searchInputSchema = {
   query: z
@@ -58,12 +59,14 @@ export interface SearchResult {
 }
 
 export async function search(input: SearchInput): Promise<SearchResult> {
-  await ensureContext(input.agentName);
+  const ctx = await ensureContext(input.agentName);
+  const projectIds = await getEffectiveProjectIds(ctx.project.id);
 
   const found = await searchFacts(input.query, {
     entityType: input.entityType,
     entityId: input.entityId,
     limit: input.limit ?? 10,
+    project: projectIds,
   });
 
   return {

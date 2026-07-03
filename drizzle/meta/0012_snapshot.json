@@ -1,6 +1,6 @@
 {
-  "id": "39c188ba-0c8a-45ba-8e96-bac5608f8133",
-  "prevId": "3a64a99c-62c9-4cf9-88b1-87416b3c3d41",
+  "id": "86830f1e-cb5d-4a5b-b570-ee3c974e2bb9",
+  "prevId": "39c188ba-0c8a-45ba-8e96-bac5608f8133",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1290,6 +1290,97 @@
           "columns": [
             "tenant_id",
             "source"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.extraction_cache": {
+      "name": "extraction_cache",
+      "schema": "",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'default'"
+        },
+        "input_hash": {
+          "name": "input_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "regime_signature": {
+          "name": "regime_signature",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "result": {
+          "name": "result",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "extractor_mode": {
+          "name": "extractor_mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "model_id": {
+          "name": "model_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "prompt_version": {
+          "name": "prompt_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "normalizer_version": {
+          "name": "normalizer_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "hit_count": {
+          "name": "hit_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "last_hit_at": {
+          "name": "last_hit_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "extraction_cache_pk": {
+          "name": "extraction_cache_pk",
+          "columns": [
+            "tenant_id",
+            "input_hash",
+            "regime_signature"
           ]
         }
       },

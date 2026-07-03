@@ -32,7 +32,7 @@ export async function writeCheckpoint(
   text: string,
   opts: Pick<
     NewFact,
-    "source" | "surface" | "tenantId" | "sessionId" | "agentId" | "metadata"
+    "source" | "surface" | "tenantId" | "project" | "sessionId" | "agentId" | "metadata"
   > = { source: "checkpoint" },
 ): Promise<Fact> {
   return writeFact({
@@ -43,6 +43,7 @@ export async function writeCheckpoint(
     source: opts.source ?? "checkpoint",
     surface: opts.surface,
     tenantId: opts.tenantId,
+    project: opts.project,
     sessionId: opts.sessionId,
     agentId: opts.agentId,
     metadata: opts.metadata,
@@ -55,8 +56,9 @@ export async function getCheckpoint(
   entityType: string,
   entityId: string,
   tenantId: string = "default",
+  project: string | string[] = "default",
 ): Promise<Fact | undefined> {
-  return findFact(entityType, entityId, CHECKPOINT_KEY, tenantId);
+  return findFact(entityType, entityId, CHECKPOINT_KEY, tenantId, project);
 }
 
 // Get the most recent checkpoint across a set of entity hints.
@@ -65,10 +67,11 @@ export async function getCheckpoint(
 export async function getActiveCheckpoint(
   entityHints: Array<{ entityType: string; entityId: string }>,
   tenantId: string = "default",
+  project: string | string[] = "default",
 ): Promise<Fact | undefined> {
   const checkpoints = await Promise.all(
     entityHints.map((h) =>
-      getCheckpoint(h.entityType, h.entityId, tenantId),
+      getCheckpoint(h.entityType, h.entityId, tenantId, project),
     ),
   );
 
@@ -83,8 +86,9 @@ export async function clearCheckpoint(
   entityType: string,
   entityId: string,
   tenantId: string = "default",
+  project: string | string[] = "default",
 ): Promise<boolean> {
-  const checkpoint = await getCheckpoint(entityType, entityId, tenantId);
+  const checkpoint = await getCheckpoint(entityType, entityId, tenantId, project);
   if (!checkpoint) return false;
 
   await archiveFact(checkpoint.id);

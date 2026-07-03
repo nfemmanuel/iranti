@@ -10,6 +10,10 @@
 // Phase 2b tables: source_reliability, escalations
 // Phase 2.5 tables: attend_log, metric_counters
 // Phase 3 changes: attend_log.phase, metric_counters composite PK (tenant_id, name)
+// Layer 0 (project scoping): facts/rules/knowledge_edges gain a `project`
+// column (dedicated scope dimension, D6 — parallel to tenantId, never
+// overloading it); new tables `projects` (registry) and `project_links`
+// (combine). See docs/prds/phases/layer-0-foundation.md §11.
 // Later phases add: relationships, entity_aliases, staff_events, tokens, users
 
 import {
@@ -137,6 +141,14 @@ export const facts = pgTable(
     // perform a breaking constraint migration on a live, populated table.
     tenantId: text("tenant_id").notNull().default("default"),
 
+    // Layer 0 (D6): dedicated project scope — a folder-derived identity
+    // (git-root, Projects-root child, or fallback cwd; see
+    // src/library/projects.ts), NOT the tenant. Defaults to "default" so
+    // every pre-existing caller/test is unaffected until it opts into real
+    // project resolution via McpContext. Isolation is enforced by including
+    // this column in the unique constraint and in every retrieval filter.
+    project: text("project").notNull().default("default"),
+
     // Which entity this fact is about.
     entityType: text("entity_type").notNull(),
     entityId: text("entity_id").notNull(),
@@ -211,10 +223,18 @@ export const facts = pgTable(
     embedding: vector("embedding", { dimensions: 768 }),
   },
   (t) => [
-    // One current value per (tenant, entity, key). Writing to the same key
-    // within the same tenant is an upsert. Different tenants can hold
-    // independent values for the same entity+key combination.
-    unique("facts_tenant_entity_key_uniq").on(t.tenantId, t.entityType, t.entityId, t.key),
+    // One current value per (tenant, project, entity, key). Writing to the
+    // same key within the same tenant+project is an upsert. Different
+    // projects (like different tenants) can hold independent values for the
+    // same entity+key combination — this is the isolation-by-default
+    // guarantee (Layer 0, D7).
+    unique("facts_tenant_project_entity_key_uniq").on(
+      t.tenantId,
+      t.project,
+      t.entityType,
+      t.entityId,
+      t.key,
+    ),
     // CORE-16: HNSW index for approximate nearest-neighbour search.
     // ef_construction / m use pgvector defaults; tune after benchmarking real data.
     // NULL embeddings are not indexed, so while embeddings are disabled every
@@ -343,6 +363,12 @@ export const rules = pgTable(
     // including their own system/global rules.
     tenantId: text("tenant_id").notNull().default("default"),
 
+    // Layer 0 (D6): dedicated project scope — see facts.project for the
+    // full explanation. Rules are project-scoped the same way facts are:
+    // a rule written in project A does not fire for project B unless
+    // explicitly combined.
+    project: text("project").notNull().default("default"),
+
     // Which entity this rule is scoped to.
     // See entity scoping convention above.
     entityType: text("entity_type").notNull(),
@@ -382,6 +408,13 @@ export const rules = pgTable(
   (t) => [
     // Primary query: all active rules for a given entity, priority-ordered.
     index("rules_entity_active_idx").on(t.entityType, t.entityId, t.isActive),
+    // Layer 0: project-scoped variant of the same lookup.
+    index("rules_project_entity_active_idx").on(
+      t.project,
+      t.entityType,
+      t.entityId,
+      t.isActive,
+    ),
   ],
 );
 
@@ -411,6 +444,11 @@ export const knowledgeEdges = pgTable(
     // Tenancy seam — always 'default' until Phase 5.
     tenantId: text("tenant_id").notNull().default("default"),
 
+    // Layer 0 (D6): dedicated project scope — see facts.project. An edge
+    // recorded while attending to project A must never surface a project-B
+    // node as a "related" suggestion (peripheral/graph-hop retrieval).
+    project: text("project").notNull().default("default"),
+
     // Source node. 'fact' | 'rule' | 'entity'
     sourceType: text("source_type").notNull(),
     sourceId: text("source_id").notNull(),
@@ -437,11 +475,12 @@ export const knowledgeEdges = pgTable(
       .defaultNow(),
   },
   (t) => [
-    // Canonical-pair uniqueness: one row per (tenant, src, tgt, relation).
+    // Canonical-pair uniqueness: one row per (tenant, project, src, tgt, relation).
     // co_access edges are stored with canonical ordering (smaller key first)
     // so there is never a duplicate (A→B, B→A) pair for the same relation.
     unique("knowledge_edges_canonical_pair_uniq").on(
       t.tenantId,
+      t.project,
       t.sourceType,
       t.sourceId,
       t.targetType,
@@ -629,6 +668,15 @@ export const mediaObjects = pgTable(
 
     tenantId: text("tenant_id").notNull().default("default"),
 
+    // Layer 0 (D6): dedicated project scope — see facts.project. Added
+    // (unlike most other audit/telemetry tables — see PRD §11.1) because
+    // media_objects DOES have a live retrieval reader: iranti_attend's
+    // media tier (OD-4, mcp/tools/attend.ts) calls searchMedia() scoped only
+    // by entityType/entityId, which can collide across projects (e.g. the
+    // same "project/my-app" entity name reused by two unrelated folders) —
+    // without this column that call site would be a real cross-project leak.
+    project: text("project").notNull().default("default"),
+
     entityType: text("entity_type").notNull(),
     entityId: text("entity_id").notNull(),
 
@@ -647,6 +695,7 @@ export const mediaObjects = pgTable(
   },
   (t) => [
     index("media_objects_entity_idx").on(t.tenantId, t.entityType, t.entityId),
+    index("media_objects_project_entity_idx").on(t.project, t.entityType, t.entityId),
   ],
 );
 
@@ -701,3 +750,98 @@ export const extractionCache = pgTable(
 
 export type ExtractionCache = typeof extractionCache.$inferSelect;
 export type NewExtractionCache = typeof extractionCache.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// projects — Layer 0 (folder-scoped projects, D5/D6/D8)
+//
+// The project registry. `id` is the deterministic project identifier computed
+// by src/library/projects.ts (git-root path, Projects-root child path, or
+// fallback cwd path — see docs/prds/phases/layer-0-foundation.md §11.2). Rows
+// are auto-upserted (get-or-create) the first time a project id is resolved
+// in a process — no manual registration step, matching the zero-config
+// default (D8). New subfolders auto-register on first call (D5).
+//
+// isExcluded: set by iranti_project_exclude / the exclude() library call.
+// An excluded project still resolves and still works (D8 spirit — excluding
+// a folder isn't a crash), but is treated as isolated with no combine links
+// honored, and its writes are tagged for audit (see §11.4 of the PRD).
+// Reversible via iranti_project_include — never a row deletion (G1).
+// ---------------------------------------------------------------------------
+export const projects = pgTable("projects", {
+  // The normalized, deterministic project id (an absolute filesystem path).
+  id: text("id").primaryKey(),
+
+  // Optional human-readable label. Not currently settable via any tool —
+  // schema pre-placement for a future `iranti project label` command.
+  label: text("label"),
+
+  // How this project id was derived. One of "git-root" |
+  // "projects-root-child" | "fallback". Audit/debugging aid — lets a user
+  // (or a future `iranti project status`) explain WHY a folder got the id
+  // it did.
+  source: text("source").notNull(),
+
+  firstSeenAt: timestamp("first_seen_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+
+  // See header comment. Default false — a project is included the moment
+  // it's first seen.
+  isExcluded: boolean("is_excluded").notNull().default(false),
+});
+
+export type ProjectRow = typeof projects.$inferSelect;
+export type NewProjectRow = typeof projects.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// project_links — Layer 0 (explicit combine, D7)
+//
+// A row means "projectA and projectB share memory while isActive" — combine
+// is symmetric (A sees B's facts/rules, and B sees A's), stored as ONE row
+// and read in both directions by src/library/projects.ts's
+// getEffectiveProjectIds(). Canonical ordering (projectA is always the
+// lexicographically smaller id) is enforced in application code, not a DB
+// constraint (Drizzle/pg-core has no portable LEAST/GREATEST expression
+// index, and PGlite's DDL surface is the more constrained of the two
+// engines — see PRD §11.1) — combineProjects() in projects.ts is the only
+// writer and always normalizes the pair before insert/lookup.
+//
+// Reversing a combine sets isActive = false and stamps deactivatedAt. The
+// row is never deleted (G1) — history of past combines is preserved and
+// re-combining the same pair re-activates the existing row rather than
+// creating a duplicate.
+// ---------------------------------------------------------------------------
+export const projectLinks = pgTable(
+  "project_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+
+    // Canonical ordering: projectA < projectB lexicographically. Enforced by
+    // combineProjects(), not the DB (see header comment).
+    projectA: text("project_a").notNull(),
+    projectB: text("project_b").notNull(),
+
+    isActive: boolean("is_active").notNull().default(true),
+
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+
+    // Null while the link has never been reversed. Set on deactivation;
+    // cleared back to null on re-activation so it always reflects the
+    // MOST RECENT deactivation, not the first.
+    deactivatedAt: timestamp("deactivated_at", { withTimezone: true }),
+  },
+  (t) => [
+    // A given (projectA, projectB) pair should have at most one row —
+    // combineProjects() looks up both orderings before inserting (app-level
+    // canonicalization, see header) and this constraint backstops that at
+    // the DB level for the canonical ordering itself.
+    unique("project_links_pair_uniq").on(t.projectA, t.projectB),
+    index("project_links_a_idx").on(t.projectA, t.isActive),
+    index("project_links_b_idx").on(t.projectB, t.isActive),
+  ],
+);
+
+export type ProjectLink = typeof projectLinks.$inferSelect;
+export type NewProjectLink = typeof projectLinks.$inferInsert;

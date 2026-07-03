@@ -36,6 +36,21 @@ import { graph } from "../graph/index.js";
 import { normalizeKey, withRawKey } from "./keys.js";
 
 // ---------------------------------------------------------------------------
+// Project scoping (Layer 0, D6/D7)
+// ---------------------------------------------------------------------------
+
+// Build the WHERE fragment for "in the effective project set". A single-
+// element set (the common case: no combine active) degenerates to a plain
+// equality, which reads identically to the pre-Layer-0 query plan. Callers
+// that never pass a project default to the literal string "default" — the
+// same fallback tenantId already uses — so every pre-existing call site
+// (library callers, tests) keeps working unchanged.
+function projectFilter(project: string | string[]) {
+  const ids = Array.isArray(project) ? project : [project];
+  return ids.length === 1 ? eq(facts.project, ids[0]!) : inArray(facts.project, ids);
+}
+
+// ---------------------------------------------------------------------------
 // Surface validation
 // ---------------------------------------------------------------------------
 
@@ -83,6 +98,7 @@ async function recordWriteEdges(
   entityId: string,
   sessionId: string | null | undefined,
   tenantId: string,
+  project: string,
 ): Promise<void> {
   const ops: Promise<void>[] = [];
 
@@ -95,17 +111,23 @@ async function recordWriteEdges(
         "about",
         1,
         tenantId,
+        project,
       )
       .catch((err: unknown) => console.error("[iranti] about edge error:", err)),
   );
 
   // co_write edge: fact → previous fact in this session
+  // Layer 0 (D7): scoped to the writing project — a session is per-agent-
+  // process, but the project it's operating in can only be one at a time
+  // for write purposes, so this stays a plain equality (not the effective/
+  // combined set) exactly like every other write-path lookup here.
   if (sessionId) {
     ops.push(
       (async () => {
         const prev = await db.query.facts.findFirst({
           where: and(
             eq(facts.tenantId, tenantId),
+            eq(facts.project, project),
             eq(facts.sessionId, sessionId),
             eq(facts.isArchived, false),
             ne(facts.id, factId),
@@ -119,6 +141,7 @@ async function recordWriteEdges(
           "co_write",
           0.5,
           tenantId,
+          project,
         );
       })().catch((err: unknown) => console.error("[iranti] co_write edge error:", err)),
     );
@@ -157,6 +180,7 @@ export async function writeFact(
     | "source"
     | "surface"
     | "tenantId"
+    | "project"
     | "sessionId"
     | "agentId"
     | "metadata"
@@ -166,6 +190,10 @@ export async function writeFact(
   assertValidSurface(input.surface);
 
   const tenantId = input.tenantId ?? "default";
+  // Layer 0 (D7): writes always target the single current project — never
+  // the effective (combined) set. Combine affects reads, not write
+  // attribution (§11.6 of the PRD).
+  const project = input.project ?? "default";
 
   // Normalize the key at the write boundary (AX-1). All lookups, the advisory
   // lock, and the stored row use normalizedKey; the original spelling is
@@ -201,19 +229,22 @@ export async function writeFact(
   let postCommitFactId: string | undefined;
   let postCommitSupersession: { newSource: string; existingSource: string } | undefined;
   const result = await db.transaction(async (tx) => {
-    // Advisory lock: serialize concurrent writes to the same (tenant, entity, key)
-    // for the duration of this transaction. Without this, two writers can both
-    // pass the protection check and both snapshot the old value to fact_archive,
-    // producing duplicate history. pg_advisory_xact_lock releases automatically
-    // when the transaction commits or rolls back. The ::bigint cast avoids
-    // ambiguity between the single-bigint and two-int overloads of the function.
-    const lockKey = `${tenantId}/${input.entityType}/${input.entityId}/${normalizedKey}`;
+    // Advisory lock: serialize concurrent writes to the same
+    // (tenant, project, entity, key) for the duration of this transaction.
+    // Without this, two writers can both pass the protection check and both
+    // snapshot the old value to fact_archive, producing duplicate history.
+    // pg_advisory_xact_lock releases automatically when the transaction
+    // commits or rolls back. The ::bigint cast avoids ambiguity between the
+    // single-bigint and two-int overloads of the function.
+    const lockKey = `${tenantId}/${project}/${input.entityType}/${input.entityId}/${normalizedKey}`;
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`);
 
-    // Step 1: Check whether a fact already exists for this key within this tenant.
+    // Step 1: Check whether a fact already exists for this key within this
+    // tenant + project.
     const existing = await tx.query.facts.findFirst({
       where: and(
         eq(facts.tenantId, tenantId),
+        eq(facts.project, project),
         eq(facts.entityType, input.entityType),
         eq(facts.entityId, input.entityId),
         eq(facts.key, normalizedKey),
@@ -305,6 +336,7 @@ export async function writeFact(
         key: normalizedKey,
         metadata,
         tenantId,
+        project,
         confidence: storedConfidence,
         stabilityScore: existing?.stabilityScore ?? 1.0,
         accessCount: existing?.accessCount ?? 0,
@@ -312,8 +344,8 @@ export async function writeFact(
         isArchived: false,
       })
       .onConflictDoUpdate({
-        // Conflict target: same tenant + entity + key.
-        target: [facts.tenantId, facts.entityType, facts.entityId, facts.key],
+        // Conflict target: same tenant + project + entity + key.
+        target: [facts.tenantId, facts.project, facts.entityType, facts.entityId, facts.key],
         set: {
           value: input.value,
           confidence: storedConfidence,
@@ -357,6 +389,7 @@ export async function writeFact(
       normalizedKey,
       input.value,
       tenantId,
+      project,
     ).catch((err: unknown) =>
       console.error("[iranti] deep conflict check error:", err),
     );
@@ -369,6 +402,7 @@ export async function writeFact(
       input.entityId,
       input.sessionId,
       tenantId,
+      project,
     ).catch((err: unknown) =>
       console.error("[iranti] write edge error:", err),
     );
@@ -388,10 +422,12 @@ export async function readFact(
   entityId: string,
   key: string,
   tenantId: string = "default",
+  project: string | string[] = "default",
 ): Promise<Fact | undefined> {
   const fact = await db.query.facts.findFirst({
     where: and(
       eq(facts.tenantId, tenantId),
+      projectFilter(project),
       eq(facts.entityType, entityType),
       eq(facts.entityId, entityId),
       eq(facts.key, normalizeKey(key)),
@@ -422,10 +458,12 @@ export async function findFact(
   entityId: string,
   key: string,
   tenantId: string = "default",
+  project: string | string[] = "default",
 ): Promise<Fact | undefined> {
   return db.query.facts.findFirst({
     where: and(
       eq(facts.tenantId, tenantId),
+      projectFilter(project),
       eq(facts.entityType, entityType),
       eq(facts.entityId, entityId),
       eq(facts.key, normalizeKey(key)),
@@ -448,10 +486,12 @@ export async function readRecentFactsByEntity(
   entityId: string,
   limit: number,
   tenantId: string = "default",
+  project: string | string[] = "default",
 ): Promise<Fact[]> {
   const found = await db.query.facts.findMany({
     where: and(
       eq(facts.tenantId, tenantId),
+      projectFilter(project),
       eq(facts.entityType, entityType),
       eq(facts.entityId, entityId),
       eq(facts.isArchived, false),
@@ -480,10 +520,12 @@ export async function readFactsByEntity(
   entityType: string,
   entityId: string,
   tenantId: string = "default",
+  project: string | string[] = "default",
 ): Promise<Fact[]> {
   const found = await db.query.facts.findMany({
     where: and(
       eq(facts.tenantId, tenantId),
+      projectFilter(project),
       eq(facts.entityType, entityType),
       eq(facts.entityId, entityId),
       eq(facts.isArchived, false),
@@ -557,20 +599,22 @@ export async function readRelevantFactsByEntity(
   limit: number,
   message?: string,
   tenantId: string = "default",
+  project: string | string[] = "default",
 ): Promise<Fact[]> {
   if (!message) {
-    return readRecentFactsByEntity(entityType, entityId, limit, tenantId);
+    return readRecentFactsByEntity(entityType, entityId, limit, tenantId, project);
   }
 
   const tokens = tokenizeMessage(message);
   if (tokens.length === 0) {
-    return readRecentFactsByEntity(entityType, entityId, limit, tenantId);
+    return readRecentFactsByEntity(entityType, entityId, limit, tenantId, project);
   }
 
   const candidateLimit = Math.min(limit * 3, 50);
   const candidates = await db.query.facts.findMany({
     where: and(
       eq(facts.tenantId, tenantId),
+      projectFilter(project),
       eq(facts.entityType, entityType),
       eq(facts.entityId, entityId),
       eq(facts.isArchived, false),
@@ -620,11 +664,13 @@ export async function readRelevantFactsByEntity(
 export async function readFactsByIds(
   ids: string[],
   tenantId: string = "default",
+  project: string | string[] = "default",
 ): Promise<Fact[]> {
   if (ids.length === 0) return [];
   return db.query.facts.findMany({
     where: and(
       eq(facts.tenantId, tenantId),
+      projectFilter(project),
       inArray(facts.id, ids),
       eq(facts.isArchived, false),
     ),
@@ -674,17 +720,30 @@ export async function searchFacts(
     entityId?: string;
     limit?: number;
     tenantId?: string;
+    project?: string | string[];
   } = {},
 ): Promise<Fact[]> {
-  const { entityType, entityId, limit = 10, tenantId = "default" } = opts;
+  const {
+    entityType,
+    entityId,
+    limit = 10,
+    tenantId = "default",
+    project = "default",
+  } = opts;
   // Key column stores normalized keys — match against the normalized query.
   // Value column is free-form text — keep the original query for that branch.
   const keyPattern = `%${normalizeKey(query)}%`;
   const valPattern = `%${query}%`;
 
+  // Layer 0 (D7): search has NO entity scoping by default (it's the
+  // "across all entities" tool) — project scoping is the only thing standing
+  // between a search from project B and project A's content when both use
+  // similar terms. This is exactly the adversarial-isolation case the PRD
+  // calls out (shared keys, identical entity names, matching search terms).
   const found = await db.query.facts.findMany({
     where: and(
       eq(facts.tenantId, tenantId),
+      projectFilter(project),
       eq(facts.isArchived, false),
       or(ilike(facts.key, keyPattern), ilike(facts.value, valPattern)),
       entityType ? eq(facts.entityType, entityType) : undefined,
@@ -767,21 +826,39 @@ export async function getFactHistory(factId: string): Promise<FactArchive[]> {
 
 // Get the history of a fact by entity + key, without needing the factId.
 // Useful before you've read the current fact.
+//
+// Layer 0 (D7): fact_archive has NO project column (§11.1 — it's an audit
+// table, not a retrieval surface with its own reader today), so it cannot be
+// filtered by project directly. But it doesn't need to be: every archive row
+// is denormalized from a specific live `facts` row via fact_id, and THAT row
+// carries the project the archived value belonged to. So this joins against
+// `facts` on fact_id and filters by project there — closing what would
+// otherwise be a real leak vector (entityType/entityId/key is exactly what
+// an attacker with a guessed or colliding entity name would supply from a
+// different project's scope, e.g. the same "project/my-app" entity name
+// reused by two unrelated folders).
 export async function getFactHistoryByKey(
   entityType: string,
   entityId: string,
   key: string,
   tenantId: string = "default",
+  project: string | string[] = "default",
 ): Promise<FactArchive[]> {
-  return db.query.factArchive.findMany({
-    where: and(
-      eq(factArchive.tenantId, tenantId),
-      eq(factArchive.entityType, entityType),
-      eq(factArchive.entityId, entityId),
-      eq(factArchive.key, normalizeKey(key)),
-    ),
-    orderBy: desc(factArchive.archivedAt),
-  });
+  const rows = await db
+    .select({ archive: factArchive })
+    .from(factArchive)
+    .innerJoin(facts, eq(factArchive.factId, facts.id))
+    .where(
+      and(
+        eq(factArchive.tenantId, tenantId),
+        eq(factArchive.entityType, entityType),
+        eq(factArchive.entityId, entityId),
+        eq(factArchive.key, normalizeKey(key)),
+        projectFilter(project),
+      ),
+    )
+    .orderBy(desc(factArchive.archivedAt));
+  return rows.map((r) => r.archive);
 }
 
 // ---------------------------------------------------------------------------
