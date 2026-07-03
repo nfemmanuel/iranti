@@ -12,7 +12,7 @@ only copy of anything. Continue from the first unchecked item in "Next".
 
 ---
 
-## Status: PHASE 3 — Feature 1 (Layer 0a PGlite) in progress
+## Status: PHASE 3 — Feature 2 (Layer 0b harness) built, gauntlet running
 
 ## Done
 - [x] Mandate activated + recorded to iranti memory (`overnight_mandate_active`)
@@ -35,12 +35,21 @@ only copy of anything. Continue from the first unchecked item in "Next".
       Extra: latent tx side-effect bug in writeFact found+fixed. Flagged for report:
       `pnpm db:migrate` broken on Node 24 (.js→.ts specifiers) — pre-existing.
 
+- [x] **Feature 2/6 BUILT — `feat/layer0b-harness` @ `35a9347c`, gauntlet in progress.**
+      PRD-first (layer-0b-harness.md, indexed). Background builder completed the core
+      (7 src/harness modules, 4-persona corpus, bench/baseline.json, `pnpm bench` via vitest)
+      but was killed by a session interrupt with work UNCOMMITTED — rescued as `d0b532fb`,
+      then independently verified: typecheck 0, harness 1/1 green, run-to-run deterministic.
+      First new-iranti numbers (heuristic mode, zero LLM): extraction recall 74.5% /
+      precision 100%, retrieval hit-rate 75.0%, confirmation-rate 53.6%.
+      Addendum `35a9347c` (prompted by external ai-mem bench of 0.4.1: 5/5 trick-query
+      false positives): 8 negative no-answer probes + falsePositiveRate metric — day-one
+      honest reading 100% (8/8), the target a future no-answer/thresholding feature must move.
+      Regression (default env): 128 passed / 170 failed = EXACT pre-existing
+      ECONNREFUSED:5435 baseline → no regression from harness changes.
+
 ## In-flight
-- [ ] Feature 2 — `feat/layer0b-harness`: golden-corpus measurement harness (multi-profile,
-      deterministic heuristic-mode default, recall/precision + retrieval hit-rate +
-      confirmation-rate; baseline checked in so improved/regressed is a diff). Scope doc first
-      (PRD-first), then build → gauntlet → merge.
-- [ ] Feature 2 — `feat/layer0b-harness`: golden-corpus measurement harness (multi-profile) → gauntlet → merge
+- [ ] Feature 2 — gauntlet completion (PGlite-mode full suite + fresh-eyes review) → fix loop → ff-merge → push
 - [ ] Feature 3 — `feat/project-scoping`: folder-scoped projects + combine/exclude + `iranti init` → gauntlet → merge
 - [ ] Feature 4 — `feat/entity-resolution`: alias→entity links (the "textbook" fix) → gauntlet → merge
 - [ ] Feature 5 — `feat/rules-enforcement`: situational rules & preferences enforcement → gauntlet → merge
