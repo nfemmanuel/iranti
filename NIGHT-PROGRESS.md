@@ -12,7 +12,7 @@ only copy of anything. Continue from the first unchecked item in "Next".
 
 ---
 
-## Status: PHASE 3 — Feature 3 (folder-scoped projects) in progress
+## Status: PHASE 3 — Feature 4 (entity resolution) in progress
 
 ## Done
 - [x] Mandate activated + recorded to iranti memory (`overnight_mandate_active`)
@@ -50,10 +50,30 @@ only copy of anything. Continue from the first unchecked item in "Next".
       uncommitted; rescued to `d0b532fb`, finished foreground. PRD-first honored
       (layer-0b-harness.md written before code, now shipped + indexed).
 
+- [x] **Feature 3/6 MERGED → main @ `94303e1e`** — `feat/project-scoping`, 6 commits.
+      Folder-scoped projects per Layer 0 D4–D8 + new §11 addendum: migration 0013 (project
+      column on facts/rules/edges/media + projects/project_links tables + extended uniques),
+      deterministic detection (git-root > Projects-root-child > fallback), reversible
+      combine/exclude, 5 iranti_project_* tools, `iranti init` library (bin gap documented —
+      Node strip-types). Also repaired pre-existing broken drizzle snapshot chain (0011 dupe,
+      0012 missing) — verified cosmetic-to-tooling only, runtime migrate unaffected.
+      Gauntlet: independent verify ✅ (37 new tests reproduced; bench 0.0pp; spot suites exact)
+      · fresh-eyes review found REAL BLOCKER — factId paths (iranti_history/iranti_archive)
+      leaked cross-project reads/archives by raw UUID; reproduced empirically → FIXED
+      (effective-scope filtering, out-of-scope ≡ not-found, honest archive result) + 2
+      regression tests, which themselves caught a raw-vs-normalized compare bug in the first
+      fix ✅ · post-fix: isolation 16/16, facts 33/33, checkpoints 8/8, mcp-tools 46/46,
+      bench 0.0pp, tsc/lint 0 ✅.
+      Bench earned its keep: scoping initially zeroed harness recall (default-project
+      mismatch) — caught by the 0.0pp discipline, fixed by resolveCurrentProject().
+      Env note: repo Postgres (iranti-postgres-1, pgvector pg17) now runs on 5435 (worker
+      started it via pnpm db:up) — dual-engine verification available; old ECONNREFUSED
+      baseline obsolete. Dormant iranti_dev_container untouched net-net.
+
 ## In-flight
-- [ ] Feature 3 — `feat/project-scoping`: folder-scoped projects + combine/exclude + `iranti init`
-      (Layer 0 PRD D4–D8 are the contract; adversarial cross-project isolation tests mandatory)
-      → gauntlet → merge
+- [ ] Feature 4 — `feat/entity-resolution`: alias→entity links, learned once, applied at
+      retrieval forever. Efficacy gate = the 0b harness's alias probes (all scoring 0 today
+      BY DESIGN) must flip to hits — the delta IS the proof. Scope doc first.
 - [ ] Feature 4 — `feat/entity-resolution`: alias→entity links (the "textbook" fix) → gauntlet → merge
 - [ ] Feature 5 — `feat/rules-enforcement`: situational rules & preferences enforcement → gauntlet → merge
 - [ ] Feature 6 — `feat/checkpoints`: checkpoint criteria + project-state rollup → gauntlet → merge
