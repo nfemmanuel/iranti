@@ -98,6 +98,218 @@ Two blockers sit under everything:
 - **Regression (against server Postgres):** existing suite green with `IRANTI_DB_ENGINE=postgres`.
 - **Manual:** `iranti init` in a real Projects folder; open two subfolders in a host; confirm isolation + the zero-config boot.
 
+## 11. Implementation-details addendum (project scoping build)
+
+Written at build start for the folder-scoped-projects slice (D4–D8). Settles the
+§9 "schema shape" open question and every wiring decision needed to write code
+without contradicting an accepted decision.
+
+### 11.1 Schema shape (settles §9)
+
+Lean confirmed: a dedicated `project` column, **parallel to `tenantId`**, added
+to every table that already carries `tenantId` and is read during retrieval or
+attend: `facts`, `rules`, `knowledge_edges`. `tenantId` keeps its existing
+meaning and default (`"default"`) untouched everywhere (D6) — `project` is an
+additional, independent scope dimension, not a replacement.
+
+- `facts.project`, `rules.project`, `knowledge_edges.project`: `text NOT NULL
+  DEFAULT 'default'`. The literal string `"default"` is the fallback project id
+  for callers that never resolve a real one (bare library calls, existing
+  tests, scripts) — it is a value in the `project` column, unrelated to
+  `tenantId`'s own `"default"` value in a different column.
+- `facts`' unique constraint becomes `(tenant_id, project, entity_type,
+  entity_id, key)` — two projects can hold independent values for the same
+  entity+key, matching the isolation-by-default goal (§3, D7).
+- `fact_archive`, `source_reliability`, `escalations`, `attend_log`,
+  `metric_counters`, `media_objects`, `extraction_cache` are **not** given a
+  `project` column in this slice. They are audit/telemetry/cache tables, not
+  retrieval surfaces — nothing reads them filtered by "current project" today,
+  and adding the column now with no reader would be speculative schema. Flagged
+  as a follow-up if/when those tables grow project-aware readers.
+- New table `projects` (the registry): `id text PRIMARY KEY` (the deterministic
+  project id from §11.2), `label text`, `source text NOT NULL` (`"git-root" |
+  "projects-root-child" | "fallback"`), `first_seen_at timestamptz NOT NULL
+  DEFAULT now()`, `is_excluded boolean NOT NULL DEFAULT false`. Auto-upserted
+  (get-or-create) the first time a project id is resolved in a process — this
+  is what makes "new subfolders auto-register on first call" (D5) concrete.
+- New table `project_links` (combine, D7): `id uuid PRIMARY KEY default
+  random`, `project_a text NOT NULL`, `project_b text NOT NULL`, `is_active
+  boolean NOT NULL DEFAULT true`, `created_at timestamptz NOT NULL
+  DEFAULT now()`, `deactivated_at timestamptz`. A row means "A and B see each
+  other's facts/rules while `is_active`." Combine is symmetric (A sees B, B
+  sees A) — stored as one row, read in both directions. Reversing sets
+  `is_active = false` (and `deactivated_at`); the row is never deleted, so
+  history of past combines is preserved (G1, "never a hard delete").
+  Uniqueness: `(least(project_a,project_b), greatest(project_a,project_b))` is
+  NOT a DB constraint (Drizzle/pg-core has no portable `LEAST`/`GREATEST`
+  expression index shorthand and PGlite's DDL surface is the more constrained
+  of the two engines) — canonical ordering is enforced in application code
+  (`src/library/projects.ts`'s `combineProjects()` always stores the
+  lexicographically smaller id as `project_a`), and a partial-lookup query
+  checks both orderings before inserting, avoiding duplicate active links for
+  the same pair without relying on a DB-level constraint.
+
+### 11.2 Project detection (settles the "clear precedence rule" in §9)
+
+`src/library/projects.ts`, pure functions plus one cached resolver:
+
+1. **git-root case (highest precedence):** walk up from `process.cwd()`
+   looking for a `.git` entry (directory OR file — file happens in git
+   worktrees/submodules, where `.git` is a pointer file, not a directory).
+   The first directory found containing `.git` is the project root. Project id
+   = that absolute path, normalized (see §11.2.1).
+   - **Nested-subfolder-of-git-repo case:** walking up means a subfolder deep
+     inside a repo resolves to the SAME id as the repo root, not its own id —
+     "the project" is the repo, not the subfolder. This is the PRD's explicit
+     nested-git-repo test case.
+   - **Nested git repos (submodule inside a repo):** the walk stops at the
+     FIRST `.git` found going upward from cwd, i.e. the innermost repo. Cwd
+     inside a submodule is its own project, distinct from the parent repo —
+     conservative (isolation-favoring) reading: two `.git` boundaries means
+     two developers' worth of intent could differ, so don't collapse them.
+2. **Projects-root-child case:** only reached when no `.git` is found above
+   cwd. If a Projects root is configured (`IRANTI_PROJECTS_ROOT` env var, or
+   the `projectsRoot` key written by `iranti init` into the host config file —
+   env var wins if both are present, since env is the more explicit/ephemeral
+   override), and cwd is under that root, the project id is the immediate
+   child directory of the root that contains cwd (e.g. root
+   `~/dev`, cwd `~/dev/acme/src/api` → project id is `~/dev/acme`,
+   normalized). If cwd IS the Projects root itself (no child segment), falls
+   through to the fallback case below — the root is not a project.
+3. **Fallback case (lowest precedence):** no `.git` found, and either no
+   Projects root is configured or cwd is not under it. Project id = the
+   normalized absolute cwd itself. Documented as "one folder, one project" —
+   every distinct fallback folder is already its own project with zero
+   configuration (D8), it just doesn't get the "whole subtree is one project"
+   grouping that git-root or Projects-root-child provide.
+
+Precedence is git-root > Projects-root-child > fallback, checked in that order
+on every resolution — never cached across different cwds, though within one
+process the resolution for the process's OWN cwd is computed once (§11.3).
+
+#### 11.2.1 Normalization (determinism requirement)
+
+Same input path must always produce the same id. `normalizeProjectId(absPath)`:
+lowercase the drive letter on Windows (`C:\` and `c:\` are the same volume),
+convert `\` to `/`, resolve `..`/`.`/symlinks via `fs.realpathSync` (falls back
+to the un-resolved absolute path if `realpathSync` throws — e.g. a path that
+doesn't exist yet — so detection never crashes on a symlink edge case), strip a
+single trailing slash. This is the "path-based, `normalizeKey`-style"
+normalization the PRD's D5 calls for, purpose-built for filesystem paths
+(`normalizeKey` itself is for fact keys, not reused here — different alphabet
+of valid characters, and lowercasing a path's non-drive segments on a
+case-sensitive filesystem would be wrong).
+
+#### 11.2.2 Symlinks and the Projects-root itself
+
+- A symlinked subfolder resolves through `realpathSync` before the git-root
+  walk and the Projects-root containment check, so a symlink into a Projects
+  root resolves to the same id as the real path — no duplicate project
+  identity for the same physical folder reached two ways.
+- The Projects root folder itself, opened directly (no child segment) with no
+  `.git`, is fallback-cased per §11.2 point 2 above (falls through) rather
+  than being treated as its own project — it is infrastructure, not a project.
+
+### 11.3 Process-wide resolution and caching
+
+Mirrors `src/mcp/context.ts`'s handshake pattern: `resolveCurrentProject()` is
+computed lazily on first call within a process and cached for that process's
+lifetime (one stdio server = one long-lived cwd; re-resolving per call would
+be wasted work and cannot change mid-process since MCP hosts don't `chdir()`
+their server). The resolver also performs the `projects` table upsert
+(get-or-create + `is_excluded` check) the first time it runs, exactly
+mirroring `registerAgent`'s get-or-create shape in `agents.ts`. Tests that need
+a fresh resolution per case call a `resetProjectCache()` escape hatch (module
+resets already used by `it-runs.test.ts`/`persistence.test.ts` also work).
+
+### 11.4 Exclude semantics
+
+`excludeProject(id)` sets `projects.is_excluded = true` (idempotent upsert if
+the project has never been seen before — excluding a folder you've never
+opened in iranti is valid, e.g. pre-configuring during `iranti init`).
+`includeProject(id)` (the reverse) sets it back to `false` — reversible, never
+a row deletion (G1). What "excluded" DOES, precisely: `resolveCurrentProject()`
+still returns the id (excluding a folder doesn't break the tool — it isn't a
+crash, D8's zero-config spirit), but `attend`/`write`/`search`/`query` treat an
+excluded project as **isolated with no combine links honored**, and every write
+is tagged `metadata.excludedProjectWrite = true` for future audit. This is the
+conservative reading chosen where the PRD is silent on exact exclude behavior:
+excluded means "don't extend trust to or from this folder," not "silently
+discard its writes" (discarding data a user typed would violate "never a hard
+delete" in spirit even though no row is deleted).
+
+### 11.5 Combine/exclude interaction
+
+If A is excluded and A+B are combined, the combine link is stored but not
+honored for A while `is_excluded` is true (exclude wins) — re-including A
+re-activates the existing combine automatically (no need to re-combine),
+since the link's `is_active` flag and the project's `is_excluded` flag are
+independent and both are simply re-checked on every read.
+
+### 11.6 Retrieval/write scoping wiring
+
+- `src/library/facts.ts`, `src/library/rules.ts`: every function gains a
+  `project` parameter alongside the existing `tenantId` parameter, defaulting
+  to `"default"` (never a breaking change to existing callers/tests — the
+  default preserves current single-project behavior exactly). Where a function
+  reads, its `WHERE` clause is extended to filter by the effective project set
+  (see below) instead of a single equality, mirroring the existing
+  `eq(facts.tenantId, tenantId)` pattern with an `inArray`/`or` over resolved
+  project ids.
+- **Effective project set for reads** = `{currentProject} ∪ {P : an active
+  project_links row combines currentProject with P}`, computed once per
+  `attend`/`search`/`query` call by `src/library/projects.ts`'s
+  `getEffectiveProjectIds(projectId)`. Writes always use the single
+  `currentProject` (writing "on behalf of" a combined partner is out of scope
+  — combine affects reads, not write attribution).
+- `src/mcp/context.ts`'s `McpContext` gains a `project: Project` field
+  (the registry row), resolved once alongside the existing agent/session
+  handshake in `ensureContext()`. `attend.ts`/`write.ts`/`search.ts`/
+  `query.ts` all already call `ensureContext()` first — they pick up
+  `ctx.project.id` from there and pass it down, so no new per-tool-call
+  plumbing is needed beyond reading one more field off the existing context.
+- `knowledge_edges`: `reinforceEdge`/`getNeighbors` gain the same `project`
+  parameter, defaulting to `"default"`, so peripheral (graph-hop) retrieval in
+  `attend.ts` stays project-scoped too — an edge recorded in project A must
+  never surface a project-B fact as a "related" suggestion.
+
+### 11.7 `iranti init` shape (settles the D8/D5 "convenience, not requirement" wiring)
+
+Per the repo-realities constraint (ESM `.js` specifiers, `node
+--experimental-strip-types` broken on Node 24 for `src/`), `iranti init` is
+built as a library function `src/library/setup.ts`'s `runInit(options)` —
+pure-ish (takes an explicit `homeDir`/`cwd`/`writeFile` for testability, no
+hidden global state) — covered by unit tests through `vitest`/`tsx` exactly
+like every other library module. It:
+
+1. Writes/updates a host config JSON at `~/.iranti/config.json`:
+   `{ projectsRoot: <absolute path>, dataDir: <absolute path or default> }`.
+2. Does NOT require a running MCP server or touch the database — config-only,
+   so it can run before the store has ever been opened (D8: init is
+   convenience, never a requirement — the store boots and auto-migrates on
+   first real MCP use regardless of whether init ever ran).
+3. A thin CLI wrapper is documented as a **wiring gap**: `package.json` cannot
+   add a working `bin` entry that runs TS source directly under the
+   `node --experimental-strip-types` limitation already on record for
+   `db:migrate`. Shipping a broken `bin` would be worse than not shipping one.
+   `runInit()` + its tests are the deliverable; a real `bin/iranti` (compiled
+   `dist/` entry, or a `tsx`-shimmed script) is left to the cutover/publish
+   step (§3 non-goals — "the cutover... is a later step, not this PRD") where
+   the build/publish pipeline is being decided anyway. This does not block any
+   acceptance criterion: §7's "one-command setup" criterion is satisfied by
+   `runInit()` being callable (e.g. `pnpm exec vitest run` of its own smoke
+   test, or a documented `node -e` one-liner) even without a polished `bin`.
+
+### 11.8 Migration numbering
+
+Next migration file is `0013_<drizzle-kit-generated-name>.sql`, generated via
+`pnpm db:generate` against the schema changes in §11.1, then hand-checked
+against the PGlite auto-migrate path in `connection.ts` (no override expected
+— no extensions, only `ADD COLUMN ... DEFAULT`, `CREATE TABLE`, and one new
+unique index, all within PGlite's demonstrated DDL surface per the 0011/0012
+precedent).
+
 ## Changelog
 - 2026-07-02 — proposed
 - 2026-07-03 — accepted (NF's overnight-mandate GO; D5 git-root identity, D6 dedicated project scope, D7 isolated-by-default all confirmed)
+- 2026-07-03 — implementation-details addendum added before build (§11): settles the §9 schema-shape open question (dedicated `project` column parallel to `tenantId`, plus `projects` registry + `project_links` combine table), the git-root/Projects-root-child/fallback precedence and normalization rule, exclude semantics, combine/exclude interaction, retrieval/write scoping wiring through `McpContext`, and the `iranti init` library-function-not-broken-bin shape.
