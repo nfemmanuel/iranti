@@ -38,7 +38,7 @@ import {
   findFact,
   readArchivedValuesByFactIds,
   readFactsByIds,
-  readRelevantFactsByEntity,
+  readRelevantFactsWithMatch,
   writeFact,
 } from "../../library/facts.js";
 import { getRulesForAttend } from "../../library/rules.js";
@@ -287,6 +287,11 @@ export interface AttendResult {
     value: string;
     source: string;
     updatedAt: string;
+    // Layer 0f: true when this fact MATCHED the message (keyword overlap
+    // or deterministic alias resolution); false = ambient recency context.
+    // A lexical claim, not a truth claim. All-false on a message nothing
+    // answers — that's iranti saying "nothing here answers that."
+    matched: boolean;
   }>;
   // Phase 3 (CORE-15): graph-hop secondary tier. Facts within 2 hops of the
   // primary hits, weight-ordered, capped at MAX_PERIPHERAL_FACTS.
@@ -502,9 +507,17 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
     ? Math.max(1, Math.ceil(MAX_MID_TURN_FACTS / Math.max(1, hints.length)))
     : MAX_FACTS_PER_ENTITY;
 
+  // Layer 0f: ids of facts that MATCHED the message (keyword overlap, or a
+  // deterministic alias resolution) vs ambient recency context. Threaded to
+  // the response as facts[].matched so a host can tell "this relates to
+  // what was asked" from "this is just recent background" — the no-answer
+  // honesty fix (a query nothing answers now returns only matched:false
+  // entries instead of indistinguishable confident-looking facts).
+  const matchedFactIds = new Set<string>();
+
   const factsPerEntity = await Promise.all(
     hints.map(async (h) => {
-      const relevant = await readRelevantFactsByEntity(
+      const { facts: relevant, matchedIds } = await readRelevantFactsWithMatch(
         h.entityType,
         h.entityId,
         perEntityCap,
@@ -512,6 +525,7 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
         "default",
         effectiveProjectIds,
       );
+      for (const id of matchedIds) matchedFactIds.add(id);
 
       // Layer 0c (entity resolution): an alias shares zero tokens with the
       // fact it names by definition ("the figma file" vs a Figma URL), so
@@ -551,6 +565,9 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
         ...targetFact,
         key: normalizeKey(`alias:${matchedAlias.alias}`),
       };
+      // An alias resolution IS a match (the one deterministic thing we know
+      // answers the query), even though it shares zero tokens (Layer 0f).
+      matchedFactIds.add(targetFact.id);
       if (relevant.some((f) => f.key === aliasFact.key)) return relevant;
 
       // The alias view REPLACES any same-id entry keyword scoring found
@@ -871,6 +888,7 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
       value: f.value,
       source: f.source,
       updatedAt: f.updatedAt.toISOString(),
+      matched: matchedFactIds.has(f.id),
     })),
     peripheral: budgetedPeripheral,
     checkpoint: budgetedCheckpoint

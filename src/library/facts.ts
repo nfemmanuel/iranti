@@ -622,26 +622,40 @@ function scoreRelevance(fact: Fact, tokens: string[]): number {
   return score;
 }
 
-// Fetch facts relevant to a message for a given entity.
+// Fetch facts relevant to a message for a given entity, and SAY which ones
+// actually matched (Layer 0f). Returns the facts plus the set of fact ids
+// whose relevance score was > 0 — i.e. facts that share vocabulary with the
+// message. Facts returned via the no-message/no-token/no-overlap recency
+// fallbacks are AMBIENT context: still returned (their value is real), but
+// never in matchedIds, so a caller can tell "this relates to what was
+// asked" from "this is just recent background." `matched` is a LEXICAL
+// claim (keyword overlap), not a truth claim — documented in the PRD.
+//
 // When no message is provided, delegates to readRecentFactsByEntity.
 // With a message, fetches a wider candidate pool (up to 3× limit, max 50),
 // scores by keyword overlap in key + value, and returns the top `limit`
 // by score then recency. Access tracking fires only on returned rows.
-export async function readRelevantFactsByEntity(
+export async function readRelevantFactsWithMatch(
   entityType: string,
   entityId: string,
   limit: number,
   message?: string,
   tenantId: string = "default",
   project: string | string[] = "default",
-): Promise<Fact[]> {
+): Promise<{ facts: Fact[]; matchedIds: Set<string> }> {
   if (!message) {
-    return readRecentFactsByEntity(entityType, entityId, limit, tenantId, project);
+    return {
+      facts: await readRecentFactsByEntity(entityType, entityId, limit, tenantId, project),
+      matchedIds: new Set(),
+    };
   }
 
   const tokens = tokenizeMessage(message);
   if (tokens.length === 0) {
-    return readRecentFactsByEntity(entityType, entityId, limit, tenantId, project);
+    return {
+      facts: await readRecentFactsByEntity(entityType, entityId, limit, tenantId, project),
+      matchedIds: new Set(),
+    };
   }
 
   const candidateLimit = Math.min(limit * 3, 50);
@@ -657,7 +671,7 @@ export async function readRelevantFactsByEntity(
     limit: candidateLimit,
   });
 
-  if (candidates.length === 0) return [];
+  if (candidates.length === 0) return { facts: [], matchedIds: new Set() };
 
   const scored = candidates.map((f) => ({
     fact: f,
@@ -665,7 +679,7 @@ export async function readRelevantFactsByEntity(
   }));
   const anyMatch = scored.some((s) => s.score > 0);
 
-  // No keyword match at all — fall back to pure recency.
+  // No keyword match at all — fall back to pure recency (all ambient).
   if (!anyMatch) {
     const top = candidates.slice(0, limit);
     const ids = top.map((f) => f.id);
@@ -673,7 +687,7 @@ export async function readRelevantFactsByEntity(
       .update(facts)
       .set({ lastAccessedAt: new Date(), accessCount: sql`${facts.accessCount} + 1` })
       .where(inArray(facts.id, ids));
-    return top;
+    return { facts: top, matchedIds: new Set() };
   }
 
   scored.sort((a, b) =>
@@ -682,14 +696,60 @@ export async function readRelevantFactsByEntity(
       : b.fact.updatedAt.getTime() - a.fact.updatedAt.getTime(),
   );
 
-  const top = scored.slice(0, limit).map((s) => s.fact);
+  const topScored = scored.slice(0, limit);
+  const top = topScored.map((s) => s.fact);
   const ids = top.map((f) => f.id);
   await db
     .update(facts)
     .set({ lastAccessedAt: new Date(), accessCount: sql`${facts.accessCount} + 1` })
     .where(inArray(facts.id, ids));
 
-  return top;
+  // MATCHED requires a KEY-token hit, not merely a substring buried in the
+  // value prose. Measured rationale (PRD 0f, revised after the first bench
+  // run): with the loose any-overlap rule, 7 of 8 no-answer probes still
+  // produced a matched fact — plausible questions naturally reuse domain
+  // nouns ("ledger", "payment") that appear somewhere in some value, so the
+  // flag over-claimed. A fact's key is its NAME; sharing vocabulary with
+  // the name is a much stronger lexical claim than brushing its prose.
+  // Ranking is unchanged (still full score); only the label is stricter.
+  return {
+    facts: top,
+    matchedIds: new Set(
+      topScored
+        .filter((s) => hasKeyTokenMatch(s.fact, tokens))
+        .map((s) => s.fact.id),
+    ),
+  };
+}
+
+// Does the message share at least one token with the fact's KEY?
+// (Same tokenization rules on both sides; keys are normalizeKey'd at write
+// time, so splitting on non-alphanumerics recovers their word tokens.)
+function hasKeyTokenMatch(fact: Fact, tokens: string[]): boolean {
+  const keyTokens = new Set(fact.key.toLowerCase().split(/[^a-z0-9]+/));
+  return tokens.some((t) => keyTokens.has(t));
+}
+
+// Back-compat wrapper: same behavior as always, match info discarded.
+// Existing callers/tests keep working unchanged; attend() uses the
+// WithMatch variant to label its response (Layer 0f).
+export async function readRelevantFactsByEntity(
+  entityType: string,
+  entityId: string,
+  limit: number,
+  message?: string,
+  tenantId: string = "default",
+  project: string | string[] = "default",
+): Promise<Fact[]> {
+  const { facts: result } = await readRelevantFactsWithMatch(
+    entityType,
+    entityId,
+    limit,
+    message,
+    tenantId,
+    project,
+  );
+  return result;
 }
 
 // Look up multiple facts by their IDs. No side effects — does not update

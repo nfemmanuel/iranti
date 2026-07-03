@@ -52,7 +52,7 @@ export function renderReport(report: BenchReport, deltas: MetricDelta[]): string
         `  confirmation-rate=${pct(p.retrieval.confirmationRate)} (${p.retrieval.confirmedCount}/${p.retrieval.positiveCount})`,
     );
     lines.push(
-      `    no-answer    false-positive-rate=${pct(p.retrieval.falsePositiveRate)} (${p.retrieval.falsePositiveCount}/${p.retrieval.negativeCount} negative probes; lower is better)`,
+      `    no-answer    false-positive-rate=${pct(p.retrieval.falsePositiveRate)} (${p.retrieval.falsePositiveCount}/${p.retrieval.negativeCount} matched-fact; raw any-fact=${pct(p.retrieval.falsePositiveRateRaw)}; lower is better)`,
     );
     const hitDelta = deltaByMetric.get(`${p.persona}.retrieval.hitRate`);
     const confDelta = deltaByMetric.get(`${p.persona}.retrieval.confirmationRate`);
@@ -96,7 +96,7 @@ export function renderReport(report: BenchReport, deltas: MetricDelta[]): string
       `  confirmation-rate=${padRight(pct(o.retrieval.confirmationRate), 7)} (${o.retrieval.confirmedCount}/${o.retrieval.positiveCount})`,
   );
   lines.push(
-    `  no-answer    false-positive-rate=${padRight(pct(o.retrieval.falsePositiveRate), 7)} (${o.retrieval.falsePositiveCount}/${o.retrieval.negativeCount} negative probes; lower is better)`,
+    `  no-answer    false-positive-rate=${padRight(pct(o.retrieval.falsePositiveRate), 7)} (${o.retrieval.falsePositiveCount}/${o.retrieval.negativeCount} matched-fact; raw any-fact=${pct(o.retrieval.falsePositiveRateRaw)}; lower is better)`,
   );
   if (o.rules.ruleProbeCount > 0) {
     lines.push(

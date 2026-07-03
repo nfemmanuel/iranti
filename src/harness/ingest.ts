@@ -40,6 +40,10 @@ export interface ProbeFactResult {
   value: string;
   source: string;
   updatedAt: string;
+  // Layer 0f: present on attend() probe responses (matched vs ambient);
+  // absent on store read-backs (allFactsAfterIngest), where the concept
+  // doesn't apply — extraction scoring ignores it.
+  matched?: boolean;
 }
 
 export interface ProbeOutcome {
@@ -247,6 +251,7 @@ export async function runPersonaIngest(
           value: f.value,
           source: f.source,
           updatedAt: f.updatedAt,
+          matched: f.matched,
         })),
       });
     }

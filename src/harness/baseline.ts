@@ -56,6 +56,9 @@ export function diffReports(baseline: BenchReport | null, current: BenchReport):
     // NaN-coalesced (not ?? 0) so a baseline generated before the negative-
     // probe class existed reports "(no baseline)" instead of a fake +delta.
     { name: "overall.retrieval.falsePositiveRate", get: (r) => r.overall.retrieval.falsePositiveRate ?? NaN },
+    // Layer 0f — the pre-0f any-fact definition, kept printed for one
+    // release. NaN-coalesced: pre-0f baselines lack the field.
+    { name: "overall.retrieval.falsePositiveRateRaw", get: (r) => r.overall.retrieval.falsePositiveRateRaw ?? NaN },
     // Layer 0d — new metric class. NaN-coalesced for the same reason: any
     // baseline generated before this PRD shipped has no `rules` field at
     // all, so this must print "(no baseline)" rather than a fabricated

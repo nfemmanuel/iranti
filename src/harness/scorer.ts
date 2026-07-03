@@ -121,12 +121,17 @@ export interface ProbeScore {
   rank: number | null;
   hit: boolean; // rank !== null (always false for negative probes)
   confirmed: boolean; // rank === 1 (always false for negative probes)
-  // Negative probes only: attend() returned one or more facts for a query
-  // whose answer is not in the corpus. There is no relevance score exposed
-  // on returned facts today, so ANY returned fact counts — this is the
-  // honest (harsh) definition; a future no-answer/thresholding feature
-  // improves this number measurably. Always false for positive probes.
+  // Negative probes only: attend() returned one or more MATCHED facts for
+  // a query whose answer is not in the corpus (Layer 0f redefinition:
+  // ambient-labeled context is honest background, not a false claim; a
+  // matched-labeled fact on a no-answer query IS). Always false for
+  // positive probes.
   falsePositive: boolean;
+  // Negative probes only: the ORIGINAL harsh pre-0f definition — ANY fact
+  // returned at all, matched or ambient. Printed alongside for one release
+  // (PRD 0f §5) so the improvement reads as a measured delta, not a silent
+  // definition swap. Always false for positive probes.
+  falsePositiveRaw: boolean;
 }
 
 export interface RetrievalScore {
@@ -139,6 +144,8 @@ export interface RetrievalScore {
   negativeCount: number;
   falsePositiveCount: number;
   falsePositiveRate: number; // falsePositiveCount / negativeCount (lower is better)
+  falsePositiveRawCount: number;
+  falsePositiveRateRaw: number; // pre-0f any-fact definition, for transparency
   perProbe: ProbeScore[];
 }
 
@@ -152,7 +159,8 @@ export function scoreRetrieval(result: PersonaIngestResult): RetrievalScore {
         rank: null,
         hit: false,
         confirmed: false,
-        falsePositive: outcome.returnedFacts.length > 0,
+        falsePositive: outcome.returnedFacts.some((f) => f.matched === true),
+        falsePositiveRaw: outcome.returnedFacts.length > 0,
       };
     }
     const expectedNormalized = new Set(outcome.expectedKeys.map(normalizeKey));
@@ -172,6 +180,7 @@ export function scoreRetrieval(result: PersonaIngestResult): RetrievalScore {
       hit: rank !== null,
       confirmed: rank === 1,
       falsePositive: false,
+      falsePositiveRaw: false,
     };
   });
 
@@ -182,6 +191,7 @@ export function scoreRetrieval(result: PersonaIngestResult): RetrievalScore {
   const confirmedCount = positives.filter((p) => p.confirmed).length;
   const negativeCount = negatives.length;
   const falsePositiveCount = negatives.filter((p) => p.falsePositive).length;
+  const falsePositiveRawCount = negatives.filter((p) => p.falsePositiveRaw).length;
 
   return {
     probeCount: perProbe.length,
@@ -197,6 +207,8 @@ export function scoreRetrieval(result: PersonaIngestResult): RetrievalScore {
     negativeCount,
     falsePositiveCount,
     falsePositiveRate: negativeCount > 0 ? falsePositiveCount / negativeCount : 0,
+    falsePositiveRawCount,
+    falsePositiveRateRaw: negativeCount > 0 ? falsePositiveRawCount / negativeCount : 0,
     perProbe,
   };
 }
@@ -339,6 +351,10 @@ export function buildOverallReport(personas: PersonaReport[]): OverallReport {
   const confirmedCount = personas.reduce((s, p) => s + p.retrieval.confirmedCount, 0);
   const negativeCount = personas.reduce((s, p) => s + p.retrieval.negativeCount, 0);
   const falsePositiveCount = personas.reduce((s, p) => s + p.retrieval.falsePositiveCount, 0);
+  const falsePositiveRawCount = personas.reduce(
+    (s, p) => s + p.retrieval.falsePositiveRawCount,
+    0,
+  );
 
   const retrieval: RetrievalScore = {
     probeCount,
@@ -350,6 +366,8 @@ export function buildOverallReport(personas: PersonaReport[]): OverallReport {
     negativeCount,
     falsePositiveCount,
     falsePositiveRate: negativeCount > 0 ? falsePositiveCount / negativeCount : 0,
+    falsePositiveRawCount,
+    falsePositiveRateRaw: negativeCount > 0 ? falsePositiveRawCount / negativeCount : 0,
     perProbe: personas.flatMap((p) => p.retrieval.perProbe),
   };
 

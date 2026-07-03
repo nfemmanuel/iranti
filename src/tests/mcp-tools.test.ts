@@ -1250,3 +1250,81 @@ describe("attend — CORE-17 stale-context corrections", () => {
     expect(c).toBeUndefined();
   });
 });
+
+// Layer 0f — no-answer honesty: facts[] carries matched (lexical overlap or
+// alias resolution) vs ambient (recency fallback). The acceptance criteria
+// from the PRD, as executable assertions.
+describe("attend — matched vs ambient labeling (Layer 0f)", () => {
+  it("marks exactly the overlapping fact matched, the rest ambient", async () => {
+    const entityId = randomUUID();
+    await write({
+      entityType: "project",
+      entityId,
+      key: "database-choice",
+      value: "we use postgres sixteen for the ledger",
+      agentName: "test-agent",
+    });
+    await write({
+      entityType: "project",
+      entityId,
+      key: "deploy-cadence",
+      value: "ship every friday afternoon",
+      agentName: "test-agent",
+    });
+
+    // matched requires overlap with the fact's KEY (its name): "database"
+    // and "choice" both hit database-choice; nothing hits deploy-cadence.
+    // (Value-only overlap deliberately does NOT set matched — measured in
+    // the 0f bench runs, any-overlap over-claimed on 7/8 no-answer probes.)
+    const result = await attend({
+      entityHints: [{ entityType: "project", entityId }],
+      message: "what was our database choice for the ledger?",
+    });
+
+    const db = result.facts.find((f) => f.key === "database-choice");
+    const deploy = result.facts.find((f) => f.key === "deploy-cadence");
+    expect(db?.matched).toBe(true);
+    // deploy-cadence's name shares no vocabulary with the question — if
+    // returned at all, it must be labeled ambient, never matched.
+    if (deploy) expect(deploy.matched).toBe(false);
+  });
+
+  it("a question nothing answers returns ONLY ambient facts (all matched:false)", async () => {
+    const entityId = randomUUID();
+    await write({
+      entityType: "project",
+      entityId,
+      key: "database-choice",
+      value: "we use postgres sixteen for the ledger",
+      agentName: "test-agent",
+    });
+
+    const result = await attend({
+      entityHints: [{ entityType: "project", entityId }],
+      message: "what kafka partitioning scheme did the team settle on?",
+    });
+
+    // Ambient context may still flow (that's Option B's point), but not a
+    // single fact may CLAIM to answer this — iranti saying "I don't know".
+    expect(result.facts.every((f) => f.matched === false)).toBe(true);
+  });
+
+  it("an alias-resolved fact is matched (deterministic resolution IS a match)", async () => {
+    const entityId = randomUUID();
+    await attend({
+      entityHints: [{ entityType: "project", entityId }],
+      message:
+        "See https://www.figma.com/file/match9/mocks for mocks — everyone just calls it 'the match file' here.",
+      agentName: "test-agent",
+    });
+
+    const result = await attend({
+      entityHints: [{ entityType: "project", entityId }],
+      message: "where is the match file?",
+    });
+
+    const aliasHit = result.facts.find((f) => f.key === "alias:the-match-file");
+    expect(aliasHit).toBeDefined();
+    expect(aliasHit!.matched).toBe(true);
+  });
+});
