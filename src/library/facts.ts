@@ -592,7 +592,18 @@ export function tokenizeMessage(text: string): string[] {
       text
         .toLowerCase()
         .split(/[^a-z0-9]+/)
-        .filter((t) => t.length >= 3 && !stop.has(t)),
+        // Length floor of 3, EXCEPT digit-bearing 2-char tokens (s3, r2,
+        // a1): function words never contain digits, so this admits the
+        // short-identifier class (backlog RULE-1: a rule about "S3" could
+        // never match on its defining token) with zero stop-word noise
+        // risk. Pure-alpha 2-char acronyms (PR, UI, CI) remain excluded —
+        // admitting them would admit every un-stopworded preposition too;
+        // that residual is documented in RULE-1.
+        .filter(
+          (t) =>
+            (t.length >= 3 || (t.length === 2 && /\d/.test(t))) &&
+            !stop.has(t),
+        ),
     ),
   ];
 }

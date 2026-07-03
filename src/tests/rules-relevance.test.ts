@@ -82,3 +82,33 @@ describe("isRuleSituationallyRelevant", () => {
     expect(isRuleSituationallyRelevant(rule, tokens)).toBe(false);
   });
 });
+
+// RULE-1 (backlog): digit-bearing 2-char tokens (S3, R2) survive the
+// tokenizer's length floor, so a rule authored around a short identifier
+// can match on exactly that identifier. The reviewer's production example.
+describe("short-identifier tokens (RULE-1)", () => {
+  it("a rule about S3 fires on a message that only shares the token 's3'", () => {
+    const rule = {
+      text: "always use presigned URLs for S3, never public buckets",
+      priority: 0,
+    };
+    // No other content overlap — "s3" carries the match alone.
+    const tokens = tokenizeMessage("should this go straight into S3?");
+    expect(tokens).toContain("s3");
+    expect(isRuleSituationallyRelevant(rule, tokens)).toBe(true);
+  });
+
+  it("case-insensitive: lowercase 's3' in the message matches too", () => {
+    const rule = { text: "always use presigned URLs for S3", priority: 0 };
+    const tokens = tokenizeMessage("putting the exports in s3 tonight");
+    expect(isRuleSituationallyRelevant(rule, tokens)).toBe(true);
+  });
+
+  it("pure-alpha 2-char tokens are still dropped (documented RULE-1 residual)", () => {
+    // "pr" must NOT be admitted — admitting pure-alpha 2-char tokens would
+    // admit every un-stopworded preposition ('is', 'to', 'on', ...).
+    const tokens = tokenizeMessage("opening a pr for it now");
+    expect(tokens).not.toContain("pr");
+    expect(tokens).not.toContain("it");
+  });
+});
