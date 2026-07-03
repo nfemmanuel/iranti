@@ -12,19 +12,25 @@ only copy of anything. Continue from the first unchecked item in "Next".
 
 ---
 
-## Status: PHASE 1 — audit & gates (in progress)
+## Status: PHASE 3 — Feature 1 (Layer 0a PGlite) in progress
 
 ## Done
 - [x] Mandate activated + recorded to iranti memory (`overnight_mandate_active`)
 - [x] Layer 0 PRD flipped to **accepted** (NF's GO) + added to PRD index
 - [x] NIGHT-PROGRESS.md created
+- [x] **Phase 1 PASSED** — typecheck 0, lint 0, 103/103 non-DB tests green; doc delta since 6-28
+      audit = 7 deliberate verified files, no unaccounted drift; docs secured in `bc8ca6ae`
+- [x] **Phase 2 COMPLETE** — tag `pre-cutover-2026-07-03` pushed; `main`→`legacy/prisma-0.4.x`
+      (old product preserved, pushed); `iranti-core`→`main`, force-with-lease pushed, tracking
+      origin/main. Rebuild is now the default branch content. Note: stale `origin/iranti-core`
+      pointer left on remote deliberately (preserve; morning cleanup candidate).
 
 ## In-flight
-- [ ] Phase 1: commit pending docs; typecheck + lint + full-suite gates; doc-consistency delta check (since 2026-06-28 audit)
-
-## Next
-- [ ] Phase 2: tag `pre-cutover-2026-07-03` + push; archive-and-swap (`main`→`legacy/prisma-0.4.x`, `iranti-core`→`main`); push
-- [ ] Feature 1 — `feat/layer0a-pglite`: embedded PGlite engine switch + auto-migrate + it-runs gate → gauntlet → merge
+- [ ] Feature 1 — `feat/layer0a-pglite`: embedded PGlite engine switch (`src/db/connection.ts`;
+      default=PGlite at data dir, `IRANTI_DB_ENGINE=postgres`+`DATABASE_URL` preserved),
+      auto-migrate on first boot (drizzle pglite migrator), it-runs smoke gate
+      (attend→write→attend in a temp dir, no Postgres, no env), attempt existing DB suites on
+      PGlite (bonus: makes full suite runnable in this env). Then gauntlet → merge.
 - [ ] Feature 2 — `feat/layer0b-harness`: golden-corpus measurement harness (multi-profile) → gauntlet → merge
 - [ ] Feature 3 — `feat/project-scoping`: folder-scoped projects + combine/exclude + `iranti init` → gauntlet → merge
 - [ ] Feature 4 — `feat/entity-resolution`: alias→entity links (the "textbook" fix) → gauntlet → merge
