@@ -11,74 +11,110 @@
         "precision": 1
       },
       "retrieval": {
-        "probeCount": 7,
+        "probeCount": 9,
+        "positiveCount": 7,
         "hitCount": 6,
         "confirmedCount": 4,
         "hitRate": 0.8571428571428571,
         "confirmationRate": 0.5714285714285714,
+        "negativeCount": 2,
+        "falsePositiveCount": 2,
+        "falsePositiveRate": 1,
         "perProbe": [
           {
             "query": "What database and ORM are we using for the payments service?",
             "expectedKeys": [
               "decision:to-use-postgresql-16-with-drizzle-as-the"
             ],
+            "negative": false,
             "rank": 2,
             "hit": true,
-            "confirmed": false
+            "confirmed": false,
+            "falsePositive": false
           },
           {
             "query": "What's the connection pool size?",
             "expectedKeys": [
               "correction:the-connection-pool-size"
             ],
+            "negative": false,
             "rank": 1,
             "hit": true,
-            "confirmed": true
+            "confirmed": true,
+            "falsePositive": false
           },
           {
             "query": "What did we try for idempotency that didn't work?",
             "expectedKeys": [
               "failed-approach:doing-idempotency-with-a-unique-constrai"
             ],
+            "negative": false,
             "rank": 2,
             "hit": true,
-            "confirmed": false
+            "confirmed": false,
+            "falsePositive": false
           },
           {
             "query": "Can we use MongoDB for the ledger table?",
             "expectedKeys": [
               "constraint:mongodb-for-the-ledger-table"
             ],
+            "negative": false,
             "rank": 1,
             "hit": true,
-            "confirmed": true
+            "confirmed": true,
+            "falsePositive": false
           },
           {
             "query": "Where's the reconciliation doc?",
             "expectedKeys": [
               "alias:the-reconciliation-doc"
             ],
+            "negative": false,
             "rank": null,
             "hit": false,
-            "confirmed": false
+            "confirmed": false,
+            "falsePositive": false
           },
           {
             "query": "Should service-to-service calls use direct HTTP?",
             "expectedKeys": [
               "decision:all-internal-service-to-service-calls-go"
             ],
+            "negative": false,
             "rank": 1,
             "hit": true,
-            "confirmed": true
+            "confirmed": true,
+            "falsePositive": false
           },
           {
             "query": "What's the retry backoff base?",
             "expectedKeys": [
               "correction:the-retry-backoff-base"
             ],
+            "negative": false,
             "rank": 1,
             "hit": true,
-            "confirmed": true
+            "confirmed": true,
+            "falsePositive": false
+          },
+          {
+            "query": "What's our Kafka partitioning strategy for payment events?",
+            "expectedKeys": [],
+            "negative": true,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": true
+          },
+          {
+            "query": "Which S3 bucket do the ledger exports land in?",
+            "expectedKeys": [],
+            "negative": true,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": true
           }
         ]
       }
@@ -94,74 +130,110 @@
         "precision": 1
       },
       "retrieval": {
-        "probeCount": 7,
+        "probeCount": 9,
+        "positiveCount": 7,
         "hitCount": 5,
         "confirmedCount": 3,
         "hitRate": 0.7142857142857143,
         "confirmationRate": 0.42857142857142855,
+        "negativeCount": 2,
+        "falsePositiveCount": 2,
+        "falsePositiveRate": 1,
         "perProbe": [
           {
             "query": "What model are we using for churn prediction?",
             "expectedKeys": [
               "decision:to-use-a-gradient-boosted-tree-instead-o"
             ],
+            "negative": false,
             "rank": 3,
             "hit": true,
-            "confirmed": false
+            "confirmed": false,
+            "falsePositive": false
           },
           {
             "query": "What's the validation AUC?",
             "expectedKeys": [
               "correction:validation-auc"
             ],
+            "negative": false,
             "rank": null,
             "hit": false,
-            "confirmed": false
+            "confirmed": false,
+            "falsePositive": false
           },
           {
             "query": "What's the learning rate for the final run?",
             "expectedKeys": [
               "correction:the-learning-rate-in-the-final-run"
             ],
+            "negative": false,
             "rank": 1,
             "hit": true,
-            "confirmed": true
+            "confirmed": true,
+            "falsePositive": false
           },
           {
             "query": "Can we use raw user IDs as a feature?",
             "expectedKeys": [
               "constraint:raw-user-ids-as-a-feature"
             ],
+            "negative": false,
             "rank": 1,
             "hit": true,
-            "confirmed": true
+            "confirmed": true,
+            "falsePositive": false
           },
           {
             "query": "What did we try for class imbalance that didn't work?",
             "expectedKeys": [
               "failed-approach:oversampling-the-minority-class"
             ],
+            "negative": false,
             "rank": 2,
             "hit": true,
-            "confirmed": false
+            "confirmed": false,
+            "falsePositive": false
           },
           {
             "query": "Where's the dashboard run?",
             "expectedKeys": [
               "alias:the-dashboard-run"
             ],
+            "negative": false,
             "rank": null,
             "hit": false,
-            "confirmed": false
+            "confirmed": false,
+            "falsePositive": false
           },
           {
             "query": "How are features versioned?",
             "expectedKeys": [
               "decision:features-get-versioned-in-the-feature-st"
             ],
+            "negative": false,
             "rank": 1,
             "hit": true,
-            "confirmed": true
+            "confirmed": true,
+            "falsePositive": false
+          },
+          {
+            "query": "Which GPU cluster does the training job run on?",
+            "expectedKeys": [],
+            "negative": true,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": true
+          },
+          {
+            "query": "What drift-detection threshold did the team pick for production monitoring?",
+            "expectedKeys": [],
+            "negative": true,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": true
           }
         ]
       }
@@ -177,74 +249,110 @@
         "precision": 1
       },
       "retrieval": {
-        "probeCount": 7,
+        "probeCount": 9,
+        "positiveCount": 7,
         "hitCount": 6,
         "confirmedCount": 5,
         "hitRate": 0.8571428571428571,
         "confirmationRate": 0.7142857142857143,
+        "negativeCount": 2,
+        "falsePositiveCount": 2,
+        "falsePositiveRate": 1,
         "perProbe": [
           {
             "query": "What are we using for styling?",
             "expectedKeys": [
               "decision:tailwind-for-styling-instead-of-the-old-"
             ],
+            "negative": false,
             "rank": 1,
             "hit": true,
-            "confirmed": true
+            "confirmed": true,
+            "falsePositive": false
           },
           {
             "query": "What's the tablet breakpoint?",
             "expectedKeys": [
               "correction:the-breakpoint-for-tablet"
             ],
+            "negative": false,
             "rank": 1,
             "hit": true,
-            "confirmed": true
+            "confirmed": true,
+            "falsePositive": false
           },
           {
             "query": "What's the primary brand color?",
             "expectedKeys": [
               "correction:the-primary-brand-color"
             ],
+            "negative": false,
             "rank": 1,
             "hit": true,
-            "confirmed": true
+            "confirmed": true,
+            "falsePositive": false
           },
           {
             "query": "Can the pricing page be client-side only rendered?",
             "expectedKeys": [
               "constraint:client-side-only-rendering-for-the-prici"
             ],
+            "negative": false,
             "rank": 1,
             "hit": true,
-            "confirmed": true
+            "confirmed": true,
+            "falsePositive": false
           },
           {
             "query": "What did we try for styling that didn't work with SSR?",
             "expectedKeys": [
               "failed-approach:css-in-js-with-runtime-styles"
             ],
+            "negative": false,
             "rank": 5,
             "hit": true,
-            "confirmed": false
+            "confirmed": false,
+            "falsePositive": false
           },
           {
             "query": "Where's the figma file?",
             "expectedKeys": [
               "alias:the-figma-file"
             ],
+            "negative": false,
             "rank": null,
             "hit": false,
-            "confirmed": false
+            "confirmed": false,
+            "falsePositive": false
           },
           {
             "query": "Where do new components live?",
             "expectedKeys": [
               "decision:all-new-components-live-under-src-compon"
             ],
+            "negative": false,
             "rank": 1,
             "hit": true,
-            "confirmed": true
+            "confirmed": true,
+            "falsePositive": false
+          },
+          {
+            "query": "What icon set did the design team pick for the dashboard?",
+            "expectedKeys": [],
+            "negative": true,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": true
+          },
+          {
+            "query": "What's our target Lighthouse performance score?",
+            "expectedKeys": [],
+            "negative": true,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": true
           }
         ]
       }
@@ -260,74 +368,110 @@
         "precision": 1
       },
       "retrieval": {
-        "probeCount": 7,
+        "probeCount": 9,
+        "positiveCount": 7,
         "hitCount": 4,
         "confirmedCount": 3,
         "hitRate": 0.5714285714285714,
         "confirmationRate": 0.42857142857142855,
+        "negativeCount": 2,
+        "falsePositiveCount": 2,
+        "falsePositiveRate": 1,
         "perProbe": [
           {
             "query": "What are we using for the internal tool's database?",
             "expectedKeys": [
               "decision:sqlite"
             ],
+            "negative": false,
             "rank": 7,
             "hit": true,
-            "confirmed": false
+            "confirmed": false,
+            "falsePositive": false
           },
           {
             "query": "Where's the widget's sync job documented?",
             "expectedKeys": [
               "alias:the-sync-wiki-page"
             ],
+            "negative": false,
             "rank": null,
             "hit": false,
-            "confirmed": false
+            "confirmed": false,
+            "falsePositive": false
           },
           {
             "query": "What time does the sync run?",
             "expectedKeys": [
               "correction:sync-run-time"
             ],
+            "negative": false,
             "rank": null,
             "hit": false,
-            "confirmed": false
+            "confirmed": false,
+            "falsePositive": false
           },
           {
             "query": "What's the retry count?",
             "expectedKeys": [
               "correction:the-retry-count"
             ],
+            "negative": false,
             "rank": 1,
             "hit": true,
-            "confirmed": true
+            "confirmed": true,
+            "falsePositive": false
           },
           {
             "query": "What did we try for the nightly sync that failed?",
             "expectedKeys": [
               "failed-approach:just-cron-a-bash-script-for-the-nightly-"
             ],
+            "negative": false,
             "rank": 1,
             "hit": true,
-            "confirmed": true
+            "confirmed": true,
+            "falsePositive": false
           },
           {
             "query": "Is it okay to touch the export script on Fridays?",
             "expectedKeys": [
               "constraint:export-script-fridays"
             ],
+            "negative": false,
             "rank": null,
             "hit": false,
-            "confirmed": false
+            "confirmed": false,
+            "falsePositive": false
           },
           {
             "query": "What does the new tool need to do when it fails?",
             "expectedKeys": [
               "constraint:whatever-we-build-next-has-to-send-a-sla"
             ],
+            "negative": false,
             "rank": 1,
             "hit": true,
-            "confirmed": true
+            "confirmed": true,
+            "falsePositive": false
+          },
+          {
+            "query": "who's on call for the widget this week?",
+            "expectedKeys": [],
+            "negative": true,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": true
+          },
+          {
+            "query": "what port does the widget's admin panel run on?",
+            "expectedKeys": [],
+            "negative": true,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": true
           }
         ]
       }
@@ -343,263 +487,395 @@
       "precision": 1
     },
     "retrieval": {
-      "probeCount": 28,
+      "probeCount": 36,
+      "positiveCount": 28,
       "hitCount": 21,
       "confirmedCount": 15,
       "hitRate": 0.75,
       "confirmationRate": 0.5357142857142857,
+      "negativeCount": 8,
+      "falsePositiveCount": 8,
+      "falsePositiveRate": 1,
       "perProbe": [
         {
           "query": "What database and ORM are we using for the payments service?",
           "expectedKeys": [
             "decision:to-use-postgresql-16-with-drizzle-as-the"
           ],
+          "negative": false,
           "rank": 2,
           "hit": true,
-          "confirmed": false
+          "confirmed": false,
+          "falsePositive": false
         },
         {
           "query": "What's the connection pool size?",
           "expectedKeys": [
             "correction:the-connection-pool-size"
           ],
+          "negative": false,
           "rank": 1,
           "hit": true,
-          "confirmed": true
+          "confirmed": true,
+          "falsePositive": false
         },
         {
           "query": "What did we try for idempotency that didn't work?",
           "expectedKeys": [
             "failed-approach:doing-idempotency-with-a-unique-constrai"
           ],
+          "negative": false,
           "rank": 2,
           "hit": true,
-          "confirmed": false
+          "confirmed": false,
+          "falsePositive": false
         },
         {
           "query": "Can we use MongoDB for the ledger table?",
           "expectedKeys": [
             "constraint:mongodb-for-the-ledger-table"
           ],
+          "negative": false,
           "rank": 1,
           "hit": true,
-          "confirmed": true
+          "confirmed": true,
+          "falsePositive": false
         },
         {
           "query": "Where's the reconciliation doc?",
           "expectedKeys": [
             "alias:the-reconciliation-doc"
           ],
+          "negative": false,
           "rank": null,
           "hit": false,
-          "confirmed": false
+          "confirmed": false,
+          "falsePositive": false
         },
         {
           "query": "Should service-to-service calls use direct HTTP?",
           "expectedKeys": [
             "decision:all-internal-service-to-service-calls-go"
           ],
+          "negative": false,
           "rank": 1,
           "hit": true,
-          "confirmed": true
+          "confirmed": true,
+          "falsePositive": false
         },
         {
           "query": "What's the retry backoff base?",
           "expectedKeys": [
             "correction:the-retry-backoff-base"
           ],
+          "negative": false,
           "rank": 1,
           "hit": true,
-          "confirmed": true
+          "confirmed": true,
+          "falsePositive": false
+        },
+        {
+          "query": "What's our Kafka partitioning strategy for payment events?",
+          "expectedKeys": [],
+          "negative": true,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": true
+        },
+        {
+          "query": "Which S3 bucket do the ledger exports land in?",
+          "expectedKeys": [],
+          "negative": true,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": true
         },
         {
           "query": "What model are we using for churn prediction?",
           "expectedKeys": [
             "decision:to-use-a-gradient-boosted-tree-instead-o"
           ],
+          "negative": false,
           "rank": 3,
           "hit": true,
-          "confirmed": false
+          "confirmed": false,
+          "falsePositive": false
         },
         {
           "query": "What's the validation AUC?",
           "expectedKeys": [
             "correction:validation-auc"
           ],
+          "negative": false,
           "rank": null,
           "hit": false,
-          "confirmed": false
+          "confirmed": false,
+          "falsePositive": false
         },
         {
           "query": "What's the learning rate for the final run?",
           "expectedKeys": [
             "correction:the-learning-rate-in-the-final-run"
           ],
+          "negative": false,
           "rank": 1,
           "hit": true,
-          "confirmed": true
+          "confirmed": true,
+          "falsePositive": false
         },
         {
           "query": "Can we use raw user IDs as a feature?",
           "expectedKeys": [
             "constraint:raw-user-ids-as-a-feature"
           ],
+          "negative": false,
           "rank": 1,
           "hit": true,
-          "confirmed": true
+          "confirmed": true,
+          "falsePositive": false
         },
         {
           "query": "What did we try for class imbalance that didn't work?",
           "expectedKeys": [
             "failed-approach:oversampling-the-minority-class"
           ],
+          "negative": false,
           "rank": 2,
           "hit": true,
-          "confirmed": false
+          "confirmed": false,
+          "falsePositive": false
         },
         {
           "query": "Where's the dashboard run?",
           "expectedKeys": [
             "alias:the-dashboard-run"
           ],
+          "negative": false,
           "rank": null,
           "hit": false,
-          "confirmed": false
+          "confirmed": false,
+          "falsePositive": false
         },
         {
           "query": "How are features versioned?",
           "expectedKeys": [
             "decision:features-get-versioned-in-the-feature-st"
           ],
+          "negative": false,
           "rank": 1,
           "hit": true,
-          "confirmed": true
+          "confirmed": true,
+          "falsePositive": false
+        },
+        {
+          "query": "Which GPU cluster does the training job run on?",
+          "expectedKeys": [],
+          "negative": true,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": true
+        },
+        {
+          "query": "What drift-detection threshold did the team pick for production monitoring?",
+          "expectedKeys": [],
+          "negative": true,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": true
         },
         {
           "query": "What are we using for styling?",
           "expectedKeys": [
             "decision:tailwind-for-styling-instead-of-the-old-"
           ],
+          "negative": false,
           "rank": 1,
           "hit": true,
-          "confirmed": true
+          "confirmed": true,
+          "falsePositive": false
         },
         {
           "query": "What's the tablet breakpoint?",
           "expectedKeys": [
             "correction:the-breakpoint-for-tablet"
           ],
+          "negative": false,
           "rank": 1,
           "hit": true,
-          "confirmed": true
+          "confirmed": true,
+          "falsePositive": false
         },
         {
           "query": "What's the primary brand color?",
           "expectedKeys": [
             "correction:the-primary-brand-color"
           ],
+          "negative": false,
           "rank": 1,
           "hit": true,
-          "confirmed": true
+          "confirmed": true,
+          "falsePositive": false
         },
         {
           "query": "Can the pricing page be client-side only rendered?",
           "expectedKeys": [
             "constraint:client-side-only-rendering-for-the-prici"
           ],
+          "negative": false,
           "rank": 1,
           "hit": true,
-          "confirmed": true
+          "confirmed": true,
+          "falsePositive": false
         },
         {
           "query": "What did we try for styling that didn't work with SSR?",
           "expectedKeys": [
             "failed-approach:css-in-js-with-runtime-styles"
           ],
+          "negative": false,
           "rank": 5,
           "hit": true,
-          "confirmed": false
+          "confirmed": false,
+          "falsePositive": false
         },
         {
           "query": "Where's the figma file?",
           "expectedKeys": [
             "alias:the-figma-file"
           ],
+          "negative": false,
           "rank": null,
           "hit": false,
-          "confirmed": false
+          "confirmed": false,
+          "falsePositive": false
         },
         {
           "query": "Where do new components live?",
           "expectedKeys": [
             "decision:all-new-components-live-under-src-compon"
           ],
+          "negative": false,
           "rank": 1,
           "hit": true,
-          "confirmed": true
+          "confirmed": true,
+          "falsePositive": false
+        },
+        {
+          "query": "What icon set did the design team pick for the dashboard?",
+          "expectedKeys": [],
+          "negative": true,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": true
+        },
+        {
+          "query": "What's our target Lighthouse performance score?",
+          "expectedKeys": [],
+          "negative": true,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": true
         },
         {
           "query": "What are we using for the internal tool's database?",
           "expectedKeys": [
             "decision:sqlite"
           ],
+          "negative": false,
           "rank": 7,
           "hit": true,
-          "confirmed": false
+          "confirmed": false,
+          "falsePositive": false
         },
         {
           "query": "Where's the widget's sync job documented?",
           "expectedKeys": [
             "alias:the-sync-wiki-page"
           ],
+          "negative": false,
           "rank": null,
           "hit": false,
-          "confirmed": false
+          "confirmed": false,
+          "falsePositive": false
         },
         {
           "query": "What time does the sync run?",
           "expectedKeys": [
             "correction:sync-run-time"
           ],
+          "negative": false,
           "rank": null,
           "hit": false,
-          "confirmed": false
+          "confirmed": false,
+          "falsePositive": false
         },
         {
           "query": "What's the retry count?",
           "expectedKeys": [
             "correction:the-retry-count"
           ],
+          "negative": false,
           "rank": 1,
           "hit": true,
-          "confirmed": true
+          "confirmed": true,
+          "falsePositive": false
         },
         {
           "query": "What did we try for the nightly sync that failed?",
           "expectedKeys": [
             "failed-approach:just-cron-a-bash-script-for-the-nightly-"
           ],
+          "negative": false,
           "rank": 1,
           "hit": true,
-          "confirmed": true
+          "confirmed": true,
+          "falsePositive": false
         },
         {
           "query": "Is it okay to touch the export script on Fridays?",
           "expectedKeys": [
             "constraint:export-script-fridays"
           ],
+          "negative": false,
           "rank": null,
           "hit": false,
-          "confirmed": false
+          "confirmed": false,
+          "falsePositive": false
         },
         {
           "query": "What does the new tool need to do when it fails?",
           "expectedKeys": [
             "constraint:whatever-we-build-next-has-to-send-a-sla"
           ],
+          "negative": false,
           "rank": 1,
           "hit": true,
-          "confirmed": true
+          "confirmed": true,
+          "falsePositive": false
+        },
+        {
+          "query": "who's on call for the widget this week?",
+          "expectedKeys": [],
+          "negative": true,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": true
+        },
+        {
+          "query": "what port does the widget's admin panel run on?",
+          "expectedKeys": [],
+          "negative": true,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": true
         }
       ]
     }

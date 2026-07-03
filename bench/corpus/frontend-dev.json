@@ -197,6 +197,20 @@
       "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }],
       "expectedKeys": ["decision:all-new-components-live-under-src-compon"],
       "note": "decision recall"
+    },
+    {
+      "query": "What icon set did the design team pick for the dashboard?",
+      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }],
+      "expectedKeys": [],
+      "negative": true,
+      "note": "NEGATIVE PROBE — icons/icon libraries are never mentioned in this transcript (aria-label on icon-only buttons is about accessibility, not an icon set choice); any returned fact is a false positive."
+    },
+    {
+      "query": "What's our target Lighthouse performance score?",
+      "entityHints": [{ "entityType": "project", "entityId": "dashboard-redesign" }],
+      "expectedKeys": [],
+      "negative": true,
+      "note": "NEGATIVE PROBE — Lighthouse/performance budgets are never mentioned in this transcript."
     }
   ]
 }

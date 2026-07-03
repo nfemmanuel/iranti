@@ -48,15 +48,20 @@ export function renderReport(report: BenchReport, deltas: MetricDelta[]): string
       );
     }
     lines.push(
-      `    retrieval    hit-rate=${pct(p.retrieval.hitRate)} (${p.retrieval.hitCount}/${p.retrieval.probeCount})` +
-        `  confirmation-rate=${pct(p.retrieval.confirmationRate)} (${p.retrieval.confirmedCount}/${p.retrieval.probeCount})`,
+      `    retrieval    hit-rate=${pct(p.retrieval.hitRate)} (${p.retrieval.hitCount}/${p.retrieval.positiveCount})` +
+        `  confirmation-rate=${pct(p.retrieval.confirmationRate)} (${p.retrieval.confirmedCount}/${p.retrieval.positiveCount})`,
+    );
+    lines.push(
+      `    no-answer    false-positive-rate=${pct(p.retrieval.falsePositiveRate)} (${p.retrieval.falsePositiveCount}/${p.retrieval.negativeCount} negative probes; lower is better)`,
     );
     const hitDelta = deltaByMetric.get(`${p.persona}.retrieval.hitRate`);
     const confDelta = deltaByMetric.get(`${p.persona}.retrieval.confirmationRate`);
-    if (hitDelta || confDelta) {
+    const fpDelta = deltaByMetric.get(`${p.persona}.retrieval.falsePositiveRate`);
+    if (hitDelta || confDelta || fpDelta) {
       lines.push(
         `      vs baseline: hit-rate ${hitDelta ? fmtDelta(hitDelta) : "n/a"}, ` +
-          `confirmation-rate ${confDelta ? fmtDelta(confDelta) : "n/a"}`,
+          `confirmation-rate ${confDelta ? fmtDelta(confDelta) : "n/a"}, ` +
+          `false-positive-rate ${fpDelta ? fmtDelta(fpDelta) : "n/a"}`,
       );
     }
     lines.push("");
@@ -70,14 +75,18 @@ export function renderReport(report: BenchReport, deltas: MetricDelta[]): string
       `  precision=${padRight(pct(o.extraction.precision), 7)} (${o.extraction.matchedCount}/${o.extraction.identityHits})`,
   );
   lines.push(
-    `  retrieval    hit-rate=${padRight(pct(o.retrieval.hitRate), 7)} (${o.retrieval.hitCount}/${o.retrieval.probeCount})` +
-      `  confirmation-rate=${padRight(pct(o.retrieval.confirmationRate), 7)} (${o.retrieval.confirmedCount}/${o.retrieval.probeCount})`,
+    `  retrieval    hit-rate=${padRight(pct(o.retrieval.hitRate), 7)} (${o.retrieval.hitCount}/${o.retrieval.positiveCount})` +
+      `  confirmation-rate=${padRight(pct(o.retrieval.confirmationRate), 7)} (${o.retrieval.confirmedCount}/${o.retrieval.positiveCount})`,
+  );
+  lines.push(
+    `  no-answer    false-positive-rate=${padRight(pct(o.retrieval.falsePositiveRate), 7)} (${o.retrieval.falsePositiveCount}/${o.retrieval.negativeCount} negative probes; lower is better)`,
   );
   const overallDeltas = [
     deltaByMetric.get("overall.extraction.recall"),
     deltaByMetric.get("overall.extraction.precision"),
     deltaByMetric.get("overall.retrieval.hitRate"),
     deltaByMetric.get("overall.retrieval.confirmationRate"),
+    deltaByMetric.get("overall.retrieval.falsePositiveRate"),
   ].filter((d): d is MetricDelta => d !== undefined);
   if (overallDeltas.length > 0) {
     lines.push("  vs baseline:");

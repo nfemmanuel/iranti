@@ -53,6 +53,9 @@ export function diffReports(baseline: BenchReport | null, current: BenchReport):
     { name: "overall.extraction.precision", get: (r) => r.overall.extraction.precision },
     { name: "overall.retrieval.hitRate", get: (r) => r.overall.retrieval.hitRate },
     { name: "overall.retrieval.confirmationRate", get: (r) => r.overall.retrieval.confirmationRate },
+    // NaN-coalesced (not ?? 0) so a baseline generated before the negative-
+    // probe class existed reports "(no baseline)" instead of a fake +delta.
+    { name: "overall.retrieval.falsePositiveRate", get: (r) => r.overall.retrieval.falsePositiveRate ?? NaN },
   ];
 
   for (const p of current.personas) {
@@ -61,6 +64,7 @@ export function diffReports(baseline: BenchReport | null, current: BenchReport):
       { name: `${p.persona}.extraction.precision`, get: (r) => r.personas.find((x) => x.persona === p.persona)?.extraction.precision ?? NaN },
       { name: `${p.persona}.retrieval.hitRate`, get: (r) => r.personas.find((x) => x.persona === p.persona)?.retrieval.hitRate ?? NaN },
       { name: `${p.persona}.retrieval.confirmationRate`, get: (r) => r.personas.find((x) => x.persona === p.persona)?.retrieval.confirmationRate ?? NaN },
+      { name: `${p.persona}.retrieval.falsePositiveRate`, get: (r) => r.personas.find((x) => x.persona === p.persona)?.retrieval.falsePositiveRate ?? NaN },
     );
   }
 

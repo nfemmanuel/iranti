@@ -186,6 +186,20 @@
       "entityHints": [{ "entityType": "project", "entityId": "churn-model" }],
       "expectedKeys": ["decision:features-get-versioned-in-the-feature-st"],
       "note": "decision recall"
+    },
+    {
+      "query": "Which GPU cluster does the training job run on?",
+      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }],
+      "expectedKeys": [],
+      "negative": true,
+      "note": "NEGATIVE PROBE — GPUs/compute infrastructure are never mentioned in this transcript; any returned fact is a false positive."
+    },
+    {
+      "query": "What drift-detection threshold did the team pick for production monitoring?",
+      "entityHints": [{ "entityType": "project", "entityId": "churn-model" }],
+      "expectedKeys": [],
+      "negative": true,
+      "note": "NEGATIVE PROBE — drift detection and production monitoring are never mentioned in this transcript."
     }
   ]
 }

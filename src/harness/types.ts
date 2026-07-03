@@ -47,7 +47,15 @@ export interface CorpusProbe {
   entityHints: Array<{ entityType: string; entityId: string }>;
   // Keys (normalizeKey-equivalent) of the gold fact(s) this probe expects to
   // find in the returned facts[]. Usually one; occasionally two-related.
+  // Empty (and `negative: true`) for negative probes.
   expectedKeys: string[];
+  // A negative (no-answer) probe: the question sounds plausible for this
+  // persona but its correct answer is NOT in the corpus. Any fact returned
+  // for it is a false positive. Measures whether retrieval knows when it
+  // doesn't know — the failure mode that produced 5/5 confident wrong
+  // answers in the external 0.4.1 bench's trick queries. Scored as
+  // falsePositiveRate (scorer.ts), excluded from hit/confirmation rates.
+  negative?: boolean;
   note?: string;
 }
 

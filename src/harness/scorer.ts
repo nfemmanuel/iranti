@@ -1,10 +1,12 @@
 // Scoring — Layer 0b.
 //
-// Turns raw ingest/probe output into the four named metrics (PRD §5 D3):
+// Turns raw ingest/probe output into the named metrics (PRD §5 D3):
 //   1. extraction recall & precision (vs gold facts)
 //   2. retrieval hit-rate (+ rank)
 //   3. confirmation rate (top-of-list, not just "somewhere in the list")
-//   4. determinism (scored separately, in harness.test.ts, by diffing two
+//   4. false-positive rate on negative (no-answer) probes — whether
+//      retrieval knows when it doesn't know (see types.ts CorpusProbe).
+//   5. determinism (scored separately, in harness.test.ts, by diffing two
 //      full report JSONs — not a per-persona metric, so it isn't here).
 
 import { normalizeKey } from "../library/keys.js";
@@ -106,24 +108,47 @@ export function scoreExtraction(
 export interface ProbeScore {
   query: string;
   expectedKeys: string[];
+  negative: boolean;
   // 1-based rank of the first matching expected fact in returnedFacts, or
   // null if none of the expected keys appear anywhere in the returned list.
+  // Always null for negative probes (they expect nothing).
   rank: number | null;
-  hit: boolean; // rank !== null
-  confirmed: boolean; // rank === 1
+  hit: boolean; // rank !== null (always false for negative probes)
+  confirmed: boolean; // rank === 1 (always false for negative probes)
+  // Negative probes only: attend() returned one or more facts for a query
+  // whose answer is not in the corpus. There is no relevance score exposed
+  // on returned facts today, so ANY returned fact counts — this is the
+  // honest (harsh) definition; a future no-answer/thresholding feature
+  // improves this number measurably. Always false for positive probes.
+  falsePositive: boolean;
 }
 
 export interface RetrievalScore {
-  probeCount: number;
+  probeCount: number; // all probes, positive + negative
+  positiveCount: number;
   hitCount: number;
   confirmedCount: number;
-  hitRate: number; // hitCount / probeCount
-  confirmationRate: number; // confirmedCount / probeCount
+  hitRate: number; // hitCount / positiveCount
+  confirmationRate: number; // confirmedCount / positiveCount
+  negativeCount: number;
+  falsePositiveCount: number;
+  falsePositiveRate: number; // falsePositiveCount / negativeCount (lower is better)
   perProbe: ProbeScore[];
 }
 
 export function scoreRetrieval(result: PersonaIngestResult): RetrievalScore {
   const perProbe: ProbeScore[] = result.probeOutcomes.map((outcome) => {
+    if (outcome.negative) {
+      return {
+        query: outcome.query,
+        expectedKeys: outcome.expectedKeys,
+        negative: true,
+        rank: null,
+        hit: false,
+        confirmed: false,
+        falsePositive: outcome.returnedFacts.length > 0,
+      };
+    }
     const expectedNormalized = new Set(outcome.expectedKeys.map(normalizeKey));
     let rank: number | null = null;
     for (let i = 0; i < outcome.returnedFacts.length; i++) {
@@ -136,22 +161,36 @@ export function scoreRetrieval(result: PersonaIngestResult): RetrievalScore {
     return {
       query: outcome.query,
       expectedKeys: outcome.expectedKeys,
+      negative: false,
       rank,
       hit: rank !== null,
       confirmed: rank === 1,
+      falsePositive: false,
     };
   });
 
-  const probeCount = perProbe.length;
-  const hitCount = perProbe.filter((p) => p.hit).length;
-  const confirmedCount = perProbe.filter((p) => p.confirmed).length;
+  const positives = perProbe.filter((p) => !p.negative);
+  const negatives = perProbe.filter((p) => p.negative);
+  const positiveCount = positives.length;
+  const hitCount = positives.filter((p) => p.hit).length;
+  const confirmedCount = positives.filter((p) => p.confirmed).length;
+  const negativeCount = negatives.length;
+  const falsePositiveCount = negatives.filter((p) => p.falsePositive).length;
 
   return {
-    probeCount,
+    probeCount: perProbe.length,
+    positiveCount,
     hitCount,
     confirmedCount,
-    hitRate: probeCount > 0 ? hitCount / probeCount : 0,
-    confirmationRate: probeCount > 0 ? confirmedCount / probeCount : 0,
+    // Hit/confirmation rates are over POSITIVE probes only — negative probes
+    // expect nothing, so counting them here would deflate both rates with
+    // guaranteed misses instead of measuring what they actually measure
+    // (falsePositiveRate below).
+    hitRate: positiveCount > 0 ? hitCount / positiveCount : 0,
+    confirmationRate: positiveCount > 0 ? confirmedCount / positiveCount : 0,
+    negativeCount,
+    falsePositiveCount,
+    falsePositiveRate: negativeCount > 0 ? falsePositiveCount / negativeCount : 0,
     perProbe,
   };
 }
@@ -209,15 +248,22 @@ export function buildOverallReport(personas: PersonaReport[]): OverallReport {
   };
 
   const probeCount = personas.reduce((s, p) => s + p.retrieval.probeCount, 0);
+  const positiveCount = personas.reduce((s, p) => s + p.retrieval.positiveCount, 0);
   const hitCount = personas.reduce((s, p) => s + p.retrieval.hitCount, 0);
   const confirmedCount = personas.reduce((s, p) => s + p.retrieval.confirmedCount, 0);
+  const negativeCount = personas.reduce((s, p) => s + p.retrieval.negativeCount, 0);
+  const falsePositiveCount = personas.reduce((s, p) => s + p.retrieval.falsePositiveCount, 0);
 
   const retrieval: RetrievalScore = {
     probeCount,
+    positiveCount,
     hitCount,
     confirmedCount,
-    hitRate: probeCount > 0 ? hitCount / probeCount : 0,
-    confirmationRate: probeCount > 0 ? confirmedCount / probeCount : 0,
+    hitRate: positiveCount > 0 ? hitCount / positiveCount : 0,
+    confirmationRate: positiveCount > 0 ? confirmedCount / positiveCount : 0,
+    negativeCount,
+    falsePositiveCount,
+    falsePositiveRate: negativeCount > 0 ? falsePositiveCount / negativeCount : 0,
     perProbe: personas.flatMap((p) => p.retrieval.perProbe),
   };
 

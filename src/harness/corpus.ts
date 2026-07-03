@@ -31,6 +31,24 @@ function assertCorpusShape(value: unknown, file: string): asserts value is Corpu
   if (!Array.isArray(c["probes"]) || c["probes"].length === 0) {
     throw new Error(`Corpus file ${file} ("${c["persona"]}") has no probes.`);
   }
+  // Authoring guard: a negative probe with expectedKeys (or a positive probe
+  // without them) is a corpus bug that would silently corrupt both the
+  // false-positive metric and hit-rate. Fail loudly at load time instead.
+  for (const probe of c["probes"] as Array<Record<string, unknown>>) {
+    const isNegative = probe["negative"] === true;
+    const expectedKeys = probe["expectedKeys"];
+    const hasKeys = Array.isArray(expectedKeys) && expectedKeys.length > 0;
+    if (isNegative && hasKeys) {
+      throw new Error(
+        `Corpus file ${file} ("${c["persona"]}"): negative probe "${String(probe["query"])}" must have empty expectedKeys.`,
+      );
+    }
+    if (!isNegative && !hasKeys) {
+      throw new Error(
+        `Corpus file ${file} ("${c["persona"]}"): probe "${String(probe["query"])}" has no expectedKeys and is not marked negative.`,
+      );
+    }
+  }
 }
 
 // Load every *.json file in bench/corpus, sorted by filename so run order

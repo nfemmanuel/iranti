@@ -17,7 +17,7 @@ iranti-core has no way to answer "did this change help or hurt memory quality" e
 ## 3. Goals & non-goals
 
 **Goals**
-- A deterministic default run (`pnpm bench`) that measures extraction recall/precision, retrieval hit-rate, and confirmation rate against a fixed multi-persona corpus, with zero LLM calls.
+- A deterministic default run (`pnpm bench`) that measures extraction recall/precision, retrieval hit-rate, confirmation rate, and no-answer false-positive rate against a fixed multi-persona corpus, with zero LLM calls.
 - A baseline file that the runner diffs against, so "improved/regressed" is a printed number, not an opinion.
 - A corpus that actively guards against overfitting to one developer's voice: at least 3 distinct technical personas + 1 messy conversationalist, none modeled on the author's own style.
 - Run-to-run byte-identical output in heuristic mode (the determinism thesis applied to measurement itself).
@@ -47,11 +47,12 @@ iranti-core has no way to answer "did this change help or hurt memory quality" e
 
 - **D1 — Deterministic-only default.** The default `pnpm bench` run forces `IRANTI_EXTRACTOR=heuristic` and uses only keyword+graph retrieval (attend's existing default path — no LLM is wired into attend regardless). Why: a measurement instrument that isn't reproducible is worse than no instrument — it produces numbers nobody can trust or diff. *Rejected:* defaulting to `local` mode, which would make CI runs depend on a live Ollama endpoint and produce non-reproducible numbers (LLM output isn't guaranteed byte-stable even at temperature 0 across model/endpoint versions).
 - **D2 — Corpus authored from scratch, four distinct voices, not derived from any one user's real chats.** The explicit risk named in the mandate is overfitting the harness (and, later, the memory system) to how one person writes. Personas are deliberately differentiated: terse/technical (backend), casual/UI-focused (frontend), jargon-dense (data/ML), and unstructured/tangential (messy conversationalist). *Rejected:* one large corpus scored in aggregate only — aggregate-only would hide a regression that helps one persona while hurting another.
-- **D3 — Three metrics + one integrity check, not one composite score.**
+- **D3 — Four metrics + one integrity check, not one composite score.**
   1. **Extraction recall/precision** — match gold facts on normalized `(entityType/entityId, key)`; value match scored separately (leniently — substring/normalized-equality, not exact byte match) since phrasing varies.
-  2. **Retrieval hit-rate** — after ingesting a transcript, run each probe query through `attend()` and check whether the expected fact appears anywhere in `facts[]` (report *rank*, i.e. position in the returned list, not just boolean hit).
-  3. **Confirmation rate** — the named product KPI ("confirm, don't discover"): fraction of probes where the gold fact is in the TOP-returned set (rank 1, i.e. the first fact) — the standard a user could act on without scanning. This is stricter than hit-rate by design; the gap between the two numbers IS the "how much scanning is required" measurement.
-  4. **Determinism check** — two consecutive runs produce byte-identical JSON (timestamps excluded from the compared payload). This one is asserted; the other three are reported, not gated — see D5.
+  2. **Retrieval hit-rate** — after ingesting a transcript, run each probe query through `attend()` and check whether the expected fact appears anywhere in `facts[]` (report *rank*, i.e. position in the returned list, not just boolean hit). Computed over positive probes only.
+  3. **Confirmation rate** — the named product KPI ("confirm, don't discover"): fraction of positive probes where the gold fact is in the TOP-returned set (rank 1, i.e. the first fact) — the standard a user could act on without scanning. This is stricter than hit-rate by design; the gap between the two numbers IS the "how much scanning is required" measurement.
+  4. **False-positive rate on negative probes** — each persona carries 2 no-answer ("negative") probes: plausible-sounding questions whose correct answer is NOT in the corpus. A false positive = any fact returned for such a probe (no relevance threshold exists to fall below today, so this is the honest, harsh definition). No-answer queries measure whether retrieval knows when it doesn't know — the failure mode that produced 5/5 confident false positives in the external benchmark of iranti 0.4.1's trick queries. Expected to score badly today; exists so a future no-answer/thresholding feature has a day-one measurable target. Excluded from hit-rate/confirmation-rate denominators (they would otherwise be guaranteed misses polluting a different measurement).
+  5. **Determinism check** — two consecutive runs produce byte-identical JSON (timestamps excluded from the compared payload). This one is asserted; the other four are reported, not gated — see D5.
   *Rejected:* a single blended score — it would hide exactly the recall-vs-precision and hit-rate-vs-confirmation-rate tradeoffs the harness exists to expose.
 - **D4 — Baseline diff, not pass/fail thresholds.** `bench/baseline.json` is checked in; the runner always prints current-vs-baseline per-metric deltas. An `--update-baseline` flag regenerates it. Why: iranti has no real users yet and today's numbers are known to be low (Layer 0/2b has no entity resolution) — a hardcoded quality floor would either be trivially met (useless) or fail the gate on legitimate zero-feature-change commits (noisy). The diff format is what makes "improved/regressed" concrete without pretending we know what "good" is yet.
 - **D5 — The spec asserts nothing about absolute quality, only determinism.** `harness.test.ts` must stay green regardless of how bad recall/precision/confirmation are today — the acceptance bar for this PRD is "the instrument works and is honest," not "memory is good." The ONE hard assertion is run-to-run determinism, because that's a property of the harness itself (a bug in the harness), not of memory quality. This keeps the gate usable in CI immediately, before any quality work has landed.
@@ -68,7 +69,8 @@ None. No changes to `facts`/`entities`/`graph` schema, no changes to `attend()`/
 
 - [ ] `docs/prds/phases/layer-0b-harness.md` (this file) exists, accepted.
 - [ ] `bench/corpus/*.json` contains 4 persona transcripts (backend-API dev, frontend dev, data/ML person, messy conversationalist), each ~10–15 messages, each with ≥2 correction cases and ≥2 alias references, each with gold facts and probe queries.
-- [ ] `src/harness/` implements: corpus loader, per-persona fresh-PGlite ingest (through real `attend`/`write`), scorer (recall/precision/hit-rate/confirmation-rate), baseline differ, console reporter.
+- [ ] `src/harness/` implements: corpus loader, per-persona fresh-PGlite ingest (through real `attend`/`write`), scorer (recall/precision/hit-rate/confirmation-rate/false-positive-rate), baseline differ, console reporter.
+- [ ] Each persona corpus includes ≥2 negative (no-answer) probes, and the scorer reports `falsePositiveRate` from them (D3.4).
 - [ ] `bench/baseline.json` checked in, generated from the current (Layer 0a) main state.
 - [ ] `pnpm bench` runs green end-to-end, writes `bench/latest.json`, prints a per-persona + overall console table with baseline deltas.
 - [ ] Determinism: running `pnpm bench` twice produces identical `bench/latest.json` content modulo timestamps (asserted inside `harness.test.ts`, not just manually observed).
@@ -98,4 +100,5 @@ None. This is a new, additive measurement capability; it does not change any doc
 ## Changelog
 - 2026-07-03 — proposed
 - 2026-07-03 — accepted (part of the overnight mandate; Layer 0b sibling to Layer 0)
+- 2026-07-03 — addendum before merge: negative-probe class + `falsePositiveRate` metric (D3.4), prompted by the external ai-mem benchmark of iranti 0.4.1 scoring 5/5 confident false positives on no-answer trick queries
 - 2026-07-03 — shipped (see commits in `feat/layer0b-harness`; numbers recorded in the harness's own `bench/baseline.json` and PR description)

@@ -157,6 +157,20 @@
       "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }],
       "expectedKeys": ["constraint:whatever-we-build-next-has-to-send-a-sla"],
       "note": "constraint recall"
+    },
+    {
+      "query": "who's on call for the widget this week?",
+      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }],
+      "expectedKeys": [],
+      "negative": true,
+      "note": "NEGATIVE PROBE — on-call/rotations are never mentioned in this transcript; any returned fact is a false positive. Lowercase in-voice phrasing."
+    },
+    {
+      "query": "what port does the widget's admin panel run on?",
+      "entityHints": [{ "entityType": "project", "entityId": "internal-tools-dashboard" }],
+      "expectedKeys": [],
+      "negative": true,
+      "note": "NEGATIVE PROBE — ports and an admin panel are never mentioned in this transcript."
     }
   ]
 }
