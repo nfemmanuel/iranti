@@ -1,6 +1,6 @@
 # PRD: Layer 0d — Rules & Preferences Enforcement (situational relevance)
 
-**Status:** accepted
+**Status:** shipped
 **Phase:** Layer 0d (YC foundation track) · **Date:** 2026-07-03 · **Author:** NF + Claude
 **Related:** master PRD (standing-preferences claim — the product owner's #1 feature), Layer 0 PRD (`layer-0-foundation.md` — project scoping this feature must respect), Layer 0b PRD (`layer-0b-harness.md` — the measurement instrument this PRD's efficacy gate extends), Layer 0c PRD (`layer-0c-entity-resolution.md` — the alias/rank-1 invariant this PRD must not break). Pre-authorized by the overnight mandate as the #1 feature.
 
@@ -117,20 +117,20 @@ export interface CorpusRule {
 
 ## 7. Acceptance criteria
 
-- [ ] `docs/prds/phases/layer-0d-rules-enforcement.md` (this file) exists, accepted, committed before any code.
-- [ ] `getRulesForAttend` accepts an optional `message` param; all 5 existing call sites with no message (`rules.test.ts` x3, `projects-isolation.test.ts` x2) and the `mcp-tools.test.ts` no-message rules test are UNCHANGED and green.
-- [ ] Situational relevance: a rule below the critical-priority floor is injected when the message shares vocabulary with the rule's text, and is NOT injected on an unrelated message — proven by both a unit test and the host-simulation suite.
-- [ ] Critical-priority rules (>=100) are always injected regardless of message content, in scope.
-- [ ] `MAX_RULES_PER_ATTEND` budget enforced; most relevant/highest-priority rules win when more qualify than the budget.
-- [ ] Cross-project isolation preserved: a rule from project A never fires in project B (existing `projects-isolation.test.ts` case untouched + new host-simulation case).
-- [ ] Alias rank-1 invariant and one-id-one-entry dedup (Layer 0c) unmodified and still green (`aliases.test.ts` 17/17 unaffected — rules and facts are independent tiers in `attend()`).
-- [ ] Harness: each of the 4 persona corpora gains `rules` (seed) + `ruleProbes` (2-3 positive + 1-2 negative) — additive JSON only, zero bytes changed in existing `messages`/`goldFacts`/`probes`/`ruleProbes`-absent fields (`git diff` reviewed line-by-line).
-- [ ] `scorer.ts`/`baseline.ts`/`report.ts` wired for `ruleRelevanceRate`/`ruleNoiseRate`, same pattern as `falsePositiveRate`.
-- [ ] `pnpm bench`: existing metrics (extraction recall/precision, hitRate, confirmationRate, falsePositiveRate — overall + per-persona) print `0.0pp` vs `bench/baseline.json` (unchanged, not regenerated). New rule metrics print real day-one numbers with `(no baseline)`.
-- [ ] Determinism: two consecutive `pnpm bench` runs byte-identical (existing hard assertion), still passes with rules wired in.
-- [ ] Host-simulation suite (`src/tests/host-simulation.test.ts`) covers, end-to-end through `attend()`/`iranti_write_rule`: (i) write → relevant situation surfaces it ranked within budget; (ii) unrelated situation → not injected; (iii) deactivated → not injected; (iv) cross-project leak check (project A rule never in project B); (v) restart persistence (module-reset pattern, `persistence.test.ts` style).
-- [ ] `pnpm typecheck` (tsc) and `pnpm lint` exit 0.
-- [ ] All named gate suites green on PGlite: new rules-relevance suite, host-simulation suite, `aliases` 17/17, `projects-isolation` 16/16, `extractor` 27/27, `mcp-tools` 51/51, `facts` 33/33, `it-runs` 1/1.
+- [x] `docs/prds/phases/layer-0d-rules-enforcement.md` (this file) exists, accepted, committed before any code.
+- [x] `getRulesForAttend` accepts an optional `message` param; all 5 existing call sites with no message (`rules.test.ts` x3, `projects-isolation.test.ts` x2) and the `mcp-tools.test.ts` no-message rules test are UNCHANGED and green.
+- [x] Situational relevance: a rule below the critical-priority floor is injected when the message shares vocabulary with the rule's text, and is NOT injected on an unrelated message — proven by both a unit test and the host-simulation suite.
+- [x] Critical-priority rules (>=100) are always injected regardless of message content, in scope.
+- [x] `MAX_RULES_PER_ATTEND` budget enforced; most relevant/highest-priority rules win when more qualify than the budget.
+- [x] Cross-project isolation preserved: a rule from project A never fires in project B (existing `projects-isolation.test.ts` case untouched + new host-simulation case).
+- [x] Alias rank-1 invariant and one-id-one-entry dedup (Layer 0c) unmodified and still green (`aliases.test.ts` 17/17 unaffected — rules and facts are independent tiers in `attend()`).
+- [x] Harness: each of the 4 persona corpora gains `rules` (seed) + `ruleProbes` (2-3 positive + 1-2 negative) — additive JSON only, zero bytes changed in existing `messages`/`goldFacts`/`probes`/`ruleProbes`-absent fields (`git diff` reviewed line-by-line).
+- [x] `scorer.ts`/`baseline.ts`/`report.ts` wired for `ruleRelevanceRate`/`ruleNoiseRate`, same pattern as `falsePositiveRate`.
+- [x] `pnpm bench`: existing metrics (extraction recall/precision, hitRate, confirmationRate, falsePositiveRate — overall + per-persona) print `0.0pp` vs `bench/baseline.json` (unchanged, not regenerated). New rule metrics print real day-one numbers with `(no baseline)`.
+- [x] Determinism: two consecutive `pnpm bench` runs byte-identical (existing hard assertion), still passes with rules wired in.
+- [x] Host-simulation suite (`src/tests/host-simulation.test.ts`) covers, end-to-end through `attend()`/`iranti_write_rule`: (i) write → relevant situation surfaces it ranked within budget; (ii) unrelated situation → not injected; (iii) deactivated → not injected; (iv) cross-project leak check (project A rule never in project B); (v) restart persistence (module-reset pattern, `persistence.test.ts` style).
+- [x] `pnpm typecheck` (tsc) and `pnpm lint` exit 0.
+- [x] All named gate suites green on PGlite: new rules-relevance suite (10/10), host-simulation suite (3/3), `aliases` 17/17, `projects-isolation` 16/16, `extractor` 27/27, `mcp-tools` 53/53 (up from 51 — 2 new situational-relevance cases added, additive), `facts` 33/33, `it-runs` 1/1.
 
 ## 8. Deltas from the master PRD
 
@@ -156,3 +156,4 @@ None. Standing rules/preferences are explicitly named in the master PRD as the p
 ## Changelog
 - 2026-07-03 — proposed
 - 2026-07-03 — accepted (pre-authorized by the overnight mandate — rules & preferences enforcement is the product owner's #1 feature; PRD written and committed before any implementation code per the PRD-first process rule)
+- 2026-07-03 — shipped (branch `feat/rules-enforcement`, commits ddf1f79..4c23dca). Day-one bench: `ruleRelevanceRate` 100% (12/12), `ruleNoiseRate` 0% (0/8), both `(no baseline)` as expected for a new metric; every pre-existing metric 0.0pp vs `bench/baseline.json` (untouched). Found and fixed a real hang while building the host-simulation suite: `closeDb()` called immediately after `attend()` without a grace period raced attend's fire-and-forget post-response chain on PGlite's single connection, leaving a query promise pending forever instead of rejecting — fixed with the same 300ms grace period `harness/ingest.ts`/`projects-isolation.test.ts` already use. `mcp-tools.test.ts` grew from 51 to 53 tests (2 new attend()-level situational-relevance cases, additive, not a regression).
