@@ -12,7 +12,7 @@ only copy of anything. Continue from the first unchecked item in "Next".
 
 ---
 
-## Status: PHASE 3 — Feature 6 (checkpoints & project-state) in progress
+## Status: ✅ COMPLETE — all 6 features merged; whole-system pass green; morning report at docs/reviews/2026-07-03-overnight-build.md
 
 ## Done
 - [x] Mandate activated + recorded to iranti memory (`overnight_mandate_active`)
@@ -108,15 +108,20 @@ only copy of anything. Continue from the first unchecked item in "Next".
       worked around consistently in tests, root fix tracked as backlog RULE-2;
       tokenizer short-token floor (S3/PR never match) disclosed + tracked as RULE-1.
 
+- [x] **Feature 6/6 MERGED → main @ `c96ab0de`** — `feat/checkpoints`, 6 commits.
+      Checkpoint stage/status metadata (no migration) + project-state rollup + tool +
+      first-attend-after-gap surfacing. Only review of the night with 0 BLOCKER + 0 MAJOR;
+      5 MINOR all fixed (id tiebreakers, mid-turn latch guard, field caps, stdio-only
+      guarantee documented, promised stage tests written). Builder honestly corrected the
+      mandate's AX-7 mislabel (PRD Decision 0).
+- [x] **End-of-night whole-system pass GREEN** — fresh clone → cold install → it-runs 1/1 →
+      persistence 1/1 → bench all 7 metrics 0.0pp byte-deterministic from the clone →
+      host-sim 3/3 → isolation 16/16. Layer 0 PRD closed out shipped (criterion 6 partial:
+      init bin = cutover item) @ `ecb38f6d`.
+- [x] **Morning report:** `docs/reviews/2026-07-03-overnight-build.md`
+
 ## In-flight
-- [ ] Feature 6 — `feat/checkpoints`: task-completion checkpoint criteria + stages +
-      AX-7 status-as-checkpoint-tag + project-state rollup ("where did we leave off?",
-      including after a long gap). Scope doc first.
-- [ ] Feature 4 — `feat/entity-resolution`: alias→entity links (the "textbook" fix) → gauntlet → merge
-- [ ] Feature 5 — `feat/rules-enforcement`: situational rules & preferences enforcement → gauntlet → merge
-- [ ] Feature 6 — `feat/checkpoints`: checkpoint criteria + project-state rollup → gauntlet → merge
-- [ ] End-of-night whole-system pass (fresh clone, cold zero-infra boot, integration stress, doc re-audit)
-- [ ] Morning report: `docs/reviews/2026-07-03-overnight-build.md`
+(nothing — mandate complete)
 
 ## Risks / notes
 - Full test suite requires Postgres (docker) for DB-backed tests — env has no server; DB suites
