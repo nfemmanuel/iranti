@@ -38,7 +38,7 @@ describe("learnAlias", () => {
       entityId,
       "Where's the figma file?",
     );
-    expect(resolved).toBe("shared-url:abc123def456");
+    expect(resolved?.factKey).toBe("shared-url:abc123def456");
   });
 
   it("re-learning the same alias text upserts rather than duplicating", async () => {
@@ -130,7 +130,7 @@ describe("resolveAlias", () => {
       entityId,
       "  WHERE'S    THE   RECONCILIATION   DOC  ?",
     );
-    expect(resolved).toBe("shared-url:bbb");
+    expect(resolved?.factKey).toBe("shared-url:bbb");
   });
 
   it("prefers the longest matching alias when multiple match the same message", async () => {
@@ -155,7 +155,7 @@ describe("resolveAlias", () => {
       entityId,
       "where's the reconciliation doc?",
     );
-    expect(resolved).toBe("shared-url:long-target");
+    expect(resolved?.factKey).toBe("shared-url:long-target");
   });
 
   it("does not resolve an archived alias", async () => {
@@ -248,7 +248,7 @@ describe("project scoping (Layer 0 D6/D7)", () => {
       "default",
       projectA,
     );
-    expect(resolvedInA).toBe("shared-url:project-a-secret");
+    expect(resolvedInA?.factKey).toBe("shared-url:project-a-secret");
   });
 
   it("resolves across a combined project pair via the effective project set", async () => {
@@ -276,6 +276,6 @@ describe("project scoping (Layer 0 D6/D7)", () => {
       "default",
       effectiveForB,
     );
-    expect(resolved).toBe("shared-url:combined-target");
+    expect(resolved?.factKey).toBe("shared-url:combined-target");
   });
 });

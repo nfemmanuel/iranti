@@ -113,6 +113,86 @@ describe("attend — write side (extraction)", () => {
   });
 });
 
+describe("attend — entity resolution (Layer 0c aliases)", () => {
+  it("learns an alias from an explicit nickname declaration and resolves it on a later, alias-only query", async () => {
+    const entityId = randomUUID();
+
+    // Same shape as the frontend-dev corpus's real case: a URL followed by
+    // an explicit "everyone calls it 'X'" nickname declaration.
+    await attend({
+      entityHints: [{ entityType: "project", entityId }],
+      message:
+        "See https://www.figma.com/file/abc123/mocks for the latest mocks — everyone just calls it 'the figma file' in Slack.",
+      agentName: "test-agent",
+    });
+
+    // A later query using ONLY the alias — no URL, no shared tokens with the
+    // artifact's value — must resolve to the URL fact via alias lookup.
+    const result = await attend({
+      entityHints: [{ entityType: "project", entityId }],
+      message: "Where's the figma file?",
+    });
+
+    const aliasHit = result.facts.find((f) => f.key === "alias:the-figma-file");
+    expect(aliasHit).toBeDefined();
+    expect(aliasHit!.value).toBe("https://www.figma.com/file/abc123/mocks");
+    // Guaranteed inclusion means it wins the rank-1 slot (PRD D6).
+    expect(result.facts[0]!.key).toBe("alias:the-figma-file");
+  });
+
+  it("an alias learned for one entity does not resolve for a different entity", async () => {
+    const entityIdA = randomUUID();
+    const entityIdB = randomUUID();
+
+    await attend({
+      entityHints: [{ entityType: "project", entityId: entityIdA }],
+      message:
+        "See https://example.com/doc-a for the spec — I keep calling it 'the spec doc' in standup, same thing.",
+    });
+
+    const resultB = await attend({
+      entityHints: [{ entityType: "project", entityId: entityIdB }],
+      message: "Where's the spec doc?",
+    });
+
+    expect(resultB.facts.some((f) => f.key === "alias:the-spec-doc")).toBe(false);
+  });
+
+  it("does not learn an alias when the message declares a nickname but no artifact is present", async () => {
+    const entityId = randomUUID();
+
+    await attend({
+      entityHints: [{ entityType: "project", entityId }],
+      message: "decision: we're calling it 'the widget' internally, don't let that confuse you",
+    });
+
+    const { listAliasesForEntity } = await import("../library/aliases.js");
+    const aliases = await listAliasesForEntity("project", entityId);
+    expect(aliases).toHaveLength(0);
+  });
+
+  it("re-declaring the same alias for a different artifact updates the resolution (upsert, not duplicate)", async () => {
+    const entityId = randomUUID();
+
+    await attend({
+      entityHints: [{ entityType: "project", entityId }],
+      message: "See https://example.com/v1 here — everyone calls it 'the doc'.",
+    });
+    await attend({
+      entityHints: [{ entityType: "project", entityId }],
+      message: "See https://example.com/v2 here — everyone calls it 'the doc'.",
+    });
+
+    const result = await attend({
+      entityHints: [{ entityType: "project", entityId }],
+      message: "where's the doc?",
+    });
+
+    const aliasHit = result.facts.find((f) => f.key === "alias:the-doc");
+    expect(aliasHit?.value).toBe("https://example.com/v2");
+  });
+});
+
 describe("attend — read side", () => {
   it("returns rules for hinted entities plus system/global", async () => {
     const entityId = randomUUID();

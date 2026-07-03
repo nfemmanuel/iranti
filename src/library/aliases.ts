@@ -114,9 +114,14 @@ export async function learnAlias(
 // ---------------------------------------------------------------------------
 
 // Resolve a message against an entity's known active aliases. Returns the
-// target factKey of the FIRST active alias whose normalized phrase appears
-// as a substring of the normalized message, or undefined if none match.
-// Exact substring lookup only — no fuzzy/similarity scoring (G1).
+// FULL matched alias row (not just the target factKey) so callers can also
+// use the alias's own normalized phrase — e.g. mcp/tools/attend.ts's read
+// path synthesizes a retrievable "alias:<slug>" key from it, matching how
+// the Layer 0b bench corpus's gold facts model an alias (a distinct
+// key/value pair alongside the artifact it names, both holding the same
+// value — see docs/prds/phases/layer-0c-entity-resolution.md's bench
+// verification). Exact substring lookup only — no fuzzy/similarity scoring
+// (G1).
 //
 // When multiple aliases match, the longest alias phrase wins (most specific
 // match) — deterministic given a fixed alias set, and avoids a short alias
@@ -128,7 +133,7 @@ export async function resolveAlias(
   message: string,
   tenantId: string = "default",
   project: string | string[] = "default",
-): Promise<string | undefined> {
+): Promise<EntityAlias | undefined> {
   if (!message) return undefined;
   const normalizedMessage = normalizeAlias(message);
   if (!normalizedMessage) return undefined;
@@ -151,7 +156,7 @@ export async function resolveAlias(
     }
   }
 
-  return best?.factKey;
+  return best;
 }
 
 // List every alias (active and archived) for an entity — correctability/audit.

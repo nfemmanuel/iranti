@@ -31,15 +31,18 @@ import {
 import { upsertEntity } from "../../library/entities.js";
 import {
   VALID_SURFACES,
+  findFact,
   readArchivedValuesByFactIds,
   readFactsByIds,
   readRelevantFactsByEntity,
   writeFact,
 } from "../../library/facts.js";
 import { getRulesForAttend } from "../../library/rules.js";
+import { learnAlias, resolveAlias } from "../../library/aliases.js";
+import { normalizeKey } from "../../library/keys.js";
 import { graph } from "../../graph/index.js";
 import { extractor } from "../../extract/index.js";
-import { EXTRACT_SOURCE, extractArtifacts } from "../extractor.js";
+import { EXTRACT_SOURCE, extractAliases, extractArtifacts } from "../extractor.js";
 import { ensureContext } from "../context.js";
 import { writeAttendLog, persistMetricCounters } from "../../library/attend-log.js";
 import { incrementTurnCount } from "../../library/sessions.js";
@@ -423,6 +426,24 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
         project: currentProject,
       });
     }
+
+    // Layer 0c (entity resolution): learn any nickname declared for an
+    // artifact in THIS message ("everyone calls it 'the figma file'").
+    // Deterministic, heuristic-only — see extractAliases's header comment.
+    // Aliases land on the same primary entity the artifact itself did, and
+    // are project-scoped exactly like the fact they point to (currentProject,
+    // never the effective/combined set — matches writeFact's write-attribution
+    // rule, §11.6 of the Layer 0 PRD).
+    for (const alias of extractAliases(input.message!, artifacts)) {
+      await learnAlias({
+        entityType: primary.entityType,
+        entityId: primary.entityId,
+        rawAlias: alias.rawAlias,
+        factKey: alias.factKey,
+        source: EXTRACT_SOURCE,
+        project: currentProject,
+      });
+    }
   }
 
   // ---- READ side: rules + recent facts + checkpoint ------------------------
@@ -438,16 +459,62 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
     : MAX_FACTS_PER_ENTITY;
 
   const factsPerEntity = await Promise.all(
-    hints.map((h) =>
-      readRelevantFactsByEntity(
+    hints.map(async (h) => {
+      const relevant = await readRelevantFactsByEntity(
         h.entityType,
         h.entityId,
         perEntityCap,
         input.message,
         "default",
         effectiveProjectIds,
-      ),
-    ),
+      );
+
+      // Layer 0c (entity resolution): an alias shares zero tokens with the
+      // fact it names by definition ("the figma file" vs a Figma URL), so
+      // keyword-overlap scoring in readRelevantFactsByEntity structurally
+      // cannot find it. Resolve any alias the message matches for this
+      // entity and GUARANTEE a hit is present — prepended, so it wins the
+      // entity's own rank-1 slot — rather than hoping it scores well
+      // competing against the keyword-ranked candidates (see PRD D6).
+      if (!input.message) return relevant;
+      const matchedAlias = await resolveAlias(
+        h.entityType,
+        h.entityId,
+        input.message,
+        "default",
+        effectiveProjectIds,
+      );
+      if (!matchedAlias) return relevant;
+
+      const targetFact = await findFact(
+        h.entityType,
+        h.entityId,
+        matchedAlias.factKey,
+        "default",
+        effectiveProjectIds,
+      );
+      if (!targetFact) return relevant;
+
+      // Surface the alias itself as a retrievable "alias:<slug>" fact
+      // (normalizeKey("alias:" + the learned phrase) — e.g. "the figma
+      // file" -> "alias:the-figma-file"), carrying the target's current
+      // value. This is a synthesized VIEW of the target fact, not a second
+      // stored row: the underlying source of truth stays the one fact at
+      // matchedAlias.factKey (still returned too, via `relevant`, under its
+      // own key). Reuses the target's id so graph edge recording continues
+      // to accrue against the real fact even when it's found by nickname.
+      const aliasFact: Fact = {
+        ...targetFact,
+        key: normalizeKey(`alias:${matchedAlias.alias}`),
+      };
+      if (relevant.some((f) => f.key === aliasFact.key)) return relevant;
+
+      // Prepend and re-cap at perEntityCap: the alias hit takes the rank-1
+      // slot (it's the one deterministic thing we KNOW answers the query),
+      // pushing out the lowest-ranked keyword match if the list was already
+      // full — never silently growing the per-entity budget.
+      return [aliasFact, ...relevant].slice(0, perEntityCap);
+    }),
   );
   const ranked = factsPerEntity
     .flat()
