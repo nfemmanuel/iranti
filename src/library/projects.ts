@@ -53,7 +53,17 @@ import {
 // target doesn't exist yet — detection must never throw), lowercases a
 // Windows drive letter (C:\ and c:\ are the same volume), converts `\` to
 // `/`, and strips one trailing slash.
+//
+// "default" is a reserved SENTINEL, not a path — it's the schema column
+// default and every function parameter's fallback value throughout the
+// project-scoping surface (facts.ts, rules.ts, media.ts, graph/index.ts all
+// default an omitted project to the literal string "default"). Passing it
+// through the path-resolution logic below would resolve it against the
+// CURRENT WORKING DIRECTORY (path.resolve("default") -> "<cwd>/default"),
+// silently corrupting the one value every un-migrated / pre-Layer-0 row
+// actually holds. So it is special-cased as already-canonical.
 export function normalizeProjectId(absPath: string): string {
+  if (absPath === "default") return absPath;
   let resolved: string;
   try {
     resolved = realpathSync(absPath);
@@ -214,7 +224,7 @@ export async function resolveCurrentProject(cwd?: string): Promise<ProjectRow> {
 }
 
 export async function getProjectById(id: string): Promise<ProjectRow | undefined> {
-  return db.query.projects.findFirst({ where: eq(projects.id, id) });
+  return db.query.projects.findFirst({ where: eq(projects.id, normalizeProjectId(id)) });
 }
 
 // ---------------------------------------------------------------------------

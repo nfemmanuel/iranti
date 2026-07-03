@@ -31,6 +31,7 @@ import {
   knowledgeEdges,
   type KnowledgeEdge,
 } from "../db/schema.js";
+import { normalizeProjectId } from "../library/projects.js";
 
 // Drizzle's relational query builder (db.query.*) can drop complex or()
 // conditions inside where(). All queries here use the standard query
@@ -143,7 +144,7 @@ export class PostgresGraphBackend implements GraphBackend {
     weight?: number;
   }): Promise<KnowledgeEdge> {
     const tenantId = edge.tenantId ?? "default";
-    const project = edge.project ?? "default";
+    const project = normalizeProjectId(edge.project ?? "default");
     const w = edge.weight ?? 1;
 
     // Canonicalize undirected relations so addEdge and getEdge agree on the row key.
@@ -195,8 +196,9 @@ export class PostgresGraphBackend implements GraphBackend {
     relation: string,
     delta = 1,
     tenantId = "default",
-    project = "default",
+    projectInput = "default",
   ): Promise<void> {
+    const project = normalizeProjectId(projectInput);
     // Canonicalize undirected relations so (A,B) and (B,A) are the same row.
     // governs and about edges are directed — preserve their direction.
     const isUndirected = relation === "co_access" || relation === "co_write";
@@ -242,7 +244,7 @@ export class PostgresGraphBackend implements GraphBackend {
     project: string | string[] = "default",
   ): Promise<KnowledgeEdge[]> {
     const { depth = 1, minWeight = 0, limit = 20 } = opts;
-    const projectIds = Array.isArray(project) ? project : [project];
+    const projectIds = (Array.isArray(project) ? project : [project]).map(normalizeProjectId);
     // Built as an explicit IN (...) list of individually-bound params rather
     // than `= ANY(${array})`: postgres-js and PGlite may not agree on array
     // parameter serialization through a tagged-template placeholder, and
@@ -417,8 +419,9 @@ export class PostgresGraphBackend implements GraphBackend {
     b: GraphNode,
     relation: string,
     tenantId = "default",
-    project = "default",
+    projectInput = "default",
   ): Promise<KnowledgeEdge | undefined> {
+    const project = normalizeProjectId(projectInput);
     // Canonicalize undirected relations so (A,B) and (B,A) find the same row.
     const [src, tgt] =
       relation === "co_access" || relation === "co_write" ? canonicalize(a, b) : [a, b];

@@ -22,9 +22,11 @@ ALTER TABLE "extraction_cache" DROP CONSTRAINT "extraction_cache_pk";--> stateme
 ALTER TABLE "extraction_cache" ADD CONSTRAINT "extraction_cache_tenant_id_input_hash_regime_signature_pk" PRIMARY KEY("tenant_id","input_hash","regime_signature");--> statement-breakpoint
 ALTER TABLE "facts" ADD COLUMN "project" text DEFAULT 'default' NOT NULL;--> statement-breakpoint
 ALTER TABLE "knowledge_edges" ADD COLUMN "project" text DEFAULT 'default' NOT NULL;--> statement-breakpoint
+ALTER TABLE "media_objects" ADD COLUMN "project" text DEFAULT 'default' NOT NULL;--> statement-breakpoint
 ALTER TABLE "rules" ADD COLUMN "project" text DEFAULT 'default' NOT NULL;--> statement-breakpoint
 CREATE INDEX "project_links_a_idx" ON "project_links" USING btree ("project_a","is_active");--> statement-breakpoint
 CREATE INDEX "project_links_b_idx" ON "project_links" USING btree ("project_b","is_active");--> statement-breakpoint
+CREATE INDEX "media_objects_project_entity_idx" ON "media_objects" USING btree ("project","entity_type","entity_id");--> statement-breakpoint
 CREATE INDEX "rules_project_entity_active_idx" ON "rules" USING btree ("project","entity_type","entity_id","is_active");--> statement-breakpoint
 ALTER TABLE "facts" ADD CONSTRAINT "facts_tenant_project_entity_key_uniq" UNIQUE("tenant_id","project","entity_type","entity_id","key");--> statement-breakpoint
 ALTER TABLE "knowledge_edges" ADD CONSTRAINT "knowledge_edges_canonical_pair_uniq" UNIQUE("tenant_id","project","source_type","source_id","target_type","target_id","relation");

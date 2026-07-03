@@ -8,13 +8,15 @@ import { and, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import { mediaObjects, type MediaObject, type NewMediaObject } from "../db/schema.js";
 import { normalizeKey } from "./keys.js";
+import { normalizeProjectId } from "./projects.js";
 
 // See facts.ts's projectFilter — same rationale.
 function projectFilter(project: string | string[]) {
   const ids = Array.isArray(project) ? project : [project];
-  return ids.length === 1
-    ? eq(mediaObjects.project, ids[0]!)
-    : inArray(mediaObjects.project, ids);
+  const normalized = ids.map(normalizeProjectId);
+  return normalized.length === 1
+    ? eq(mediaObjects.project, normalized[0]!)
+    : inArray(mediaObjects.project, normalized);
 }
 
 // Merge a patch into the existing metadata jsonb (top-level keys overwrite,
@@ -43,7 +45,7 @@ export interface WriteMediaInput {
 
 export async function writeMediaObject(input: WriteMediaInput): Promise<MediaObject> {
   const tenantId = input.tenantId ?? "default";
-  const project = input.project ?? "default";
+  const project = normalizeProjectId(input.project ?? "default");
   const normalizedKey_ = normalizeKey(input.key);
 
   const [row] = await db

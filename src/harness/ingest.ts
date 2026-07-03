@@ -90,6 +90,18 @@ export async function runPersonaIngest(
 
     const { attend } = await import("../mcp/tools/attend.js");
 
+    // Layer 0 (D5/D6): attend() scopes every write to ctx.project.id, resolved
+    // from process.cwd() (this repo's own git root when the harness runs
+    // locally/in CI — resolveCurrentProject() is deterministic so calling it
+    // again here yields the SAME id attend() already used internally).
+    // Without this, the harness's direct DB reads below (readFactsByEntity)
+    // would default to the "default" project scope and find nothing, even
+    // though attend() itself still ingests and retrieves correctly (attend's
+    // OWN return value is project-scoped consistently within itself — only
+    // this harness's side-channel verification reads were affected).
+    const { resolveCurrentProject } = await import("../library/projects.js");
+    const harnessProject = (await resolveCurrentProject()).id;
+
     // ---- Ingest: feed every transcript message through attend(). ----------
     // Using attend() (not write()) for every message mirrors how a real host
     // would call iranti: the message is passed as `message`, entity hints as
@@ -141,7 +153,8 @@ export async function runPersonaIngest(
     const countAllFacts = async (): Promise<number> => {
       let total = 0;
       for (const ref of entityRefs.values()) {
-        total += (await readFactsByEntity(ref.entityType, ref.entityId)).length;
+        total += (await readFactsByEntity(ref.entityType, ref.entityId, "default", harnessProject))
+          .length;
       }
       return total;
     };
@@ -157,7 +170,12 @@ export async function runPersonaIngest(
     // ---- Collect every fact written for every entity the transcript touched.
     const allFactsAfterIngest: ProbeFactResult[] = [];
     for (const ref of entityRefs.values()) {
-      const facts = await readFactsByEntity(ref.entityType, ref.entityId);
+      const facts = await readFactsByEntity(
+        ref.entityType,
+        ref.entityId,
+        "default",
+        harnessProject,
+      );
       for (const f of facts) {
         allFactsAfterIngest.push({
           entity: `${f.entityType}/${f.entityId}`,

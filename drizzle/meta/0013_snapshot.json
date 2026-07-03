@@ -998,6 +998,13 @@
           "notNull": true,
           "default": "'default'"
         },
+        "project": {
+          "name": "project",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'default'"
+        },
         "entity_type": {
           "name": "entity_type",
           "type": "text",
@@ -1054,6 +1061,33 @@
           "columns": [
             {
               "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "entity_type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "entity_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "media_objects_project_entity_idx": {
+          "name": "media_objects_project_entity_idx",
+          "columns": [
+            {
+              "expression": "project",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

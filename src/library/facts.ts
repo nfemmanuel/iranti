@@ -34,6 +34,7 @@ import {
 import { getScore } from "./source-reliability.js";
 import { graph } from "../graph/index.js";
 import { normalizeKey, withRawKey } from "./keys.js";
+import { normalizeProjectId } from "./projects.js";
 
 // ---------------------------------------------------------------------------
 // Project scoping (Layer 0, D6/D7)
@@ -45,9 +46,17 @@ import { normalizeKey, withRawKey } from "./keys.js";
 // that never pass a project default to the literal string "default" — the
 // same fallback tenantId already uses — so every pre-existing call site
 // (library callers, tests) keeps working unchanged.
+//
+// Every id is run through normalizeProjectId — mirroring normalizeKey's role
+// at the fact-key write boundary — so a caller that passes a differently
+// cased/slashed but equivalent path always lands on the same scope as the
+// resolver's own (already-normalized) output.
 function projectFilter(project: string | string[]) {
   const ids = Array.isArray(project) ? project : [project];
-  return ids.length === 1 ? eq(facts.project, ids[0]!) : inArray(facts.project, ids);
+  const normalized = ids.map(normalizeProjectId);
+  return normalized.length === 1
+    ? eq(facts.project, normalized[0]!)
+    : inArray(facts.project, normalized);
 }
 
 // ---------------------------------------------------------------------------
@@ -192,8 +201,10 @@ export async function writeFact(
   const tenantId = input.tenantId ?? "default";
   // Layer 0 (D7): writes always target the single current project — never
   // the effective (combined) set. Combine affects reads, not write
-  // attribution (§11.6 of the PRD).
-  const project = input.project ?? "default";
+  // attribution (§11.6 of the PRD). Normalized at the write boundary (same
+  // rationale as projectFilter above) so a raw caller-supplied path always
+  // lands in the same scope a normalized read will later look for.
+  const project = normalizeProjectId(input.project ?? "default");
 
   // Normalize the key at the write boundary (AX-1). All lookups, the advisory
   // lock, and the stored row use normalizedKey; the original spelling is

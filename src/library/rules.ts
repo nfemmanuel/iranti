@@ -40,12 +40,18 @@ import { and, desc, eq, inArray, or } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import { rules, type NewRule, type Rule } from "../db/schema.js";
+import { normalizeProjectId } from "./projects.js";
 
 // See facts.ts's projectFilter — same rationale: a single-element effective
-// set degenerates to a plain equality.
+// set degenerates to a plain equality, and every id is normalized so a
+// caller-supplied path always lands on the same scope as the resolver's own
+// (already-normalized) output.
 function projectFilter(project: string | string[]) {
   const ids = Array.isArray(project) ? project : [project];
-  return ids.length === 1 ? eq(rules.project, ids[0]!) : inArray(rules.project, ids);
+  const normalized = ids.map(normalizeProjectId);
+  return normalized.length === 1
+    ? eq(rules.project, normalized[0]!)
+    : inArray(rules.project, normalized);
 }
 
 // ---------------------------------------------------------------------------
@@ -72,7 +78,11 @@ export async function writeRule(
 ): Promise<Rule> {
   const [rule] = await db
     .insert(rules)
-    .values({ ...input, isActive: true })
+    .values({
+      ...input,
+      project: normalizeProjectId(input.project ?? "default"),
+      isActive: true,
+    })
     .returning();
 
   return rule!;
