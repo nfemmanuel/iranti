@@ -115,8 +115,28 @@ export function renderReport(report: BenchReport, deltas: MetricDelta[]): string
   ].filter((d): d is MetricDelta => d !== undefined);
   if (overallDeltas.length > 0) {
     lines.push("  vs baseline:");
+    // Layer 0f changed falsePositiveRate's DEFINITION (any-fact -> matched-
+    // only). Against a pre-0f baseline (detectable: the raw metric has no
+    // baseline value while falsePositiveRate does) the delta mixes the
+    // definition change with real behavior — flag it so a reader scanning
+    // only this block can't mistake it for pure improvement under a
+    // constant yardstick (review finding). Self-retiring: disappears once
+    // the baseline is regenerated with both definitions present.
+    const fpDelta = deltaByMetric.get("overall.retrieval.falsePositiveRate");
+    const fpRawDelta = deltaByMetric.get("overall.retrieval.falsePositiveRateRaw");
+    const mixedDefinitionDelta =
+      fpDelta !== undefined &&
+      fpDelta.baseline !== null &&
+      fpRawDelta !== undefined &&
+      fpRawDelta.baseline === null;
     for (const d of overallDeltas) {
-      lines.push(`    ${d.metric}: ${d.baseline === null ? "(no baseline)" : pct(d.baseline)} -> ${pct(d.current)}  [${fmtDelta(d)}]`);
+      const caveat =
+        mixedDefinitionDelta && d.metric === "overall.retrieval.falsePositiveRate"
+          ? "  (definition changed in 0f: baseline=any-fact, current=matched-only — not a constant yardstick)"
+          : "";
+      lines.push(
+        `    ${d.metric}: ${d.baseline === null ? "(no baseline)" : pct(d.baseline)} -> ${pct(d.current)}  [${fmtDelta(d)}]${caveat}`,
+      );
     }
   }
   lines.push("=".repeat(72));

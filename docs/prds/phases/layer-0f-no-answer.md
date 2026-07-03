@@ -1,6 +1,6 @@
 # PRD: Layer 0f — No-Answer Honesty (Matched vs Ambient Retrieval)
 
-**Status:** accepted
+**Status:** shipped
 **Phase:** Layer 0f (YC foundation track) · **Date:** 2026-07-03 · **Author:** Claude (drafted post-mandate; awaiting NF acceptance)
 **Related:** Layer 0b PRD D3.4 (falsePositiveRate metric), the external ai-mem benchmark of iranti 0.4.1 (5/5 confident false positives on trick queries), master PRD "confirm, don't discover".
 
@@ -59,7 +59,8 @@ None — implements §"confirm, don't discover" more faithfully.
 ## 9. Risks & open questions
 
 - Hosts could over-trust `matched` (keyword overlap ≠ semantic answer) — matched is a lexical claim, not a truth claim, and the measured 75% residual on no-answer probes quantifies exactly how often name-vocabulary overlap over-claims on plausible-but-unanswerable questions. Closing it requires semantic understanding (embeddings or an opt-in LLM tier), both outside G1's deterministic core — the residual is the measured case for that future tier, mirroring how the alias probes motivated entity resolution.
-- The stricter key-token rule can UNDER-claim: a fact that answers via value-only overlap ranks first but reads matched:false. Not scored by any current metric; accepted as the conservative side of the trade (an ambient label on a true answer is safer than a matched label on a wrong one).
+- The stricter key-token rule can UNDER-claim — and this is **already live in the reference corpus, not hypothetical** (review finding): the messy-conversationalist probe "What does the new tool need to do when it fails?" ranks `constraint:whatever-we-build-next-has-to-send-a-sla` at #1 (hit, confirmed — a fully correct answer) yet labels it `matched: false`, because the query overlaps the fact's *value* ("fails") but shares no token with its truncated key. Not scored by any current metric; accepted as the conservative side of the trade (an ambient label on a true answer is safer than a matched label on a wrong one), but any future matched-quality metric should score exactly this case.
+- **Short-identifier cross-matching (review finding):** `hasKeyTokenMatch`'s key side has no length floor, and digit-bearing 2-char tokens (s3, r2, version numbers like "16") pass the message side's RULE-1 rule — so a fact keyed `decision:migrate-to-s3-storage` reads `matched: true` against a semantically unrelated "is s3 down for anyone else?" on that single shared token. Only one benign incidental case exists in the corpus today (a Postgres "16"); documented here as a live mechanism alongside the domain-noun ceiling rather than left implicit.
 - Whether `iranti_search`/`iranti_query` should get the same flag in this phase or a follow-up (lean: follow-up).
 
 ## 10. Verification
@@ -69,3 +70,4 @@ Harness negative probes (primary), unit tests on the score→matched threading, 
 ## Changelog
 - 2026-07-03 — proposed (drafted post-overnight-mandate)
 - 2026-07-03 — accepted: NF chose OPTION B (ambient labeling) via decision prompt
+- 2026-07-03 — shipped (feat/layer0f-no-answer; measured 100%→75.0% matched-fact false positives; review 0 BLOCKER/MAJOR + 3 MINOR all fixed)
