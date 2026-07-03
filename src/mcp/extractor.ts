@@ -112,3 +112,69 @@ export function extractArtifacts(message: string): ExtractedArtifact[] {
 
   return artifacts.slice(0, MAX_EXTRACTS_PER_MESSAGE);
 }
+
+// --------------------------------------------------------------------------
+// Alias extraction — Layer 0c (entity resolution, the "textbook" fix)
+// --------------------------------------------------------------------------
+//
+// Learns a nickname for an artifact mentioned EARLIER IN THE SAME MESSAGE:
+// "See <url> for the mocks — everyone just calls it 'the figma file'."
+// Deterministic, heuristic-only (G1): a fixed set of quoted-nickname regex
+// patterns, applied to the raw message text. The matched alias phrase is
+// bound to the LAST artifact extractArtifacts() found in this same message
+// (order of appearance) — never to prior-turn history, so the result is a
+// pure function of (message, its own extracted artifacts).
+//
+// This module stays pure (no database access) — same contract as
+// extractArtifacts above. The caller (mcp/tools/attend.ts) is responsible
+// for persisting the result via src/library/aliases.ts's learnAlias.
+
+export interface ExtractedAlias {
+  // The nickname phrase as written, e.g. "the figma file". Trimmed, but not
+  // case/whitespace-normalized here — src/library/aliases.ts's learnAlias
+  // owns normalization at the storage boundary (same division of labor as
+  // writeFact/normalizeKey).
+  rawAlias: string;
+  // The fact key of the artifact this alias resolves to (already
+  // content-hash-suffixed by extractArtifacts, e.g. "shared_url:a1b2c3...").
+  factKey: string;
+}
+
+// Quoted-nickname declarative patterns. Each captures the nickname text
+// (without its surrounding quotes). Deliberately narrow and explicit —
+// precision over recall, matching HeuristicExtractor's posture: a missed
+// alias is far cheaper than a wrongly-bound one.
+const ALIAS_PATTERNS: RegExp[] = [
+  // "everyone calls it 'X'", "some people call it 'X'", "people calling it 'X'"
+  /\b(?:everyone|some\s+people|people)\s+(?:just\s+)?call(?:s|ing)?\s+it\s+['"](.+?)['"]/i,
+  // "I keep calling it 'X'", "I just call it 'X'", "I call it 'X'"
+  /\bI\s+(?:keep\s+|just\s+)?call(?:s|ing)?\s+it\s+['"](.+?)['"]/i,
+  // "we're calling it 'X'", "we are calling it 'X'"
+  /\bwe(?:'re| are)\s+calling\s+it\s+['"](.+?)['"]/i,
+  // "aka 'X'", "aka X" (quotes optional; stops at sentence punctuation)
+  /\baka\s+['"]?(.+?)['"]?(?:[.,;]|$)/i,
+];
+
+// Extract at most one alias per message, bound to the LAST artifact
+// extracted from that same message (order of appearance — see header
+// comment). Returns [] when the message declares no artifact to bind to,
+// even if an alias phrase matches — an alias with nothing to point at is
+// not a fact yet (mirrors extractArtifacts's "wrong facts are worse than
+// missing facts" precision stance).
+export function extractAliases(
+  message: string,
+  artifactsInMessage: ExtractedArtifact[],
+): ExtractedAlias[] {
+  if (artifactsInMessage.length === 0) return [];
+
+  for (const pattern of ALIAS_PATTERNS) {
+    const m = message.match(pattern);
+    if (!m?.[1]) continue;
+    const rawAlias = m[1].trim();
+    if (rawAlias.length < 2 || rawAlias.length > 80) continue;
+    const target = artifactsInMessage[artifactsInMessage.length - 1]!;
+    return [{ rawAlias, factKey: target.key }];
+  }
+
+  return [];
+}
