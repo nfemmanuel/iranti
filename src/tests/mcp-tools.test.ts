@@ -140,6 +140,41 @@ describe("attend — entity resolution (Layer 0c aliases)", () => {
     expect(result.facts[0]!.key).toBe("alias:the-figma-file");
   });
 
+  it("never returns two facts sharing one id when the alias AND keyword scoring both find the target", async () => {
+    const entityId = randomUUID();
+
+    await attend({
+      entityHints: [{ entityType: "project", entityId }],
+      message:
+        "See https://www.figma.com/file/xyz789/mocks for the mocks — everyone just calls it 'the design file' here.",
+      agentName: "test-agent",
+    });
+
+    // This query contains BOTH the alias phrase AND strong keyword overlap
+    // with the stored value ("figma", "mocks") — so keyword scoring finds
+    // the target independently of alias resolution. Review finding: the
+    // synthesized alias view reuses the target's id, and two same-id
+    // entries in one response fed self-loop co_access edges
+    // (recordAttendEdges all-pairs) and duplicate corrections
+    // (getCorrections). The alias view must REPLACE the keyword hit.
+    const result = await attend({
+      entityHints: [{ entityType: "project", entityId }],
+      message: "where is the design file with the figma mocks?",
+    });
+
+    // The response type doesn't expose fact ids, so assert the observable
+    // form of the one-id-one-entry invariant: the target's value appears
+    // EXACTLY once, and under the alias key (the keyword-scored duplicate
+    // was replaced, not kept alongside).
+    const urlEntries = result.facts.filter(
+      (f) => f.value === "https://www.figma.com/file/xyz789/mocks",
+    );
+    expect(urlEntries).toHaveLength(1);
+    expect(urlEntries[0]!.key).toBe("alias:the-design-file");
+    // And the alias view wins the rank-1 slot.
+    expect(result.facts[0]!.key).toBe("alias:the-design-file");
+  });
+
   it("an alias learned for one entity does not resolve for a different entity", async () => {
     const entityIdA = randomUUID();
     const entityIdB = randomUUID();

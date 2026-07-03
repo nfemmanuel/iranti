@@ -279,3 +279,59 @@ describe("project scoping (Layer 0 D6/D7)", () => {
     expect(resolved?.factKey).toBe("shared-url:combined-target");
   });
 });
+
+// Review-gauntlet regressions (Layer 0c fresh-eyes findings).
+describe("resolveAlias — boundary + determinism regressions", () => {
+  it("does NOT match an alias as a raw substring inside a longer word", async () => {
+    const entityId = randomUUID();
+    await learnAlias({
+      entityType: "project",
+      entityId,
+      rawAlias: "the doc",
+      factKey: "shared_url:docleak000000",
+      source: "extractor_heuristic",
+    });
+
+    // "the docker file" contains "the doc" as a substring — a plain
+    // .includes() fired here (review finding). Whole-phrase boundary
+    // matching must not.
+    const noMatch = await resolveAlias(
+      "project",
+      entityId,
+      "where is the docker file?",
+    );
+    expect(noMatch).toBeUndefined();
+
+    // The genuine phrase, bounded by punctuation/end, still resolves.
+    const match = await resolveAlias("project", entityId, "where is the doc?");
+    expect(match?.factKey).toBe("shared-url:docleak000000");
+  });
+
+  it("equal-length competing aliases resolve deterministically (oldest wins), repeatedly", async () => {
+    const entityId = randomUUID();
+    // Two aliases, SAME normalized length, both present in the probe
+    // message, pointing at different targets. Without an explicit sort the
+    // winner fell to physical row order (review finding).
+    await learnAlias({
+      entityType: "project",
+      entityId,
+      rawAlias: "alpha docs",
+      factKey: "shared_url:tiebreak-first",
+      source: "extractor_heuristic",
+    });
+    await learnAlias({
+      entityType: "project",
+      entityId,
+      rawAlias: "bravo docs",
+      factKey: "shared_url:tiebreak-second",
+      source: "extractor_heuristic",
+    });
+
+    const message = "compare alpha docs with bravo docs before standup";
+    for (let i = 0; i < 3; i++) {
+      const resolved = await resolveAlias("project", entityId, message);
+      // Oldest-created wins the equal-length tie, every single run.
+      expect(resolved?.factKey).toBe("shared-url:tiebreak-first");
+    }
+  });
+});

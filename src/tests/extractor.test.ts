@@ -196,17 +196,32 @@ describe("extractAliases — precision guardrails", () => {
     expect(aliases[0]!.factKey).toBe(artifacts[1]!.key);
   });
 
-  it("supports 'aka X' shorthand", () => {
-    const message = "check https://example.com/runbook, aka the runbook";
+  it("supports quoted 'aka' shorthand", () => {
+    const message = "check https://example.com/runbook, aka 'the runbook'";
     const artifacts = extractArtifacts(message);
     const aliases = extractAliases(message, artifacts);
     expect(aliases).toHaveLength(1);
     expect(aliases[0]!.rawAlias).toBe("the runbook");
   });
 
+  // Review finding (Layer 0c gauntlet): the earlier UNQUOTED aka form
+  // greedily captured ordinary prose after any bare "aka" up to the next
+  // punctuation and persisted it as an alias forever. Quotes are now
+  // required, matching every other ALIAS_PATTERNS entry. These are the
+  // reviewer's own reproduction sentences, kept as permanent negatives.
+  it("does NOT learn from unquoted 'aka' prose (precision over recall)", () => {
+    const m1 =
+      "See https://x.com/doc — I renamed the branch aka feature/new-thing for clarity";
+    expect(extractAliases(m1, extractArtifacts(m1))).toEqual([]);
+
+    const m2 =
+      "read https://y.com/post about the movie Baka aka Fool yesterday and thought it was great";
+    expect(extractAliases(m2, extractArtifacts(m2))).toEqual([]);
+  });
+
   it("rejects an absurdly long alias phrase (probable false match)", () => {
     const longPhrase = "x".repeat(100);
-    const message = `see https://example.com/thing, aka ${longPhrase}`;
+    const message = `see https://example.com/thing, aka '${longPhrase}'`;
     const artifacts = extractArtifacts(message);
     expect(extractAliases(message, artifacts)).toEqual([]);
   });

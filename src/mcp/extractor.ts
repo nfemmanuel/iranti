@@ -151,8 +151,12 @@ const ALIAS_PATTERNS: RegExp[] = [
   /\bI\s+(?:keep\s+|just\s+)?call(?:s|ing)?\s+it\s+['"](.+?)['"]/i,
   // "we're calling it 'X'", "we are calling it 'X'"
   /\bwe(?:'re| are)\s+calling\s+it\s+['"](.+?)['"]/i,
-  // "aka 'X'", "aka X" (quotes optional; stops at sentence punctuation)
-  /\baka\s+['"]?(.+?)['"]?(?:[.,;]|$)/i,
+  // "aka 'X'" — quotes REQUIRED, matching the other patterns' discipline.
+  // The earlier unquoted form greedily captured ordinary prose after any
+  // bare "aka" up to the next punctuation ("renamed the branch aka
+  // feature/new-thing for clarity" would persist a garbage alias forever)
+  // — review finding; precision over recall.
+  /\baka\s+['"](.+?)['"]/i,
 ];
 
 // Extract at most one alias per message, bound to the LAST artifact

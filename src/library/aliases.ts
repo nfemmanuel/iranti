@@ -148,15 +148,34 @@ export async function resolveAlias(
     ),
   });
 
-  let best: EntityAlias | undefined;
-  for (const candidate of candidates) {
-    if (!normalizedMessage.includes(candidate.alias)) continue;
-    if (!best || candidate.alias.length > best.alias.length) {
-      best = candidate;
-    }
-  }
+  // Deterministic candidate order BEFORE matching (review finding: the DB
+  // query has no ORDER BY, so equal-length ties would otherwise fall to
+  // physical row order — not guaranteed stable across engines or after a
+  // vacuum). Longest alias first (most specific), then oldest, then id.
+  const ordered = [...candidates].sort(
+    (a, b) =>
+      b.alias.length - a.alias.length ||
+      a.createdAt.getTime() - b.createdAt.getTime() ||
+      (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+  );
 
-  return best;
+  for (const candidate of ordered) {
+    if (matchesWholePhrase(normalizedMessage, candidate.alias)) return candidate;
+  }
+  return undefined;
+}
+
+// Whole-phrase containment: the alias must appear bounded by non-word
+// characters (or string edges), not merely as a raw substring — a plain
+// .includes() would let alias "the doc" fire inside "where is the docker
+// file?" (review finding). Still exact/deterministic per G1: no fuzziness,
+// just a boundary rule on both ends of the stored phrase.
+function matchesWholePhrase(message: string, alias: string): boolean {
+  const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(
+    `(?<![\\p{L}\\p{N}_])${escaped}(?![\\p{L}\\p{N}_])`,
+    "u",
+  ).test(message);
 }
 
 // List every alias (active and archived) for an entity — correctability/audit.

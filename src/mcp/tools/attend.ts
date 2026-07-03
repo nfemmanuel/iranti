@@ -500,20 +500,29 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
       // file" -> "alias:the-figma-file"), carrying the target's current
       // value. This is a synthesized VIEW of the target fact, not a second
       // stored row: the underlying source of truth stays the one fact at
-      // matchedAlias.factKey (still returned too, via `relevant`, under its
-      // own key). Reuses the target's id so graph edge recording continues
-      // to accrue against the real fact even when it's found by nickname.
+      // matchedAlias.factKey. Reuses the target's id so graph edge
+      // recording continues to accrue against the real fact even when it's
+      // found by nickname.
       const aliasFact: Fact = {
         ...targetFact,
         key: normalizeKey(`alias:${matchedAlias.alias}`),
       };
       if (relevant.some((f) => f.key === aliasFact.key)) return relevant;
 
+      // The alias view REPLACES any same-id entry keyword scoring found
+      // independently — two entries sharing one fact id must never coexist
+      // in the returned list (review findings: the all-pairs co_access loop
+      // in recordAttendEdges would insert a fact:X<->fact:X self-loop edge,
+      // and getCorrections would emit a duplicate correction for the same
+      // superseded fact). One id, one entry; the alias-keyed view wins the
+      // slot because it is the one deterministic match for the query.
+      const withoutTarget = relevant.filter((f) => f.id !== targetFact.id);
+
       // Prepend and re-cap at perEntityCap: the alias hit takes the rank-1
       // slot (it's the one deterministic thing we KNOW answers the query),
       // pushing out the lowest-ranked keyword match if the list was already
       // full — never silently growing the per-entity budget.
-      return [aliasFact, ...relevant].slice(0, perEntityCap);
+      return [aliasFact, ...withoutTarget].slice(0, perEntityCap);
     }),
   );
   const ranked = factsPerEntity
