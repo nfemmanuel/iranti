@@ -65,7 +65,10 @@ const url = process.env["DATABASE_URL"];
 
 // postgres engine: explicit opt-in, or legacy behavior (DATABASE_URL set,
 // IRANTI_DB_ENGINE unset) so existing setups keep working unchanged.
-const usePostgres = engineEnv === "postgres" || (engineEnv === undefined && !!url);
+// `!engineEnv` (not `=== undefined`): an EMPTY-string IRANTI_DB_ENGINE (a
+// common env-templating artifact) is treated the same as unset, so a
+// configured DATABASE_URL is never silently discarded in favor of PGlite.
+const usePostgres = engineEnv === "postgres" || (!engineEnv && !!url);
 
 if (usePostgres) {
   if (!url) {
@@ -95,10 +98,23 @@ if (usePostgres) {
     process.env["IRANTI_DATA_DIR"] ?? path.join(homedir(), ".iranti", "db"),
   );
 
+  // NOTE (known limitation, reviewed + accepted as follow-up): there is no
+  // inter-process lock on the data dir. Two processes pointed at the same
+  // IRANTI_DATA_DIR would race the open + migrate. The deployment model is
+  // one host = one server process (PRD D3), so this is out of scope for
+  // Layer 0a; a lockfile is tracked as a follow-up in the overnight report.
   const client = new PGlite(dataDir);
   db = drizzlePglite(client, { schema });
+  // Idempotent close: PGlite's close() THROWS on a second call (unlike
+  // postgres-js's pool.end(), which is safely re-entrant). Signal handlers
+  // can double-fire (SIGINT then SIGTERM), so guard here rather than in
+  // every caller — this makes the pool shim's "double-close is safe on both
+  // engines" contract actually true.
+  let closed = false;
   pool = {
     async end() {
+      if (closed) return;
+      closed = true;
       await client.close();
     },
   };
@@ -200,33 +216,52 @@ if (usePostgres) {
   const lastRow = lastRows[0];
   const lastMillis = lastRow ? Number(lastRow.created_at) : undefined;
 
-  for (let i = 0; i < migrations.length; i++) {
-    const migration = migrations[i]!;
-    const tag = journal.entries[i]?.tag;
-    if (lastMillis !== undefined && lastMillis >= migration.folderMillis) continue;
+  // Apply ALL pending migrations inside ONE transaction, exactly like
+  // drizzle's real migrate() does (drizzle-orm/pg-core/dialect.js wraps the
+  // whole pending set in session.transaction). Postgres DDL is
+  // transactional, so a crash between any two statements — or between a
+  // migration's SQL and its bookkeeping INSERT — rolls back atomically on
+  // next boot instead of leaving a half-applied migration that re-fails
+  // forever ("column already exists") and bricks the zero-infra data dir.
+  const pending = migrations
+    .map((migration, i) => ({ migration, tag: journal.entries[i]?.tag }))
+    .filter(({ migration }) => lastMillis === undefined || lastMillis < migration.folderMillis);
 
-    const override = tag !== undefined ? PGLITE_MIGRATION_OVERRIDES[tag] : undefined;
-    if (override) {
-      console.error(
-        `iranti: applying PGlite-adapted statements for migration ${tag} (pgvector not bundled — see connection.ts comment)`,
-      );
+  if (pending.length > 0) {
+    await client.exec("BEGIN");
+    try {
+      for (const { migration, tag } of pending) {
+        const override = tag !== undefined ? PGLITE_MIGRATION_OVERRIDES[tag] : undefined;
+        if (override) {
+          console.error(
+            `iranti: applying PGlite-adapted statements for migration ${tag} (pgvector not bundled — see connection.ts comment)`,
+          );
+        }
+        const statements = override ?? migration.sql;
+        for (const stmt of statements) {
+          if (stmt.trim().length === 0) continue;
+          // Use the raw PGlite client's exec() (simple query protocol), not
+          // db.execute() (extended/prepared protocol via drizzle's session).
+          // Several migrations contain multiple SQL commands within one
+          // statement-breakpoint chunk (e.g. two CREATE FUNCTION bodies in
+          // 0011_ax1_key_normalization.sql) — PGlite's prepared-statement path
+          // rejects "multiple commands into a prepared statement", but exec()
+          // handles multi-command text the same way `psql` would. exec()
+          // participates in the surrounding explicit transaction.
+          await client.exec(stmt);
+        }
+        await db.execute(sql`
+          INSERT INTO ${sql.identifier(migrationsSchema)}.${sql.identifier(migrationsTable)} ("hash", "created_at")
+          VALUES (${migration.hash}, ${migration.folderMillis})
+        `);
+      }
+      await client.exec("COMMIT");
+    } catch (err) {
+      // Roll back the whole pending set so the store stays at its previous
+      // consistent state; rethrow so boot fails loudly rather than half-migrated.
+      await client.exec("ROLLBACK").catch(() => {});
+      throw err;
     }
-    const statements = override ?? migration.sql;
-    for (const stmt of statements) {
-      if (stmt.trim().length === 0) continue;
-      // Use the raw PGlite client's exec() (simple query protocol), not
-      // db.execute() (extended/prepared protocol via drizzle's session).
-      // Several migrations contain multiple SQL commands within one
-      // statement-breakpoint chunk (e.g. two CREATE FUNCTION bodies in
-      // 0011_ax1_key_normalization.sql) — PGlite's prepared-statement path
-      // rejects "multiple commands into a prepared statement", but exec()
-      // handles multi-command text the same way `psql` would.
-      await client.exec(stmt);
-    }
-    await db.execute(sql`
-      INSERT INTO ${sql.identifier(migrationsSchema)}.${sql.identifier(migrationsTable)} ("hash", "created_at")
-      VALUES (${migration.hash}, ${migration.folderMillis})
-    `);
   }
 }
 

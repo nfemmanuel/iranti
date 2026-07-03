@@ -17,6 +17,16 @@
 // This suite deliberately does NOT import ../db/connection.js directly (not
 // even for teardown) so it exercises exactly what a fresh host process
 // would: cold boot, migrate, attend, write, attend.
+//
+// LOAD-BEARING TEST-RUNNER ASSUMPTION: this file mutates process.env
+// (deletes DATABASE_URL, sets IRANTI_DB_ENGINE/IRANTI_DATA_DIR). That is
+// only safe because vitest runs with pool:"forks" — each test FILE gets its
+// own process, so env mutations here cannot leak into other suites (and the
+// dev machine's real DATABASE_URL, loaded by the config's dotenv step,
+// cannot leak back in after we delete it). If the pool is ever switched to
+// "threads" (shared process, shared env), this gate and the Postgres-path
+// suites would silently corrupt each other's env — re-isolate env per test
+// file before making that change. (Same applies to persistence.test.ts.)
 
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
