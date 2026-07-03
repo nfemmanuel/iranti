@@ -25,12 +25,21 @@ only copy of anything. Continue from the first unchecked item in "Next".
       origin/main. Rebuild is now the default branch content. Note: stale `origin/iranti-core`
       pointer left on remote deliberately (preserve; morning cleanup candidate).
 
+## Done (continued)
+- [x] **Feature 1/6 MERGED → main @ `0a545dd1`** — `feat/layer0a-pglite`, 5 commits.
+      Zero-infra runtime: PGlite default engine + postgres opt-in; TRANSACTIONAL auto-migrate
+      (review BLOCKER fixed); it-runs gate + persistence/restart regression; ALL 14 DB suites
+      pass on PGlite (192/192) — full suite now runs with zero infrastructure.
+      Gauntlet: independent verification ✅ · fresh-eyes review (1 BLOCKER + 3 MINOR fixed;
+      1 MAJOR = no cross-process dir lock, documented follow-up) ✅ · stress battery ✅.
+      Extra: latent tx side-effect bug in writeFact found+fixed. Flagged for report:
+      `pnpm db:migrate` broken on Node 24 (.js→.ts specifiers) — pre-existing.
+
 ## In-flight
-- [ ] Feature 1 — `feat/layer0a-pglite`: embedded PGlite engine switch (`src/db/connection.ts`;
-      default=PGlite at data dir, `IRANTI_DB_ENGINE=postgres`+`DATABASE_URL` preserved),
-      auto-migrate on first boot (drizzle pglite migrator), it-runs smoke gate
-      (attend→write→attend in a temp dir, no Postgres, no env), attempt existing DB suites on
-      PGlite (bonus: makes full suite runnable in this env). Then gauntlet → merge.
+- [ ] Feature 2 — `feat/layer0b-harness`: golden-corpus measurement harness (multi-profile,
+      deterministic heuristic-mode default, recall/precision + retrieval hit-rate +
+      confirmation-rate; baseline checked in so improved/regressed is a diff). Scope doc first
+      (PRD-first), then build → gauntlet → merge.
 - [ ] Feature 2 — `feat/layer0b-harness`: golden-corpus measurement harness (multi-profile) → gauntlet → merge
 - [ ] Feature 3 — `feat/project-scoping`: folder-scoped projects + combine/exclude + `iranti init` → gauntlet → merge
 - [ ] Feature 4 — `feat/entity-resolution`: alias→entity links (the "textbook" fix) → gauntlet → merge
