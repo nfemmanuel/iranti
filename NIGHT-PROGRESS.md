@@ -12,7 +12,7 @@ only copy of anything. Continue from the first unchecked item in "Next".
 
 ---
 
-## Status: PHASE 3 — Feature 2 (Layer 0b harness) built, gauntlet running
+## Status: PHASE 3 — Feature 3 (folder-scoped projects) in progress
 
 ## Done
 - [x] Mandate activated + recorded to iranti memory (`overnight_mandate_active`)
@@ -35,22 +35,25 @@ only copy of anything. Continue from the first unchecked item in "Next".
       Extra: latent tx side-effect bug in writeFact found+fixed. Flagged for report:
       `pnpm db:migrate` broken on Node 24 (.js→.ts specifiers) — pre-existing.
 
-- [x] **Feature 2/6 BUILT — `feat/layer0b-harness` @ `35a9347c`, gauntlet in progress.**
-      PRD-first (layer-0b-harness.md, indexed). Background builder completed the core
-      (7 src/harness modules, 4-persona corpus, bench/baseline.json, `pnpm bench` via vitest)
-      but was killed by a session interrupt with work UNCOMMITTED — rescued as `d0b532fb`,
-      then independently verified: typecheck 0, harness 1/1 green, run-to-run deterministic.
-      First new-iranti numbers (heuristic mode, zero LLM): extraction recall 74.5% /
-      precision 100%, retrieval hit-rate 75.0%, confirmation-rate 53.6%.
-      Addendum `35a9347c` (prompted by external ai-mem bench of 0.4.1: 5/5 trick-query
-      false positives): 8 negative no-answer probes + falsePositiveRate metric — day-one
-      honest reading 100% (8/8), the target a future no-answer/thresholding feature must move.
-      Regression (default env): 128 passed / 170 failed = EXACT pre-existing
-      ECONNREFUSED:5435 baseline → no regression from harness changes.
+- [x] **Feature 2/6 MERGED → main @ `3a590af2`** — `feat/layer0b-harness`, 4 commits.
+      Gauntlet: independent verify ✅ (determinism 0.0pp ×2, lint 0, tsc 0) · regression ✅
+      (default env = exact 170-ECONNREFUSED baseline; PGlite isolated-dir suites facts 33/33,
+      mcp-tools 46/46, graph 18/18) · fresh-eyes review ✅ (0 BLOCKER, 3 MAJOR + 2 MINOR,
+      ALL 5 FIXED: scorer slash-truncation, broken --update-baseline flag, 300ms settle race
+      → stability poll, embedded NUL bytes, placeholder gold keys) · post-fix gates ✅.
+      Metrics live: recall 74.5% / precision 100% / hit-rate 75% / confirmation 53.6% /
+      falsePositiveRate 100% (day-one honest no-answer number, from the ai-mem bench lesson).
+      Flagged: naive `IRANTI_DB_ENGINE=pglite pnpm test` (all suites, shared dir) is
+      unsupported (no cross-process dir lock — known Layer 0a follow-up); a botched such run
+      created junk `~/.iranti/db` — preserved, NF should clear before first real boot.
+      Build note: builder agent was killed mid-flight by a session interrupt with work
+      uncommitted; rescued to `d0b532fb`, finished foreground. PRD-first honored
+      (layer-0b-harness.md written before code, now shipped + indexed).
 
 ## In-flight
-- [ ] Feature 2 — gauntlet completion (PGlite-mode full suite + fresh-eyes review) → fix loop → ff-merge → push
-- [ ] Feature 3 — `feat/project-scoping`: folder-scoped projects + combine/exclude + `iranti init` → gauntlet → merge
+- [ ] Feature 3 — `feat/project-scoping`: folder-scoped projects + combine/exclude + `iranti init`
+      (Layer 0 PRD D4–D8 are the contract; adversarial cross-project isolation tests mandatory)
+      → gauntlet → merge
 - [ ] Feature 4 — `feat/entity-resolution`: alias→entity links (the "textbook" fix) → gauntlet → merge
 - [ ] Feature 5 — `feat/rules-enforcement`: situational rules & preferences enforcement → gauntlet → merge
 - [ ] Feature 6 — `feat/checkpoints`: checkpoint criteria + project-state rollup → gauntlet → merge
