@@ -9,11 +9,12 @@
 // matches production: vitest forks give this file its own process.
 
 import { randomUUID } from "crypto";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { pool } from "../db/connection.js";
 import { writeCheckpoint } from "../library/checkpoints.js";
 import { findFact, writeFact } from "../library/facts.js";
 import { getRuleById } from "../library/rules.js";
+import { resolveCurrentProject } from "../library/projects.js";
 import { graph } from "../graph/index.js";
 import { EXTRACT_SOURCE } from "../mcp/extractor.js";
 import { attend, MAX_TOTAL_FACTS } from "../mcp/tools/attend.js";
@@ -28,6 +29,19 @@ import { writeRuleTool } from "../mcp/tools/write-rule.js";
 
 afterAll(async () => {
   await pool.end({ timeout: 5 });
+});
+
+// Layer 0 (D5/D6): every tool call in this file goes through ensureContext(),
+// which resolves the project from process.cwd() (this repo's own git root
+// when running the suite locally/CI) and scopes every write to it. Direct
+// library reads in this file (findFact, getRuleById lookups, etc.) must use
+// the SAME resolved project id, or they'd default to the "default" scope and
+// find nothing — the exact mismatch discovered and fixed in the harness
+// (src/harness/ingest.ts) while building Layer 0.
+let testProject: string;
+
+beforeAll(async () => {
+  testProject = (await resolveCurrentProject()).id;
 });
 
 describe("attend — write side (extraction)", () => {
@@ -124,13 +138,17 @@ describe("attend — read side", () => {
   it("returns the active checkpoint separately, not in the facts list", async () => {
     const entityId = randomUUID();
 
-    await writeCheckpoint("project", entityId, "halfway through migration");
+    await writeCheckpoint("project", entityId, "halfway through migration", {
+      source: "checkpoint",
+      project: testProject,
+    });
     await writeFact({
       entityType: "project",
       entityId,
       key: "tech-stack",
       value: "typescript",
       source: "test",
+      project: testProject,
     });
 
     const result = await attend({
@@ -156,6 +174,7 @@ describe("attend — read side", () => {
           key: `fact-${i}`,
           value: `value-${i}`,
           source: "test",
+          project: testProject,
         });
       }
     }
@@ -192,7 +211,7 @@ describe("write", () => {
 
     expect(result.isCheckpoint).toBe(false);
 
-    const fact = await findFact("project", entityId, "language");
+    const fact = await findFact("project", entityId, "language", "default", testProject);
     expect(fact?.value).toBe("typescript");
     expect(fact?.agentId).not.toBeNull();
     expect(fact?.sessionId).not.toBeNull();
@@ -238,6 +257,7 @@ describe("attend — context window observation (Phase 1.2)", () => {
       key: "deploy-target",
       value: "production runs on fly.io in the ord region",
       source: "test",
+      project: testProject,
     });
 
     const result = await attend({
@@ -258,6 +278,7 @@ describe("attend — context window observation (Phase 1.2)", () => {
       key: "secret-sauce",
       value: "the caching layer uses a two-tier LRU with a redis backstop",
       source: "test",
+      project: testProject,
     });
 
     const result = await attend({
@@ -277,6 +298,7 @@ describe("attend — context window observation (Phase 1.2)", () => {
       key: "framework",
       value: "built on drizzle and postgres.js",
       source: "test",
+      project: testProject,
     });
 
     const result = await attend({
@@ -293,6 +315,7 @@ describe("attend — context window observation (Phase 1.2)", () => {
       "project",
       entityId,
       "midway through the auth refactor, next is token rotation",
+      { source: "checkpoint", project: testProject },
     );
 
     const result = await attend({
@@ -314,6 +337,7 @@ describe("attend — context window observation (Phase 1.2)", () => {
       key: "ver",
       value: "v2",
       source: "test",
+      project: testProject,
     });
 
     const result = await attend({
@@ -337,6 +361,7 @@ describe("attend — keyword relevance scoring", () => {
       key: "ux-design-principles",
       value: "prefer minimal interfaces",
       source: "test",
+      project: testProject,
     });
     await writeFact({
       entityType: "project",
@@ -344,6 +369,7 @@ describe("attend — keyword relevance scoring", () => {
       key: "onboarding-flow",
       value: "three-step wizard for new users",
       source: "test",
+      project: testProject,
     });
 
     // Rate-limiting fact written last (most recent — would lead under pure recency)
@@ -353,6 +379,7 @@ describe("attend — keyword relevance scoring", () => {
       key: "rate-limit-config",
       value: "100 requests per minute",
       source: "test",
+      project: testProject,
     });
 
     const result = await attend({
@@ -386,6 +413,7 @@ describe("attend — keyword relevance scoring", () => {
       key: "older-fact",
       value: "written first",
       source: "test",
+      project: testProject,
     });
     await writeFact({
       entityType: "project",
@@ -393,6 +421,7 @@ describe("attend — keyword relevance scoring", () => {
       key: "newer-fact",
       value: "written second",
       source: "test",
+      project: testProject,
     });
 
     const result = await attend({
@@ -412,6 +441,7 @@ describe("search", () => {
       key: "auth-provider",
       value: "oauth2",
       source: "test",
+      project: testProject,
     });
     await writeFact({
       entityType: "project",
@@ -419,6 +449,7 @@ describe("search", () => {
       key: "db-host",
       value: "localhost",
       source: "test",
+      project: testProject,
     });
 
     const result = await search({ query: "auth-provider" });
@@ -433,6 +464,7 @@ describe("search", () => {
       key: "infra-notes",
       value: "migrate postgres to aurora rds",
       source: "test",
+      project: testProject,
     });
 
     const result = await search({ query: "aurora" });
@@ -457,6 +489,7 @@ describe("search", () => {
       key: "scope-signal",
       value: "entity-a",
       source: "test",
+      project: testProject,
     });
     await writeFact({
       entityType: "project",
@@ -464,6 +497,7 @@ describe("search", () => {
       key: "scope-signal",
       value: "entity-b",
       source: "test",
+      project: testProject,
     });
 
     const result = await search({
@@ -621,6 +655,8 @@ describe("write_issue", () => {
       "project",
       entityId,
       "issue:dark-mode-not-working",
+      "default",
+      testProject,
     );
     const parsed = JSON.parse(fact!.value) as Record<string, unknown>;
     expect(parsed.title).toBe("Dark mode not working");
@@ -645,7 +681,7 @@ describe("write_issue", () => {
       priority: "medium",
     });
 
-    const fact = await findFact("project", entityId, "issue:login-bug");
+    const fact = await findFact("project", entityId, "issue:login-bug", "default", testProject);
     const parsed = JSON.parse(fact!.value) as Record<string, unknown>;
     expect(parsed.status).toBe("resolved");
   });
@@ -663,7 +699,9 @@ describe("archive", () => {
 
     const result = await archive({ factId: written.factId });
     expect(result.archived).toBe(true);
-    expect(await findFact("project", entityId, "to-go")).toBeUndefined();
+    expect(
+      await findFact("project", entityId, "to-go", "default", testProject),
+    ).toBeUndefined();
   });
 
   it("archives by entity + key", async () => {
@@ -681,7 +719,9 @@ describe("archive", () => {
       key: "stale",
     });
     expect(result.archived).toBe(true);
-    expect(await findFact("project", entityId, "stale")).toBeUndefined();
+    expect(
+      await findFact("project", entityId, "stale", "default", testProject),
+    ).toBeUndefined();
   });
 
   it("reports failure cleanly for an unknown entity + key", async () => {
@@ -714,10 +754,12 @@ describe("attend — CORE-15 two-pass peripheral retrieval", () => {
     const factA = await writeFact({
       entityType: "project", entityId: entityIdA,
       key: "stack", value: "TypeScript and Node.js", source: "test",
+      project: testProject,
     });
     const factB = await writeFact({
       entityType: "project", entityId: entityIdB,
       key: "database", value: "PostgreSQL 16", source: "test",
+      project: testProject,
     });
 
     // Create a co_access edge and reinforce it 3× so its weight (3) beats the
@@ -728,6 +770,9 @@ describe("attend — CORE-15 two-pass peripheral retrieval", () => {
         { type: "fact", id: factA.id },
         { type: "fact", id: factB.id },
         "co_access",
+        1,
+        "default",
+        testProject,
       );
     }
 
@@ -755,6 +800,7 @@ describe("attend — CORE-15 two-pass peripheral retrieval", () => {
     await writeFact({
       entityType: "project", entityId,
       key: "runtime", value: "Node 22", source: "test",
+      project: testProject,
     });
 
     const result = await attend({
@@ -771,19 +817,22 @@ describe("attend — CORE-15 two-pass peripheral retrieval", () => {
     const factA = await writeFact({
       entityType: "project", entityId: idA,
       key: "root", value: "root fact", source: "test",
+      project: testProject,
     });
     const factB = await writeFact({
       entityType: "project", entityId: idB,
       key: "middle", value: "middle fact", source: "test",
+      project: testProject,
     });
     const factC = await writeFact({
       entityType: "project", entityId: idC,
       key: "distant", value: "distant fact", source: "test",
+      project: testProject,
     });
 
     // A → B (1 hop), B → C (2nd hop from A).
-    await graph.reinforceEdge({ type: "fact", id: factA.id }, { type: "fact", id: factB.id }, "co_access");
-    await graph.reinforceEdge({ type: "fact", id: factB.id }, { type: "fact", id: factC.id }, "co_access");
+    await graph.reinforceEdge({ type: "fact", id: factA.id }, { type: "fact", id: factB.id }, "co_access", 1, "default", testProject);
+    await graph.reinforceEdge({ type: "fact", id: factB.id }, { type: "fact", id: factC.id }, "co_access", 1, "default", testProject);
 
     const result = await attend({
       entityHints: [{ entityType: "project", entityId: idA }],
@@ -800,16 +849,21 @@ describe("attend — CORE-15 two-pass peripheral retrieval", () => {
     const factP = await writeFact({
       entityType: "project", entityId: entityIdA,
       key: "lang", value: "Go", source: "test",
+      project: testProject,
     });
     const factQ = await writeFact({
       entityType: "project", entityId: entityIdB,
       key: "infra", value: "Kubernetes", source: "test",
+      project: testProject,
     });
 
     await graph.reinforceEdge(
       { type: "fact", id: factP.id },
       { type: "fact", id: factQ.id },
       "co_access",
+      1,
+      "default",
+      testProject,
     );
 
     // Both entities in scope — both facts should land in primary tier.
@@ -841,6 +895,7 @@ describe("attend — CORE-33 token-budgeted injection", () => {
       await writeFact({
         entityType: "project", entityId,
         key: `fact-${i}`, value: `${longVal}-${i}`, source: "test",
+        project: testProject,
       });
     }
 
@@ -868,10 +923,12 @@ describe("attend — CORE-33 token-budgeted injection", () => {
     const factA = await writeFact({
       entityType: "project", entityId: entityIdA,
       key: "prim", value: "x".repeat(12), source: "test",
+      project: testProject,
     });
     const factB = await writeFact({
       entityType: "project", entityId: entityIdB,
       key: "periph", value: "x".repeat(12), source: "test",
+      project: testProject,
     });
 
     // Link A → B so factB surfaces as peripheral.
@@ -879,6 +936,9 @@ describe("attend — CORE-33 token-budgeted injection", () => {
       { type: "fact", id: factA.id },
       { type: "fact", id: factB.id },
       "co_access",
+      1,
+      "default",
+      testProject,
     );
 
     // Budget 4 tokens: enough for the primary fact (ceil(12/4)=3) but not
@@ -908,6 +968,7 @@ describe("attend — CORE-33 token-budgeted injection", () => {
       await writeFact({
         entityType: "project", entityId,
         key: `k${i}`, value: `short value ${i}`, source: "test",
+        project: testProject,
       });
     }
 
@@ -931,11 +992,13 @@ describe("attend — CORE-17 stale-context corrections", () => {
     await writeFact({
       entityType: "project", entityId,
       key: "stack:language", value: "TypeScript is primary", source: "test",
+      project: testProject,
     });
     // ...then overwrite it (archives staleVal, makes currentVal live).
     await writeFact({
       entityType: "project", entityId,
       key: "stack:language", value: "Rust is primary now", source: "test",
+      project: testProject,
     });
 
     // Host passes context that still mentions the old value but not the new one.
@@ -957,6 +1020,7 @@ describe("attend — CORE-17 stale-context corrections", () => {
     await writeFact({
       entityType: "project", entityId,
       key: "stack:infra", value: "Kubernetes clusters", source: "test",
+      project: testProject,
     });
 
     // Context does NOT contain the current value, but there is no archived value
@@ -976,10 +1040,12 @@ describe("attend — CORE-17 stale-context corrections", () => {
     await writeFact({
       entityType: "project", entityId,
       key: "stack:language", value: "Go is primary language", source: "test",
+      project: testProject,
     });
     await writeFact({
       entityType: "project", entityId,
       key: "stack:language", value: "Elixir is primary language", source: "test",
+      project: testProject,
     });
 
     // No context passed — corrections need a comparison window, so none fire.
@@ -995,10 +1061,12 @@ describe("attend — CORE-17 stale-context corrections", () => {
     await writeFact({
       entityType: "project", entityId,
       key: "stack:db", value: "PostgreSQL is the database", source: "test",
+      project: testProject,
     });
     await writeFact({
       entityType: "project", entityId,
       key: "stack:db", value: "CockroachDB is the database", source: "test",
+      project: testProject,
     });
 
     // Context already holds the current value — nothing stale to report.

@@ -7,15 +7,29 @@
 //   4. Concurrency regression: advisory lock prevents duplicate archive snapshots
 
 import { randomUUID } from "crypto";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { pool } from "../db/connection.js";
 import { writeFact, getFactHistoryByKey, findFact } from "../library/facts.js";
 import { writeRule } from "../library/rules.js";
 import { graph } from "../graph/index.js";
 import { attend } from "../mcp/tools/attend.js";
+import { resolveCurrentProject } from "../library/projects.js";
 
 afterAll(async () => {
   await pool.end({ timeout: 5 });
+});
+
+// Layer 0 (D5/D6): attend() resolves the REAL project from process.cwd()
+// (this repo's own git root) via ensureContext(). Direct library calls in
+// this file (writeFact, writeRule, graph.getEdge/getNeighbors) must use the
+// SAME project id or a write made directly bypasses what attend() can see,
+// and a read made directly can't find what attend()'s edge recording wrote
+// (see src/tests/mcp-tools.test.ts and src/harness/ingest.ts for the same
+// fix applied elsewhere).
+let testProject: string;
+
+beforeAll(async () => {
+  testProject = (await resolveCurrentProject()).id;
 });
 
 // ---------------------------------------------------------------------------
@@ -255,8 +269,12 @@ describe("attend — co_access edge recording", () => {
     const entityType = "project";
 
     // Write two facts so attend returns them together.
-    const f1 = await writeFact({ entityType, entityId, key: "fact_a", value: "alpha", source: "test" });
-    const f2 = await writeFact({ entityType, entityId, key: "fact_b", value: "beta", source: "test" });
+    const f1 = await writeFact({
+      entityType, entityId, key: "fact_a", value: "alpha", source: "test", project: testProject,
+    });
+    const f2 = await writeFact({
+      entityType, entityId, key: "fact_b", value: "beta", source: "test", project: testProject,
+    });
 
     await attend({ entityHints: [{ entityType, entityId }] });
 
@@ -267,6 +285,8 @@ describe("attend — co_access edge recording", () => {
       { type: "fact", id: f1.id },
       { type: "fact", id: f2.id },
       "co_access",
+      "default",
+      testProject,
     );
 
     expect(edge).toBeDefined();
@@ -277,8 +297,12 @@ describe("attend — co_access edge recording", () => {
     const entityId = randomUUID();
     const entityType = "project";
 
-    const f1 = await writeFact({ entityType, entityId, key: "fact_x", value: "x1", source: "test" });
-    const f2 = await writeFact({ entityType, entityId, key: "fact_y", value: "y1", source: "test" });
+    const f1 = await writeFact({
+      entityType, entityId, key: "fact_x", value: "x1", source: "test", project: testProject,
+    });
+    const f2 = await writeFact({
+      entityType, entityId, key: "fact_y", value: "y1", source: "test", project: testProject,
+    });
 
     await attend({ entityHints: [{ entityType, entityId }] });
     await attend({ entityHints: [{ entityType, entityId }] });
@@ -289,6 +313,8 @@ describe("attend — co_access edge recording", () => {
       { type: "fact", id: f1.id },
       { type: "fact", id: f2.id },
       "co_access",
+      "default",
+      testProject,
     );
 
     expect(edge).toBeDefined();
@@ -305,12 +331,18 @@ describe("attend — co_access edge recording", () => {
       key: "solo",
       value: "only one fact",
       source: "test",
+      project: testProject,
     });
 
     await attend({ entityHints: [{ entityType: "project", entityId }] });
     await new Promise((r) => setTimeout(r, EDGE_SETTLE_MS));
 
-    const neighbors = await graph.getNeighbors({ type: "fact", id: f1.id });
+    const neighbors = await graph.getNeighbors(
+      { type: "fact", id: f1.id },
+      {},
+      "default",
+      testProject,
+    );
     // f1 appears alone — no CO_ACCESS edges (those require ≥2 facts).
     // governs edges may exist if system/global rules fired alongside f1; that
     // is correct behaviour, not a guard failure.
@@ -335,11 +367,16 @@ describe("attend — governs edge recording", () => {
       text: "governs edge test rule",
       source: "test",
       priority: 0,
+      project: testProject,
     });
 
     // Write two facts.
-    const f1 = await writeFact({ entityType, entityId, key: "g_fact_a", value: "ga", source: "test" });
-    const f2 = await writeFact({ entityType, entityId, key: "g_fact_b", value: "gb", source: "test" });
+    const f1 = await writeFact({
+      entityType, entityId, key: "g_fact_a", value: "ga", source: "test", project: testProject,
+    });
+    const f2 = await writeFact({
+      entityType, entityId, key: "g_fact_b", value: "gb", source: "test", project: testProject,
+    });
 
     await attend({ entityHints: [{ entityType, entityId }] });
     await new Promise((r) => setTimeout(r, EDGE_SETTLE_MS));
@@ -349,11 +386,15 @@ describe("attend — governs edge recording", () => {
       { type: "rule", id: rule.id },
       { type: "fact", id: f1.id },
       "governs",
+      "default",
+      testProject,
     );
     const ruleToF2 = await graph.getEdge(
       { type: "rule", id: rule.id },
       { type: "fact", id: f2.id },
       "governs",
+      "default",
+      testProject,
     );
 
     expect(ruleToF1).toBeDefined();
