@@ -49,6 +49,7 @@ import { extractor } from "../../extract/index.js";
 import { EXTRACT_SOURCE, extractAliases, extractArtifacts } from "../extractor.js";
 import { ensureContext } from "../context.js";
 import { writeAttendLog, persistMetricCounters } from "../../library/attend-log.js";
+import { trackBackground } from "../../library/background.js";
 import { incrementTurnCount } from "../../library/sessions.js";
 import { comprehensionMetrics } from "../../library/conflicts.js";
 import { searchMedia } from "../../library/media.js";
@@ -799,7 +800,9 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
   // (Layer 0, single connection) — running them concurrently was observed to
   // wedge the process during PGlite engine testing. Sequencing them here
   // costs nothing (nobody awaits this chain) and is correct on both engines.
-  void (async () => {
+  // trackBackground (not bare `void`) so closeDb can settle this chain
+  // before tearing down the connection — RULE-2 root fix; see background.ts.
+  trackBackground((async () => {
     if (budgetedFacts.length >= 2 || budgetedRuleList.length > 0) {
       // Layer 0 (D7): edges are tagged to the ATTENDING project (currentProject),
       // never a combined partner — this edge records "these were co-accessed
@@ -854,7 +857,7 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
     lastSyncedMetrics = snapshot;
   })().catch((err: unknown) =>
     console.error("[iranti] async post-attend chain error:", err),
-  );
+  ));
 
   return {
     rules: budgetedRuleList.map((r) => ({

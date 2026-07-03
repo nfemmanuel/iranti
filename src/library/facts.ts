@@ -35,6 +35,7 @@ import { getScore } from "./source-reliability.js";
 import { graph } from "../graph/index.js";
 import { normalizeKey, withRawKey } from "./keys.js";
 import { normalizeProjectId } from "./projects.js";
+import { trackBackground } from "./background.js";
 
 // ---------------------------------------------------------------------------
 // Project scoping (Layer 0, D6/D7)
@@ -379,12 +380,16 @@ export async function writeFact(
     return fact!;
   });
 
+  // trackBackground (not bare `void`) on all three post-commit side effects
+  // so closeDb can settle them before teardown — RULE-2; see background.ts.
   if (postCommitSupersession) {
-    void recordSupersession(
-      postCommitSupersession.newSource,
-      postCommitSupersession.existingSource,
-      tenantId,
-    ).catch((err: unknown) => console.error("[iranti] reliability update error:", err));
+    trackBackground(
+      recordSupersession(
+        postCommitSupersession.newSource,
+        postCommitSupersession.existingSource,
+        tenantId,
+      ).catch((err: unknown) => console.error("[iranti] reliability update error:", err)),
+    );
   }
 
   // Step 5 (Phase 2b): Deep conflict check — fire-and-forget, never blocks.
@@ -394,28 +399,32 @@ export async function writeFact(
   // escalate-and-return-early path (postCommitFactId stays unset there,
   // since no new fact was written — see the escalate branch above).
   if (postCommitFactId) {
-    void runDeepConflictCheck(
-      input.entityType,
-      input.entityId,
-      normalizedKey,
-      input.value,
-      tenantId,
-      project,
-    ).catch((err: unknown) =>
-      console.error("[iranti] deep conflict check error:", err),
+    trackBackground(
+      runDeepConflictCheck(
+        input.entityType,
+        input.entityId,
+        normalizedKey,
+        input.value,
+        tenantId,
+        project,
+      ).catch((err: unknown) =>
+        console.error("[iranti] deep conflict check error:", err),
+      ),
     );
 
     // Step 6 (Phase 2.5, CORE-29): Write-time edges — fire-and-forget.
     // about: fact→entity hub. co_write: fact→prev fact in same session.
-    void recordWriteEdges(
-      postCommitFactId,
-      input.entityType,
-      input.entityId,
-      input.sessionId,
-      tenantId,
-      project,
-    ).catch((err: unknown) =>
-      console.error("[iranti] write edge error:", err),
+    trackBackground(
+      recordWriteEdges(
+        postCommitFactId,
+        input.entityType,
+        input.entityId,
+        input.sessionId,
+        tenantId,
+        project,
+      ).catch((err: unknown) =>
+        console.error("[iranti] write edge error:", err),
+      ),
     );
   }
 

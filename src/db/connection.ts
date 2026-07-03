@@ -47,6 +47,7 @@ import { PGlite } from "@electric-sql/pglite";
 import postgres from "postgres";
 import { homedir } from "node:os";
 import path from "node:path";
+import { settleBackground } from "../library/background.js";
 import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
 import * as schema from "./schema.js";
@@ -115,6 +116,14 @@ if (usePostgres) {
     async end() {
       if (closed) return;
       closed = true;
+      // RULE-2 root fix: settle detached fire-and-forget chains (attend's
+      // post-response chain, writeFact's post-commit side effects) BEFORE
+      // closing the single connection. Closing mid-query leaves that
+      // query's promise pending FOREVER (PGlite neither resolves nor
+      // rejects it) — a real host shutting down right after a turn hung
+      // exactly here. Bounded: after 5s we close anyway (a bounded wait
+      // beats both an unbounded hang and a blind close).
+      await settleBackground(5000);
       await client.close();
     },
   };
@@ -271,5 +280,10 @@ export { db, pool };
 // sites are left as-is (see module comment above) — this is just the
 // preferred name going forward.
 export async function closeDb(): Promise<void> {
+  // Settle here too (not only in the PGlite end shim) so the server-Postgres
+  // path also drains detached chains before pool teardown — postgres-js
+  // survives in-flight teardown, but draining removes the benign-yet-noisy
+  // CONNECTION_ENDED stderr spam from chains losing the race (RULE-2).
+  await settleBackground(5000);
   await pool.end({ timeout: 5 });
 }
