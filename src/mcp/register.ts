@@ -24,6 +24,18 @@ import {
   fetchAliasInputSchema,
 } from "./tools/aliases.js";
 import { ingestMediaTool, ingestMediaInputSchema } from "./tools/ingest-media.js";
+import {
+  projectStatus,
+  projectStatusInputSchema,
+  projectCombine,
+  projectCombineInputSchema,
+  projectUncombine,
+  projectUncombineInputSchema,
+  projectExclude,
+  projectExcludeInputSchema,
+  projectInclude,
+  projectIncludeInputSchema,
+} from "./tools/project.js";
 
 // Phase 3 (CORE-31): default breadcrumb injected into every non-attend result.
 // attend() returns its own nextDue (phase-specific); all other tools get this.
@@ -249,6 +261,103 @@ export function registerIrantiTools(server: McpServer): void {
     async (input) => {
       try {
         return asResult(await ingestMediaTool(input));
+      } catch (err) {
+        return asError(err);
+      }
+    },
+  );
+
+  // Layer 0 (D7/D8): project scoping controls.
+  server.registerTool(
+    "iranti_project_status",
+    {
+      title: "Project status",
+      description:
+        "Show the current project (detected from this server's working " +
+        "directory), how it was detected, whether it's excluded, and which " +
+        "other projects it's actively combined with.",
+      inputSchema: projectStatusInputSchema,
+    },
+    async (input) => {
+      try {
+        return asResult(await projectStatus(input));
+      } catch (err) {
+        return asError(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "iranti_project_combine",
+    {
+      title: "Combine projects",
+      description:
+        "Explicitly share memory between the current project and another " +
+        "one. Reads in either project will then span both. Reversible via " +
+        "iranti_project_uncombine. Isolation is the default — this is an " +
+        "opt-in, stored, reversible action, never a one-way migration.",
+      inputSchema: projectCombineInputSchema,
+    },
+    async (input) => {
+      try {
+        return asResult(await projectCombine(input));
+      } catch (err) {
+        return asError(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "iranti_project_uncombine",
+    {
+      title: "Uncombine projects",
+      description:
+        "Reverse a previous iranti_project_combine. Restores isolation " +
+        "between the two projects. The combine record is kept (not " +
+        "deleted) — combining again reactivates it.",
+      inputSchema: projectUncombineInputSchema,
+    },
+    async (input) => {
+      try {
+        return asResult(await projectUncombine(input));
+      } catch (err) {
+        return asError(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "iranti_project_exclude",
+    {
+      title: "Exclude a project",
+      description:
+        "Mark a project folder as excluded: it still works (writes still " +
+        "succeed), but no combine links are honored for it and its writes " +
+        "are tagged for audit. Reversible via iranti_project_include. " +
+        "Defaults to the current project if none is given.",
+      inputSchema: projectExcludeInputSchema,
+    },
+    async (input) => {
+      try {
+        return asResult(await projectExclude(input));
+      } catch (err) {
+        return asError(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "iranti_project_include",
+    {
+      title: "Re-include a project",
+      description:
+        "Reverse iranti_project_exclude. Any previously active combine " +
+        "links for this project are automatically honored again.",
+      inputSchema: projectIncludeInputSchema,
+    },
+    async (input) => {
+      try {
+        return asResult(await projectInclude(input));
       } catch (err) {
         return asError(err);
       }
