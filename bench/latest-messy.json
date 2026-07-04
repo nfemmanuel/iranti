@@ -1,0 +1,915 @@
+{
+  "personas": [
+    {
+      "persona": "novel-vocab-quenling",
+      "extraction": {
+        "goldCount": 7,
+        "storedCount": 1,
+        "identityHits": 0,
+        "matchedCount": 0,
+        "recall": 0,
+        "valueRecallCount": 0,
+        "valueRecall": 0,
+        "precision": 0,
+        "fabricationProbeCount": 2,
+        "fabricationViolationCount": 0,
+        "fabricationRate": 0,
+        "perFabricationProbe": [
+          {
+            "text": "no decision yet on Fняp vs Zorblex for the next service, still debating honestly",
+            "extractedKeys": [],
+            "violated": false
+          },
+          {
+            "text": "please make sure Zorin double-checked the plovnik badge printer before the offsite",
+            "extractedKeys": [],
+            "violated": false
+          }
+        ]
+      },
+      "retrieval": {
+        "probeCount": 9,
+        "positiveCount": 7,
+        "hitCount": 0,
+        "confirmedCount": 0,
+        "hitRate": 0,
+        "confirmationRate": 0,
+        "negativeCount": 2,
+        "falsePositiveCount": 0,
+        "falsePositiveRate": 0,
+        "falsePositiveRawCount": 2,
+        "falsePositiveRateRaw": 1,
+        "perProbe": [
+          {
+            "query": "What technology did we pick for the quenling layer?",
+            "expectedKeys": [
+              "decision:quenling-layer-technology"
+            ],
+            "negative": false,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": false,
+            "falsePositiveRaw": false
+          },
+          {
+            "query": "What handles cross-cluster handshakes now?",
+            "expectedKeys": [
+              "decision:cross-cluster-handshake-protocol"
+            ],
+            "negative": false,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": false,
+            "falsePositiveRaw": false
+          },
+          {
+            "query": "Can something skip the triple-sign step on the glennwick ledger?",
+            "expectedKeys": [
+              "constraint:glennwick-ledger-triple-sign"
+            ],
+            "negative": false,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": false,
+            "falsePositiveRaw": false
+          },
+          {
+            "query": "What's the barlow threshold?",
+            "expectedKeys": [
+              "correction:barlow-threshold"
+            ],
+            "negative": false,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": false,
+            "falsePositiveRaw": false
+          },
+          {
+            "query": "What caching approach did we try and abandon?",
+            "expectedKeys": [
+              "failed-approach:custom-windlass-caching"
+            ],
+            "negative": false,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": false,
+            "falsePositiveRaw": false
+          },
+          {
+            "query": "Who owns the escalation path for glennwick incidents?",
+            "expectedKeys": [
+              "fact:glennwick-escalation-owner"
+            ],
+            "negative": false,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": false,
+            "falsePositiveRaw": false
+          },
+          {
+            "query": "Are we migrating off Zorblex soon?",
+            "expectedKeys": [
+              "decision:no-zorblex-migration"
+            ],
+            "negative": false,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": false,
+            "falsePositiveRaw": false
+          },
+          {
+            "query": "what's the plovnik budget for next quarter",
+            "expectedKeys": [],
+            "negative": true,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": false,
+            "falsePositiveRaw": true
+          },
+          {
+            "query": "which timezone does Drenna work from",
+            "expectedKeys": [],
+            "negative": true,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": false,
+            "falsePositiveRaw": true
+          }
+        ]
+      },
+      "rules": {
+        "ruleProbeCount": 0,
+        "positiveCount": 0,
+        "relevantCount": 0,
+        "ruleRelevanceRate": 0,
+        "negativeCount": 0,
+        "noiseCount": 0,
+        "ruleNoiseRate": 0,
+        "perRuleProbe": []
+      }
+    },
+    {
+      "persona": "ramble-infra-eng",
+      "extraction": {
+        "goldCount": 8,
+        "storedCount": 0,
+        "identityHits": 0,
+        "matchedCount": 0,
+        "recall": 0,
+        "valueRecallCount": 0,
+        "valueRecall": 0,
+        "precision": 0,
+        "fabricationProbeCount": 2,
+        "fabricationViolationCount": 1,
+        "fabricationRate": 0.5,
+        "perFabricationProbe": [
+          {
+            "text": "no decision yet on the retry count, still arguing about it honestly",
+            "extractedKeys": [],
+            "violated": false
+          },
+          {
+            "text": "make sure someone waters the office plants this week",
+            "extractedKeys": [
+              "preference:someone-waters-the-office-plants-this-we"
+            ],
+            "violated": true
+          }
+        ]
+      },
+      "retrieval": {
+        "probeCount": 10,
+        "positiveCount": 8,
+        "hitCount": 0,
+        "confirmedCount": 0,
+        "hitRate": 0,
+        "confirmationRate": 0,
+        "negativeCount": 2,
+        "falsePositiveCount": 0,
+        "falsePositiveRate": 0,
+        "falsePositiveRawCount": 0,
+        "falsePositiveRateRaw": 0,
+        "perProbe": [
+          {
+            "query": "What database are we using for the billing pipeline?",
+            "expectedKeys": [
+              "decision:database"
+            ],
+            "negative": false,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": false,
+            "falsePositiveRaw": false
+          },
+          {
+            "query": "What queue technology did we end up going with?",
+            "expectedKeys": [
+              "decision:queue-technology"
+            ],
+            "negative": false,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": false,
+            "falsePositiveRaw": false
+          },
+          {
+            "query": "How many retries should the job do?",
+            "expectedKeys": [
+              "correction:retry-count"
+            ],
+            "negative": false,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": false,
+            "falsePositiveRaw": false
+          },
+          {
+            "query": "Can the reconciliation job write straight to the ledger table?",
+            "expectedKeys": [
+              "constraint:reconciliation-ledger-writes"
+            ],
+            "negative": false,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": false,
+            "falsePositiveRaw": false
+          },
+          {
+            "query": "What did we try for rate limiting that didn't pan out?",
+            "expectedKeys": [
+              "failed-approach:custom-rate-limiter"
+            ],
+            "negative": false,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": false,
+            "falsePositiveRaw": false
+          },
+          {
+            "query": "What's the timeout on the payment gateway call?",
+            "expectedKeys": [
+              "constraint:payment-gateway-timeout"
+            ],
+            "negative": false,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": false,
+            "falsePositiveRaw": false
+          },
+          {
+            "query": "Where does the on-call rotation live now?",
+            "expectedKeys": [
+              "decision:oncall-tool"
+            ],
+            "negative": false,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": false,
+            "falsePositiveRaw": false
+          },
+          {
+            "query": "Is there a plan to shard the ledger table?",
+            "expectedKeys": [
+              "decision:no-sharding-plan"
+            ],
+            "negative": false,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": false,
+            "falsePositiveRaw": false
+          },
+          {
+            "query": "what timezone does the team mostly work in",
+            "expectedKeys": [],
+            "negative": true,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": false,
+            "falsePositiveRaw": false
+          },
+          {
+            "query": "who approved the postgres upgrade budget",
+            "expectedKeys": [],
+            "negative": true,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": false,
+            "falsePositiveRaw": false
+          }
+        ]
+      },
+      "rules": {
+        "ruleProbeCount": 0,
+        "positiveCount": 0,
+        "relevantCount": 0,
+        "ruleRelevanceRate": 0,
+        "negativeCount": 0,
+        "noiseCount": 0,
+        "ruleNoiseRate": 0,
+        "perRuleProbe": []
+      }
+    },
+    {
+      "persona": "ramble-product-frontend",
+      "extraction": {
+        "goldCount": 8,
+        "storedCount": 1,
+        "identityHits": 0,
+        "matchedCount": 0,
+        "recall": 0,
+        "valueRecallCount": 1,
+        "valueRecall": 0.125,
+        "precision": 0,
+        "fabricationProbeCount": 2,
+        "fabricationViolationCount": 1,
+        "fabricationRate": 0.5,
+        "perFabricationProbe": [
+          {
+            "text": "still no decision on the button color honestly, going in circles",
+            "extractedKeys": [],
+            "violated": false
+          },
+          {
+            "text": "please grab lunch for the team before the 1pm meeting",
+            "extractedKeys": [
+              "preference:grab-lunch-for-the-team-before-the-1pm-m"
+            ],
+            "violated": true
+          }
+        ]
+      },
+      "retrieval": {
+        "probeCount": 10,
+        "positiveCount": 8,
+        "hitCount": 0,
+        "confirmedCount": 0,
+        "hitRate": 0,
+        "confirmationRate": 0,
+        "negativeCount": 2,
+        "falsePositiveCount": 0,
+        "falsePositiveRate": 0,
+        "falsePositiveRawCount": 2,
+        "falsePositiveRateRaw": 1,
+        "perProbe": [
+          {
+            "query": "What state management library are we using for checkout?",
+            "expectedKeys": [
+              "decision:state-management"
+            ],
+            "negative": false,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": false,
+            "falsePositiveRaw": false
+          },
+          {
+            "query": "What color should the primary button be?",
+            "expectedKeys": [
+              "decision:primary-button-color"
+            ],
+            "negative": false,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": false,
+            "falsePositiveRaw": false
+          },
+          {
+            "query": "Does the checkout first screen need to work without javascript?",
+            "expectedKeys": [
+              "constraint:checkout-first-paint-no-js"
+            ],
+            "negative": false,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": false,
+            "falsePositiveRaw": false
+          },
+          {
+            "query": "What animation approach did we try and abandon for page transitions?",
+            "expectedKeys": [
+              "failed-approach:framer-motion-page-transitions"
+            ],
+            "negative": false,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": false,
+            "falsePositiveRaw": false
+          },
+          {
+            "query": "Which side does the cart drawer open from?",
+            "expectedKeys": [
+              "correction:cart-drawer-side"
+            ],
+            "negative": false,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": false,
+            "falsePositiveRaw": false
+          },
+          {
+            "query": "What's the minimum screen width checkout needs to support?",
+            "expectedKeys": [
+              "constraint:minimum-viewport-width"
+            ],
+            "negative": false,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": false,
+            "falsePositiveRaw": false
+          },
+          {
+            "query": "Are we building a new design system from scratch for this?",
+            "expectedKeys": [
+              "decision:component-library-approach"
+            ],
+            "negative": false,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": false,
+            "falsePositiveRaw": false
+          },
+          {
+            "query": "When does the checkout form show validation errors?",
+            "expectedKeys": [
+              "decision:validation-timing"
+            ],
+            "negative": false,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": false,
+            "falsePositiveRaw": false
+          },
+          {
+            "query": "what analytics vendor is tracking the checkout funnel",
+            "expectedKeys": [],
+            "negative": true,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": false,
+            "falsePositiveRaw": true
+          },
+          {
+            "query": "who's the designer that owns the checkout mockups",
+            "expectedKeys": [],
+            "negative": true,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": false,
+            "falsePositiveRaw": true
+          }
+        ]
+      },
+      "rules": {
+        "ruleProbeCount": 0,
+        "positiveCount": 0,
+        "relevantCount": 0,
+        "ruleRelevanceRate": 0,
+        "negativeCount": 0,
+        "noiseCount": 0,
+        "ruleNoiseRate": 0,
+        "perRuleProbe": []
+      }
+    }
+  ],
+  "overall": {
+    "extraction": {
+      "goldCount": 23,
+      "storedCount": 2,
+      "identityHits": 0,
+      "matchedCount": 0,
+      "recall": 0,
+      "valueRecallCount": 1,
+      "valueRecall": 0.043478260869565216,
+      "precision": 0,
+      "fabricationProbeCount": 6,
+      "fabricationViolationCount": 2,
+      "fabricationRate": 0.3333333333333333,
+      "perFabricationProbe": [
+        {
+          "text": "no decision yet on Fняp vs Zorblex for the next service, still debating honestly",
+          "extractedKeys": [],
+          "violated": false
+        },
+        {
+          "text": "please make sure Zorin double-checked the plovnik badge printer before the offsite",
+          "extractedKeys": [],
+          "violated": false
+        },
+        {
+          "text": "no decision yet on the retry count, still arguing about it honestly",
+          "extractedKeys": [],
+          "violated": false
+        },
+        {
+          "text": "make sure someone waters the office plants this week",
+          "extractedKeys": [
+            "preference:someone-waters-the-office-plants-this-we"
+          ],
+          "violated": true
+        },
+        {
+          "text": "still no decision on the button color honestly, going in circles",
+          "extractedKeys": [],
+          "violated": false
+        },
+        {
+          "text": "please grab lunch for the team before the 1pm meeting",
+          "extractedKeys": [
+            "preference:grab-lunch-for-the-team-before-the-1pm-m"
+          ],
+          "violated": true
+        }
+      ]
+    },
+    "retrieval": {
+      "probeCount": 29,
+      "positiveCount": 23,
+      "hitCount": 0,
+      "confirmedCount": 0,
+      "hitRate": 0,
+      "confirmationRate": 0,
+      "negativeCount": 6,
+      "falsePositiveCount": 0,
+      "falsePositiveRate": 0,
+      "falsePositiveRawCount": 4,
+      "falsePositiveRateRaw": 0.6666666666666666,
+      "perProbe": [
+        {
+          "query": "What technology did we pick for the quenling layer?",
+          "expectedKeys": [
+            "decision:quenling-layer-technology"
+          ],
+          "negative": false,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": false,
+          "falsePositiveRaw": false
+        },
+        {
+          "query": "What handles cross-cluster handshakes now?",
+          "expectedKeys": [
+            "decision:cross-cluster-handshake-protocol"
+          ],
+          "negative": false,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": false,
+          "falsePositiveRaw": false
+        },
+        {
+          "query": "Can something skip the triple-sign step on the glennwick ledger?",
+          "expectedKeys": [
+            "constraint:glennwick-ledger-triple-sign"
+          ],
+          "negative": false,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": false,
+          "falsePositiveRaw": false
+        },
+        {
+          "query": "What's the barlow threshold?",
+          "expectedKeys": [
+            "correction:barlow-threshold"
+          ],
+          "negative": false,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": false,
+          "falsePositiveRaw": false
+        },
+        {
+          "query": "What caching approach did we try and abandon?",
+          "expectedKeys": [
+            "failed-approach:custom-windlass-caching"
+          ],
+          "negative": false,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": false,
+          "falsePositiveRaw": false
+        },
+        {
+          "query": "Who owns the escalation path for glennwick incidents?",
+          "expectedKeys": [
+            "fact:glennwick-escalation-owner"
+          ],
+          "negative": false,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": false,
+          "falsePositiveRaw": false
+        },
+        {
+          "query": "Are we migrating off Zorblex soon?",
+          "expectedKeys": [
+            "decision:no-zorblex-migration"
+          ],
+          "negative": false,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": false,
+          "falsePositiveRaw": false
+        },
+        {
+          "query": "what's the plovnik budget for next quarter",
+          "expectedKeys": [],
+          "negative": true,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": false,
+          "falsePositiveRaw": true
+        },
+        {
+          "query": "which timezone does Drenna work from",
+          "expectedKeys": [],
+          "negative": true,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": false,
+          "falsePositiveRaw": true
+        },
+        {
+          "query": "What database are we using for the billing pipeline?",
+          "expectedKeys": [
+            "decision:database"
+          ],
+          "negative": false,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": false,
+          "falsePositiveRaw": false
+        },
+        {
+          "query": "What queue technology did we end up going with?",
+          "expectedKeys": [
+            "decision:queue-technology"
+          ],
+          "negative": false,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": false,
+          "falsePositiveRaw": false
+        },
+        {
+          "query": "How many retries should the job do?",
+          "expectedKeys": [
+            "correction:retry-count"
+          ],
+          "negative": false,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": false,
+          "falsePositiveRaw": false
+        },
+        {
+          "query": "Can the reconciliation job write straight to the ledger table?",
+          "expectedKeys": [
+            "constraint:reconciliation-ledger-writes"
+          ],
+          "negative": false,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": false,
+          "falsePositiveRaw": false
+        },
+        {
+          "query": "What did we try for rate limiting that didn't pan out?",
+          "expectedKeys": [
+            "failed-approach:custom-rate-limiter"
+          ],
+          "negative": false,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": false,
+          "falsePositiveRaw": false
+        },
+        {
+          "query": "What's the timeout on the payment gateway call?",
+          "expectedKeys": [
+            "constraint:payment-gateway-timeout"
+          ],
+          "negative": false,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": false,
+          "falsePositiveRaw": false
+        },
+        {
+          "query": "Where does the on-call rotation live now?",
+          "expectedKeys": [
+            "decision:oncall-tool"
+          ],
+          "negative": false,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": false,
+          "falsePositiveRaw": false
+        },
+        {
+          "query": "Is there a plan to shard the ledger table?",
+          "expectedKeys": [
+            "decision:no-sharding-plan"
+          ],
+          "negative": false,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": false,
+          "falsePositiveRaw": false
+        },
+        {
+          "query": "what timezone does the team mostly work in",
+          "expectedKeys": [],
+          "negative": true,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": false,
+          "falsePositiveRaw": false
+        },
+        {
+          "query": "who approved the postgres upgrade budget",
+          "expectedKeys": [],
+          "negative": true,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": false,
+          "falsePositiveRaw": false
+        },
+        {
+          "query": "What state management library are we using for checkout?",
+          "expectedKeys": [
+            "decision:state-management"
+          ],
+          "negative": false,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": false,
+          "falsePositiveRaw": false
+        },
+        {
+          "query": "What color should the primary button be?",
+          "expectedKeys": [
+            "decision:primary-button-color"
+          ],
+          "negative": false,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": false,
+          "falsePositiveRaw": false
+        },
+        {
+          "query": "Does the checkout first screen need to work without javascript?",
+          "expectedKeys": [
+            "constraint:checkout-first-paint-no-js"
+          ],
+          "negative": false,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": false,
+          "falsePositiveRaw": false
+        },
+        {
+          "query": "What animation approach did we try and abandon for page transitions?",
+          "expectedKeys": [
+            "failed-approach:framer-motion-page-transitions"
+          ],
+          "negative": false,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": false,
+          "falsePositiveRaw": false
+        },
+        {
+          "query": "Which side does the cart drawer open from?",
+          "expectedKeys": [
+            "correction:cart-drawer-side"
+          ],
+          "negative": false,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": false,
+          "falsePositiveRaw": false
+        },
+        {
+          "query": "What's the minimum screen width checkout needs to support?",
+          "expectedKeys": [
+            "constraint:minimum-viewport-width"
+          ],
+          "negative": false,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": false,
+          "falsePositiveRaw": false
+        },
+        {
+          "query": "Are we building a new design system from scratch for this?",
+          "expectedKeys": [
+            "decision:component-library-approach"
+          ],
+          "negative": false,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": false,
+          "falsePositiveRaw": false
+        },
+        {
+          "query": "When does the checkout form show validation errors?",
+          "expectedKeys": [
+            "decision:validation-timing"
+          ],
+          "negative": false,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": false,
+          "falsePositiveRaw": false
+        },
+        {
+          "query": "what analytics vendor is tracking the checkout funnel",
+          "expectedKeys": [],
+          "negative": true,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": false,
+          "falsePositiveRaw": true
+        },
+        {
+          "query": "who's the designer that owns the checkout mockups",
+          "expectedKeys": [],
+          "negative": true,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": false,
+          "falsePositiveRaw": true
+        }
+      ]
+    },
+    "rules": {
+      "ruleProbeCount": 0,
+      "positiveCount": 0,
+      "relevantCount": 0,
+      "ruleRelevanceRate": 0,
+      "negativeCount": 0,
+      "noiseCount": 0,
+      "ruleNoiseRate": 0,
+      "perRuleProbe": []
+    }
+  }
+}

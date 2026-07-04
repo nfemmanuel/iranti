@@ -1,0 +1,206 @@
+{
+  "persona": "ramble-product-frontend",
+  "description": "MESSY CORPUS (value-recall build) — frontend/product-leaning voice, different rambling flavor from ramble-infra-eng (more meeting-recap style, 'so basically what happened was', trailing qualifiers, opinions mixed with facts) so the messy corpus doesn't overfit to one rambling shape. No clean 'Decision:'/'Requirement:' labels anywhere. goldFacts labeled by VALUE (approximate slug keys) for the key-agnostic valueRecall metric.",
+  "messages": [
+    {
+      "text": "so basically what happened was we went back and forth for like three meetings on the state management thing and honestly everyone was kind of over it by the end, but where we landed is we're using zustand, not redux, redux just felt like way too much boilerplate for a team our size",
+      "entityHints": [
+        { "entityType": "project", "entityId": "checkout-redesign" }
+      ]
+    },
+    {
+      "text": "and don't quote me exactly but I think design wants the primary button color to be that darker blue, not the teal we had in the first mockups, teal tested badly with the accessibility folks, contrast ratio was actually failing",
+      "entityHints": [
+        { "entityType": "project", "entityId": "checkout-redesign" }
+      ]
+    },
+    {
+      "text": "oh also, and this one's kind of a big deal, marketing needs the new checkout flow to work without javascript for the first paint, something about an seo audit, so no client-only rendering for that first screen, has to be server rendered or it's a no-go for them",
+      "entityHints": [
+        { "entityType": "project", "entityId": "checkout-redesign" }
+      ]
+    },
+    {
+      "text": "we spent a solid week trying to get the animation library working for the page transitions, framer motion I think it was, gave up on it though, way too heavy for mobile and it was janky on the older android test devices anyway",
+      "entityHints": [
+        { "entityType": "project", "entityId": "checkout-redesign" }
+      ]
+    },
+    {
+      "text": "small correction on something I said last week, I told people the cart drawer opens from the right, that's actually not right anymore, we flipped it to open from the left after the usability session, most people reached for the left side without thinking about it",
+      "entityHints": [
+        { "entityType": "project", "entityId": "checkout-redesign" }
+      ]
+    },
+    {
+      "text": "just as a heads up for whoever picks this up next, the whole checkout has to stay usable down to a 320px wide screen, that's an actual support ticket volume thing, way more people on tiny old phones than you'd think",
+      "entityHints": [
+        { "entityType": "project", "entityId": "checkout-redesign" }
+      ]
+    },
+    {
+      "text": "component library wise we ended up not building our own design system from scratch, too much time, we're just extending the existing one the platform team maintains, adding our checkout-specific pieces on top",
+      "entityHints": [
+        { "entityType": "project", "entityId": "checkout-redesign" }
+      ]
+    },
+    {
+      "text": "for anyone wondering why the form validation feels weird, it's intentional, we show errors only on blur not on every keystroke, that came out of the same usability session as the drawer thing, people found live validation really annoying",
+      "entityHints": [
+        { "entityType": "project", "entityId": "checkout-redesign" }
+      ]
+    }
+  ],
+  "goldFacts": [
+    {
+      "entityType": "project",
+      "entityId": "checkout-redesign",
+      "key": "decision:state-management",
+      "value": "zustand",
+      "note": "message 1 — implicit decision via 'where we landed is we're using X, not Y'. Contains the DECISION_PATTERNS 'we're using X' shape technically, but embedded mid-clause after 'where we landed is' rather than sentence-initial, and the whole sentence exceeds typical capture length before a terminator — realistic ambiguity about whether the heuristic catches it. Gold value is the short answer either way."
+    },
+    {
+      "entityType": "project",
+      "entityId": "checkout-redesign",
+      "key": "decision:primary-button-color",
+      "value": "darker blue",
+      "note": "message 2 — hedged decision ('don't quote me exactly but I think design wants X, not Y') with a reason (accessibility contrast) buried after. No DECISION_PATTERNS shape matches hedged/reported-speech framing. EXPECTED HEURISTIC MISS."
+    },
+    {
+      "entityType": "project",
+      "entityId": "checkout-redesign",
+      "key": "constraint:checkout-first-paint-no-js",
+      "value": "the new checkout flow must work without javascript for the first paint, has to be server rendered",
+      "note": "message 3 — a hard business constraint (marketing/SEO driven) phrased as 'X needs Y... has to be Z or it's a no-go', not any CONSTRAINT_PATTERNS shape (can't/cannot/must not/should not/won't/requirement:/constraint:/have to/must/not allowed to — 'has to be' technically could match 'have to/must' variants only if the regex reached it, but the subject is far upstream of that clause). EXPECTED HEURISTIC MISS or partial at best."
+    },
+    {
+      "entityType": "project",
+      "entityId": "checkout-redesign",
+      "key": "failed-approach:framer-motion-page-transitions",
+      "value": "framer motion for the page transitions",
+      "note": "message 4 — failed approach via 'spent a week trying to get X working... gave up on it though, too heavy'. Not the 'tried X but didn't work' shape FAILED_PATTERNS needs. EXPECTED HEURISTIC MISS."
+    },
+    {
+      "entityType": "project",
+      "entityId": "checkout-redesign",
+      "key": "correction:cart-drawer-side",
+      "value": "the cart drawer opens from the left",
+      "note": "message 5 — an explicit correction ('that's actually not right anymore, we flipped it to X') with no 'is'/'should be' clause pattern. Same phrasing-gap class as the shipped messy-conversationalist corpus's 'actually wait... not...' miss. EXPECTED HEURISTIC MISS."
+    },
+    {
+      "entityType": "project",
+      "entityId": "checkout-redesign",
+      "key": "constraint:minimum-viewport-width",
+      "value": "320px",
+      "note": "message 6 — numeric constraint via 'has to stay usable down to X', no requirement:/constraint: label or can't-use framing. EXPECTED HEURISTIC MISS. Gold value is the short numeric answer (valueMatches is substring-based)."
+    },
+    {
+      "entityType": "project",
+      "entityId": "checkout-redesign",
+      "key": "decision:component-library-approach",
+      "value": "extending the existing platform design system rather than building a new one",
+      "note": "message 7 — implicit decision via 'we ended up not building X from scratch... we're just extending Y'. Negated-then-positive framing; no DECISION_PATTERNS shape targets this. EXPECTED HEURISTIC MISS."
+    },
+    {
+      "entityType": "project",
+      "entityId": "checkout-redesign",
+      "key": "decision:validation-timing",
+      "value": "show form validation errors on blur, not on every keystroke",
+      "note": "message 8 — an intentional design decision explained defensively ('it's intentional, we show X not Y') rather than declared. EXPECTED HEURISTIC MISS."
+    }
+  ],
+  "probes": [
+    {
+      "query": "What state management library are we using for checkout?",
+      "entityHints": [
+        { "entityType": "project", "entityId": "checkout-redesign" }
+      ],
+      "expectedKeys": ["decision:state-management"],
+      "note": "direct recall"
+    },
+    {
+      "query": "What color should the primary button be?",
+      "entityHints": [
+        { "entityType": "project", "entityId": "checkout-redesign" }
+      ],
+      "expectedKeys": ["decision:primary-button-color"],
+      "note": "hedged decision recall"
+    },
+    {
+      "query": "Does the checkout first screen need to work without javascript?",
+      "entityHints": [
+        { "entityType": "project", "entityId": "checkout-redesign" }
+      ],
+      "expectedKeys": ["constraint:checkout-first-paint-no-js"],
+      "note": "high-stakes business constraint recall"
+    },
+    {
+      "query": "What animation approach did we try and abandon for page transitions?",
+      "entityHints": [
+        { "entityType": "project", "entityId": "checkout-redesign" }
+      ],
+      "expectedKeys": ["failed-approach:framer-motion-page-transitions"],
+      "note": "failed-approach recall"
+    },
+    {
+      "query": "Which side does the cart drawer open from?",
+      "entityHints": [
+        { "entityType": "project", "entityId": "checkout-redesign" }
+      ],
+      "expectedKeys": ["correction:cart-drawer-side"],
+      "note": "correction recall — must return left, not the earlier-stated right"
+    },
+    {
+      "query": "What's the minimum screen width checkout needs to support?",
+      "entityHints": [
+        { "entityType": "project", "entityId": "checkout-redesign" }
+      ],
+      "expectedKeys": ["constraint:minimum-viewport-width"],
+      "note": "numeric constraint recall"
+    },
+    {
+      "query": "Are we building a new design system from scratch for this?",
+      "entityHints": [
+        { "entityType": "project", "entityId": "checkout-redesign" }
+      ],
+      "expectedKeys": ["decision:component-library-approach"],
+      "note": "negated-then-positive decision recall"
+    },
+    {
+      "query": "When does the checkout form show validation errors?",
+      "entityHints": [
+        { "entityType": "project", "entityId": "checkout-redesign" }
+      ],
+      "expectedKeys": ["decision:validation-timing"],
+      "note": "defensively-explained decision recall"
+    },
+    {
+      "query": "what analytics vendor is tracking the checkout funnel",
+      "entityHints": [
+        { "entityType": "project", "entityId": "checkout-redesign" }
+      ],
+      "expectedKeys": [],
+      "negative": true,
+      "note": "NEGATIVE PROBE — no analytics vendor is ever mentioned in this transcript"
+    },
+    {
+      "query": "who's the designer that owns the checkout mockups",
+      "entityHints": [
+        { "entityType": "project", "entityId": "checkout-redesign" }
+      ],
+      "expectedKeys": [],
+      "negative": true,
+      "note": "NEGATIVE PROBE — no individual designer is named anywhere in this transcript, only 'design' as a team"
+    }
+  ],
+  "fabricationProbes": [
+    {
+      "text": "still no decision on the button color honestly, going in circles",
+      "note": "negated 'decision' noun in messy voice — must extract ZERO facts"
+    },
+    {
+      "text": "please grab lunch for the team before the 1pm meeting",
+      "note": "off-project errand using the 'please X' preference-pattern trigger shape without being a standing preference — must extract ZERO facts. NEWLY SURFACED FINDING (confirmed live: this probe DOES currently extract preference:grab-lunch-for-the-team-before-the-1pm-m, a real reproducible fabrication under the shipped heuristic). See ramble-infra-eng.json's matching fabricationProbes note for why this is a deliberately DIFFERENT trigger class from the shipped corpus's 'X didn't work' probes, not a duplicate of a known gap."
+    }
+  ]
+}

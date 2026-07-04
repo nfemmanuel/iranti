@@ -13,6 +13,15 @@ import type { Corpus } from "./types.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // src/harness/corpus.ts -> ../../bench/corpus
 export const CORPUS_DIR = path.resolve(__dirname, "../../bench/corpus");
+// messy-corpus build — a SEPARATE directory (never bench/corpus itself) so
+// the default `pnpm bench` corpus stays untouched/deterministic. Same Corpus
+// schema, same validation (assertCorpusShape below), different content:
+// realistic messy/rambling transcripts + a novel-vocabulary persona, gold-
+// labeled primarily by VALUE (see extraction-measurement.md / the v1-wave1
+// build report §4 for why key-identity credit can't see an LLM's value on
+// differently-worded keys — this corpus + the scorer's valueRecall metric
+// are the pair that closes that blind spot).
+export const CORPUS_MESSY_DIR = path.resolve(__dirname, "../../bench/corpus-messy");
 
 function assertCorpusShape(value: unknown, file: string): asserts value is Corpus {
   if (typeof value !== "object" || value === null) {
@@ -96,21 +105,40 @@ function assertCorpusShape(value: unknown, file: string): asserts value is Corpu
   }
 }
 
-// Load every *.json file in bench/corpus, sorted by filename so run order
-// (and therefore report row order) is stable across machines and runs.
-export function loadCorpora(): Corpus[] {
-  const files = readdirSync(CORPUS_DIR)
+// Load every *.json file in an arbitrary corpus directory, sorted by
+// filename so run order (and therefore report row order) is stable across
+// machines and runs. Shared by loadCorpora() (bench/corpus, the default
+// heuristic bench) and loadMessyCorpora() (bench/corpus-messy, below) so
+// both directories get IDENTICAL shape validation — a messy-corpus author
+// typo is caught the same way a default-corpus one is.
+function loadCorporaFrom(dir: string): Corpus[] {
+  const files = readdirSync(dir)
     .filter((f) => f.endsWith(".json"))
     .sort();
 
   if (files.length === 0) {
-    throw new Error(`No corpus files found in ${CORPUS_DIR}`);
+    throw new Error(`No corpus files found in ${dir}`);
   }
 
   return files.map((file) => {
-    const full = path.join(CORPUS_DIR, file);
+    const full = path.join(dir, file);
     const parsed: unknown = JSON.parse(readFileSync(full, "utf-8"));
     assertCorpusShape(parsed, file);
     return parsed;
   });
+}
+
+// Load every *.json file in bench/corpus. Unchanged behavior/signature from
+// before the messy-corpus build — this function's body is now a thin
+// delegation to loadCorporaFrom(CORPUS_DIR) instead of its own copy of the
+// same loop, but every existing caller sees identical results.
+export function loadCorpora(): Corpus[] {
+  return loadCorporaFrom(CORPUS_DIR);
+}
+
+// messy-corpus build — loads bench/corpus-messy instead. Never called by
+// harness.test.ts (the default `pnpm bench` spec) — only by
+// messy-bench.test.ts (`pnpm bench:messy`, new in this build).
+export function loadMessyCorpora(): Corpus[] {
+  return loadCorporaFrom(CORPUS_MESSY_DIR);
 }

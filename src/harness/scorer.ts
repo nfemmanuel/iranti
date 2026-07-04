@@ -56,6 +56,20 @@ export interface ExtractionScore {
   // stored facts.
   matchedCount: number;
   recall: number; // matchedCount / goldCount (0 when goldCount === 0)
+  // extraction-measurement.md (messy-corpus build) — KEY-AGNOSTIC credit.
+  // A gold fact counts here if its VALUE lenient-matches (valueMatches)
+  // ANY stored fact's value, regardless of entity/key. This is deliberately
+  // separate from identityHits/matchedCount above (recall's key-identity
+  // path is UNCHANGED by this field's existence — see valueRecallCount's own
+  // independent loop below, not a reuse of the identity-keyed map) because
+  // the whole point is to credit an extractor that stored the SAME fact
+  // under a DIFFERENT key than the heuristic's synthesized one — the exact
+  // blind spot the docs/reviews/2026-07-04-v1-wave1-build.md §4 finding
+  // named: "a gold fact is credited only if stored under the extractor's
+  // exact synthesized key... recall structurally cannot rise on the LLM
+  // path even when it should." valueRecall is the metric that CAN rise.
+  valueRecallCount: number;
+  valueRecall: number; // valueRecallCount / goldCount (0 when goldCount === 0)
   // Stored facts that matched SOME gold fact's identity+value. Facts stored
   // that don't correspond to any gold fact are not "wrong" in a strict sense
   // (the corpus doesn't enumerate every non-gold fact that's fine to store)
@@ -115,6 +129,21 @@ export function scoreExtraction(
     }
   }
 
+  // valueRecall — independent loop, deliberately NOT derived from the
+  // identity-keyed pass above: it must credit a stored fact under ANY key
+  // (or even a different entity — an LLM extractor's entity-scoping errors
+  // are a separate concern from its key-wording, and this metric isolates
+  // key-wording specifically), so it scans every stored fact's value against
+  // every gold fact's value with no identity gate at all. O(goldCount x
+  // storedCount) — corpora here are small (tens of facts), so a nested loop
+  // is clearer than building a second index for a one-off scorer pass.
+  let valueRecallCount = 0;
+  for (const gold of goldFacts) {
+    if (storedFacts.some((f) => valueMatches(f.value, gold.value))) {
+      valueRecallCount++;
+    }
+  }
+
   const perFabricationProbe: FabricationProbeScore[] = fabricationOutcomes.map((o) => ({
     text: o.text,
     extractedKeys: o.extractedKeys,
@@ -129,6 +158,8 @@ export function scoreExtraction(
     identityHits,
     matchedCount,
     recall: goldCount > 0 ? matchedCount / goldCount : 0,
+    valueRecallCount,
+    valueRecall: goldCount > 0 ? valueRecallCount / goldCount : 0,
     // Precision here is scoped to the gold-identity slots that were filled
     // at all (identityHits) — of those, how many had the correct value.
     // A slot never filled counts against recall, not precision.
@@ -367,6 +398,7 @@ export function buildOverallReport(personas: PersonaReport[]): OverallReport {
   const storedCount = personas.reduce((s, p) => s + p.extraction.storedCount, 0);
   const identityHits = personas.reduce((s, p) => s + p.extraction.identityHits, 0);
   const matchedCount = personas.reduce((s, p) => s + p.extraction.matchedCount, 0);
+  const valueRecallCount = personas.reduce((s, p) => s + p.extraction.valueRecallCount, 0);
 
   // AX-9 — micro-averaged exactly like every other overall ratio.
   const fabricationProbeCount = personas.reduce(
@@ -384,6 +416,8 @@ export function buildOverallReport(personas: PersonaReport[]): OverallReport {
     identityHits,
     matchedCount,
     recall: goldCount > 0 ? matchedCount / goldCount : 0,
+    valueRecallCount,
+    valueRecall: goldCount > 0 ? valueRecallCount / goldCount : 0,
     // Micro-averaged exactly (matched / identity-hits summed across all
     // personas first, then divided once) — equivalent to weighting each
     // persona's precision by its identityHits, without the reconstruction

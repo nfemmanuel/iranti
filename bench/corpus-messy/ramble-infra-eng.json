@@ -1,0 +1,206 @@
+{
+  "persona": "ramble-infra-eng",
+  "description": "MESSY CORPUS (value-recall build) — infra engineer who talks in run-on, multi-fact sentences with zero clean 'Decision:'/'Requirement:' labels. Every message is written the way people actually type in Slack: filler, asides, implicit decisions buried mid-sentence, a correction that never uses 'is'/'should be'. The heuristic extractor is expected to catch very little of this; goldFacts are labeled by VALUE (approximate slug keys) so the key-agnostic valueRecall metric (scorer.ts) can credit an LLM extracting the same fact under different wording. Do NOT confuse with bench/corpus/messy-conversationalist.json — that corpus tests the HEURISTIC's precision-over-recall stance against messy phrasing (exact-key golds); this one tests whether a DIFFERENT extractor can recover the same facts under ITS OWN key choices.",
+  "messages": [
+    {
+      "text": "okay so long story short we spent like two days going back and forth and yeah we're just gonna stick with postgres, mongo was a nightmare for the reporting queries and nobody on the team actually knew mongo well enough to make it fast anyway",
+      "entityHints": [
+        { "entityType": "project", "entityId": "billing-pipeline" }
+      ]
+    },
+    {
+      "text": "also while I'm thinking about it — the queue thing, we ended up NOT doing kafka, way too much ops overhead for what's basically three consumers, went with plain sqs instead and honestly it's been fine",
+      "entityHints": [
+        { "entityType": "project", "entityId": "billing-pipeline" }
+      ]
+    },
+    {
+      "text": "oh and the retry thing, so I said 3 retries earlier this week but that was wrong, we bumped it to 7 after the incident, someone should update the runbook but whatever, just know it's 7 now not 3",
+      "entityHints": [
+        { "entityType": "project", "entityId": "billing-pipeline" }
+      ]
+    },
+    {
+      "text": "one more thing and this is important, whatever gets built for the reconciliation job absolutely cannot write directly to the ledger table, has to go through the same api everything else uses, finance will actually block the release if that rule gets broken again like it did in q1",
+      "entityHints": [
+        { "entityType": "project", "entityId": "billing-pipeline" }
+      ]
+    },
+    {
+      "text": "we messed around with a custom rate limiter for like a week, hand rolled token bucket thing, ended up ripping it out because it kept dropping requests under load and nobody could explain why, moved to the shared platform limiter instead and that's been solid",
+      "entityHints": [
+        { "entityType": "project", "entityId": "billing-pipeline" }
+      ]
+    },
+    {
+      "text": "random but useful context — timeout for the downstream payment gateway call, everyone keeps assuming it's 30s because that's the default everywhere else in the codebase but for THIS one specific call it's actually 12s, gateway team asked us to keep it tight so we don't hold connections open",
+      "entityHints": [
+        { "entityType": "project", "entityId": "billing-pipeline" }
+      ]
+    },
+    {
+      "text": "yeah the on-call rotation lives in pagerduty now, we moved off the old spreadsheet thing back in like march sometime, way overdue honestly",
+      "entityHints": [
+        { "entityType": "project", "entityId": "billing-pipeline" }
+      ]
+    },
+    {
+      "text": "quick faq answer since people keep asking, no there's no plan to shard the ledger table, at our current volume it's genuinely not worth the complexity, revisit if we 10x",
+      "entityHints": [
+        { "entityType": "project", "entityId": "billing-pipeline" }
+      ]
+    }
+  ],
+  "goldFacts": [
+    {
+      "entityType": "project",
+      "entityId": "billing-pipeline",
+      "key": "decision:database",
+      "value": "postgres",
+      "note": "message 1 — implicit decision, no label at all ('we're just gonna stick with X'). Heuristic DECISION_PATTERNS require 'decided to use'/'chose'/'going with'/'decision:'/'using'/'adopting'/'switching to'/'let's use'/'agreed'/'concluded' shapes — 'stick with' matches none of them. EXPECTED HEURISTIC MISS. Value-recall credits ANY stored fact whose value contains/is-contained-by 'postgres'."
+    },
+    {
+      "entityType": "project",
+      "entityId": "billing-pipeline",
+      "key": "decision:queue-technology",
+      "value": "sqs",
+      "note": "message 2 — double implicit decision (rejects kafka, picks sqs) buried after 'went with'. 'went with X instead' is not in DECISION_PATTERNS (only 'going with', present tense, matches). EXPECTED HEURISTIC MISS."
+    },
+    {
+      "entityType": "project",
+      "entityId": "billing-pipeline",
+      "key": "correction:retry-count",
+      "value": "7 retries",
+      "note": "message 3 — mid-sentence correction with no 'is'/'should be' clause ('that was wrong... bumped it to 7... not 3'). CORRECTION_PATTERNS require 'actually, X is Y' or 'the correct value ... is Y' shapes. EXPECTED HEURISTIC MISS (same phrasing-gap class as the shipped messy-conversationalist corpus's 'actually wait... not...' miss)."
+    },
+    {
+      "entityType": "project",
+      "entityId": "billing-pipeline",
+      "key": "constraint:reconciliation-ledger-writes",
+      "value": "the reconciliation job cannot write directly to the ledger table, must go through the same api",
+      "note": "message 4 — real hard constraint, phrased as 'absolutely cannot write directly to X, has to go through Y' — not 'we can't use X' (CONSTRAINT_PATTERNS' shape). EXPECTED HEURISTIC MISS despite being the single highest-stakes fact in the transcript."
+    },
+    {
+      "entityType": "project",
+      "entityId": "billing-pipeline",
+      "key": "failed-approach:custom-rate-limiter",
+      "value": "custom hand rolled token bucket rate limiter",
+      "note": "message 5 — failed approach described via 'ended up ripping it out because X kept Y' rather than 'tried X but it didn't work'. FAILED_PATTERNS requires 'tried ... but/and didn't work/failed' or 'X didn't work' — this sentence's failure clause is too far from its subject for the lazy capture. EXPECTED HEURISTIC MISS."
+    },
+    {
+      "entityType": "project",
+      "entityId": "billing-pipeline",
+      "key": "constraint:payment-gateway-timeout",
+      "value": "12s",
+      "note": "message 6 — a specific numeric constraint (deliberately contradicts the false '30s is universal' assumption stated in the SAME sentence, a mid-sentence-correction shape) with no requirement:/constraint:/can't-use framing at all. EXPECTED HEURISTIC MISS. The gold value is the SHORT numeric answer on purpose — tests whether an extractor states '12s' plainly rather than restating the whole rambling sentence, since valueMatches is substring-based either direction."
+    },
+    {
+      "entityType": "project",
+      "entityId": "billing-pipeline",
+      "key": "decision:oncall-tool",
+      "value": "pagerduty",
+      "note": "message 7 — implicit tooling decision via 'lives in X now, we moved off Y'. No DECISION_PATTERNS shape matches 'lives in'/'moved off'. EXPECTED HEURISTIC MISS."
+    },
+    {
+      "entityType": "project",
+      "entityId": "billing-pipeline",
+      "key": "decision:no-sharding-plan",
+      "value": "no plan to shard the ledger table",
+      "note": "message 8 — a negative/status-quo decision ('no there's no plan to X') stated as an FAQ answer, not a positive decision assertion. No heuristic pattern targets a NEGATED decision like this (and correctly so — it's adjacent to the AX-9 fabrication-guard rationale that bare negated nouns are dangerous to match). EXPECTED HEURISTIC MISS; a good extractor should still capture the STATUS as a fact (the absence of a sharding plan is itself durable, useful information), tested here via value-recall only."
+    }
+  ],
+  "probes": [
+    {
+      "query": "What database are we using for the billing pipeline?",
+      "entityHints": [
+        { "entityType": "project", "entityId": "billing-pipeline" }
+      ],
+      "expectedKeys": ["decision:database"],
+      "note": "direct recall of the implicit postgres decision"
+    },
+    {
+      "query": "What queue technology did we end up going with?",
+      "entityHints": [
+        { "entityType": "project", "entityId": "billing-pipeline" }
+      ],
+      "expectedKeys": ["decision:queue-technology"],
+      "note": "direct recall of the implicit sqs decision"
+    },
+    {
+      "query": "How many retries should the job do?",
+      "entityHints": [
+        { "entityType": "project", "entityId": "billing-pipeline" }
+      ],
+      "expectedKeys": ["correction:retry-count"],
+      "note": "correction recall — must return 7, not the earlier-stated 3"
+    },
+    {
+      "query": "Can the reconciliation job write straight to the ledger table?",
+      "entityHints": [
+        { "entityType": "project", "entityId": "billing-pipeline" }
+      ],
+      "expectedKeys": ["constraint:reconciliation-ledger-writes"],
+      "note": "the single highest-stakes constraint in the transcript"
+    },
+    {
+      "query": "What did we try for rate limiting that didn't pan out?",
+      "entityHints": [
+        { "entityType": "project", "entityId": "billing-pipeline" }
+      ],
+      "expectedKeys": ["failed-approach:custom-rate-limiter"],
+      "note": "failed-approach recall"
+    },
+    {
+      "query": "What's the timeout on the payment gateway call?",
+      "entityHints": [
+        { "entityType": "project", "entityId": "billing-pipeline" }
+      ],
+      "expectedKeys": ["constraint:payment-gateway-timeout"],
+      "note": "numeric constraint recall, deliberately NOT the codebase-wide default"
+    },
+    {
+      "query": "Where does the on-call rotation live now?",
+      "entityHints": [
+        { "entityType": "project", "entityId": "billing-pipeline" }
+      ],
+      "expectedKeys": ["decision:oncall-tool"],
+      "note": "tooling decision recall"
+    },
+    {
+      "query": "Is there a plan to shard the ledger table?",
+      "entityHints": [
+        { "entityType": "project", "entityId": "billing-pipeline" }
+      ],
+      "expectedKeys": ["decision:no-sharding-plan"],
+      "note": "status-quo/negative decision recall"
+    },
+    {
+      "query": "what timezone does the team mostly work in",
+      "entityHints": [
+        { "entityType": "project", "entityId": "billing-pipeline" }
+      ],
+      "expectedKeys": [],
+      "negative": true,
+      "note": "NEGATIVE PROBE — timezone is never mentioned anywhere in this transcript"
+    },
+    {
+      "query": "who approved the postgres upgrade budget",
+      "entityHints": [
+        { "entityType": "project", "entityId": "billing-pipeline" }
+      ],
+      "expectedKeys": [],
+      "negative": true,
+      "note": "NEGATIVE PROBE — no budget/approval discussion exists in this transcript; plausible-sounding but unanswerable"
+    }
+  ],
+  "fabricationProbes": [
+    {
+      "text": "no decision yet on the retry count, still arguing about it honestly",
+      "note": "negated 'decision' noun in messy voice — must extract ZERO facts, mirrors the shipped fabrication-guard corpus's pattern"
+    },
+    {
+      "text": "make sure someone waters the office plants this week",
+      "note": "off-project errand using the 'make sure X' preference-pattern trigger shape without being a standing preference — must extract ZERO facts. NEWLY SURFACED FINDING (confirmed live: this probe DOES currently extract preference:someone-waters-the-office-plants-this-we, i.e. it IS a real, reproducible fabrication under the shipped heuristic — not a broken/vacuous probe). Deliberately NOT another 'X didn't work' probe: that trigger already has a documented, known miss at bench/corpus/messy-conversationalist.json's AX-10 #12 gold; this corpus intentionally surfaces a DIFFERENT trigger class ('make sure X'/'please X' imperatives — see novel-vocab-quenling.json and ramble-product-frontend.json for the matching instances) rather than re-reporting the same known gap three times."
+    }
+  ]
+}

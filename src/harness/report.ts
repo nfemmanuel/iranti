@@ -36,6 +36,7 @@ export function renderReport(report: BenchReport, deltas: MetricDelta[]): string
     lines.push(`  ${p.persona}`);
     lines.push(
       `    extraction   recall=${pct(p.extraction.recall)} (${p.extraction.matchedCount}/${p.extraction.goldCount})` +
+        `  value-recall=${pct(p.extraction.valueRecall)} (${p.extraction.valueRecallCount}/${p.extraction.goldCount})` +
         `  precision=${pct(p.extraction.precision)} (${p.extraction.matchedCount}/${p.extraction.identityHits})` +
         `  stored=${p.extraction.storedCount}`,
     );
@@ -47,11 +48,13 @@ export function renderReport(report: BenchReport, deltas: MetricDelta[]): string
       );
     }
     const recallDelta = deltaByMetric.get(`${p.persona}.extraction.recall`);
+    const valueRecallDelta = deltaByMetric.get(`${p.persona}.extraction.valueRecall`);
     const precisionDelta = deltaByMetric.get(`${p.persona}.extraction.precision`);
     const fabDelta = deltaByMetric.get(`${p.persona}.extraction.fabricationRate`);
-    if (recallDelta || precisionDelta || fabDelta) {
+    if (recallDelta || valueRecallDelta || precisionDelta || fabDelta) {
       lines.push(
         `      vs baseline: recall ${recallDelta ? fmtDelta(recallDelta) : "n/a"}, ` +
+          `value-recall ${valueRecallDelta ? fmtDelta(valueRecallDelta) : "n/a"}, ` +
           `precision ${precisionDelta ? fmtDelta(precisionDelta) : "n/a"}` +
           (fabDelta && p.extraction.fabricationProbeCount > 0
             ? `, fabrication-rate ${fmtDelta(fabDelta)}`
@@ -100,6 +103,7 @@ export function renderReport(report: BenchReport, deltas: MetricDelta[]): string
   const o = report.overall;
   lines.push(
     `  extraction   recall=${padRight(pct(o.extraction.recall), 7)} (${o.extraction.matchedCount}/${o.extraction.goldCount})` +
+      `  value-recall=${padRight(pct(o.extraction.valueRecall), 7)} (${o.extraction.valueRecallCount}/${o.extraction.goldCount})` +
       `  precision=${padRight(pct(o.extraction.precision), 7)} (${o.extraction.matchedCount}/${o.extraction.identityHits})`,
   );
   if (o.extraction.fabricationProbeCount > 0) {
@@ -122,6 +126,7 @@ export function renderReport(report: BenchReport, deltas: MetricDelta[]): string
   }
   const overallDeltas = [
     deltaByMetric.get("overall.extraction.recall"),
+    deltaByMetric.get("overall.extraction.valueRecall"),
     deltaByMetric.get("overall.extraction.precision"),
     deltaByMetric.get("overall.extraction.fabricationRate"),
     deltaByMetric.get("overall.retrieval.hitRate"),

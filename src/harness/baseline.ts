@@ -50,6 +50,14 @@ function round4(n: number): number {
 export function diffReports(baseline: BenchReport | null, current: BenchReport): MetricDelta[] {
   const metrics: Array<{ name: string; get: (r: BenchReport) => number }> = [
     { name: "overall.extraction.recall", get: (r) => r.overall.extraction.recall },
+    // messy-corpus build (value-based scorer credit) — NaN-coalesced like
+    // every metric added after a baseline already existed (AX-9's
+    // fabricationRate below is the precedent this follows exactly): a
+    // baseline generated before this field existed lacks it entirely, so
+    // this must print "(no baseline)" rather than a fabricated delta against
+    // `undefined`. Old baselines predate this field — this is the "absent-
+    // tolerant" contract the build brief asked for.
+    { name: "overall.extraction.valueRecall", get: (r) => r.overall.extraction.valueRecall ?? NaN },
     { name: "overall.extraction.precision", get: (r) => r.overall.extraction.precision },
     // AX-9 — NaN-coalesced like every metric class added after a baseline
     // already existed: pre-AX-9 baselines lack the field entirely.
@@ -73,6 +81,7 @@ export function diffReports(baseline: BenchReport | null, current: BenchReport):
   for (const p of current.personas) {
     metrics.push(
       { name: `${p.persona}.extraction.recall`, get: (r) => r.personas.find((x) => x.persona === p.persona)?.extraction.recall ?? NaN },
+      { name: `${p.persona}.extraction.valueRecall`, get: (r) => r.personas.find((x) => x.persona === p.persona)?.extraction.valueRecall ?? NaN },
       { name: `${p.persona}.extraction.precision`, get: (r) => r.personas.find((x) => x.persona === p.persona)?.extraction.precision ?? NaN },
       { name: `${p.persona}.extraction.fabricationRate`, get: (r) => r.personas.find((x) => x.persona === p.persona)?.extraction.fabricationRate ?? NaN },
       { name: `${p.persona}.retrieval.hitRate`, get: (r) => r.personas.find((x) => x.persona === p.persona)?.retrieval.hitRate ?? NaN },

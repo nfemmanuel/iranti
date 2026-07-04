@@ -1,0 +1,185 @@
+{
+  "persona": "novel-vocab-quenling",
+  "description": "MESSY CORPUS (value-recall build) — NOVEL-VOCABULARY persona. Every product name, tool name, and person name here is INVENTED (Zorblex, Fняp, the quenling layer, Vashtimor, Drenna Okoye-Waltz, plovnik, the Sarnfeld protocol) and never appears in any real training corpus — this tests whether extraction generalizes from SENTENCE SHAPE (a real decision/constraint/correction) rather than pattern-matching on recognized real-world nouns (Postgres, Kafka, Redis). A memorizing model that only 'knows what a database decision looks like' because it has seen 'we decided to use Postgres' a million times should do WORSE here relative to its performance on realistic-but-mundane vocabulary; a model that has actually learned the STRUCTURE of decision/constraint/correction language should transfer cleanly. Messages are still messy/rambling (no clean 'Decision:' labels) — vocabulary novelty is the added variable, not sentence structure. goldFacts labeled by VALUE.",
+  "messages": [
+    {
+      "text": "okay after way too much debate we picked Zorblex over Fняp for the quenling layer, Fняp's throughput numbers looked great on paper but it fell over completely once we threw real plovnik traffic at it in staging",
+      "entityHints": [
+        { "entityType": "project", "entityId": "vashtimor-core" }
+      ]
+    },
+    {
+      "text": "quick context dump since new folks keep asking — the Sarnfeld protocol handles all cross-cluster handshakes now, we ripped out the old ad-hoc thing Drenna built two years ago, it technically worked but nobody besides her understood it and she's not on the team anymore",
+      "entityHints": [
+        { "entityType": "project", "entityId": "vashtimor-core" }
+      ]
+    },
+    {
+      "text": "important one, whatever touches the glennwick ledger absolutely cannot skip the triple-sign step, that's non negotiable, compliance will not approve a release that bypasses it, we learned that the hard way with the plovnik incident",
+      "entityHints": [
+        { "entityType": "project", "entityId": "vashtimor-core" }
+      ]
+    },
+    {
+      "text": "small fix on something I said in standup, the barlow threshold is 42, not 40, I keep misremembering it, someone please just put it in the wiki this time",
+      "entityHints": [
+        { "entityType": "project", "entityId": "vashtimor-core" }
+      ]
+    },
+    {
+      "text": "we burned like two sprints on a custom windlass caching thing before admitting defeat, kept invalidating at the wrong layer and corrupting the quenling reads, tore the whole thing out and went back to the vendor's default cache",
+      "entityHints": [
+        { "entityType": "project", "entityId": "vashtimor-core" }
+      ]
+    },
+    {
+      "text": "Vashtimor Drenna Okoye-Waltz is actually the one who owns the escalation path for glennwick incidents now, not Marcus like everyone still assumes, that handoff happened back in q1 and the wiki never got updated",
+      "entityHints": [
+        { "entityType": "project", "entityId": "vashtimor-core" }
+      ]
+    },
+    {
+      "text": "for the record since it comes up constantly, no we are not migrating off Zorblex anytime soon, the quenling layer is stable on it and there's zero appetite for another migration after last year",
+      "entityHints": [
+        { "entityType": "project", "entityId": "vashtimor-core" }
+      ]
+    }
+  ],
+  "goldFacts": [
+    {
+      "entityType": "project",
+      "entityId": "vashtimor-core",
+      "key": "decision:quenling-layer-technology",
+      "value": "Zorblex",
+      "note": "message 1 — invented product name, implicit decision via 'we picked X over Y'. Tests whether the extractor recognizes DECISION SHAPE without recognizing either noun. Heuristic 'we chose X for/as/because/instead/over Y' pattern technically has an 'over' variant in its terminator list but the primary clause is 'we picked' not 'we chose' — DECISION_PATTERNS has no 'picked' verb at all. EXPECTED HEURISTIC MISS regardless of vocabulary novelty."
+    },
+    {
+      "entityType": "project",
+      "entityId": "vashtimor-core",
+      "key": "decision:cross-cluster-handshake-protocol",
+      "value": "the Sarnfeld protocol",
+      "note": "message 2 — invented protocol name, implicit decision via 'X handles Y now, we ripped out the old thing'. No DECISION_PATTERNS shape targets 'handles X now'. EXPECTED HEURISTIC MISS."
+    },
+    {
+      "entityType": "project",
+      "entityId": "vashtimor-core",
+      "key": "constraint:glennwick-ledger-triple-sign",
+      "value": "whatever touches the glennwick ledger cannot skip the triple-sign step",
+      "note": "message 3 — invented system name (glennwick), real hard constraint via 'absolutely cannot skip X, non negotiable'. Tests whether the extractor generalizes 'cannot skip' as constraint-shaped even though CONSTRAINT_PATTERNS only lists can't/cannot/must not/should not/won't + USE (not 'skip'). EXPECTED HEURISTIC MISS."
+    },
+    {
+      "entityType": "project",
+      "entityId": "vashtimor-core",
+      "key": "correction:barlow-threshold",
+      "value": "42",
+      "note": "message 4 — invented metric name (barlow threshold), numeric correction via 'the X is 42, not 40, I keep misremembering'. No 'is'/'should be' CORRECTION_PATTERNS clause. EXPECTED HEURISTIC MISS. Gold value is the bare number on purpose."
+    },
+    {
+      "entityType": "project",
+      "entityId": "vashtimor-core",
+      "key": "failed-approach:custom-windlass-caching",
+      "value": "custom windlass caching layer",
+      "note": "message 5 — invented technique name (windlass caching), failed approach via 'burned two sprints on X before admitting defeat... tore it out'. Not the 'tried X but didn't work' FAILED_PATTERNS shape. EXPECTED HEURISTIC MISS."
+    },
+    {
+      "entityType": "project",
+      "entityId": "vashtimor-core",
+      "key": "fact:glennwick-escalation-owner",
+      "value": "Drenna Okoye-Waltz",
+      "note": "message 6 — invented person name, an ownership correction ('X is actually the one who owns Y now, not Z like everyone assumes'). Not extractable by ANY heuristic category (decision/preference/constraint/failed-approach/correction patterns all require their specific trigger verbs; 'is actually the one who owns' matches none). EXPECTED HEURISTIC MISS. This is the hardest gold in the corpus — pure factual-update recall with an invented name, no trigger phrase at all."
+    },
+    {
+      "entityType": "project",
+      "entityId": "vashtimor-core",
+      "key": "decision:no-zorblex-migration",
+      "value": "not migrating off Zorblex, the quenling layer is stable on it",
+      "note": "message 7 — invented product name, status-quo/negative decision via 'no we are not migrating off X anytime soon'. Same negated-decision shape as ramble-infra-eng's no-sharding-plan gold. EXPECTED HEURISTIC MISS."
+    }
+  ],
+  "probes": [
+    {
+      "query": "What technology did we pick for the quenling layer?",
+      "entityHints": [
+        { "entityType": "project", "entityId": "vashtimor-core" }
+      ],
+      "expectedKeys": ["decision:quenling-layer-technology"],
+      "note": "novel-vocab decision recall"
+    },
+    {
+      "query": "What handles cross-cluster handshakes now?",
+      "entityHints": [
+        { "entityType": "project", "entityId": "vashtimor-core" }
+      ],
+      "expectedKeys": ["decision:cross-cluster-handshake-protocol"],
+      "note": "novel-vocab decision recall"
+    },
+    {
+      "query": "Can something skip the triple-sign step on the glennwick ledger?",
+      "entityHints": [
+        { "entityType": "project", "entityId": "vashtimor-core" }
+      ],
+      "expectedKeys": ["constraint:glennwick-ledger-triple-sign"],
+      "note": "novel-vocab high-stakes constraint recall"
+    },
+    {
+      "query": "What's the barlow threshold?",
+      "entityHints": [
+        { "entityType": "project", "entityId": "vashtimor-core" }
+      ],
+      "expectedKeys": ["correction:barlow-threshold"],
+      "note": "novel-vocab numeric correction recall — must return 42, not 40"
+    },
+    {
+      "query": "What caching approach did we try and abandon?",
+      "entityHints": [
+        { "entityType": "project", "entityId": "vashtimor-core" }
+      ],
+      "expectedKeys": ["failed-approach:custom-windlass-caching"],
+      "note": "novel-vocab failed-approach recall"
+    },
+    {
+      "query": "Who owns the escalation path for glennwick incidents?",
+      "entityHints": [
+        { "entityType": "project", "entityId": "vashtimor-core" }
+      ],
+      "expectedKeys": ["fact:glennwick-escalation-owner"],
+      "note": "hardest probe in the corpus — no trigger phrase, invented person name, must override the stale 'Marcus' assumption"
+    },
+    {
+      "query": "Are we migrating off Zorblex soon?",
+      "entityHints": [
+        { "entityType": "project", "entityId": "vashtimor-core" }
+      ],
+      "expectedKeys": ["decision:no-zorblex-migration"],
+      "note": "novel-vocab status-quo decision recall"
+    },
+    {
+      "query": "what's the plovnik budget for next quarter",
+      "entityHints": [
+        { "entityType": "project", "entityId": "vashtimor-core" }
+      ],
+      "expectedKeys": [],
+      "negative": true,
+      "note": "NEGATIVE PROBE — plovnik is mentioned only as traffic/an incident, never as a budget line; plausible-sounding but unanswerable"
+    },
+    {
+      "query": "which timezone does Drenna work from",
+      "entityHints": [
+        { "entityType": "project", "entityId": "vashtimor-core" }
+      ],
+      "expectedKeys": [],
+      "negative": true,
+      "note": "NEGATIVE PROBE — no timezone/location info exists for any person in this transcript"
+    }
+  ],
+  "fabricationProbes": [
+    {
+      "text": "no decision yet on Fняp vs Zorblex for the next service, still debating honestly",
+      "note": "negated 'decision' noun with novel vocabulary — must extract ZERO facts, tests that the fabrication guard's negation-safety also generalizes to unfamiliar nouns"
+    },
+    {
+      "text": "please make sure Zorin double-checked the plovnik badge printer before the offsite",
+      "note": "off-project errand ('please' + 'make sure' combined) with novel-vocab nouns (Zorin, plovnik) — must extract ZERO facts, and CONFIRMED LIVE it correctly does not (the combined 'please make sure X' phrasing doesn't trip PREFERENCE_PATTERNS' bare 'please X' or 'make sure X' regexes the way either alone does). Contrast with ramble-infra-eng.json's 'make sure someone waters the office plants' and ramble-product-frontend.json's 'please grab lunch for the team' — both SINGLE-trigger versions DO currently fabricate (preference:someone-waters-the-office-plants-this-we / preference:grab-lunch-for-the-team-before-the-1pm-m), a real reproducible gap distinct from the shipped bench/corpus/messy-conversationalist.json AX-10 probes' 'X didn't work' class. This persona's probe intentionally uses novel vocabulary to test the SAME question the other two personas' probes test with mundane vocabulary — here the answer happens to be 'no fabrication', which is itself informative (the false-negative side of the fabrication-guard picture, not a bug in this probe)."
+    }
+  ]
+}

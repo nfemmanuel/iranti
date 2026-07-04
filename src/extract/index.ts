@@ -251,16 +251,40 @@ export function buildHeaders(endpoint: string, apiKey: string | undefined): Reco
   return headers;
 }
 
+// messy-corpus build — found live running R1 (local qwen2.5:7b) against the
+// messy corpus: the hardcoded 8000ms request timeout below was silently
+// truncating EVERY LLM call on this hardware (a corpus-realistic message
+// measured 47.5s to complete against the real Ollama endpoint — see the
+// commit this constant ships with for the reproduction), so every call hit
+// the catch block, degraded to llmFacts = [], and R1 was byte-identical to
+// R0 — a second null-by-construction artifact, this time from a timeout
+// rather than the scorer's key-identity credit (the problem this whole build
+// exists to fix at the scoring layer). Default UNCHANGED (still 8000) so
+// production/CI behavior is byte-identical unless this var is explicitly
+// set — this is an escape hatch for slow local models during measurement,
+// not a production timeout change.
+const DEFAULT_LLM_TIMEOUT_MS = 8000;
+
+function resolveTimeoutMs(): number {
+  const raw = process.env["IRANTI_LLM_TIMEOUT_MS"];
+  if (!raw) return DEFAULT_LLM_TIMEOUT_MS;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_LLM_TIMEOUT_MS;
+}
+
 export class LocalLlmExtractor implements ExtractorBackend {
   private readonly endpoint: string;
   private readonly model: string;
+  private readonly timeoutMs: number;
 
   constructor(
     endpoint = process.env["IRANTI_LLM_ENDPOINT"] ?? "http://localhost:11434/v1",
     model = process.env["IRANTI_LLM_MODEL"] ?? "qwen2.5:3b",
+    timeoutMs = resolveTimeoutMs(),
   ) {
     this.endpoint = endpoint.replace(/\/$/, "");
     this.model = model;
+    this.timeoutMs = timeoutMs;
   }
 
   async extract(message: string): Promise<ExtractedFact[]> {
@@ -315,19 +339,37 @@ export class LocalLlmExtractor implements ExtractorBackend {
     let llmFacts: ExtractedFact[] = [];
     let llmSucceeded = false;
     try {
+      // messy-corpus build — found live running R2 (frontier claude-sonnet-5
+      // via Anthropic's OpenAI-compat endpoint): unconditionally sending
+      // `temperature: 0` was rejected with HTTP 400 "`temperature` is
+      // deprecated for this model" — confirmed by a direct curl reproduction
+      // (same request minus `temperature` returns 200 with a correct
+      // extraction). This is a model-side API constraint on this specific
+      // endpoint/model pairing, not an auth or endpoint-reachability problem
+      // — the same request succeeds instantly once the parameter is omitted.
+      // Gated the SAME way `anthropic-version` already is just above
+      // (buildHeaders) — anthropic.com hosts omit temperature entirely
+      // (falls back to that model's own default, since 0 isn't accepted
+      // there); every other host (Ollama, NIM) is BYTE-IDENTICAL to before,
+      // still gets temperature: 0 for deterministic decoding.
+      const isAnthropicHost = this.endpoint.includes("anthropic.com");
+      const body: Record<string, unknown> = {
+        model: this.model,
+        messages: [
+          { role: "system", content: LLM_SYSTEM_PROMPT },
+          { role: "user", content: message.slice(0, 2000) },
+        ],
+        max_tokens: 512,
+      };
+      if (!isAnthropicHost) {
+        body["temperature"] = 0;
+      }
+
       const res = await fetch(`${this.endpoint}/chat/completions`, {
         method: "POST",
         headers: buildHeaders(this.endpoint, process.env["IRANTI_LLM_API_KEY"]),
-        body: JSON.stringify({
-          model: this.model,
-          messages: [
-            { role: "system", content: LLM_SYSTEM_PROMPT },
-            { role: "user", content: message.slice(0, 2000) },
-          ],
-          temperature: 0,
-          max_tokens: 512,
-        }),
-        signal: AbortSignal.timeout(8000),
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(this.timeoutMs),
       });
 
       if (!res.ok) throw new Error(`LLM endpoint returned ${res.status}`);
