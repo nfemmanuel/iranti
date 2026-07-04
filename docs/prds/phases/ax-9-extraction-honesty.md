@@ -93,3 +93,5 @@ Unit (pattern positives + near-miss negatives), integration (attend round-trip f
 
 ## Changelog
 - 2026-07-04 — proposed (from dogfood review findings; NF mandate "document, review, implement, review, test, report"; NF ruling on host-text provenance incorporated as D5)
+- 2026-07-04 — PRD review (fresh-eyes, verdict REWORK): D5 rewritten to the real single-call-site structure; D6 rescoped to include the fabricationRate harness work the corpus format couldn't express. Corpus census: zero existing golds depended on the removed bare-noun patterns.
+- 2026-07-04 — implemented on `feat/dogfood-remediation-1` (d5c899b6 red-first bench, 7639566c fix, 1183460e review fixes; pending NF merge). Measured: fabricationRate 100%→0.0% (8/8→0/8), recall 74.5%→79.6% (+1.4pp new golds flipping, +3.7pp from the code-review-caught stale placeholder golds unmasking), confirmationRate 64.3%→67.9% (+3.6pp — root-caused: the bare 'constraint' pattern had been junk-squatting rank 1 on the backend idempotency probe), precision 100% held WITH fabrication probes active. Code-review gauntlet: 0 BLOCKER / 1 MAJOR (stale golds) / 3 MINOR — all fixed.

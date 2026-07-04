@@ -91,3 +91,5 @@ Unit (scoped deactivate/list), adversarial cross-project suite mirroring `projec
 
 ## Changelog
 - 2026-07-04 — proposed (from dogfood review check 6; NF mandate "document, review, implement, review, test, report")
+- 2026-07-04 — PRD review (fresh-eyes, verdict ACCEPT-WITH-EDITS): D2 resolved (mutation scope = effective set, archiveFact's verified production semantics); D5 corrected (new entity-aliases.ts — tools/aliases.ts is the registered OpenAI tool-name-alias module).
+- 2026-07-04 — implemented on `feat/dogfood-remediation-1` (3c637aee; pending NF merge). Four tools registered; deactivateRule scoped at the library layer; 9 new tests incl. archiveFact parity and the full check-6 deactivate→silent lifecycle; bench 0.0pp. Code-review gauntlet verdict: MERGE-READY, no findings.
