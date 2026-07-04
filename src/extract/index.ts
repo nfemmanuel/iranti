@@ -17,6 +17,13 @@
 //   heuristic (default) — HeuristicExtractor only
 //   local               — HeuristicExtractor + LocalLlmExtractor
 //
+// IRANTI_LLM_ENDPOINT / IRANTI_LLM_MODEL point LocalLlmExtractor at any
+// OpenAI-compatible endpoint (Ollama by default, but also a frontier
+// provider's compatibility endpoint). IRANTI_LLM_API_KEY, when set, is sent
+// on that request (see buildHeaders below) — this is what lets the "local"
+// mode reach an authenticated endpoint (Anthropic, NVIDIA NIM) instead of
+// only an open local one.
+//
 // AX-2: LocalLlmExtractor is wrapped by an extraction cache (durable,
 // content-hash keyed). Repeat extractions of the same input under the same
 // regime return cached facts with zero LLM calls. Cache misses fall through
@@ -203,6 +210,47 @@ export class HeuristicExtractor implements ExtractorBackend {
 
 const LLM_SYSTEM_PROMPT = `You extract durable facts from text. Return a JSON array of objects with "key" (kebab-case, prefixed with category like "decision:" or "preference:") and "value" (concise text). Only extract explicit, clearly stated facts — not inferences. Return [] if no clear facts exist. Output valid JSON only, no explanation.`;
 
+// extraction-measurement.md §3 (change 2) — optional auth headers.
+//
+// LocalLlmExtractor's fetch previously sent no Authorization/x-api-key
+// header at all, so the R2 measurement regime (frontier LLM via Anthropic's
+// OpenAI-compatible endpoint, or NVIDIA NIM) could never authenticate
+// regardless of endpoint config. IRANTI_LLM_API_KEY, when set, is sent as
+// BOTH `Authorization: Bearer <key>` and `x-api-key: <key>` — the union of
+// what OpenAI-compatible providers (bearer) and Anthropic's native header
+// style (x-api-key) expect; an endpoint that only recognizes one of the two
+// simply ignores the other, so this is harmless when either is unused.
+// `anthropic-version` is added ONLY when the endpoint host contains
+// "anthropic.com", since that header is meaningless (and NIM/Ollama would
+// have no opinion on it either way, but there's no reason to send a
+// provider-specific header to a provider that isn't that provider).
+//
+// Pulled out as its own pure function (endpoint + key in, headers out —
+// no fetch, no env access) so header assembly has a direct unit test
+// without needing a real or mocked network call.
+//
+// SECURITY NOTE (verified, see also buildRegimeSignature in
+// library/extraction-cache.ts): the key is never logged (no caller passes
+// it to console.error/console.log anywhere in this module) and never enters
+// the extraction-cache's regime signature. buildRegimeSignature's inputs
+// are extractorMode/modelId/promptVersion/normalizerVersion only — the key
+// is deliberately NOT a parameter there, so cache keys stay stable across
+// key rotation and no key material ever reaches the cache's plaintext
+// signature column.
+export function buildHeaders(endpoint: string, apiKey: string | undefined): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (!apiKey) return headers;
+
+  headers["Authorization"] = `Bearer ${apiKey}`;
+  headers["x-api-key"] = apiKey;
+
+  if (endpoint.includes("anthropic.com")) {
+    headers["anthropic-version"] = "2023-06-01";
+  }
+
+  return headers;
+}
+
 export class LocalLlmExtractor implements ExtractorBackend {
   private readonly endpoint: string;
   private readonly model: string;
@@ -269,7 +317,7 @@ export class LocalLlmExtractor implements ExtractorBackend {
     try {
       const res = await fetch(`${this.endpoint}/chat/completions`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: buildHeaders(this.endpoint, process.env["IRANTI_LLM_API_KEY"]),
         body: JSON.stringify({
           model: this.model,
           messages: [

@@ -101,6 +101,19 @@ export interface ModuleResetter {
   resetModules(): void;
 }
 
+// extraction-measurement.md §3 change 1 — the harness must RESPECT a
+// pre-set IRANTI_EXTRACTOR, defaulting to "heuristic" only when unset.
+// Previously runPersonaIngest unconditionally forced "heuristic", so
+// `IRANTI_EXTRACTOR=local pnpm bench` had ZERO effect (the protocol doc's
+// "already exists as a mode" claim was false — see its §3 changelog).
+//
+// Pulled out as a pure function (no env access) so the default-vs-respect
+// decision has a direct unit test independent of the env-mutation dance the
+// rest of this module does.
+export function effectiveExtractorMode(preset: string | undefined): string {
+  return preset ?? "heuristic";
+}
+
 // Run one persona's full ingest + probe cycle against a brand-new embedded
 // PGlite store. Returns the resulting facts and probe outcomes for scoring.
 //
@@ -116,7 +129,11 @@ export async function runPersonaIngest(
   try {
     process.env["IRANTI_DB_ENGINE"] = "pglite";
     process.env["IRANTI_DATA_DIR"] = dataDir;
-    process.env["IRANTI_EXTRACTOR"] = "heuristic";
+    // Default-only: a caller who pre-set IRANTI_EXTRACTOR (e.g. `local`,
+    // to run the R1/R2 measurement regimes) is respected; unset falls back
+    // to the deterministic heuristic default (R0, and every other suite
+    // that calls this harness without setting the var at all).
+    process.env["IRANTI_EXTRACTOR"] = effectiveExtractorMode(process.env["IRANTI_EXTRACTOR"]);
     delete process.env["DATABASE_URL"];
 
     vi.resetModules();
