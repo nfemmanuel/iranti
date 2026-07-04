@@ -8,8 +8,8 @@
 
 ## Stage Ledger (resume from first unchecked)
 
-- [x] S0. Internal instrument: value-recall scorer + messy corpus + novel-vocab corpus + `bench:messy` runner + R0/R1/R2 on messy (builder-messy-measure — verify & commit on report).
-- [ ] S1. Deep-research methods catalogue → `docs/research/2026-07-04-memory-benchmark-methods.md` (research-benchmark-methods agent, running). Produces the fair-suite definition everything below uses.
+- [x] S0. Internal instrument ✅ (commit 4235f38c, verified+pushed): value-recall scorer + messy + novel-vocab corpus + `bench:messy`. **Result on messy corpus (value-recall): R0 heuristic 4.3% → R1 local qwen2.5:7b 17.4% → R2 frontier claude-sonnet-5 47.8%** — the LLM's value is now visible (identity-recall stayed blind to R1 at 0%). Caveat: R2 also fabricated most (3/6 probes vs R1's 0/6) — frontier extracts more AND hallucinates more, so it needs the grounding gate (AX-4); local qwen was the most abstention-honest. Small corpus (23 golds) — directional, not definitive. Builder also fixed 2 shared extract/index.ts bugs (IRANTI_LLM_TIMEOUT_MS override; temp-omit for anthropic.com hosts), both default-preserving (default bench byte-identical, verified).
+- [x] S1. Deep-research methods catalogue ✅ → `docs/research/2026-07-04-memory-benchmark-methods.md` (committed e2d9b1ad). Fair suite locked: LongMemEval-S + LoCoMo (ByteRover judge prompts) + DMR + iranti coding-continuity (separate axis). See `project/iranti/research/benchmark-methods/s1_deep_research_findings`.
 - [ ] S2. iranti on the public scale: implement LoCoMo + (subset of) LongMemEval for iranti itself — downloads public datasets + judge prompts; gets iranti a number on the axis competitors publish. No external installs yet.
 - [ ] S3. External adapters, ONE at a time, cheapest-first, each its own small PRD + adapter + run on the SAME inputs/judge:
   - [ ] S3a. ai-mem (local: `mem2-for-ai-by-ai` / `memory-for-ai-by-ai` — inspect first) + `iranti-benchmarking` (pre-existing, inspect before rebuilding)
