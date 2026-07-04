@@ -142,19 +142,25 @@ class IrantiNextAdapter implements Adapter {
     const client = await this.ensureClient();
     const start = Date.now();
     try {
-      // Retrieve via iranti_attend(pre-response), NOT iranti_search. The new
-      // build's iranti_search is purely lexical, so a full natural-language
-      // question ("which ORM did we choose...") returns nothing — only bare
-      // keywords match. iranti_attend is iranti's actual retrieval path: given
-      // the question as `message`, it returns the relevant stored facts RANKED
+      // Retrieve via iranti_attend, NOT iranti_search. The new build's
+      // iranti_search is purely lexical, so a full natural-language question
+      // ("which ORM did we choose...") returns nothing — only bare keywords
+      // match. iranti_attend is iranti's actual retrieval path: given the
+      // question as `message`, it returns the relevant stored facts RANKED
       // (matched-first), which is exactly what a host surfaces to an agent.
-      // We then take the top `topK` of that ranked list. (attend also extracts
-      // from the question, which for a pure query yields nothing durable — the
-      // same behavior a real host exhibits.)
+      // We then take the top `topK` of that ranked list.
+      //
+      // phase='mid-turn' (NOT pre-response): mid-turn SKIPS extraction from the
+      // message (attend.ts gates message extraction on `!isMidTurn`), so a
+      // query does NOT trigger a second, useless LLM extraction on the question
+      // itself — under IRANTI_EXTRACT_SYNC that wasted ~20s (local) per query
+      // for zero facts. maxFacts is set to topK so mid-turn's small default
+      // budget doesn't cap retrieval below the track's depth.
       const result = await client.callTool("iranti_attend", {
         entityHints: [{ entityType: "project", entityId: entityIdForScope(scope) }],
         message: question,
-        phase: "pre-response",
+        phase: "mid-turn",
+        maxFacts: config.topK,
       });
       const latencyMs = Date.now() - start;
       if (result.isError || !result.text) {

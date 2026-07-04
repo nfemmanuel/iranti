@@ -346,7 +346,12 @@ async function main(): Promise<void> {
   console.log(`\nWrote ${rows.length} result rows to ${RESULTS_DIR}`);
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+main()
+  // Force a clean exit once results are written. Teardown tree-kills the MCP
+  // servers, but a stray handle (an orphaned child's pipe on Windows) could
+  // still keep the event loop alive — this guarantees the run doesn't hang.
+  .then(() => process.exit(0))
+  .catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });

@@ -186,7 +186,31 @@ export class McpClient {
     } catch {
       // stdin already closed — ignore.
     }
-    const timer = setTimeout(() => this.proc.kill(), 500);
+    const pid = this.proc.pid;
+    const kill = () => {
+      // On Windows with shell:true, this.proc is cmd.exe — proc.kill() leaves
+      // the tsx/node grandchild orphaned, and its still-open stdout pipe keeps
+      // OUR event loop alive (the runner hangs at teardown, leaking servers).
+      // taskkill /T kills the whole tree. Elsewhere a plain kill suffices.
+      if (process.platform === "win32" && pid) {
+        try {
+          spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" });
+        } catch {
+          this.proc.kill();
+        }
+      } else {
+        this.proc.kill();
+      }
+    };
+    const timer = setTimeout(kill, 300);
     timer.unref();
+    // Release our ends of the pipes so a slow/orphaned child can't keep the
+    // parent process alive after the run is done.
+    try {
+      this.proc.stdout.destroy();
+      this.proc.stderr.destroy();
+    } catch {
+      // already destroyed — ignore.
+    }
   }
 }
