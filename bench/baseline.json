@@ -3,20 +3,35 @@
     {
       "persona": "backend-api-dev",
       "extraction": {
-        "goldCount": 14,
-        "storedCount": 12,
-        "identityHits": 11,
-        "matchedCount": 11,
-        "recall": 0.7857142857142857,
-        "precision": 1
+        "goldCount": 15,
+        "storedCount": 13,
+        "identityHits": 12,
+        "matchedCount": 12,
+        "recall": 0.8,
+        "precision": 1,
+        "fabricationProbeCount": 2,
+        "fabricationViolationCount": 0,
+        "fabricationRate": 0,
+        "perFabricationProbe": [
+          {
+            "text": "Told the user no rate limiting decision is on record for the HTTP transport.",
+            "extractedKeys": [],
+            "violated": false
+          },
+          {
+            "text": "There's no constraint on payload size yet, we'll profile before picking one.",
+            "extractedKeys": [],
+            "violated": false
+          }
+        ]
       },
       "retrieval": {
         "probeCount": 9,
         "positiveCount": 7,
         "hitCount": 7,
-        "confirmedCount": 5,
+        "confirmedCount": 6,
         "hitRate": 1,
-        "confirmationRate": 0.7142857142857143,
+        "confirmationRate": 0.8571428571428571,
         "negativeCount": 2,
         "falsePositiveCount": 2,
         "falsePositiveRate": 1,
@@ -53,9 +68,9 @@
               "failed-approach:doing-idempotency-with-a-unique-constrai"
             ],
             "negative": false,
-            "rank": 2,
+            "rank": 1,
             "hit": true,
-            "confirmed": false,
+            "confirmed": true,
             "falsePositive": false,
             "falsePositiveRaw": false
           },
@@ -195,11 +210,26 @@
       "persona": "data-ml-person",
       "extraction": {
         "goldCount": 13,
-        "storedCount": 11,
+        "storedCount": 12,
         "identityHits": 10,
         "matchedCount": 10,
         "recall": 0.7692307692307693,
-        "precision": 1
+        "precision": 1,
+        "fabricationProbeCount": 2,
+        "fabricationViolationCount": 0,
+        "fabricationRate": 0,
+        "perFabricationProbe": [
+          {
+            "text": "The team made no decision on feature-store TTLs last quarter.",
+            "extractedKeys": [],
+            "violated": false
+          },
+          {
+            "text": "There was never a requirement to keep raw logs beyond thirty days.",
+            "extractedKeys": [],
+            "violated": false
+          }
+        ]
       },
       "retrieval": {
         "probeCount": 9,
@@ -385,12 +415,27 @@
     {
       "persona": "frontend-dev",
       "extraction": {
-        "goldCount": 14,
-        "storedCount": 12,
-        "identityHits": 11,
-        "matchedCount": 11,
-        "recall": 0.7857142857142857,
-        "precision": 1
+        "goldCount": 15,
+        "storedCount": 14,
+        "identityHits": 12,
+        "matchedCount": 12,
+        "recall": 0.8,
+        "precision": 1,
+        "fabricationProbeCount": 2,
+        "fabricationViolationCount": 0,
+        "fabricationRate": 0,
+        "perFabricationProbe": [
+          {
+            "text": "We haven't made a decision about the icon set yet, still comparing options.",
+            "extractedKeys": [],
+            "violated": false
+          },
+          {
+            "text": "No requirement for dark mode came out of the design review.",
+            "extractedKeys": [],
+            "violated": false
+          }
+        ]
       },
       "retrieval": {
         "probeCount": 9,
@@ -459,7 +504,7 @@
               "failed-approach:css-in-js-with-runtime-styles"
             ],
             "negative": false,
-            "rank": 5,
+            "rank": 7,
             "hit": true,
             "confirmed": false,
             "falsePositive": false,
@@ -576,12 +621,27 @@
     {
       "persona": "messy-conversationalist",
       "extraction": {
-        "goldCount": 10,
-        "storedCount": 7,
-        "identityHits": 6,
-        "matchedCount": 6,
-        "recall": 0.6,
-        "precision": 1
+        "goldCount": 11,
+        "storedCount": 8,
+        "identityHits": 7,
+        "matchedCount": 7,
+        "recall": 0.6363636363636364,
+        "precision": 1,
+        "fabricationProbeCount": 2,
+        "fabricationViolationCount": 0,
+        "fabricationRate": 0,
+        "perFabricationProbe": [
+          {
+            "text": "still no decision on the widget naming lol, don't ask",
+            "extractedKeys": [],
+            "violated": false
+          },
+          {
+            "text": "we dropped the constraint list idea entirely, too much ceremony",
+            "extractedKeys": [],
+            "violated": false
+          }
+        ]
       },
       "retrieval": {
         "probeCount": 9,
@@ -602,7 +662,7 @@
               "decision:sqlite"
             ],
             "negative": false,
-            "rank": 7,
+            "rank": 8,
             "hit": true,
             "confirmed": false,
             "falsePositive": false,
@@ -767,20 +827,65 @@
   ],
   "overall": {
     "extraction": {
-      "goldCount": 51,
-      "storedCount": 42,
-      "identityHits": 38,
-      "matchedCount": 38,
-      "recall": 0.7450980392156863,
-      "precision": 1
+      "goldCount": 54,
+      "storedCount": 47,
+      "identityHits": 41,
+      "matchedCount": 41,
+      "recall": 0.7592592592592593,
+      "precision": 1,
+      "fabricationProbeCount": 8,
+      "fabricationViolationCount": 0,
+      "fabricationRate": 0,
+      "perFabricationProbe": [
+        {
+          "text": "Told the user no rate limiting decision is on record for the HTTP transport.",
+          "extractedKeys": [],
+          "violated": false
+        },
+        {
+          "text": "There's no constraint on payload size yet, we'll profile before picking one.",
+          "extractedKeys": [],
+          "violated": false
+        },
+        {
+          "text": "The team made no decision on feature-store TTLs last quarter.",
+          "extractedKeys": [],
+          "violated": false
+        },
+        {
+          "text": "There was never a requirement to keep raw logs beyond thirty days.",
+          "extractedKeys": [],
+          "violated": false
+        },
+        {
+          "text": "We haven't made a decision about the icon set yet, still comparing options.",
+          "extractedKeys": [],
+          "violated": false
+        },
+        {
+          "text": "No requirement for dark mode came out of the design review.",
+          "extractedKeys": [],
+          "violated": false
+        },
+        {
+          "text": "still no decision on the widget naming lol, don't ask",
+          "extractedKeys": [],
+          "violated": false
+        },
+        {
+          "text": "we dropped the constraint list idea entirely, too much ceremony",
+          "extractedKeys": [],
+          "violated": false
+        }
+      ]
     },
     "retrieval": {
       "probeCount": 36,
       "positiveCount": 28,
       "hitCount": 24,
-      "confirmedCount": 18,
+      "confirmedCount": 19,
       "hitRate": 0.8571428571428571,
-      "confirmationRate": 0.6428571428571429,
+      "confirmationRate": 0.6785714285714286,
       "negativeCount": 8,
       "falsePositiveCount": 6,
       "falsePositiveRate": 0.75,
@@ -817,9 +922,9 @@
             "failed-approach:doing-idempotency-with-a-unique-constrai"
           ],
           "negative": false,
-          "rank": 2,
+          "rank": 1,
           "hit": true,
-          "confirmed": false,
+          "confirmed": true,
           "falsePositive": false,
           "falsePositiveRaw": false
         },
@@ -1049,7 +1154,7 @@
             "failed-approach:css-in-js-with-runtime-styles"
           ],
           "negative": false,
-          "rank": 5,
+          "rank": 7,
           "hit": true,
           "confirmed": false,
           "falsePositive": false,
@@ -1105,7 +1210,7 @@
             "decision:sqlite"
           ],
           "negative": false,
-          "rank": 7,
+          "rank": 8,
           "hit": true,
           "confirmed": false,
           "falsePositive": false,
