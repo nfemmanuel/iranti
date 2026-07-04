@@ -127,8 +127,14 @@ const DATASETS: Record<DatasetId, DatasetLoader> = {
 function selected<K extends string>(envVar: string, all: K[]): K[] {
   const raw = process.env[envVar];
   if (!raw) return all;
-  const want = raw.split(",").map((s) => s.trim());
-  return all.filter((k) => want.includes(k));
+  // Preserve the REQUESTED order (not the definition order) so the caller can
+  // control run sequencing — e.g. run the fast/cheap configs first so their
+  // numbers land before a multi-hour one.
+  const valid = new Set(all);
+  return raw
+    .split(",")
+    .map((s) => s.trim() as K)
+    .filter((k) => valid.has(k));
 }
 
 // ---------------------------------------------------------------------------
