@@ -154,6 +154,13 @@ describe("Layer 0b measurement harness (deterministic, heuristic-only)", () => {
     },
     // 4 personas x 2 full runs x (fresh PGlite boot + auto-migrate) is
     // slower than a typical unit test; generous but bounded timeout.
-    120_000,
+    //
+    // extraction-measurement.md §3 change 1 addendum (found live: the first
+    // R1 attempt was killed at 120s mid-flight, not on merit): an LLM regime
+    // makes ~2 model calls per message across 4 personas × 2 internal runs —
+    // minutes, not seconds, on a local 7B model. Mode-dependent bound: the
+    // heuristic default keeps the tight 120s (regression posture unchanged);
+    // non-heuristic measurement invocations get 30 minutes, still bounded.
+    IS_HEURISTIC ? 120_000 : 1_800_000,
   );
 });
