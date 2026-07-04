@@ -51,6 +51,7 @@ import { pendingBackgroundCount, settleBackground } from "../library/background.
 import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
 import * as schema from "./schema.js";
+import { acquireLock, releaseLock } from "./lockfile.js";
 
 // A pool-shaped handle so every existing `pool.end({ timeout })` call site
 // works unchanged regardless of which engine is active.
@@ -99,11 +100,14 @@ if (usePostgres) {
     process.env["IRANTI_DATA_DIR"] ?? path.join(homedir(), ".iranti", "db"),
   );
 
-  // NOTE (known limitation, reviewed + accepted as follow-up): there is no
-  // inter-process lock on the data dir. Two processes pointed at the same
-  // IRANTI_DATA_DIR would race the open + migrate. The deployment model is
-  // one host = one server process (PRD D3), so this is out of scope for
-  // Layer 0a; a lockfile is tracked as a follow-up in the overnight report.
+  // SW-1 Part A: acquire the exclusive data-dir lockfile BEFORE opening
+  // PGlite — this is the sole `new PGlite(` call site (review-verified; PRD
+  // sw-1-single-writer.md). A live second process throws a structured
+  // LockHeldError (naming the holder pid + dir + manual override) instead
+  // of racing the open + auto-migrate below; a dead holder's stale lock is
+  // taken over automatically (see src/db/lockfile.ts for the pid-liveness +
+  // atomic-takeover design).
+  await acquireLock(dataDir);
   const client = new PGlite(dataDir);
   db = drizzlePglite(client, { schema });
   // Idempotent close: PGlite's close() THROWS on a second call (unlike
@@ -133,6 +137,13 @@ if (usePostgres) {
         );
       }
       await client.close();
+      // SW-1 Part A: release the lock AFTER settle+close (this method's
+      // `closed` guard above already makes this whole body idempotent —
+      // deliberately reusing that double-close guard rather than adding a
+      // second one for the lock specifically). A clean close means an
+      // immediate re-open (same or another process) succeeds without
+      // waiting on the staleness/takeover path.
+      await releaseLock(dataDir);
     },
   };
 
