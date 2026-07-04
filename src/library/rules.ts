@@ -166,6 +166,24 @@ export async function getRulesForEntity(
   });
 }
 
+// Layer 0h: list every rule in a project scope, active-only by default —
+// the audit surface behind iranti_rules_list ("what is governing me right
+// now?"). Unlike getRulesForEntity this spans ALL entities in scope: a host
+// auditing its rules doesn't know which entities carry them. Ordered
+// priority DESC then createdAt DESC for a stable, meaningful listing.
+export async function listRulesForProject(
+  tenantId: string = "default",
+  project: string | string[] = "default",
+  includeInactive = false,
+): Promise<Rule[]> {
+  const conditions = [eq(rules.tenantId, tenantId), projectFilter(project)];
+  if (!includeInactive) conditions.push(eq(rules.isActive, true));
+  return db.query.rules.findMany({
+    where: and(...conditions),
+    orderBy: [desc(rules.priority), desc(rules.createdAt)],
+  });
+}
+
 // Get all rules that should be injected for a given set of entity hints.
 // This is the function iranti_attend calls — it owns the triggering logic.
 //
@@ -248,11 +266,33 @@ export async function getRulesForAttend(
 // Deactivate a rule. It will no longer be returned by getRulesForAttend.
 // The record is kept — deactivation is not deletion. There is no reactivation
 // path in Phase 0. To restore a rule, write a new one with the same text.
-export async function deactivateRule(ruleId: string): Promise<void> {
+// Layer 0h: project-boundary-checked, mirroring archiveAlias/archiveFact —
+// the unscoped form was the write-side twin of the Layer 0 F3 fact-UUID
+// leak (any project could deactivate any other project's rule by raw id).
+// When `project` is passed (the MCP tool always passes the effective/
+// combined set, parity with archive.ts), an out-of-scope or unknown id
+// returns false — indistinguishable on purpose. Omitting `project`
+// preserves the unscoped internal/test behavior.
+export async function deactivateRule(
+  ruleId: string,
+  tenantId: string = "default",
+  project?: string | string[],
+): Promise<boolean> {
+  const existing = await db.query.rules.findFirst({
+    where: and(eq(rules.id, ruleId), eq(rules.tenantId, tenantId)),
+  });
+  if (!existing || !existing.isActive) return false;
+
+  if (project !== undefined) {
+    const allowed = (Array.isArray(project) ? project : [project]).map(normalizeProjectId);
+    if (!allowed.includes(existing.project)) return false;
+  }
+
   await db
     .update(rules)
     .set({ isActive: false })
     .where(eq(rules.id, ruleId));
+  return true;
 }
 
 // ---------------------------------------------------------------------------

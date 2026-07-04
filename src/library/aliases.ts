@@ -196,6 +196,22 @@ export async function listAliasesForEntity(
   });
 }
 
+// Layer 0h: list aliases across ALL entities in a project scope — the audit
+// surface behind iranti_aliases_list. Active-only by default; a host
+// auditing its learned vocabulary doesn't know which entities carry it.
+export async function listAliasesForProject(
+  tenantId: string = "default",
+  project: string | string[] = "default",
+  includeInactive = false,
+): Promise<EntityAlias[]> {
+  const conditions = [eq(entityAliases.tenantId, tenantId), projectFilter(project)];
+  if (!includeInactive) conditions.push(eq(entityAliases.isActive, true));
+  return db.query.entityAliases.findMany({
+    where: and(...conditions),
+    orderBy: desc(entityAliases.createdAt),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Archive (G1 — never a hard delete)
 // ---------------------------------------------------------------------------

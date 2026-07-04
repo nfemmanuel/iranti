@@ -23,6 +23,18 @@ import {
   fetchAlias,
   fetchAliasInputSchema,
 } from "./tools/aliases.js";
+import {
+  rulesList,
+  rulesListInputSchema,
+  ruleDeactivate,
+  ruleDeactivateInputSchema,
+} from "./tools/rules.js";
+import {
+  aliasesList,
+  aliasesListInputSchema,
+  aliasArchive,
+  aliasArchiveInputSchema,
+} from "./tools/entity-aliases.js";
 import { ingestMediaTool, ingestMediaInputSchema } from "./tools/ingest-media.js";
 import { projectStateTool, projectStateInputSchema } from "./tools/project-state.js";
 import {
@@ -127,6 +139,81 @@ export function registerIrantiTools(server: McpServer): void {
     async (input) => {
       try {
         return asResult(await writeRuleTool(input));
+      } catch (err) {
+        return asError(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "iranti_rules_list",
+    {
+      title: "List rules",
+      description:
+        "List the behavioral rules active in the current project scope, with " +
+        "their ids. The audit surface for 'what is governing me right now?' — " +
+        "pass a returned id to iranti_rule_deactivate to retire a rule.",
+      inputSchema: rulesListInputSchema,
+    },
+    async (input) => {
+      try {
+        return asResult(await rulesList(input));
+      } catch (err) {
+        return asError(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "iranti_rule_deactivate",
+    {
+      title: "Deactivate a rule",
+      description:
+        "Stop a rule from being injected, by id (from iranti_rules_list). " +
+        "The rule row is kept — never hard-deleted. To change a rule's text, " +
+        "deactivate the old one and write a new one.",
+      inputSchema: ruleDeactivateInputSchema,
+    },
+    async (input) => {
+      try {
+        return asResult(await ruleDeactivate(input));
+      } catch (err) {
+        return asError(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "iranti_aliases_list",
+    {
+      title: "List learned aliases",
+      description:
+        "List the nickname→fact aliases learned in the current project scope " +
+        "(optionally scoped to one entity), with their ids. Pass an id to " +
+        "iranti_alias_archive to retire a wrongly-learned nickname.",
+      inputSchema: aliasesListInputSchema,
+    },
+    async (input) => {
+      try {
+        return asResult(await aliasesList(input));
+      } catch (err) {
+        return asError(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "iranti_alias_archive",
+    {
+      title: "Archive an alias",
+      description:
+        "Stop a learned nickname from resolving, by id (from " +
+        "iranti_aliases_list). The record is kept — never hard-deleted.",
+      inputSchema: aliasArchiveInputSchema,
+    },
+    async (input) => {
+      try {
+        return asResult(await aliasArchive(input));
       } catch (err) {
         return asError(err);
       }
