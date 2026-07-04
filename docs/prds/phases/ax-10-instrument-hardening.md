@@ -10,6 +10,8 @@
 
 Two instrument upgrades, no engine behavior change. (1) Promote the 13-sentence adversarial stress set — which fabricated 13/13 against the post-AX-9 extractor — into the permanent corpus as fabrication probes, with an explicit growth policy so the suite keeps getting harder instead of freezing at one scenario. (2) A corpus lint that recomputes every content-hash gold key from its own value, killing the hand-typed-hash defect that has now produced three silent instrument lies.
 
+**PRD-review provenance correction:** the 13 sentences were authored and executed in the 2026-07-04 session (scratchpad script, results relayed to NF in chat) and were NOT previously committed anywhere in the repo — the corpus today holds only AX-9's 8 probes. The reviewer correctly refused an uncommitted citation. The sentences are therefore recorded VERBATIM in Appendix A of this PRD as the canonical source; the corpus additions in §7 are these 13, ADDED to the existing 8 (total 21).
+
 ## 2. Problem & motivation
 
 - AX-9's fabricationRate reads 0.0% — but only because its 8 probes cover the one killed vector class. The stress demo proved the verb-pattern classes (must-have idiom, using-up aspect, agreed-gossip, didn't-work events, please/make-sure ephemera, actually-status-updates) fabricate freely. A 0.0% that NF correctly called "insanely low" must become an honest red number the next hardening round is measured against.
@@ -20,7 +22,7 @@ Two instrument upgrades, no engine behavior change. (1) Promote the 13-sentence 
 **Goals**
 - The 13 stress sentences (verbatim from the remediation report's demo) land as `fabricationProbes` across the 4 personas, voice-matched; fabricationRate prints its honest post-addition number (expected ≈ 13-in-21 red on the classes not yet fixed) and becomes the standing scoreboard for extraction-guard work.
 - A written growth policy in the corpus README: every live fabrication incident and every newly identified pattern class adds probes in the same commit as (or before) its fix; probes are NEVER removed, only added; a quarterly-style "author fresh sentences without looking at the pattern list" note guards against teaching-to-the-test.
-- `pnpm lint:corpus` (script + wired into `pnpm bench` preflight): for every gold whose key matches `<prefix>:<12-hex>` where prefix ∈ {referenced_file, shared_url} (normalized or raw form), recompute sha256(value).slice(0,12) and FAIL with the expected key on mismatch.
+- `pnpm lint:corpus` — concrete wiring (PRD-review fix, no ambiguity): new `scripts/lint-corpus.mjs` (plain Node, no build step), a `"lint:corpus"` package script, and `"bench"` rewritten to chain it: `"bench": "node scripts/lint-corpus.mjs && vitest run src/harness/harness.test.ts"` — the bench structurally cannot run against a lying corpus. For every gold whose key matches `<prefix>:<12-hex>` where prefix ∈ {referenced_file, shared_url} (hyphen or underscore form), recompute sha256(value).slice(0,12) **from the raw `value` string exactly as stored — no path normalization** (matches extractor.ts `contentHash`; the review verified all 9 current hash golds this way, including the `./`-preserved one) and FAIL naming the expected key on mismatch.
 
 **Non-goals**
 - Fixing the fabrication classes the new probes expose (that is the extraction-tier work, gated on the measurement protocol — this PRD only makes the failure visible and permanent).
@@ -61,3 +63,24 @@ None — measurement-only.
 
 ## Changelog
 - 2026-07-04 — proposed (NF greenlight; wave-1 mandate)
+- 2026-07-04 — PRD review applied: 13-sentence source committed here as Appendix A (was session-only — citation error), lint wiring made concrete (chained npm script), lint hashes raw value verbatim.
+
+## Appendix A — the 13 adversarial sentences (canonical source; add as fabricationProbes, voice-matched per persona)
+
+Each states nothing durable; any extracted fact is a fabrication. Class labels name the pattern being stressed.
+
+| # | Sentence | Class stressed |
+|---|---|---|
+| 1 | we must have missed something in the review | constraint: "we must X" (must-have = inference idiom) |
+| 2 | we have to admit the old design was prettier | constraint: "we have to X" (have-to-admit idiom) |
+| 3 | we're using up the error budget fast this quarter | decision: "we're using X" (using-up aspect) |
+| 4 | we agreed the meeting was a waste of time | decision: "we agreed X" (opinion/gossip) |
+| 5 | we concluded the incident review yesterday | decision: "we concluded X" (finished activity) |
+| 6 | let's use the big conference room for the retro | decision: "let's use X" (ephemera) |
+| 7 | actually the outage is over, we're back up | correction: "actually X is Y" (status update) |
+| 8 | actually everyone is happy with the current setup | correction: "actually X is Y" (opinion) |
+| 9 | please don't stress about the deadline, it moved | preference: "please X" (reassurance) |
+| 10 | I checked and we never use that endpoint anymore | preference: "never use X" (observation of fact) |
+| 11 | the demo didn't work in front of the customer | failed-approach: "X didn't work" (event) |
+| 12 | my headphones didn't work on the flight | failed-approach: "X didn't work" (off-project) |
+| 13 | make sure Dave saw the memo | preference: "make sure X" (one-off errand) |

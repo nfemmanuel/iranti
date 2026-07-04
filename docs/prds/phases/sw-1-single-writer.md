@@ -72,3 +72,4 @@ None — hardens the local-first substrate; the daemon shape is the same archite
 
 ## Changelog
 - 2026-07-04 — proposed (NF: "do what you need" on process handling — floor now, daemon designed)
+- 2026-07-04 — PRD review: ACCEPT, zero blockers (sole `new PGlite(` site confirmed; acquire slots before connection.ts:107, release inside the pool.end shim after settle). One nit adopted: the shim's existing `closed` idempotence guard (connection.ts:114-118) is the double-close infrastructure the lockfile release builds on — do not re-solve it.

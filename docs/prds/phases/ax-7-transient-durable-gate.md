@@ -28,7 +28,7 @@ The extractor and hosts write facts like "build is green", "server running on po
 
 ## 4. Scope
 
-**In:** `src/library/volatility.ts` (pattern set + classifier, pure, unit-tested); `writeFact` integration (metadata marker + retrieval exclusion in the read paths that feed attend/search); extractor sources included (heuristic + host writes all flow through writeFact); volatile-probe corpus additions (red-first where the current system stores them); tests incl. escape hatch + audit visibility (transient facts visible via history/includeInactive-style audit read).
+**In:** `src/library/volatility.ts` (pattern set + classifier, pure, unit-tested); `writeFact` integration (metadata marker via a `withTransient()` helper mirroring AX-1's `withRawKey`, keys.ts:75-83 precedent — review-verified); retrieval exclusion applied at **all five read call sites** (PRD-review correction: there is NO shared filter point — `readRelevantFactsWithMatch`, `readRecentFactsByEntity`, `readFactsByEntity`, `readFactsByIds`, `searchFacts` each build their own `where`), implemented as one shared `notTransient()` where-fragment helper mirroring the `isArchived` filter pattern and applied at each of the five sites, with a test asserting the count of applied sites matches an exported list (so a sixth read path added later fails loudly instead of leaking transients); extractor sources included (heuristic + host writes all flow through writeFact); volatile-probe corpus additions (red-first where the current system stores them); tests incl. escape hatch + audit visibility (transient facts visible via history/includeInactive-style audit read) + a must-not-fire fixture for `write-issue`'s JSON value shape (`{"status": ...}` inside a value is the one real durable "status" in the codebase — review finding).
 **Out:** retro-cleanup migration of existing volatile facts in live stores (manual/cutover-time task, noted in Layer 0g migration scope); Phase 4 decay.
 
 ## 5. Design decisions
@@ -62,3 +62,4 @@ None — implements §2's "discards information with no signal" for the volatile
 
 ## Changelog
 - 2026-07-04 — proposed (NF greenlight; wave-1 mandate)
+- 2026-07-04 — PRD review applied: read-side blast radius corrected to the five independent call sites via shared notTransient() fragment; write-issue JSON-value near-miss fixture added to acceptance scope.
