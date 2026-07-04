@@ -21,6 +21,11 @@
 
 **Fairness rules (non-negotiable, NF's "genuinely fair"):** same corpus + same judge + same inputs for every system; self-reported vendor numbers flagged as such and re-run locally where possible; iranti gets NO home-field advantage on the shared conversational tasks (its coding-memory edge is shown on a SEPARATE, clearly-labeled axis, not by tilting the shared tasks); every method's apples-to-apples-ability recorded from the deep-research catalogue.
 
+**DUAL-TRACK scoring (NF, 2026-07-04) — run BOTH, report side by side:**
+- **Track G ("as the industry games it"):** replicate the score-inflating setups the S1 research caught in the wild — top_k tuned high (the MemPalace 50-vs-32 trick), best-of-N / multi-run-report-the-max (Zep's single-lucky-run), favorable/self-authored judge prompts, the generous scoring-target the methodology paper showed flips 83–94% of rankings. This makes iranti's number *comparable to the published leaderboard claims* (else we look artificially low next to inflated numbers). EVERY system gets the same generous treatment — the point is comparability, not our own inflation.
+- **Track H ("the right way"):** single run, fixed pre-registered config, strict/decision-driving scoring (MemoryArena-style: memory must drive a correct decision, not just surface a snippet), one neutral judge prompt applied identically. This is the number we actually trust and publish as iranti's honest claim.
+- The gap between Track G and Track H, PER SYSTEM, is itself a headline result: it quantifies how much each competitor's public number is inflated. iranti's own G–H gap should be small (that's the honest-instrument thesis made visible); a competitor's large G–H gap is the story.
+
 **Resume/continuity mechanics:** each S3 adapter is independently resumable (its own PRD + branch note); external installs live under `bench/external/<system>/` with a README capturing exact install/run commands so a fresh session reproduces them; the temp Anthropic key stays in gitignored `bench/.env` (REVOKE when done — flagged every turn).
 
 ---
