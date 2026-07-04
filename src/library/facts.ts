@@ -879,6 +879,10 @@ export async function searchFacts(
 export async function archiveFact(
   factId: string,
   project?: string | string[],
+  // Layer 0i: the archive-row provenance label. "archived_by_user" (default)
+  // = an explicit archive call; writeFact's supersession path writes
+  // "superseded"; correction supersession writes "superseded_by_correction".
+  reason: string = "archived_by_user",
 ): Promise<boolean> {
   return db.transaction(async (tx) => {
     // Get the current live fact.
@@ -916,13 +920,88 @@ export async function archiveFact(
       stabilityScore: fact.stabilityScore,
       accessCount: fact.accessCount,
       metadata: fact.metadata,
-      archivedReason: "archived_by_user",
+      archivedReason: reason,
     });
 
     // Mark the fact as archived.
     await tx.update(facts).set({ isArchived: true }).where(eq(facts.id, factId));
     return true;
   });
+}
+
+// ---------------------------------------------------------------------------
+// Correction supersession (Layer 0i)
+// ---------------------------------------------------------------------------
+
+// A conversational correction ("actually, the eval branch name should be
+// dogfood/report-1") extracts under its OWN key (correction:<subject-slug>),
+// so writeFact's same-key supersession never fires and the stale fact stays
+// live alongside it — both surfaced matched:true in the dogfood eval
+// (check 8), and the project-state rollup surfaced only the stale one
+// (check 10). Only these semantic categories are supersedable — a
+// correction plausibly corrects a stated decision/constraint/preference/
+// failed-approach, never an artifact (shared_url:*), a checkpoint, or
+// another correction. (Build-time tightening of PRD 0i D1's "any
+// non-correction key", recorded in the PRD changelog: the narrower set is
+// strictly safer and covers the motivating incident.)
+export const CORRECTION_SUPERSEDABLE_PREFIXES = [
+  "decision:",
+  "constraint:",
+  "preference:",
+  "failed-approach:",
+] as const;
+
+// Deterministic containment matcher (PRD 0i D1): tokenize the correction's
+// subject slug with the SAME tokenizer facts/rules relevance use; a live
+// fact on the same entity+scope is a candidate iff EVERY subject token
+// appears in its key's token set. Exactly one candidate → archive it as
+// superseded_by_correction (history preserved). Zero, or two-plus
+// (ambiguous) → do nothing: a wrong auto-archive is strictly worse than a
+// stale duplicate. Expected to UNDER-match on paraphrased corrections —
+// disclosed in PRD 0i §9; this is the precision-safe slice.
+export async function applyCorrectionSupersession(
+  entityType: string,
+  entityId: string,
+  correctionKey: string,
+  tenantId: string = "default",
+  project: string | string[] = "default",
+): Promise<{ supersededFactId: string | null; candidateCount: number }> {
+  if (!correctionKey.startsWith("correction:")) {
+    return { supersededFactId: null, candidateCount: 0 };
+  }
+  const subject = correctionKey.slice("correction:".length);
+  const subjectTokens = tokenizeMessage(subject.replace(/-/g, " "));
+  if (subjectTokens.length === 0) return { supersededFactId: null, candidateCount: 0 };
+
+  const live = await db.query.facts.findMany({
+    where: and(
+      eq(facts.tenantId, tenantId),
+      projectFilter(project),
+      eq(facts.entityType, entityType),
+      eq(facts.entityId, entityId),
+      eq(facts.isArchived, false),
+    ),
+  });
+
+  const candidates = live.filter((f) => {
+    if (!CORRECTION_SUPERSEDABLE_PREFIXES.some((p) => f.key.startsWith(p))) return false;
+    const keyTokens = new Set(f.key.toLowerCase().split(/[^a-z0-9]+/));
+    return subjectTokens.every((t) => keyTokens.has(t));
+  });
+
+  if (candidates.length !== 1) {
+    if (candidates.length > 1) {
+      // Ambiguity must never guess — log and stand down (PRD 0i D1).
+      console.error(
+        `[iranti] correction ${correctionKey} matched ${candidates.length} facts on ${entityType}/${entityId} — none archived (ambiguous).`,
+      );
+    }
+    return { supersededFactId: null, candidateCount: candidates.length };
+  }
+
+  const target = candidates[0]!;
+  const archived = await archiveFact(target.id, project, "superseded_by_correction");
+  return { supersededFactId: archived ? target.id : null, candidateCount: 1 };
 }
 
 // ---------------------------------------------------------------------------

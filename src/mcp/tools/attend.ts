@@ -35,6 +35,7 @@ import {
 } from "../../library/project-state.js";
 import {
   VALID_SURFACES,
+  applyCorrectionSupersession,
   findFact,
   readArchivedValuesByFactIds,
   readFactsByIds,
@@ -214,6 +215,24 @@ async function extractAndStore(
       project,
     });
     count++;
+
+    // Layer 0i: an extracted correction supersedes the one live fact its
+    // subject unambiguously names (same entity, same scope) — archived as
+    // superseded_by_correction, never deleted. Sequential in this same
+    // loop (the correction row must exist first; PGlite is
+    // single-connection); a failure here must never break extraction.
+    const normalizedKey = normalizeKey(fact.key);
+    if (normalizedKey.startsWith("correction:")) {
+      await applyCorrectionSupersession(
+        primary.entityType,
+        primary.entityId,
+        normalizedKey,
+        "default",
+        project,
+      ).catch((err: unknown) =>
+        console.error("[iranti] correction supersession error:", err),
+      );
+    }
   }
   return count;
 }

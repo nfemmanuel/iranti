@@ -90,3 +90,4 @@ Unit (matcher: containment, ambiguity, exclusions, tokenizer parity), integratio
 
 ## Changelog
 - 2026-07-04 — proposed (from dogfood review checks 8/10; NF mandate "document, review, implement, review, test, report")
+- 2026-07-04 — build-time addendum (tightens D1, strictly safer): supersedable candidates are restricted to the semantic-category prefixes `decision:`, `constraint:`, `preference:`, `failed-approach:` rather than "any non-correction, non-checkpoint key" — a correction plausibly corrects a stated position, never an artifact (`shared-url:*`) or an issue record. Covers the motivating incident; narrows §9's residual mis-target risk further. `CORRECTION_SUPERSEDABLE_PREFIXES` in facts.ts is the single source of truth.

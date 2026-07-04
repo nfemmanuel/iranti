@@ -144,6 +144,30 @@ async function findRecentByKeyPrefix(
   });
 }
 
+// Layer 0i (PRD D4): corrections ARE decisions for reorientation purposes —
+// a correction whose supersession found no target (the original fact was
+// never extracted, dogfood check 2's exact scenario) still carries the
+// project's latest truth and must reach a returning developer. Both
+// prefixes fetched at the shared limit, merged by the same deterministic
+// (updatedAt, id) ordering, re-capped once.
+async function findRecentDecisionsAndCorrections(
+  tenantId: string,
+  project: string | string[],
+  limit: number,
+): Promise<Fact[]> {
+  const [decisions, corrections] = await Promise.all([
+    findRecentByKeyPrefix(tenantId, project, "decision:", limit),
+    findRecentByKeyPrefix(tenantId, project, "correction:", limit),
+  ]);
+  return [...decisions, ...corrections]
+    .sort((a, b) => {
+      const t = b.updatedAt.getTime() - a.updatedAt.getTime();
+      if (t !== 0) return t;
+      return b.id.localeCompare(a.id);
+    })
+    .slice(0, limit);
+}
+
 async function findMostRecentActivity(
   tenantId: string,
   project: string | string[],
@@ -213,7 +237,9 @@ export async function getProjectState(
   const [checkpointFact, decisionFacts, issueFacts, latestActivityFact] =
     await Promise.all([
       findLatestCheckpointInProject(tenantId, project),
-      findRecentByKeyPrefix(tenantId, project, "decision:", RECENT_DECISIONS_LIMIT),
+      // Layer 0i (PRD D4): decisions AND corrections, merged by recency —
+      // see findRecentDecisionsAndCorrections's header comment.
+      findRecentDecisionsAndCorrections(tenantId, project, RECENT_DECISIONS_LIMIT),
       // Over-fetch issues since some will be filtered out as closed; capped
       // generously (5x) rather than paginating — issue volume per project is
       // small at this scale (matches readRelevantFactsByEntity's over-fetch
