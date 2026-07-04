@@ -318,6 +318,14 @@ export interface AttendResult {
     // A lexical claim, not a truth claim. All-false on a message nothing
     // answers — that's iranti saying "nothing here answers that."
     matched: boolean;
+    // CORE-16 (D3): true when this fact was admitted by the semantic
+    // (bottom-rung) tier — a similarity claim, never a lexical/exact one
+    // (mutually exclusive with matched: true). Additive + omitted-when-false
+    // (token-frugal "ball in pool" convention, not a dense boolean on every
+    // fact): a host that ignores this field sees exactly today's payload
+    // shape when the embedder is off (the default) or on every deterministic
+    // hit even when it's on.
+    semantic?: true;
   }>;
   // Phase 3 (CORE-15): graph-hop secondary tier. Facts within 2 hops of the
   // primary hits, weight-ordered, capped at MAX_PERIPHERAL_FACTS.
@@ -540,10 +548,16 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
   // honesty fix (a query nothing answers now returns only matched:false
   // entries instead of indistinguishable confident-looking facts).
   const matchedFactIds = new Set<string>();
+  // CORE-16: ids filled by the semantic (bottom-rung) tier — additive
+  // `facts[].semantic` label, D3: NEVER also present in matchedFactIds (a
+  // similarity hit is never mistaken for a lexical/exact one). Empty when
+  // the embedder is off (the default) or when deterministic tiers already
+  // filled the entity's budget.
+  const semanticFactIds = new Set<string>();
 
   const factsPerEntity = await Promise.all(
     hints.map(async (h) => {
-      const { facts: relevant, matchedIds } = await readRelevantFactsWithMatch(
+      const { facts: relevant, matchedIds, semanticIds } = await readRelevantFactsWithMatch(
         h.entityType,
         h.entityId,
         perEntityCap,
@@ -552,6 +566,7 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
         effectiveProjectIds,
       );
       for (const id of matchedIds) matchedFactIds.add(id);
+      for (const id of semanticIds) semanticFactIds.add(id);
 
       // Layer 0c (entity resolution): an alias shares zero tokens with the
       // fact it names by definition ("the figma file" vs a Figma URL), so
@@ -923,6 +938,7 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
       source: f.source,
       updatedAt: f.updatedAt.toISOString(),
       matched: matchedFactIds.has(f.id),
+      ...(semanticFactIds.has(f.id) ? { semantic: true as const } : {}),
     })),
     peripheral: budgetedPeripheral,
     checkpoint: budgetedCheckpoint

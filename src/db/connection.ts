@@ -171,19 +171,20 @@ if (usePostgres) {
   // — selects an `embedding` column. Omitting the column on PGlite would
   // turn every `SELECT` into a runtime 42703 ("column does not exist").
   //
-  // The resolution: `embedding` is a pre-existing, config-gated, currently
-  // -dead column — null until IRANTI_EMBEDDINGS=true, which nothing in the
-  // codebase sets or reads (grep confirms schema.ts is the only reference).
-  // Nothing ever writes or reads a real vector through it today. So on
-  // PGlite we substitute statement (2) with the same ALTER TABLE but typed
-  // `text` instead of `vector(768)` — same column name, same NULL default,
-  // satisfies the shared schema's column list — and skip (1) and (3)
-  // entirely (no extension to create, no vector index to build on a text
-  // column). This is the documented delta from the PRD (§8: "local embedded
-  // tier is lexical + graph only... no user-facing regression, vector was
-  // never on by default"). If IRANTI_EMBEDDINGS is ever wired up for real,
-  // this substitution — and the embedded tier's vector support generally —
-  // needs revisiting (tracked as a follow-up, not solved here).
+  // The resolution: on PGlite we substitute statement (2) with the same
+  // ALTER TABLE but typed `text` instead of `vector(768)` — same column
+  // name, same NULL default, satisfies the shared schema's column list —
+  // and skip (1) and (3) entirely (no extension to create, no vector index
+  // to build on a text column). This is the documented delta from the PRD
+  // (§8: "local embedded tier is lexical + graph only"). CORE-16 wires the
+  // column up for real (env `IRANTI_EMBEDDER=off|ollama`, default off,
+  // superseding the never-wired `IRANTI_EMBEDDINGS` placeholder this
+  // comment used to reference): src/embed/vector-column.ts is the ONE
+  // accessor that serializes to/from this text column on PGlite and to/from
+  // the native vector(768) column on Postgres, so no caller branches on
+  // engine. The regime signature (model/dim/version) that guards against
+  // cross-model cosine rides in facts.metadata.embedRegime on BOTH engines
+  // (not in this column) — see src/embed/regime.ts.
   //
   // We do NOT rewrite the migration file itself (it's shared with the
   // Postgres path, which must keep applying it unchanged) — the
@@ -283,6 +284,13 @@ if (usePostgres) {
 }
 
 export { db, pool };
+
+// CORE-16: engine-detection flag, exported so a single caller (the embed
+// serialization accessor, src/embed/vector-column.ts) can branch native-
+// pgvector vs JSON-text storage WITHOUT re-deriving the engine choice from
+// env vars a second time (that would risk drifting out of sync with the
+// actual `db`/`pool` this module built above).
+export const isPostgresEngine = usePostgres;
 
 // Engine-agnostic alias for new code. Existing `pool.end({ timeout })` call
 // sites are left as-is (see module comment above) — this is just the

@@ -37,6 +37,11 @@ import { normalizeKey, withRawKey, withTransient } from "./keys.js";
 import { normalizeProjectId } from "./projects.js";
 import { trackBackground } from "./background.js";
 import { classifyVolatility } from "./volatility.js";
+import { embedFactOnWrite } from "../embed/write-hook.js";
+import { getEmbedder, isEmbedderActive } from "../embed/index.js";
+import { regimeMatches, buildEmbedRegime } from "../embed/regime.js";
+import { cosineSimilarity, SIMILARITY_FLOOR } from "../embed/cosine.js";
+import { readEmbeddingColumnsBatch } from "../embed/vector-column.js";
 
 // ---------------------------------------------------------------------------
 // Project scoping (Layer 0, D6/D7)
@@ -487,6 +492,17 @@ export async function writeFact(
         console.error("[iranti] write edge error:", err),
       ),
     );
+
+    // Step 7 (CORE-16): embed the fact — fire-and-forget, trackBackground'd
+    // (RULE-2). embedFactOnWrite itself no-ops instantly when the embedder is
+    // off (the default), so this costs nothing on the common path beyond one
+    // env check. normalizedKey/input.value (not the returned `fact`'s value)
+    // — identical either way since this is the value just written.
+    trackBackground(
+      embedFactOnWrite(postCommitFactId, normalizedKey, input.value).catch(
+        (err: unknown) => console.error("[iranti] embed error:", err),
+      ),
+    );
   }
 
   return result;
@@ -685,6 +701,104 @@ function scoreRelevance(fact: Fact, tokens: string[]): number {
   return score;
 }
 
+// ---------------------------------------------------------------------------
+// Semantic candidate fetch — CORE-16 (bottom rung)
+// ---------------------------------------------------------------------------
+
+// PRD-review BLOCKER fix (binding): the semantic tier gets its OWN candidate
+// fetch — NOT the keyword path's `min(limit*3, 50)` recency window above.
+// That window is built for keyword scoring; reusing it would silently starve
+// the semantic tier (an old-but-semantically-right fact outside the 50 most
+// recent never enters the pool, defeating the entire paraphrase-closing
+// purpose). This fetch instead pulls ALL non-archived, non-transient,
+// embedded facts for the entity, id-ordered (deterministic — not
+// recency-ordered, since "semantically right" has nothing to do with
+// recency), hard-capped at 500 with a logged truncation note. Layer-0 scale
+// is tens-to-hundreds of facts per entity; the cap is a guardrail whose
+// trigger is the named ANN-index escalation point (PRD §9), not an expected
+// steady state.
+const SEMANTIC_CANDIDATE_CAP = 500;
+
+async function fetchSemanticCandidates(
+  entityType: string,
+  entityId: string,
+  tenantId: string,
+  project: string | string[],
+): Promise<Fact[]> {
+  // +1 over the cap so we can detect truncation without a separate COUNT query.
+  const rows = await db.query.facts.findMany({
+    where: and(
+      eq(facts.tenantId, tenantId),
+      projectFilter(project),
+      eq(facts.entityType, entityType),
+      eq(facts.entityId, entityId),
+      eq(facts.isArchived, false),
+      notTransient(),
+    ),
+    orderBy: facts.id,
+    limit: SEMANTIC_CANDIDATE_CAP + 1,
+  });
+
+  if (rows.length > SEMANTIC_CANDIDATE_CAP) {
+    console.error(
+      `[iranti] semantic candidate fetch truncated at ${SEMANTIC_CANDIDATE_CAP} for ` +
+        `${entityType}/${entityId} (${rows.length} eligible) — ANN-index escalation ` +
+        `trigger (PRD core-16-semantic-retrieval.md §9).`,
+    );
+    return rows.slice(0, SEMANTIC_CANDIDATE_CAP);
+  }
+  return rows;
+}
+
+// Embed the query and cosine-rank the entity's own semantic candidate pool,
+// excluding any fact id already claimed by a deterministic hit (slot-fill
+// only fills what remains — D1: deterministic hits always win their slots).
+// Returns at most `remaining` facts, all strictly above SIMILARITY_FLOOR,
+// highest cosine first. Never called when the embedder is off (callers
+// check isEmbedderActive() first) or when `remaining <= 0`.
+async function semanticSlotFill(
+  entityType: string,
+  entityId: string,
+  message: string,
+  excludeIds: Set<string>,
+  remaining: number,
+  tenantId: string,
+  project: string | string[],
+): Promise<Fact[]> {
+  if (remaining <= 0) return [];
+
+  const embedder = getEmbedder();
+  const [queryVec] = await embedder.embed([message]);
+  if (!queryVec || queryVec.length === 0) return [];
+
+  const candidates = await fetchSemanticCandidates(entityType, entityId, tenantId, project);
+  const eligible = candidates.filter((f) => !excludeIds.has(f.id));
+  if (eligible.length === 0) return [];
+
+  const vectors = await readEmbeddingColumnsBatch(eligible.map((f) => f.id));
+  if (vectors.size === 0) return [];
+
+  const activeRegime = buildEmbedRegime(embedder.identity);
+  const scored: Array<{ fact: Fact; score: number }> = [];
+  for (const fact of eligible) {
+    const vec = vectors.get(fact.id);
+    if (!vec) continue; // never embedded (or embed failed) — absent, not zero
+    // Regime mismatch (D4): a vector from a different model/version is
+    // mathematically incomparable to the current query vector — treated as
+    // absent, same as "never embedded." Re-embed is lazy (next write).
+    if (!regimeMatches((fact.metadata as Record<string, unknown> | null)?.["embedRegime"], activeRegime)) {
+      continue;
+    }
+    const score = cosineSimilarity(queryVec, vec);
+    // D2: fixed floor, not tuned. Below it, no-answer honesty — return
+    // nothing rather than a topically-adjacent-but-wrong "hit".
+    if (score > SIMILARITY_FLOOR) scored.push({ fact, score });
+  }
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, remaining).map((s) => s.fact);
+}
+
 // Fetch facts relevant to a message for a given entity, and SAY which ones
 // actually matched (Layer 0f). Returns the facts plus the set of fact ids
 // whose relevance score was > 0 — i.e. facts that share vocabulary with the
@@ -694,10 +808,62 @@ function scoreRelevance(fact: Fact, tokens: string[]): number {
 // asked" from "this is just recent background." `matched` is a LEXICAL
 // claim (keyword overlap), not a truth claim — documented in the PRD.
 //
+// CORE-16: after the deterministic (keyword/recency) result is final, fill
+// any remaining slots (up to `limit`) with above-floor semantic candidates
+// from the entity's OWN candidate fetch — never touching the deterministic
+// facts already chosen. No-ops instantly when the embedder is off or there's
+// no message to embed (isEmbedderActive() check is the whole cost on the
+// default path). Returns the deterministic facts unchanged, plus any
+// semantic fill appended, plus the set of ids that were semantic fill (for
+// the `semantic: true` response label — D3: NEVER also added to matchedIds).
+async function fillRemainingWithSemantic(
+  entityType: string,
+  entityId: string,
+  limit: number,
+  message: string | undefined,
+  deterministic: Fact[],
+  tenantId: string,
+  project: string | string[],
+): Promise<{ facts: Fact[]; semanticIds: Set<string> }> {
+  const remaining = limit - deterministic.length;
+  if (!message || remaining <= 0 || !isEmbedderActive()) {
+    return { facts: deterministic, semanticIds: new Set() };
+  }
+
+  const excludeIds = new Set(deterministic.map((f) => f.id));
+  const fill = await semanticSlotFill(
+    entityType,
+    entityId,
+    message,
+    excludeIds,
+    remaining,
+    tenantId,
+    project,
+  );
+  if (fill.length === 0) return { facts: deterministic, semanticIds: new Set() };
+
+  // Access-track the semantic fill facts too — a real retrieval either way.
+  await db
+    .update(facts)
+    .set({ lastAccessedAt: new Date(), accessCount: sql`${facts.accessCount} + 1` })
+    .where(inArray(facts.id, fill.map((f) => f.id)));
+
+  return {
+    facts: [...deterministic, ...fill],
+    semanticIds: new Set(fill.map((f) => f.id)),
+  };
+}
+
 // When no message is provided, delegates to readRecentFactsByEntity.
 // With a message, fetches a wider candidate pool (up to 3× limit, max 50),
 // scores by keyword overlap in key + value, and returns the top `limit`
 // by score then recency. Access tracking fires only on returned rows.
+//
+// CORE-16: after the deterministic result is computed (any of the three
+// paths below), fillRemainingWithSemantic tops up any slots still open —
+// bottom rung, slot-fill only (D1). semanticIds is always returned (empty
+// when the embedder is off, or when deterministic hits already filled the
+// budget) so a caller never has to branch on whether the tier is active.
 export async function readRelevantFactsWithMatch(
   entityType: string,
   entityId: string,
@@ -705,11 +871,12 @@ export async function readRelevantFactsWithMatch(
   message?: string,
   tenantId: string = "default",
   project: string | string[] = "default",
-): Promise<{ facts: Fact[]; matchedIds: Set<string> }> {
+): Promise<{ facts: Fact[]; matchedIds: Set<string>; semanticIds: Set<string> }> {
   if (!message) {
     return {
       facts: await readRecentFactsByEntity(entityType, entityId, limit, tenantId, project),
       matchedIds: new Set(),
+      semanticIds: new Set(),
     };
   }
 
@@ -718,6 +885,7 @@ export async function readRelevantFactsWithMatch(
     return {
       facts: await readRecentFactsByEntity(entityType, entityId, limit, tenantId, project),
       matchedIds: new Set(),
+      semanticIds: new Set(),
     };
   }
 
@@ -735,7 +903,15 @@ export async function readRelevantFactsWithMatch(
     limit: candidateLimit,
   });
 
-  if (candidates.length === 0) return { facts: [], matchedIds: new Set() };
+  if (candidates.length === 0) {
+    // No deterministic candidates at all for this entity — still worth a
+    // semantic slot-fill attempt (fillRemainingWithSemantic runs its OWN
+    // fetch, independent of `candidates` here being empty).
+    const { facts: filled, semanticIds } = await fillRemainingWithSemantic(
+      entityType, entityId, limit, message, [], tenantId, project,
+    );
+    return { facts: filled, matchedIds: new Set(), semanticIds };
+  }
 
   const scored = candidates.map((f) => ({
     fact: f,
@@ -743,7 +919,8 @@ export async function readRelevantFactsWithMatch(
   }));
   const anyMatch = scored.some((s) => s.score > 0);
 
-  // No keyword match at all — fall back to pure recency (all ambient).
+  // No keyword match at all — fall back to pure recency (all ambient), then
+  // let semantic fill any slots the recency fallback didn't use.
   if (!anyMatch) {
     const top = candidates.slice(0, limit);
     const ids = top.map((f) => f.id);
@@ -751,7 +928,10 @@ export async function readRelevantFactsWithMatch(
       .update(facts)
       .set({ lastAccessedAt: new Date(), accessCount: sql`${facts.accessCount} + 1` })
       .where(inArray(facts.id, ids));
-    return { facts: top, matchedIds: new Set() };
+    const { facts: filled, semanticIds } = await fillRemainingWithSemantic(
+      entityType, entityId, limit, message, top, tenantId, project,
+    );
+    return { facts: filled, matchedIds: new Set(), semanticIds };
   }
 
   scored.sort((a, b) =>
@@ -760,13 +940,30 @@ export async function readRelevantFactsWithMatch(
       : b.fact.updatedAt.getTime() - a.fact.updatedAt.getTime(),
   );
 
-  const topScored = scored.slice(0, limit);
-  const top = topScored.map((s) => s.fact);
-  const ids = top.map((f) => f.id);
-  await db
-    .update(facts)
-    .set({ lastAccessedAt: new Date(), accessCount: sql`${facts.accessCount} + 1` })
-    .where(inArray(facts.id, ids));
+  // CORE-16 (review-corrected slot-fill ordering): a zero-scoring fact
+  // riding along in `scored` (padding `topScored` up to `limit` purely by
+  // recency tiebreak, pre-existing behavior) is AMBIENT filler, not a
+  // deterministic hit — it never keyword-matched anything. Treating it as
+  // if it already occupied the slot would let blind recency padding starve
+  // the semantic tier exactly the way the PRD's BLOCKER fix was written to
+  // prevent for the candidate POOL; the same principle applies to the
+  // OUTPUT slots. So: real (score > 0) hits are taken first, up to `limit`;
+  // semantic fill then competes for whatever's left; only if the embedder
+  // is off (or semantic finds nothing) do zero-score facts pad the
+  // remainder — preserving today's exact output when the embedder is off
+  // (the default), since that's precisely the old `topScored.slice(0,
+  // limit)` behavior with no positive scorers to displace.
+  const positiveScored = scored.filter((s) => s.score > 0);
+  const zeroScored = scored.filter((s) => s.score === 0);
+
+  const topPositive = positiveScored.slice(0, limit);
+  const top = topPositive.map((s) => s.fact);
+  if (top.length > 0) {
+    await db
+      .update(facts)
+      .set({ lastAccessedAt: new Date(), accessCount: sql`${facts.accessCount} + 1` })
+      .where(inArray(facts.id, top.map((f) => f.id)));
+  }
 
   // MATCHED requires a KEY-token hit, not merely a substring buried in the
   // value prose. Measured rationale (PRD 0f, revised after the first bench
@@ -776,14 +973,34 @@ export async function readRelevantFactsWithMatch(
   // flag over-claimed. A fact's key is its NAME; sharing vocabulary with
   // the name is a much stronger lexical claim than brushing its prose.
   // Ranking is unchanged (still full score); only the label is stricter.
-  return {
-    facts: top,
-    matchedIds: new Set(
-      topScored
-        .filter((s) => hasKeyTokenMatch(s.fact, tokens))
-        .map((s) => s.fact.id),
-    ),
-  };
+  const matchedIds = new Set(
+    topPositive
+      .filter((s) => hasKeyTokenMatch(s.fact, tokens))
+      .map((s) => s.fact.id),
+  );
+
+  // CORE-16: slot-fill only what real keyword scoring left empty.
+  // fillRemainingWithSemantic access-tracks its OWN `fill` subset
+  // internally — do not track it again below (would double-increment
+  // accessCount for exactly the semantic-filled facts).
+  const { facts: semanticFilled, semanticIds } = await fillRemainingWithSemantic(
+    entityType, entityId, limit, message, top, tenantId, project,
+  );
+
+  // Byte-identical-when-off guarantee: pad any STILL-remaining slots with
+  // zero-score ambient facts, exactly like the pre-CORE-16 `topScored.slice
+  // (0, limit)` behavior did — this only has an effect when semantic left
+  // slots open (embedder off, or semantic found nothing above the floor).
+  const stillRemaining = limit - semanticFilled.length;
+  const zeroFill = stillRemaining > 0 ? zeroScored.slice(0, stillRemaining).map((s) => s.fact) : [];
+  if (zeroFill.length > 0) {
+    await db
+      .update(facts)
+      .set({ lastAccessedAt: new Date(), accessCount: sql`${facts.accessCount} + 1` })
+      .where(inArray(facts.id, zeroFill.map((f) => f.id)));
+  }
+
+  return { facts: [...semanticFilled, ...zeroFill], matchedIds, semanticIds };
 }
 
 // Does the message share at least one token with the fact's KEY?

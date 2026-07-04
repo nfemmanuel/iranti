@@ -20,6 +20,7 @@
     "test:coverage": "vitest run --coverage",
     "lint:corpus": "node scripts/lint-corpus.mjs",
     "bench": "node scripts/lint-corpus.mjs && vitest run src/harness/harness.test.ts",
+    "bench:semantic": "vitest run src/harness/semantic-bench.test.ts",
     "mcp": "node dist/mcp/server.js",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down",

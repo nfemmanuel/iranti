@@ -215,11 +215,19 @@ export const facts = pgTable(
 
     metadata: jsonb("metadata"),
 
-    // CORE-16 (Phase 3): dense embedding for hybrid retrieval (vector + keyword).
-    // Null until embeddings are enabled (IRANTI_EMBEDDINGS=true).
-    // Dimension 768 matches the default local model (nomic-embed-text via Ollama).
-    // Config-gated (D6): keyword+graph search remains the default; this column
-    // is a schema pre-placement so enabling is a config flip, not a migration.
+    // CORE-16 (Phase 3): dense embedding for the semantic retrieval tier
+    // (bottom rung, slot-fill only — strictly subordinate to exact/keyword;
+    // see docs/prds/phases/core-16-semantic-retrieval.md). Null until an
+    // embedder is configured (env `IRANTI_EMBEDDER=off|ollama`, default
+    // off — supersedes the never-wired `IRANTI_EMBEDDINGS` name this
+    // comment used to reference). Dimension 768 matches the default local
+    // model (nomic-embed-text via Ollama). Holds ONLY the raw vector — the
+    // regime signature {model, dim, v} that guards against cross-model
+    // cosine rides in `metadata.embedRegime` instead (both engines), so this
+    // column can stay a pure vector(768) on Postgres. Never read/written
+    // through Drizzle's typed column directly — src/embed/vector-column.ts
+    // is the one accessor, so no caller branches on engine (native pgvector
+    // on Postgres, JSON-serialized number[] text on PGlite).
     embedding: vector("embedding", { dimensions: 768 }),
   },
   (t) => [
