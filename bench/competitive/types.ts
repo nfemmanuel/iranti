@@ -74,8 +74,14 @@ export interface Adapter {
   // Stable id used as the results-table row label (e.g. "iranti-next:frontier",
   // "iranti-old", "ai-mem"). Must be constant across runs.
   readonly systemName: string;
-  write(input: WriteInput, config: RunConfig): Promise<WriteResult>;
-  query(question: string, config: RunConfig): Promise<QueryResult>;
+  // `scope` isolates one EvalCase's haystack from every other case's. Each
+  // LongMemEval question carries its OWN 30-40 session haystack; if case B's
+  // sessions were visible when answering case A, retrieval would be corrupted.
+  // Every adapter maps `scope` to its native isolation: iranti -> a per-case
+  // project entityId, Mem0 -> user_id, a file-vault -> a subfolder. The runner
+  // passes EvalCase.id as scope and never assumes cross-case memory.
+  write(input: WriteInput, scope: string, config: RunConfig): Promise<WriteResult>;
+  query(question: string, scope: string, config: RunConfig): Promise<QueryResult>;
   // Stop the MCP subprocess / close the SDK client. Optional: file-vault
   // adapters have nothing to tear down.
   teardown?(): Promise<void>;
@@ -170,3 +176,87 @@ export interface CellLedger {
   // results[runIndex] = the per-question results for that repetition.
   results: Array<{ runIndex: number; questions: QuestionResult[] }>;
 }
+
+// ---------------------------------------------------------------------------
+// Dataset contract — the runner's iteration unit.
+// ---------------------------------------------------------------------------
+//
+// Every dataset (LongMemEval-S, coding-continuity, later LoCoMo) normalizes to
+// a list of EvalCase. The runner is dataset-agnostic: for each case it ingests
+// `history` into the system under the case's own scope (one write() per
+// session, in order), asks `question`, composes an answer via the shared
+// reader, and judges it against `gold`. Loaders own raw-format parsing; the
+// runner never sees the on-disk shape.
+
+export interface EvalCase {
+  // Stable id — LongMemEval's question_id (e.g. "gpt4_..._abs"), or a
+  // coding-continuity case id. Used BOTH as the per-case isolation scope AND
+  // as the QuestionResult key for resumability, so it MUST be stable across
+  // runs.
+  id: string;
+  // Sessions to ingest before asking, in chronological order. Each becomes one
+  // adapter.write(input, scope=case.id, config) call; sessionBoundary carries
+  // the session index.
+  history: WriteInput[];
+  question: string;
+  gold: string;
+  // Category label (a LongMemEval question_type, or "coding-continuity").
+  // Selects the task-conditional judge prompt (LongMemEval has 5 variants).
+  category: string;
+  // True for LongMemEval "_abs" abstention cases: the correct behavior is to
+  // decline, and the judge uses the abstention-override prompt.
+  isAbstention?: boolean;
+}
+
+export interface Dataset {
+  id: DatasetId;
+  cases: EvalCase[];
+}
+
+// A loader downloads/parses its raw source and returns normalized cases. Pure
+// w.r.t. the run (no track/config) — the same cases feed both tracks. Accepts
+// an optional limit for cost-bounded runs (subset runs MUST be labeled as such
+// in the results, never passed off as full-500).
+export type DatasetLoader = (opts?: { limit?: number }) => Promise<Dataset>;
+
+// ---------------------------------------------------------------------------
+// Reader + Judge function contracts (implemented in reader.ts / judge.ts).
+// ---------------------------------------------------------------------------
+
+// D9 shared reader: retrieved context -> composed answer. ONE model+prompt for
+// every system in a run — this is the signature the runner calls.
+export type ComposeAnswer = (
+  question: string,
+  retrieved: string[],
+  config: ReaderConfig,
+) => Promise<string>;
+
+export interface JudgeVerdict {
+  // 1 = judged correct (or, for abstention, correctly declined); 0 otherwise.
+  score: number;
+  // The judge model's raw reply, kept for audit.
+  raw?: string;
+}
+
+// Grades one composed answer. `category` selects the task-conditional prompt;
+// `isAbstention` switches to the abstention-override prompt (per LongMemEval's
+// evaluate_qa.py contract). ONE model + prompt-family per track.
+export type Judge = (
+  input: {
+    question: string;
+    gold: string;
+    answer: string;
+    category: string;
+    isAbstention?: boolean;
+  },
+  config: JudgeConfig,
+) => Promise<JudgeVerdict>;
+
+// ---------------------------------------------------------------------------
+// Adapter registry — how the runner instantiates each system.
+// ---------------------------------------------------------------------------
+//
+// Each adapter module exports a factory. The runner builds the adapter, runs a
+// cell, then calls teardown(). Factories are lazy (nothing spawned until
+// called) so enumerating available systems is free.
+export type AdapterFactory = () => Adapter | Promise<Adapter>;
