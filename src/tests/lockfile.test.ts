@@ -362,3 +362,56 @@ describe("lockfile — real two-process adversarial (child_process)", () => {
     20_000,
   );
 });
+
+// ---------------------------------------------------------------------------
+// Wave-1 code review MAJOR: post-acquire boot failure must release the lock
+// ---------------------------------------------------------------------------
+//
+// connection.ts acquires the lock, then opens PGlite + auto-migrates. If any
+// of that throws, the catch wrapper must release the lock before the failure
+// propagates — otherwise a supervisor that catches the throw without exiting
+// holds a phantom "live" lock with no working DB behind it. Trigger: a data
+// dir pre-seeded with a corrupt PG_VERSION, which makes PGlite's open fail
+// AFTER acquireLock succeeded (the dir itself is valid and writable).
+describe("lock release on post-acquire boot failure (review MAJOR)", () => {
+  it(
+    "a corrupt data dir fails the boot AND leaves no lockfile behind",
+    async () => {
+      const { mkdtempSync, writeFileSync, existsSync, rmSync } = await import("node:fs");
+      const { tmpdir } = await import("node:os");
+      const path = await import("node:path");
+      const { vi } = await import("vitest");
+
+      const dir = mkdtempSync(path.join(tmpdir(), "iranti-lockfail-"));
+      try {
+        // Corrupt store: PG_VERSION present but garbage -> PGlite open throws
+        // after the lock is taken.
+        writeFileSync(path.join(dir, "PG_VERSION"), "not-a-version\n");
+
+        const prevEngine = process.env["IRANTI_DB_ENGINE"];
+        const prevDir = process.env["IRANTI_DATA_DIR"];
+        const prevDbUrl = process.env["DATABASE_URL"];
+        process.env["IRANTI_DB_ENGINE"] = "pglite";
+        process.env["IRANTI_DATA_DIR"] = dir;
+        delete process.env["DATABASE_URL"];
+        vi.resetModules();
+
+        await expect(import("../db/connection.js")).rejects.toThrow();
+
+        // The MAJOR's assertion: the failure path released the lock.
+        expect(existsSync(path.join(dir, "iranti.lock"))).toBe(false);
+
+        // Restore env + module graph for whatever runs after this file.
+        if (prevEngine === undefined) delete process.env["IRANTI_DB_ENGINE"];
+        else process.env["IRANTI_DB_ENGINE"] = prevEngine;
+        if (prevDir === undefined) delete process.env["IRANTI_DATA_DIR"];
+        else process.env["IRANTI_DATA_DIR"] = prevDir;
+        if (prevDbUrl !== undefined) process.env["DATABASE_URL"] = prevDbUrl;
+        vi.resetModules();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    30_000,
+  );
+});

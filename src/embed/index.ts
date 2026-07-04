@@ -3,7 +3,7 @@
 // See docs/prds/phases/core-16-semantic-retrieval.md for the full design.
 // Summary: when exact-key and keyword tiers yield fewer than the per-entity
 // cap, embed the query and cosine-match it against the entity's own
-// embedded-fact pool (its OWN candidate fetch — see src/embed/candidates.ts
+// embedded-fact pool (its OWN candidate fetch — see fetchSemanticCandidates + SEMANTIC_CANDIDATE_CAP in src/library/facts.ts
 // for why this must NOT reuse the keyword path's 50-row recency window).
 // Above-floor hits fill only the REMAINING slots, labeled `semantic: true`,
 // never `matched: true` (D3). Off by default (IRANTI_EMBEDDER=off).

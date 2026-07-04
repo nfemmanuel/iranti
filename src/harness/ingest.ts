@@ -204,6 +204,27 @@ export async function runPersonaIngest(
     // residual risk is documented in the PRD §9.)
     const { readFactsByEntity } = await import("../library/facts.js");
 
+    // extraction-measurement fix (found live, first R1 attempt): the
+    // stability poll below was calibrated for the heuristic extractor's
+    // near-instant writes. An LLM regime's extraction chains take SECONDS
+    // per message — the poll's quiet 200ms window reported "settled" while
+    // most extractions were still in flight, so the store was read back
+    // nearly empty and R1 printed recall 16.7% — an instrument artifact,
+    // not a model result. Every extraction chain is trackBackground'd
+    // (RULE-2), so the DETERMINISTIC settle is to await the registry —
+    // same module instance as attend's, because this import happens after
+    // the same vi.resetModules() boundary. Generous bound in LLM mode;
+    // heuristic keeps a short bound (its chains settle in milliseconds and
+    // the poll below remains as belt-and-braces for both).
+    const { settleBackground } = await import("../library/background.js");
+    const settleBound =
+      process.env["IRANTI_EXTRACTOR"] === "heuristic" ? 10_000 : 600_000;
+    if (!(await settleBackground(settleBound))) {
+      console.error(
+        `[iranti bench] ingest settle exceeded ${settleBound}ms — fact readback may be incomplete`,
+      );
+    }
+
     // Deduped entity refs kept as real tuples — never joined into a
     // delimited string and re-split, so an entity id containing any
     // would-be separator character can never be truncated (same bug class

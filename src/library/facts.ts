@@ -89,16 +89,20 @@ function notTransient() {
   return sql`(${facts.metadata}->>'transient') IS DISTINCT FROM 'true'`;
 }
 
-// Canonical list of read sites this gate is applied to (PRD scope, exactly
-// five). Exported so a test can assert this list's length stays 5 — a
-// change here (a name added or removed) is a deliberate, reviewed decision,
-// not a silent drift.
+// Canonical list of read sites this gate is applied to. Exported so a test
+// can assert this list's exact length — a change here (a name added or
+// removed) is a deliberate, reviewed decision, not a silent drift.
+// The PRD scoped five; CORE-16 added a SIXTH (fetchSemanticCandidates, the
+// semantic tier's own candidate fetch) — the wave-1 code review caught that
+// it was correctly filtered in code but missing from this list, which is
+// precisely the silent-drift failure this list exists to make loud.
 export const GATED_READ_SITES = [
   "readRelevantFactsWithMatch",
   "readRecentFactsByEntity",
   "readFactsByEntity",
   "readFactsByIds",
   "searchFacts",
+  "fetchSemanticCandidates",
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -498,11 +502,18 @@ export async function writeFact(
     // off (the default), so this costs nothing on the common path beyond one
     // env check. normalizedKey/input.value (not the returned `fact`'s value)
     // — identical either way since this is the value just written.
-    trackBackground(
-      embedFactOnWrite(postCommitFactId, normalizedKey, input.value).catch(
-        (err: unknown) => console.error("[iranti] embed error:", err),
-      ),
-    );
+    // Review MINOR: skip facts the AX-7 gate marked transient — their vector
+    // would be written but never read back (fetchSemanticCandidates filters
+    // notTransient), so embedding them is pure wasted model compute.
+    const wentTransient =
+      (metadata as { transient?: boolean } | null | undefined)?.transient === true;
+    if (!wentTransient) {
+      trackBackground(
+        embedFactOnWrite(postCommitFactId, normalizedKey, input.value).catch(
+          (err: unknown) => console.error("[iranti] embed error:", err),
+        ),
+      );
+    }
   }
 
   return result;

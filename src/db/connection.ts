@@ -207,6 +207,17 @@ if (usePostgres) {
     ],
   };
 
+  // SW-1 code-review MAJOR fix: everything from here through the migration
+  // block runs AFTER acquireLock — if the journal read, PGlite's lazy open
+  // (first db.execute), or a migration throws, the lock must be released
+  // before the failure propagates, or a supervisor that catches the throw
+  // without exiting is left holding a phantom "live" lock with no working
+  // DB behind it. (Process-crash paths were already self-healing via pid
+  // staleness; this closes the caught-throw path.) Flat-indented try on
+  // purpose: re-indenting the 85-line migration block would destroy its
+  // blame history for a pure wrapper.
+  try {
+
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const migrationsFolder = path.resolve(__dirname, "../../drizzle");
 
@@ -291,6 +302,13 @@ if (usePostgres) {
       await client.exec("ROLLBACK").catch(() => {});
       throw err;
     }
+  }
+
+  } catch (err) {
+    // SW-1 review fix (see comment above the matching `try`): release the
+    // data-dir lock before propagating a post-acquire boot failure.
+    await releaseLock(dataDir).catch(() => {});
+    throw err;
   }
 }
 

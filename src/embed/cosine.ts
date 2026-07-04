@@ -1,7 +1,7 @@
 // Cosine similarity — CORE-16.
 //
 // Plain JS, O(dim) per pair. Non-goal per the PRD: no ANN index at Layer-0
-// scale (tens-to-hundreds of facts per entity) — see src/embed/candidates.ts
+// scale (tens-to-hundreds of facts per entity) — see fetchSemanticCandidates + SEMANTIC_CANDIDATE_CAP in src/library/facts.ts
 // for the 500-cap that's the named escalation trigger.
 
 export function cosineSimilarity(a: number[], b: number[]): number {

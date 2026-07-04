@@ -362,4 +362,52 @@ describe("CORE-16 — semantic retrieval tier (MockEmbedder)", () => {
 
     process.env["IRANTI_EMBEDDER"] = "mock"; // restore for subsequent tests in this file
   });
+
+  it("a transient (AX-7-gated) fact is never eligible for semantic slot-fill; a durable twin is (wave-1 review MAJOR)", async () => {
+    // Cross-feature seam the wave-1 code review flagged: CORE-16's
+    // fetchSemanticCandidates is the SIXTH notTransient()-gated read site.
+    // This pins it functionally: a volatile fact whose VALUE is semantically
+    // close to the query must never surface via cosine fill, while an
+    // identical-value durable fact must.
+    const { writeFact, readRelevantFactsWithMatch } = await import("../library/facts.js");
+    const { settleBackground } = await import("../library/background.js");
+
+    const entityId = `sem-transient-${randomUUID()}`;
+    const salted = `${PARAPHRASE_QUERY} regarding the deploy-target`;
+
+    // Key shape "*-status" triggers the AX-7 volatility gate -> stored with
+    // metadata.transient = true (no `durable` override passed).
+    await writeFact({
+      entityType: "project",
+      entityId,
+      key: "wiki-page-status",
+      value: PARAPHRASE_VALUE,
+      source: "test",
+    });
+    await writeKeywordDecoy(writeFact, entityId);
+    await settleBackground(5000);
+
+    // Phase 1: only the transient candidate exists beside the decoy — the
+    // open slot must stay EMPTY rather than be filled by a transient fact.
+    const first = await readRelevantFactsWithMatch("project", entityId, 2, salted);
+    expect(first.facts.find((f) => f.key === "wiki-page-status")).toBeUndefined();
+    expect(first.semanticIds.size).toBe(0);
+
+    // Phase 2: a durable twin appears — IT fills the semantic slot; the
+    // transient one still never surfaces.
+    await writeFact({
+      entityType: "project",
+      entityId,
+      key: PARAPHRASE_KEY,
+      value: PARAPHRASE_VALUE,
+      source: "test",
+    });
+    await settleBackground(5000);
+
+    const second = await readRelevantFactsWithMatch("project", entityId, 2, salted);
+    const durableHit = second.facts.find((f) => f.key === PARAPHRASE_KEY);
+    expect(durableHit).toBeDefined();
+    expect(second.semanticIds.has(durableHit!.id)).toBe(true);
+    expect(second.facts.find((f) => f.key === "wiki-page-status")).toBeUndefined();
+  });
 });

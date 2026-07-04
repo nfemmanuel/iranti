@@ -746,11 +746,14 @@ describe("AX-1 normalizeKey boundary", () => {
 // ---------------------------------------------------------------------------
 
 describe("AX-7 transient-vs-durable gate", () => {
-  it("GATED_READ_SITES names exactly the 5 PRD-scoped read sites", () => {
-    // A sixth read path added later without being wired to notTransient()
-    // must fail THIS assertion loudly instead of silently leaking transient
-    // facts — the PRD's own acceptance criterion.
-    expect(GATED_READ_SITES).toHaveLength(5);
+  it("GATED_READ_SITES names exactly the 6 gated read sites (5 PRD-scoped + CORE-16's semantic fetch)", () => {
+    // A read path added later without being wired to notTransient() must
+    // fail THIS assertion loudly instead of silently leaking transient
+    // facts — the PRD's own acceptance criterion. The wave-1 code review
+    // proved the mechanism works: CORE-16's fetchSemanticCandidates WAS
+    // correctly filtered in code but missing from this list — exactly the
+    // drift class this test exists to catch. Now enumerated.
+    expect(GATED_READ_SITES).toHaveLength(6);
     expect([...GATED_READ_SITES].sort()).toEqual(
       [
         "readRelevantFactsWithMatch",
@@ -758,6 +761,7 @@ describe("AX-7 transient-vs-durable gate", () => {
         "readFactsByEntity",
         "readFactsByIds",
         "searchFacts",
+        "fetchSemanticCandidates",
       ].sort(),
     );
   });
