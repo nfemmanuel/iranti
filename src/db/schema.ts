@@ -302,8 +302,10 @@ export const factArchive = pgTable(
       .defaultNow(),
 
     // Why this snapshot was taken.
-    // "superseded"       — writeFact replaced the value with a new one
-    // "archived_by_user" — archiveFact() was called explicitly
+    // "superseded"                 — writeFact replaced the value with a new one
+    // "archived_by_user"           — archiveFact() was called explicitly
+    // "superseded_by_correction"   — Layer 0i: an extracted correction:* fact
+    //                                unambiguously named this fact and archived it
     archivedReason: text("archived_reason").notNull(),
   },
   (t) => [

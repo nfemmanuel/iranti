@@ -249,6 +249,14 @@ describe("extractArtifacts — AX-9 bare relative paths", () => {
     expect(artifacts).toHaveLength(0);
   });
 
+  it("misses cleanly on flag-like leading hyphens and drive-relative forms (review findings)", () => {
+    // A miss is the correct precision posture — never an imprecise capture
+    // ("-docs/config.yaml" with the hyphen, or "docs\\x.md" with the C:
+    // silently dropped).
+    expect(extractArtifacts("run with -docs/config.yaml to override")).toHaveLength(0);
+    expect(extractArtifacts("C:docs\\x.md is drive-relative")).toHaveLength(0);
+  });
+
   it("does not double-extract the tail of a ./-prefixed path", () => {
     const artifacts = extractArtifacts("see ./docs/x.md here");
     expect(artifacts).toHaveLength(1);

@@ -383,4 +383,28 @@ describe("attend — AX-9 host-summary demotion (two-sided phase branch)", () =>
     expect(stored!.source).toBe("extractor_heuristic");
     expect(stored!.confidence).toBeCloseTo(0.85, 5);
   });
+
+  it("message + currentContext together on post-response: overlapping keys deterministically end attendant_autowrite (review pin)", async () => {
+    // The extraction chain is sequential (message first, then
+    // currentContext), so when both texts extract the SAME key, writeFact's
+    // upsert makes the LAST writer win: attendant_autowrite. Both labels sit
+    // at the same demoted 0.70 confidence, so no trust escalation is
+    // possible either way — this pins the precedence so a future chain
+    // reorder shows up as a test failure, not a silent provenance flip.
+    const entityId = randomUUID();
+    await attend({
+      entityHints: [{ entityType: "project", entityId }],
+      message: "we chose Caddy as the reverse proxy",
+      currentContext: "Summary of turn: we chose Caddy as the reverse proxy for the edge tier.",
+      phase: "post-response",
+    });
+    await new Promise((r) => setTimeout(r, 400));
+
+    const { resolveCurrentProject } = await import("../library/projects.js");
+    const project = (await resolveCurrentProject()).id;
+    const stored = await findFact("project", entityId, "decision:caddy", "default", project);
+    expect(stored).toBeDefined();
+    expect(stored!.source).toBe("attendant_autowrite");
+    expect(stored!.confidence).toBeCloseTo(0.7, 5);
+  });
 });

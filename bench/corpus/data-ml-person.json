@@ -178,9 +178,9 @@
     {
       "entityType": "project",
       "entityId": "churn-model",
-      "key": "referenced_file:churn_eda_notebook",
+      "key": "referenced_file:b6a96709489b",
       "value": "notebooks/churn_eda.ipynb",
-      "note": "message 10 — 'Check X for the analysis' phrasing has no heuristic match, and notebooks/churn_eda.ipynb is NOT extracted by extractArtifacts (no leading ./ or / segment marker). INTENTIONALLY a miss today — file-path-in-prose gap. KEY FORMAT PLACEHOLDER: this hand-written slug is NOT the 12-hex content-hash key extractArtifacts() would produce; if path extraction is ever widened to catch this path, recompute this gold key as the real content hash or the improvement will be silently masked as a continued miss."
+      "note": "message 10 — bare repo-relative path, extracted by AX-9's BARE_RELATIVE_PATH_PATTERN. HISTORY: was a documented miss with a hand-written placeholder key ('referenced_file:churn_eda_notebook') whose own note instructed recomputing the real 12-hex content hash if path extraction ever widened — AX-9 widened it, the code-review gauntlet caught the stale placeholder masking the improvement, and this key is now the real sha256(path) hash per that instruction."
     },
     {
       "entityType": "project",
