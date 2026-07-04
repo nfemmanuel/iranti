@@ -115,6 +115,55 @@ function toEvalCase(raw: RawInstance): EvalCase {
 }
 
 // -----------------------------------------------------------------------
+// Stratified subsampling.
+// -----------------------------------------------------------------------
+
+// A plain first-N-by-id sample is NOT category-balanced (verified: first-30
+// dropped single-session-assistant entirely and over-weighted knowledge-
+// update). Since full-500 is infeasible for the LLM-extractor configs (~48
+// sessions/case × 500 = tens of thousands of extraction calls), a subset MUST
+// be stratified so every question_type is represented in proportion to the
+// full set. Deterministic: id-sorted within each category, largest categories
+// absorb the rounding remainder. Abstention (`_abs`, ~6% of the set, crossing
+// categories) is included proportionally by construction — the returned count
+// is reported in the results so a subset is never passed off as full-500.
+function stratifiedSample(sorted: RawInstance[], limit: number): RawInstance[] {
+  const byCat = new Map<string, RawInstance[]>();
+  for (const r of sorted) {
+    const arr = byCat.get(r.question_type) ?? [];
+    arr.push(r);
+    byCat.set(r.question_type, arr);
+  }
+  const cats = [...byCat.keys()].sort();
+  const total = sorted.length;
+  const alloc = new Map<string, number>();
+  let assigned = 0;
+  for (const cat of cats) {
+    const n = Math.max(1, Math.round((byCat.get(cat)!.length / total) * limit));
+    alloc.set(cat, n);
+    assigned += n;
+  }
+  // Reconcile to hit `limit` exactly: largest categories give/take the diff.
+  const catsBySize = [...cats].sort((a, b) => byCat.get(b)!.length - byCat.get(a)!.length);
+  let diff = limit - assigned;
+  let guard = 0;
+  while (diff !== 0 && guard++ < 10000) {
+    const cat = catsBySize[guard % catsBySize.length]!;
+    const cur = alloc.get(cat)!;
+    if (diff > 0) {
+      alloc.set(cat, cur + 1);
+      diff--;
+    } else if (cur > 1) {
+      alloc.set(cat, cur - 1);
+      diff++;
+    }
+  }
+  const picked: RawInstance[] = [];
+  for (const cat of cats) picked.push(...byCat.get(cat)!.slice(0, alloc.get(cat)!));
+  return picked.sort((a, b) => (a.question_id < b.question_id ? -1 : a.question_id > b.question_id ? 1 : 0));
+}
+
+// -----------------------------------------------------------------------
 // Loader.
 // -----------------------------------------------------------------------
 
@@ -123,11 +172,11 @@ export const loadLongMemEvalS: DatasetLoader = async (opts) => {
 
   const raw = JSON.parse(await readFile(CACHE_PATH, "utf-8")) as RawInstance[];
 
-  // Stable order: sort by id first so `limit` is deterministic regardless
-  // of on-disk array order (the task's explicit "first N by id sort"
-  // requirement), then normalize.
+  // Stable id-sort so any subset is deterministic regardless of on-disk order.
   const sorted = [...raw].sort((a, b) => (a.question_id < b.question_id ? -1 : a.question_id > b.question_id ? 1 : 0));
-  const limited = opts?.limit !== undefined ? sorted.slice(0, opts.limit) : sorted;
+  // `limit` now yields a STRATIFIED subset (all 6 categories, proportional),
+  // not the first-N — see stratifiedSample above.
+  const limited = opts?.limit !== undefined ? stratifiedSample(sorted, opts.limit) : sorted;
 
   const cases: EvalCase[] = limited.map(toEvalCase);
 
