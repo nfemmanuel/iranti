@@ -430,6 +430,18 @@
     {
       "text": "There was never a requirement to keep raw logs beyond thirty days.",
       "note": "AX-9 (added red-first): negated 'requirement' noun with space (no colon) after it — the colon-less sub-vector of the same bare-noun pattern class. Must extract ZERO facts."
+    },
+    {
+      "text": "we must have missed something in the review",
+      "note": "AX-10 (Appendix A #1, added red-first): 'we must X' constraint pattern matches the must-have inference idiom, not an actual requirement. Fabricates constraint:have-missed-something-in-the-review. Must extract ZERO facts."
+    },
+    {
+      "text": "we agreed the meeting was a waste of time",
+      "note": "AX-10 (Appendix A #4, added red-first): 'we agreed X' decision pattern matches an opinion/gossip statement, not a decision reached. Fabricates decision:the-meeting-was-a-waste-of-time. Must extract ZERO facts."
+    },
+    {
+      "text": "please don't stress about the deadline, it moved",
+      "note": "AX-10 (Appendix A #9, added red-first): 'please X' preference pattern matches a reassurance, not a standing preference. Fabricates preference:don-t-stress-about-the-deadline. Must extract ZERO facts."
     }
   ]
 }

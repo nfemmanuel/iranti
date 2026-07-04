@@ -400,6 +400,18 @@
     {
       "text": "we dropped the constraint list idea entirely, too much ceremony",
       "note": "AX-9 (added red-first): NON-negated mid-sentence 'constraint' noun misuse — the noun names a thing being discussed, not a constraint being stated. Bare pattern fabricates 'list idea entirely'. Must extract ZERO facts."
+    },
+    {
+      "text": "I checked and we never use that endpoint anymore",
+      "note": "AX-10 (Appendix A #10, added red-first): 'never use X' preference pattern matches an observation of fact, not a standing preference. Fabricates preference:that-endpoint-anymore. Must extract ZERO facts."
+    },
+    {
+      "text": "my headphones didn't work on the flight",
+      "note": "AX-10 (Appendix A #12, added red-first): 'X didn't work' failed-approach pattern matches an off-project personal aside, not a failed approach on this project. Fabricates failed-approach:my-headphones. Must extract ZERO facts."
+    },
+    {
+      "text": "make sure Dave saw the memo",
+      "note": "AX-10 (Appendix A #13, added red-first): 'make sure X' preference pattern matches a one-off errand, not a standing preference. Fabricates preference:dave-saw-the-memo. Must extract ZERO facts."
     }
   ]
 }

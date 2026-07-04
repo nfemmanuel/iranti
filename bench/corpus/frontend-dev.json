@@ -462,6 +462,18 @@
     {
       "text": "No requirement for dark mode came out of the design review.",
       "note": "AX-9 (added red-first): negated 'requirement' noun. Bare pattern fabricates 'for dark mode came out of the design review'. Must extract ZERO facts."
+    },
+    {
+      "text": "we have to admit the old design was prettier",
+      "note": "AX-10 (Appendix A #2, added red-first): 'we have to X' constraint pattern matches the have-to-admit idiom, not an actual requirement. Fabricates constraint:admit-the-old-design-was-prettier. Must extract ZERO facts."
+    },
+    {
+      "text": "let's use the big conference room for the retro",
+      "note": "AX-10 (Appendix A #6, added red-first): 'let's use X' decision pattern matches one-off meeting-room ephemera, not a durable decision. Fabricates decision:the-big-conference-room-for-the-retro. Must extract ZERO facts."
+    },
+    {
+      "text": "actually everyone is happy with the current setup",
+      "note": "AX-10 (Appendix A #8, added red-first): 'actually X is Y' correction pattern matches an opinion statement, not a correction of a prior claim. Fabricates correction:everyone. Must extract ZERO facts."
     }
   ]
 }

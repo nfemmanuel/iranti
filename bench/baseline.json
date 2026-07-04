@@ -9,9 +9,9 @@
         "matchedCount": 13,
         "recall": 0.8666666666666667,
         "precision": 1,
-        "fabricationProbeCount": 2,
-        "fabricationViolationCount": 0,
-        "fabricationRate": 0,
+        "fabricationProbeCount": 6,
+        "fabricationViolationCount": 4,
+        "fabricationRate": 0.6666666666666666,
         "perFabricationProbe": [
           {
             "text": "Told the user no rate limiting decision is on record for the HTTP transport.",
@@ -22,6 +22,34 @@
             "text": "There's no constraint on payload size yet, we'll profile before picking one.",
             "extractedKeys": [],
             "violated": false
+          },
+          {
+            "text": "we're using up the error budget fast this quarter",
+            "extractedKeys": [
+              "decision:up-the-error-budget-fast-this-quarter"
+            ],
+            "violated": true
+          },
+          {
+            "text": "we concluded the incident review yesterday",
+            "extractedKeys": [
+              "decision:the-incident-review-yesterday"
+            ],
+            "violated": true
+          },
+          {
+            "text": "actually the outage is over, we're back up",
+            "extractedKeys": [
+              "correction:the-outage"
+            ],
+            "violated": true
+          },
+          {
+            "text": "the demo didn't work in front of the customer",
+            "extractedKeys": [
+              "failed-approach:the-demo"
+            ],
+            "violated": true
           }
         ]
       },
@@ -215,9 +243,9 @@
         "matchedCount": 11,
         "recall": 0.8461538461538461,
         "precision": 1,
-        "fabricationProbeCount": 2,
-        "fabricationViolationCount": 0,
-        "fabricationRate": 0,
+        "fabricationProbeCount": 5,
+        "fabricationViolationCount": 3,
+        "fabricationRate": 0.6,
         "perFabricationProbe": [
           {
             "text": "The team made no decision on feature-store TTLs last quarter.",
@@ -228,6 +256,27 @@
             "text": "There was never a requirement to keep raw logs beyond thirty days.",
             "extractedKeys": [],
             "violated": false
+          },
+          {
+            "text": "we must have missed something in the review",
+            "extractedKeys": [
+              "constraint:have-missed-something-in-the-review"
+            ],
+            "violated": true
+          },
+          {
+            "text": "we agreed the meeting was a waste of time",
+            "extractedKeys": [
+              "decision:the-meeting-was-a-waste-of-time"
+            ],
+            "violated": true
+          },
+          {
+            "text": "please don't stress about the deadline, it moved",
+            "extractedKeys": [
+              "preference:don-t-stress-about-the-deadline"
+            ],
+            "violated": true
           }
         ]
       },
@@ -421,9 +470,9 @@
         "matchedCount": 13,
         "recall": 0.8666666666666667,
         "precision": 1,
-        "fabricationProbeCount": 2,
-        "fabricationViolationCount": 0,
-        "fabricationRate": 0,
+        "fabricationProbeCount": 5,
+        "fabricationViolationCount": 3,
+        "fabricationRate": 0.6,
         "perFabricationProbe": [
           {
             "text": "We haven't made a decision about the icon set yet, still comparing options.",
@@ -434,6 +483,27 @@
             "text": "No requirement for dark mode came out of the design review.",
             "extractedKeys": [],
             "violated": false
+          },
+          {
+            "text": "we have to admit the old design was prettier",
+            "extractedKeys": [
+              "constraint:admit-the-old-design-was-prettier"
+            ],
+            "violated": true
+          },
+          {
+            "text": "let's use the big conference room for the retro",
+            "extractedKeys": [
+              "decision:the-big-conference-room-for-the-retro"
+            ],
+            "violated": true
+          },
+          {
+            "text": "actually everyone is happy with the current setup",
+            "extractedKeys": [
+              "correction:everyone"
+            ],
+            "violated": true
           }
         ]
       },
@@ -627,9 +697,9 @@
         "matchedCount": 7,
         "recall": 0.6363636363636364,
         "precision": 1,
-        "fabricationProbeCount": 2,
-        "fabricationViolationCount": 0,
-        "fabricationRate": 0,
+        "fabricationProbeCount": 5,
+        "fabricationViolationCount": 3,
+        "fabricationRate": 0.6,
         "perFabricationProbe": [
           {
             "text": "still no decision on the widget naming lol, don't ask",
@@ -640,6 +710,27 @@
             "text": "we dropped the constraint list idea entirely, too much ceremony",
             "extractedKeys": [],
             "violated": false
+          },
+          {
+            "text": "I checked and we never use that endpoint anymore",
+            "extractedKeys": [
+              "preference:that-endpoint-anymore"
+            ],
+            "violated": true
+          },
+          {
+            "text": "my headphones didn't work on the flight",
+            "extractedKeys": [
+              "failed-approach:my-headphones"
+            ],
+            "violated": true
+          },
+          {
+            "text": "make sure Dave saw the memo",
+            "extractedKeys": [
+              "preference:dave-saw-the-memo"
+            ],
+            "violated": true
           }
         ]
       },
@@ -833,9 +924,9 @@
       "matchedCount": 44,
       "recall": 0.8148148148148148,
       "precision": 1,
-      "fabricationProbeCount": 8,
-      "fabricationViolationCount": 0,
-      "fabricationRate": 0,
+      "fabricationProbeCount": 21,
+      "fabricationViolationCount": 13,
+      "fabricationRate": 0.6190476190476191,
       "perFabricationProbe": [
         {
           "text": "Told the user no rate limiting decision is on record for the HTTP transport.",
@@ -848,6 +939,34 @@
           "violated": false
         },
         {
+          "text": "we're using up the error budget fast this quarter",
+          "extractedKeys": [
+            "decision:up-the-error-budget-fast-this-quarter"
+          ],
+          "violated": true
+        },
+        {
+          "text": "we concluded the incident review yesterday",
+          "extractedKeys": [
+            "decision:the-incident-review-yesterday"
+          ],
+          "violated": true
+        },
+        {
+          "text": "actually the outage is over, we're back up",
+          "extractedKeys": [
+            "correction:the-outage"
+          ],
+          "violated": true
+        },
+        {
+          "text": "the demo didn't work in front of the customer",
+          "extractedKeys": [
+            "failed-approach:the-demo"
+          ],
+          "violated": true
+        },
+        {
           "text": "The team made no decision on feature-store TTLs last quarter.",
           "extractedKeys": [],
           "violated": false
@@ -856,6 +975,27 @@
           "text": "There was never a requirement to keep raw logs beyond thirty days.",
           "extractedKeys": [],
           "violated": false
+        },
+        {
+          "text": "we must have missed something in the review",
+          "extractedKeys": [
+            "constraint:have-missed-something-in-the-review"
+          ],
+          "violated": true
+        },
+        {
+          "text": "we agreed the meeting was a waste of time",
+          "extractedKeys": [
+            "decision:the-meeting-was-a-waste-of-time"
+          ],
+          "violated": true
+        },
+        {
+          "text": "please don't stress about the deadline, it moved",
+          "extractedKeys": [
+            "preference:don-t-stress-about-the-deadline"
+          ],
+          "violated": true
         },
         {
           "text": "We haven't made a decision about the icon set yet, still comparing options.",
@@ -868,6 +1008,27 @@
           "violated": false
         },
         {
+          "text": "we have to admit the old design was prettier",
+          "extractedKeys": [
+            "constraint:admit-the-old-design-was-prettier"
+          ],
+          "violated": true
+        },
+        {
+          "text": "let's use the big conference room for the retro",
+          "extractedKeys": [
+            "decision:the-big-conference-room-for-the-retro"
+          ],
+          "violated": true
+        },
+        {
+          "text": "actually everyone is happy with the current setup",
+          "extractedKeys": [
+            "correction:everyone"
+          ],
+          "violated": true
+        },
+        {
           "text": "still no decision on the widget naming lol, don't ask",
           "extractedKeys": [],
           "violated": false
@@ -876,6 +1037,27 @@
           "text": "we dropped the constraint list idea entirely, too much ceremony",
           "extractedKeys": [],
           "violated": false
+        },
+        {
+          "text": "I checked and we never use that endpoint anymore",
+          "extractedKeys": [
+            "preference:that-endpoint-anymore"
+          ],
+          "violated": true
+        },
+        {
+          "text": "my headphones didn't work on the flight",
+          "extractedKeys": [
+            "failed-approach:my-headphones"
+          ],
+          "violated": true
+        },
+        {
+          "text": "make sure Dave saw the memo",
+          "extractedKeys": [
+            "preference:dave-saw-the-memo"
+          ],
+          "violated": true
         }
       ]
     },

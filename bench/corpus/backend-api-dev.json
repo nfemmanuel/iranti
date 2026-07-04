@@ -455,6 +455,22 @@
     {
       "text": "There's no constraint on payload size yet, we'll profile before picking one.",
       "note": "AX-9 (added red-first): negated 'constraint' noun mid-sentence. The bare 'constraint[:\\s]+' pattern fabricates 'on payload size yet'. Must extract ZERO facts."
+    },
+    {
+      "text": "we're using up the error budget fast this quarter",
+      "note": "AX-10 (Appendix A #3, added red-first): 'we're using X' decision pattern matches the using-up aspect verb, not an actual decision. Fabricates decision:up-the-error-budget-fast-this-quarter. Must extract ZERO facts."
+    },
+    {
+      "text": "we concluded the incident review yesterday",
+      "note": "AX-10 (Appendix A #5, added red-first): 'we concluded X' decision pattern matches a finished-activity report, not a conclusion reached. Fabricates decision:the-incident-review-yesterday. Must extract ZERO facts."
+    },
+    {
+      "text": "actually the outage is over, we're back up",
+      "note": "AX-10 (Appendix A #7, added red-first): 'actually X is Y' correction pattern matches a status update, not a correction of a prior claim. Fabricates correction:the-outage. Must extract ZERO facts."
+    },
+    {
+      "text": "the demo didn't work in front of the customer",
+      "note": "AX-10 (Appendix A #11, added red-first): 'X didn't work' failed-approach pattern matches an event report, not an approach that was tried and failed. Fabricates failed-approach:the-demo. Must extract ZERO facts."
     }
   ]
 }
