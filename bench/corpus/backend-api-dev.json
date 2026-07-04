@@ -196,9 +196,9 @@
     {
       "entityType": "project",
       "entityId": "ledger-service",
-      "key": "referenced_file:823c3ef0b4b3",
+      "key": "referenced_file:4bccf0a85960",
       "value": "src/db/schema.ts",
-      "note": "message 10 — the file path is NOT extracted by extractArtifacts (no leading ./ or / and not preceded appropriately for UNIX_PATH_PATTERN); INTENTIONALLY set up to score as a miss today. This is the file-path-in-prose gap, distinct from the alias gap."
+      "note": "message 10 — bare repo-relative path, extracted by AX-9's BARE_RELATIVE_PATH_PATTERN. HISTORY: originally a documented miss whose gold key carried a WRONG hash (823c3ef0b4b3 is not sha256 of the path; unlabeled twin of the two 'KEY FORMAT PLACEHOLDER' golds the code review caught) — found during NF's recall-plateau investigation when this slot alone stayed red after the fix; key is now the real sha256(path) hash 4bccf0a85960."
     },
     {
       "entityType": "project",
