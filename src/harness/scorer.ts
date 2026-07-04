@@ -11,7 +11,12 @@
 
 import { normalizeKey } from "../library/keys.js";
 import type { Corpus, GoldFact } from "./types.js";
-import type { PersonaIngestResult, ProbeFactResult, RuleProbeOutcome } from "./ingest.js";
+import type {
+  FabricationOutcome,
+  PersonaIngestResult,
+  ProbeFactResult,
+  RuleProbeOutcome,
+} from "./ingest.js";
 
 // --------------------------------------------------------------------------
 // Value matching — deliberately lenient (PRD §9 risk, documented here too).
@@ -58,11 +63,27 @@ export interface ExtractionScore {
   // many had the right value", which is the precision question this corpus
   // can actually answer with its lenient-value-match gold labels.
   precision: number; // matchedCount / identityHits (0 when identityHits === 0)
+  // AX-9 — fabrication dimension. goldFacts is an allow-list, so recall/
+  // precision above structurally cannot punish an INVENTED fact (the scorer
+  // ignores stored facts matching no gold identity — see the precision doc
+  // comment). fabricationProbes close that blind spot: each probe text must
+  // extract NOTHING; a probe that extracts anything is a violation.
+  fabricationProbeCount: number;
+  fabricationViolationCount: number;
+  fabricationRate: number; // violations / probes (0 when no probes; LOWER is better)
+  perFabricationProbe: FabricationProbeScore[];
+}
+
+export interface FabricationProbeScore {
+  text: string;
+  extractedKeys: string[];
+  violated: boolean; // extractedKeys.length > 0
 }
 
 export function scoreExtraction(
   goldFacts: GoldFact[],
   storedFacts: ProbeFactResult[],
+  fabricationOutcomes: FabricationOutcome[] = [],
 ): ExtractionScore {
   const goldCount = goldFacts.length;
   const storedCount = storedFacts.length;
@@ -94,6 +115,14 @@ export function scoreExtraction(
     }
   }
 
+  const perFabricationProbe: FabricationProbeScore[] = fabricationOutcomes.map((o) => ({
+    text: o.text,
+    extractedKeys: o.extractedKeys,
+    violated: o.extractedKeys.length > 0,
+  }));
+  const fabricationProbeCount = perFabricationProbe.length;
+  const fabricationViolationCount = perFabricationProbe.filter((p) => p.violated).length;
+
   return {
     goldCount,
     storedCount,
@@ -104,6 +133,11 @@ export function scoreExtraction(
     // at all (identityHits) — of those, how many had the correct value.
     // A slot never filled counts against recall, not precision.
     precision: identityHits > 0 ? matchedCount / identityHits : 0,
+    fabricationProbeCount,
+    fabricationViolationCount,
+    fabricationRate:
+      fabricationProbeCount > 0 ? fabricationViolationCount / fabricationProbeCount : 0,
+    perFabricationProbe,
   };
 }
 
@@ -318,7 +352,11 @@ export interface BenchReport {
 export function scorePersona(corpus: Corpus, result: PersonaIngestResult): PersonaReport {
   return {
     persona: corpus.persona,
-    extraction: scoreExtraction(corpus.goldFacts, result.allFactsAfterIngest),
+    extraction: scoreExtraction(
+      corpus.goldFacts,
+      result.allFactsAfterIngest,
+      result.fabricationOutcomes,
+    ),
     retrieval: scoreRetrieval(result),
     rules: scoreRules(result.ruleProbeOutcomes),
   };
@@ -329,6 +367,16 @@ export function buildOverallReport(personas: PersonaReport[]): OverallReport {
   const storedCount = personas.reduce((s, p) => s + p.extraction.storedCount, 0);
   const identityHits = personas.reduce((s, p) => s + p.extraction.identityHits, 0);
   const matchedCount = personas.reduce((s, p) => s + p.extraction.matchedCount, 0);
+
+  // AX-9 — micro-averaged exactly like every other overall ratio.
+  const fabricationProbeCount = personas.reduce(
+    (s, p) => s + p.extraction.fabricationProbeCount,
+    0,
+  );
+  const fabricationViolationCount = personas.reduce(
+    (s, p) => s + p.extraction.fabricationViolationCount,
+    0,
+  );
 
   const extraction: ExtractionScore = {
     goldCount,
@@ -343,6 +391,11 @@ export function buildOverallReport(personas: PersonaReport[]): OverallReport {
     // precision ratio alone (precision === 0 is ambiguous between
     // identityHits === 0 and identityHits > 0 with zero value-matches).
     precision: identityHits > 0 ? matchedCount / identityHits : 0,
+    fabricationProbeCount,
+    fabricationViolationCount,
+    fabricationRate:
+      fabricationProbeCount > 0 ? fabricationViolationCount / fabricationProbeCount : 0,
+    perFabricationProbe: personas.flatMap((p) => p.extraction.perFabricationProbe),
   };
 
   const probeCount = personas.reduce((s, p) => s + p.retrieval.probeCount, 0);

@@ -118,6 +118,15 @@
           "entityId": "ledger-service"
         }
       ]
+    },
+    {
+      "text": "We decided to keep Redis as the default cache backend — Memcached stays opt-in behind a feature flag.",
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "ledger-service"
+        }
+      ]
     }
   ],
   "goldFacts": [
@@ -218,6 +227,13 @@
       "key": "preference:select-in-the-reporting-queries",
       "value": "SELECT * in the reporting queries",
       "note": "message 13 — heuristic 'never use X' pattern (filed under preference: by the extractor's own PREFERENCE_PATTERNS, not a bug in the corpus)"
+    },
+    {
+      "entityType": "project",
+      "entityId": "ledger-service",
+      "key": "decision:to-keep-redis-as-the-default-cache-backe",
+      "value": "to keep Redis as the default cache backend",
+      "note": "AX-9 em-dash gold (added red-first): 'we decided to keep X — Y' phrasing. The em-dash is not a clause terminator today and the full clause exceeds the 80-char capture cap, so this extracts NOTHING pre-fix — dogfood check 2's live miss shape. Flips once dashes join the terminator class."
     }
   ],
   "probes": [
@@ -429,6 +445,16 @@
         "Never use SELECT *"
       ],
       "note": "HONEST-CAPABILITY PROBE (added in review): realistic phrasing with genuine partial overlap, no exact-phrase echo. Fires today only via the shared token 'columns' — a near-miss that happens to land. From the reviewer's independently-constructed set."
+    }
+  ],
+  "fabricationProbes": [
+    {
+      "text": "Told the user no rate limiting decision is on record for the HTTP transport.",
+      "note": "AX-9 (added red-first): the LIVE fabrication incident's sentence, verbatim (dogfood check 3). The bare 'decision[:\\s]+' pattern drops the negation and stores the inverse of reality. Must extract ZERO facts."
+    },
+    {
+      "text": "There's no constraint on payload size yet, we'll profile before picking one.",
+      "note": "AX-9 (added red-first): negated 'constraint' noun mid-sentence. The bare 'constraint[:\\s]+' pattern fabricates 'on payload size yet'. Must extract ZERO facts."
     }
   ]
 }

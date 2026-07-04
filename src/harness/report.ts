@@ -39,12 +39,23 @@ export function renderReport(report: BenchReport, deltas: MetricDelta[]): string
         `  precision=${pct(p.extraction.precision)} (${p.extraction.matchedCount}/${p.extraction.identityHits})` +
         `  stored=${p.extraction.storedCount}`,
     );
+    // AX-9 — only printed when the persona defines fabrication probes, same
+    // conditional-print posture as the rules line below.
+    if (p.extraction.fabricationProbeCount > 0) {
+      lines.push(
+        `    fabrication  fabrication-rate=${pct(p.extraction.fabricationRate)} (${p.extraction.fabricationViolationCount}/${p.extraction.fabricationProbeCount} probes extracted something; lower is better)`,
+      );
+    }
     const recallDelta = deltaByMetric.get(`${p.persona}.extraction.recall`);
     const precisionDelta = deltaByMetric.get(`${p.persona}.extraction.precision`);
-    if (recallDelta || precisionDelta) {
+    const fabDelta = deltaByMetric.get(`${p.persona}.extraction.fabricationRate`);
+    if (recallDelta || precisionDelta || fabDelta) {
       lines.push(
         `      vs baseline: recall ${recallDelta ? fmtDelta(recallDelta) : "n/a"}, ` +
-          `precision ${precisionDelta ? fmtDelta(precisionDelta) : "n/a"}`,
+          `precision ${precisionDelta ? fmtDelta(precisionDelta) : "n/a"}` +
+          (fabDelta && p.extraction.fabricationProbeCount > 0
+            ? `, fabrication-rate ${fmtDelta(fabDelta)}`
+            : ""),
       );
     }
     lines.push(
@@ -91,6 +102,11 @@ export function renderReport(report: BenchReport, deltas: MetricDelta[]): string
     `  extraction   recall=${padRight(pct(o.extraction.recall), 7)} (${o.extraction.matchedCount}/${o.extraction.goldCount})` +
       `  precision=${padRight(pct(o.extraction.precision), 7)} (${o.extraction.matchedCount}/${o.extraction.identityHits})`,
   );
+  if (o.extraction.fabricationProbeCount > 0) {
+    lines.push(
+      `  fabrication  fabrication-rate=${padRight(pct(o.extraction.fabricationRate), 7)} (${o.extraction.fabricationViolationCount}/${o.extraction.fabricationProbeCount} probes extracted something; lower is better)`,
+    );
+  }
   lines.push(
     `  retrieval    hit-rate=${padRight(pct(o.retrieval.hitRate), 7)} (${o.retrieval.hitCount}/${o.retrieval.positiveCount})` +
       `  confirmation-rate=${padRight(pct(o.retrieval.confirmationRate), 7)} (${o.retrieval.confirmedCount}/${o.retrieval.positiveCount})`,
@@ -107,6 +123,7 @@ export function renderReport(report: BenchReport, deltas: MetricDelta[]): string
   const overallDeltas = [
     deltaByMetric.get("overall.extraction.recall"),
     deltaByMetric.get("overall.extraction.precision"),
+    deltaByMetric.get("overall.extraction.fabricationRate"),
     deltaByMetric.get("overall.retrieval.hitRate"),
     deltaByMetric.get("overall.retrieval.confirmationRate"),
     deltaByMetric.get("overall.retrieval.falsePositiveRate"),

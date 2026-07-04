@@ -66,6 +66,19 @@ export interface RuleProbeOutcome {
   returnedRuleTexts: string[];
 }
 
+// AX-9 — one outcome per fabrication probe. The probe text is fed DIRECTLY
+// through the semantic extractor (extractor.extract), not through attend():
+// the property under test is "does the extractor invent a fact from this
+// text", which needs no store, no entity hints, and no retrieval — and
+// keeping it store-free means a violating fact can never pollute the same
+// run's extraction/retrieval scoring.
+export interface FabricationOutcome {
+  text: string;
+  // Keys of every fact the extractor produced from the probe text.
+  // Non-empty = violation.
+  extractedKeys: string[];
+}
+
 export interface PersonaIngestResult {
   persona: string;
   // Every fact present in the store after ingest, across all entities the
@@ -76,6 +89,9 @@ export interface PersonaIngestResult {
   // Layer 0d — one outcome per ruleProbe, in corpus order. Empty when the
   // corpus defines no ruleProbes (optional field — see types.ts).
   ruleProbeOutcomes: RuleProbeOutcome[];
+  // AX-9 — one outcome per fabricationProbe, in corpus order. Empty when the
+  // corpus defines none.
+  fabricationOutcomes: FabricationOutcome[];
 }
 
 // A stripped-down signature so this module doesn't need to import vitest's
@@ -277,7 +293,30 @@ export async function runPersonaIngest(
       });
     }
 
-    return { persona: corpus.persona, allFactsAfterIngest, probeOutcomes, ruleProbeOutcomes };
+    // ---- AX-9: fabrication probes — extractor-direct, store-free. ----------
+    // Imported dynamically AFTER the module reset like everything else in
+    // this function, so the extractor honors this persona run's
+    // IRANTI_EXTRACTOR=heuristic env (buildExtractor reads it at module
+    // evaluation time).
+    const fabricationOutcomes: FabricationOutcome[] = [];
+    if (corpus.fabricationProbes && corpus.fabricationProbes.length > 0) {
+      const { extractor } = await import("../extract/index.js");
+      for (const probe of corpus.fabricationProbes) {
+        const extracted = await extractor.extract(probe.text);
+        fabricationOutcomes.push({
+          text: probe.text,
+          extractedKeys: extracted.map((f) => f.key),
+        });
+      }
+    }
+
+    return {
+      persona: corpus.persona,
+      allFactsAfterIngest,
+      probeOutcomes,
+      ruleProbeOutcomes,
+      fabricationOutcomes,
+    };
   } finally {
     // Best-effort close + cleanup. A failure here must not mask a real test
     // failure above, so errors are swallowed (same posture as

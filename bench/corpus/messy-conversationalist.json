@@ -91,6 +91,15 @@
           "entityId": "internal-tools-dashboard"
         }
       ]
+    },
+    {
+      "text": "constraint: the onboarding checklist lives in google docs — nobody moves it to the wiki till q3.",
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "internal-tools-dashboard"
+        }
+      ]
     }
   ],
   "goldFacts": [
@@ -163,6 +172,13 @@
       "key": "alias:the-sync-wiki-page",
       "value": "https://internal.acme.example/wiki/sync-job",
       "note": "ALIAS CASE 2 — message 9 also refers to the same URL as 'the sync wiki page'. No entity resolution exists; a probe on the alias alone will not find the fact. INTENTIONALLY scores 0 today."
+    },
+    {
+      "entityType": "project",
+      "entityId": "internal-tools-dashboard",
+      "key": "constraint:the-onboarding-checklist-lives-in-google",
+      "value": "the onboarding checklist lives in google docs",
+      "note": "AX-9 em-dash gold (added red-first): sentence-initial lowercase 'constraint:' label with an em-dash clause. Pre-fix the bare pattern's capture can't reach a [.,;] terminator within 80 chars (the dash isn't one), so NOTHING extracts. Flips when the anchored label pattern + dash terminators land."
     }
   ],
   "probes": [
@@ -374,6 +390,16 @@
         "export script"
       ],
       "note": "HONEST-CAPABILITY PROBE (added in review, reviewer's own example): a real host would want the Friday-export rule surfaced here, but no token overlaps the rule text. EXPECTED TO MISS today."
+    }
+  ],
+  "fabricationProbes": [
+    {
+      "text": "still no decision on the widget naming lol, don't ask",
+      "note": "AX-9 (added red-first): negated 'decision' noun, messy voice. Bare pattern fabricates 'on the widget naming lol'. Must extract ZERO facts."
+    },
+    {
+      "text": "we dropped the constraint list idea entirely, too much ceremony",
+      "note": "AX-9 (added red-first): NON-negated mid-sentence 'constraint' noun misuse — the noun names a thing being discussed, not a constraint being stated. Bare pattern fabricates 'list idea entirely'. Must extract ZERO facts."
     }
   ]
 }

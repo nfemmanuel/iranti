@@ -90,6 +90,21 @@ export interface RuleProbe {
   note?: string;
 }
 
+// AX-9: a fabrication probe — a message that sounds category-adjacent (it
+// contains a noun like "decision"/"constraint"/"requirement", usually under
+// negation) but asserts NOTHING durable. The extractor must produce ZERO
+// facts from it. This is the inverse of GoldFact: goldFacts is an allow-list
+// the scorer can only reward, so before this field existed the corpus
+// structurally could not express "extracting anything here is a bug" — the
+// exact blind spot behind the live negation-fabrication incident
+// (docs/reviews/2026-07-04-dogfood-iranti-next.md, check 3). Probe texts are
+// fed straight through the semantic extractor (no store round-trip needed);
+// any extracted fact is a violation, scored as extraction.fabricationRate.
+export interface FabricationProbe {
+  text: string;
+  note?: string;
+}
+
 export interface Corpus {
   // Stable persona id -- used as part of the fresh-store project entityId
   // namespace and as the report's row label. Keep short, kebab-case.
@@ -104,4 +119,6 @@ export interface Corpus {
   // persona doesn't (yet) define rules. All 4 shipped personas define both.
   rules?: CorpusRule[];
   ruleProbes?: RuleProbe[];
+  // AX-9 — optional for the same backward-compatibility reason.
+  fabricationProbes?: FabricationProbe[];
 }

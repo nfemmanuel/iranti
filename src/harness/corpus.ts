@@ -76,6 +76,24 @@ function assertCorpusShape(value: unknown, file: string): asserts value is Corpu
   if (c["rules"] !== undefined && !Array.isArray(c["rules"])) {
     throw new Error(`Corpus file ${file} ("${c["persona"]}"): "rules" must be an array.`);
   }
+
+  // AX-9: fabrication probes are text-only; an empty text would make the
+  // probe vacuously pass (nothing extracts from ""), silently inflating the
+  // honesty number — fail loudly at load time instead.
+  if (c["fabricationProbes"] !== undefined) {
+    if (!Array.isArray(c["fabricationProbes"])) {
+      throw new Error(
+        `Corpus file ${file} ("${c["persona"]}"): "fabricationProbes" must be an array.`,
+      );
+    }
+    for (const probe of c["fabricationProbes"] as Array<Record<string, unknown>>) {
+      if (typeof probe["text"] !== "string" || probe["text"].trim().length === 0) {
+        throw new Error(
+          `Corpus file ${file} ("${c["persona"]}"): every fabrication probe needs non-empty "text".`,
+        );
+      }
+    }
+  }
 }
 
 // Load every *.json file in bench/corpus, sorted by filename so run order

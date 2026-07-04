@@ -118,6 +118,15 @@
           "entityId": "dashboard-redesign"
         }
       ]
+    },
+    {
+      "text": "The component inventory lives in docs/design/component-inventory.md, keep it updated when new pieces land.",
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "dashboard-redesign"
+        }
+      ]
     }
   ],
   "goldFacts": [
@@ -218,6 +227,13 @@
       "key": "alias:the-dashboard",
       "value": "dashboard-redesign",
       "note": "ALIAS CASE 2 — the project itself is referred to informally as 'the dashboard' or 'the new dashboard' across messages 2 and elsewhere but is only ever stored under entityId 'dashboard-redesign'. A probe phrased around 'the dashboard' with no entity hint would not resolve to this project. Documents the project-alias gap (distinct from fact-value aliasing) — not separately probed since entityHints are supplied explicitly by every probe in this harness (see PRD non-goals: no entity-resolution probing without hints yet)."
+    },
+    {
+      "entityType": "project",
+      "entityId": "dashboard-redesign",
+      "key": "referenced_file:65e4e3b82da1",
+      "value": "docs/design/component-inventory.md",
+      "note": "AX-9 bare-relative-path gold (added red-first): a repo-relative path with no ./ prefix — the way developers actually type paths (dogfood check 4's caveat). Invisible to every artifact pattern today (RELATIVE requires ./, UNIX requires leading /, WINDOWS requires a drive letter). Flips when BARE_RELATIVE_PATH_PATTERN (≥2 segments + extension) lands."
     }
   ],
   "probes": [
@@ -436,6 +452,16 @@
         "aria-label"
       ],
       "note": "HONEST-CAPABILITY PROBE (added in review): textbook aria-label situation phrased realistically ('icons' != 'icon', no stemming) — EXPECTED TO MISS today. Documents the G1 keyword-overlap ceiling as a measured number instead of a footnote; a future deterministic synonym layer closes it as a visible delta."
+    }
+  ],
+  "fabricationProbes": [
+    {
+      "text": "We haven't made a decision about the icon set yet, still comparing options.",
+      "note": "AX-9 (added red-first): explicitly-undecided 'decision' noun. Bare pattern fabricates 'about the icon set yet' — a stored answer to the persona's own negative probe. Must extract ZERO facts."
+    },
+    {
+      "text": "No requirement for dark mode came out of the design review.",
+      "note": "AX-9 (added red-first): negated 'requirement' noun. Bare pattern fabricates 'for dark mode came out of the design review'. Must extract ZERO facts."
     }
   ]
 }

@@ -51,6 +51,9 @@ export function diffReports(baseline: BenchReport | null, current: BenchReport):
   const metrics: Array<{ name: string; get: (r: BenchReport) => number }> = [
     { name: "overall.extraction.recall", get: (r) => r.overall.extraction.recall },
     { name: "overall.extraction.precision", get: (r) => r.overall.extraction.precision },
+    // AX-9 — NaN-coalesced like every metric class added after a baseline
+    // already existed: pre-AX-9 baselines lack the field entirely.
+    { name: "overall.extraction.fabricationRate", get: (r) => r.overall.extraction.fabricationRate ?? NaN },
     { name: "overall.retrieval.hitRate", get: (r) => r.overall.retrieval.hitRate },
     { name: "overall.retrieval.confirmationRate", get: (r) => r.overall.retrieval.confirmationRate },
     // NaN-coalesced (not ?? 0) so a baseline generated before the negative-
@@ -71,6 +74,7 @@ export function diffReports(baseline: BenchReport | null, current: BenchReport):
     metrics.push(
       { name: `${p.persona}.extraction.recall`, get: (r) => r.personas.find((x) => x.persona === p.persona)?.extraction.recall ?? NaN },
       { name: `${p.persona}.extraction.precision`, get: (r) => r.personas.find((x) => x.persona === p.persona)?.extraction.precision ?? NaN },
+      { name: `${p.persona}.extraction.fabricationRate`, get: (r) => r.personas.find((x) => x.persona === p.persona)?.extraction.fabricationRate ?? NaN },
       { name: `${p.persona}.retrieval.hitRate`, get: (r) => r.personas.find((x) => x.persona === p.persona)?.retrieval.hitRate ?? NaN },
       { name: `${p.persona}.retrieval.confirmationRate`, get: (r) => r.personas.find((x) => x.persona === p.persona)?.retrieval.confirmationRate ?? NaN },
       { name: `${p.persona}.retrieval.falsePositiveRate`, get: (r) => r.personas.find((x) => x.persona === p.persona)?.retrieval.falsePositiveRate ?? NaN },

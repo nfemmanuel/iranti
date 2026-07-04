@@ -421,5 +421,15 @@
       ],
       "note": "HONEST-CAPABILITY PROBE (added in review): 'jupyter' for notebook, 'training flow' for pipeline — zero shared tokens with the rule text. EXPECTED TO MISS today; the synonym/vocabulary gap made measurable."
     }
+  ],
+  "fabricationProbes": [
+    {
+      "text": "The team made no decision on feature-store TTLs last quarter.",
+      "note": "AX-9 (added red-first): negated 'decision' noun. Bare pattern fabricates 'on feature-store TTLs last quarter'. Must extract ZERO facts."
+    },
+    {
+      "text": "There was never a requirement to keep raw logs beyond thirty days.",
+      "note": "AX-9 (added red-first): negated 'requirement' noun with space (no colon) after it — the colon-less sub-vector of the same bare-noun pattern class. Must extract ZERO facts."
+    }
   ]
 }
