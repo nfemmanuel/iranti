@@ -64,6 +64,7 @@ None — measurement-only.
 ## Changelog
 - 2026-07-04 — proposed (NF greenlight; wave-1 mandate)
 - 2026-07-04 — PRD review applied: 13-sentence source committed here as Appendix A (was session-only — citation error), lint wiring made concrete (chained npm script), lint hashes raw value verbatim.
+- 2026-07-04 — implemented (`feat/v1-wave1`, commit 3ea4bdc). Deviation: persona assignment for the 13 sentences (3-4 per persona) was not specified beyond "voice-matched" examples in D2 — assigned directly by tone/content fit (backend-api-dev: #3,5,7,11; data-ml-person: #1,4,9; frontend-dev: #2,6,8; messy-conversationalist: #10,12,13) rather than a mechanical split; recorded per-probe in each corpus file's note field. All 13 verified 13/13-fabricating today via a scratch script run against HeuristicExtractor's own regex patterns before being added. Baseline advanced same-commit: fabricationRate 0.0% -> 61.9% (13/21), all other metrics 0.0pp.
 
 ## Appendix A — the 13 adversarial sentences (canonical source; add as fabricationProbes, voice-matched per persona)
 
