@@ -54,16 +54,16 @@
         ]
       },
       "retrieval": {
-        "probeCount": 9,
+        "probeCount": 10,
         "positiveCount": 7,
         "hitCount": 7,
         "confirmedCount": 6,
         "hitRate": 1,
         "confirmationRate": 0.8571428571428571,
-        "negativeCount": 2,
+        "negativeCount": 3,
         "falsePositiveCount": 2,
-        "falsePositiveRate": 1,
-        "falsePositiveRawCount": 2,
+        "falsePositiveRate": 0.6666666666666666,
+        "falsePositiveRawCount": 3,
         "falsePositiveRateRaw": 1,
         "perProbe": [
           {
@@ -168,6 +168,16 @@
             "hit": false,
             "confirmed": false,
             "falsePositive": true,
+            "falsePositiveRaw": true
+          },
+          {
+            "query": "Is the deploy pipeline passing right now?",
+            "expectedKeys": [],
+            "negative": true,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": false,
             "falsePositiveRaw": true
           }
         ]
@@ -508,16 +518,16 @@
         ]
       },
       "retrieval": {
-        "probeCount": 9,
+        "probeCount": 10,
         "positiveCount": 7,
         "hitCount": 7,
         "confirmedCount": 6,
         "hitRate": 1,
         "confirmationRate": 0.8571428571428571,
-        "negativeCount": 2,
+        "negativeCount": 3,
         "falsePositiveCount": 2,
-        "falsePositiveRate": 1,
-        "falsePositiveRawCount": 2,
+        "falsePositiveRate": 0.6666666666666666,
+        "falsePositiveRawCount": 3,
         "falsePositiveRateRaw": 1,
         "perProbe": [
           {
@@ -622,6 +632,16 @@
             "hit": false,
             "confirmed": false,
             "falsePositive": true,
+            "falsePositiveRaw": true
+          },
+          {
+            "query": "Is the storybook build currently green?",
+            "expectedKeys": [],
+            "negative": true,
+            "rank": null,
+            "hit": false,
+            "confirmed": false,
+            "falsePositive": false,
             "falsePositiveRaw": true
           }
         ]
@@ -1062,16 +1082,16 @@
       ]
     },
     "retrieval": {
-      "probeCount": 36,
+      "probeCount": 38,
       "positiveCount": 28,
       "hitCount": 24,
       "confirmedCount": 19,
       "hitRate": 0.8571428571428571,
       "confirmationRate": 0.6785714285714286,
-      "negativeCount": 8,
+      "negativeCount": 10,
       "falsePositiveCount": 6,
-      "falsePositiveRate": 0.75,
-      "falsePositiveRawCount": 8,
+      "falsePositiveRate": 0.6,
+      "falsePositiveRawCount": 10,
       "falsePositiveRateRaw": 1,
       "perProbe": [
         {
@@ -1176,6 +1196,16 @@
           "hit": false,
           "confirmed": false,
           "falsePositive": true,
+          "falsePositiveRaw": true
+        },
+        {
+          "query": "Is the deploy pipeline passing right now?",
+          "expectedKeys": [],
+          "negative": true,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": false,
           "falsePositiveRaw": true
         },
         {
@@ -1384,6 +1414,16 @@
           "hit": false,
           "confirmed": false,
           "falsePositive": true,
+          "falsePositiveRaw": true
+        },
+        {
+          "query": "Is the storybook build currently green?",
+          "expectedKeys": [],
+          "negative": true,
+          "rank": null,
+          "hit": false,
+          "confirmed": false,
+          "falsePositive": false,
           "falsePositiveRaw": true
         },
         {

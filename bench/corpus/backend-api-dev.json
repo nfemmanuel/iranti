@@ -127,6 +127,15 @@
           "entityId": "ledger-service"
         }
       ]
+    },
+    {
+      "text": "Decision: the deploy pipeline is currently passing on main.",
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "ledger-service"
+        }
+      ]
     }
   ],
   "goldFacts": [
@@ -351,6 +360,18 @@
       "expectedKeys": [],
       "negative": true,
       "note": "NEGATIVE PROBE — S3 and exports are never mentioned in this transcript."
+    },
+    {
+      "query": "Is the deploy pipeline passing right now?",
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "ledger-service"
+        }
+      ],
+      "expectedKeys": [],
+      "negative": true,
+      "note": "AX-7 VOLATILE-WRITE NEGATIVE PROBE (added red-first): message 15's 'Decision: the deploy pipeline is currently passing on main' is a moment-true CI/build snapshot, not a durable decision. RED TODAY (pre-AX-7): the bare 'Decision:' label pattern extracts it as decision:the-deploy-pipeline-is-currently-passing and it comes back matched=true for this query — a confidently-wrong answer once main's pipeline status changes. AX-7's classifyVolatility gate (runtime-state-predicate: 'is currently passing') marks it transient at write time, excluding it from readRelevantFactsWithMatch and every other gated read site; this probe must then return zero facts (any fact returned is the exact harm this gate exists to prevent)."
     }
   ],
   "rules": [

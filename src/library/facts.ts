@@ -33,9 +33,10 @@ import {
 } from "./conflicts.js";
 import { getScore } from "./source-reliability.js";
 import { graph } from "../graph/index.js";
-import { normalizeKey, withRawKey } from "./keys.js";
+import { normalizeKey, withRawKey, withTransient } from "./keys.js";
 import { normalizeProjectId } from "./projects.js";
 import { trackBackground } from "./background.js";
+import { classifyVolatility } from "./volatility.js";
 
 // ---------------------------------------------------------------------------
 // Project scoping (Layer 0, D6/D7)
@@ -59,6 +60,41 @@ function projectFilter(project: string | string[]) {
     ? eq(facts.project, normalized[0]!)
     : inArray(facts.project, normalized);
 }
+
+// ---------------------------------------------------------------------------
+// Transient-fact exclusion (AX-7)
+// ---------------------------------------------------------------------------
+
+// Build the WHERE fragment excluding transient (volatility-gated) facts —
+// mirrors the `eq(facts.isArchived, false)` filter pattern used throughout
+// this file, but for the jsonb metadata.transient marker instead of a real
+// column (metadata carries it per D4, no migration). `IS DISTINCT FROM
+// 'true'` (not `!= 'true'`) so a NULL metadata column (every fact written
+// before AX-7, and every non-volatile fact after it) is correctly treated as
+// "not transient" — plain `!=` against NULL is NULL in SQL, which would
+// silently exclude every pre-AX-7 row from every read site.
+//
+// PRD-mandated blast radius: there is NO shared query-builder point across
+// the five read paths below (each builds its own `where`), so this fragment
+// must be applied at each of them individually. GATED_READ_SITES is the
+// canonical list a test asserts has length 5 — deliberately makes a sixth
+// read path added later (and NOT wired to this fragment) fail loudly in the
+// test suite instead of silently leaking transient facts.
+function notTransient() {
+  return sql`(${facts.metadata}->>'transient') IS DISTINCT FROM 'true'`;
+}
+
+// Canonical list of read sites this gate is applied to (PRD scope, exactly
+// five). Exported so a test can assert this list's length stays 5 — a
+// change here (a name added or removed) is a deliberate, reviewed decision,
+// not a silent drift.
+export const GATED_READ_SITES = [
+  "readRelevantFactsWithMatch",
+  "readRecentFactsByEntity",
+  "readFactsByEntity",
+  "readFactsByIds",
+  "searchFacts",
+] as const;
 
 // ---------------------------------------------------------------------------
 // Surface validation
@@ -194,7 +230,14 @@ export async function writeFact(
     | "sessionId"
     | "agentId"
     | "metadata"
-  > & { confidence?: number },
+  > & {
+    confidence?: number;
+    // AX-7: explicit escape hatch. undefined (default) = the volatility gate
+    // applies; true = the caller insists this is durable and the gate is
+    // bypassed entirely (classifyVolatility is not even consulted). The gate
+    // guards DEFAULTS, it does not overrule explicit caller intent (PRD §3).
+    durable?: boolean;
+  },
 ): Promise<Fact> {
   // Validate surface before touching the database.
   assertValidSurface(input.surface);
@@ -220,10 +263,28 @@ export async function writeFact(
         `Provide a key with at least one alphanumeric character.`,
     );
   }
-  const metadata =
+  let metadata =
     normalizedKey !== input.key
       ? withRawKey(input.metadata, input.key)
       : input.metadata;
+
+  // AX-7: transient-vs-durable gate. Runs on the NORMALIZED key (the same
+  // form every read site's where-fragment and every other write-boundary
+  // check use) and the raw value. `durable: true` is the explicit escape
+  // hatch — the gate is not even consulted, matching "the gate guards
+  // defaults, it does not overrule intent" (PRD D-hatch, §3). A volatile
+  // classification does NOT block or alter the write in any other way — the
+  // fact is stored exactly as any other fact, just carrying
+  // metadata.transient = true so the five gated read sites (facts.ts's
+  // notTransient() fragment) exclude it from default retrieval while
+  // getFactHistoryByKey/getFactHistory and other audit-style reads still see
+  // it (D1: downgrade, don't drop).
+  if (input.durable !== true) {
+    const { volatile } = classifyVolatility(normalizedKey, input.value);
+    if (volatile) {
+      metadata = withTransient(metadata);
+    }
+  }
 
   // Step 5/6 below (deep conflict check, write-time edges) are fire-and-forget
   // side effects that must never block the write. They used to be fired from
@@ -515,6 +576,7 @@ export async function readRecentFactsByEntity(
       eq(facts.entityType, entityType),
       eq(facts.entityId, entityId),
       eq(facts.isArchived, false),
+      notTransient(),
     ),
     orderBy: desc(facts.updatedAt),
     limit,
@@ -549,6 +611,7 @@ export async function readFactsByEntity(
       eq(facts.entityType, entityType),
       eq(facts.entityId, entityId),
       eq(facts.isArchived, false),
+      notTransient(),
     ),
     orderBy: facts.key,
   });
@@ -666,6 +729,7 @@ export async function readRelevantFactsWithMatch(
       eq(facts.entityType, entityType),
       eq(facts.entityId, entityId),
       eq(facts.isArchived, false),
+      notTransient(),
     ),
     orderBy: desc(facts.updatedAt),
     limit: candidateLimit,
@@ -767,6 +831,7 @@ export async function readFactsByIds(
       projectFilter(project),
       inArray(facts.id, ids),
       eq(facts.isArchived, false),
+      notTransient(),
     ),
   });
 }
@@ -839,6 +904,7 @@ export async function searchFacts(
       eq(facts.tenantId, tenantId),
       projectFilter(project),
       eq(facts.isArchived, false),
+      notTransient(),
       or(ilike(facts.key, keyPattern), ilike(facts.value, valPattern)),
       entityType ? eq(facts.entityType, entityType) : undefined,
       entityId ? eq(facts.entityId, entityId) : undefined,

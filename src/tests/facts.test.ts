@@ -16,6 +16,7 @@ import { db, pool } from "../db/connection.js";
 import { factArchive, facts } from "../db/schema.js";
 import {
   VALID_SURFACES,
+  GATED_READ_SITES,
   archiveFact,
   findFact,
   getFactById,
@@ -23,7 +24,10 @@ import {
   getFactHistoryByKey,
   readFact,
   readFactsByEntity,
+  readFactsByIds,
   readRecentFactsByEntity,
+  readRelevantFactsByEntity,
+  searchFacts,
   writeFact,
 } from "../library/facts.js";
 import { normalizeKey } from "../library/keys.js";
@@ -734,5 +738,206 @@ describe("AX-1 normalizeKey boundary", () => {
     for (const k of heuristicKeys) {
       expect(normalizeKey(k)).toBe(k);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AX-7 — transient-vs-durable gate (integration)
+// ---------------------------------------------------------------------------
+
+describe("AX-7 transient-vs-durable gate", () => {
+  it("GATED_READ_SITES names exactly the 5 PRD-scoped read sites", () => {
+    // A sixth read path added later without being wired to notTransient()
+    // must fail THIS assertion loudly instead of silently leaking transient
+    // facts — the PRD's own acceptance criterion.
+    expect(GATED_READ_SITES).toHaveLength(5);
+    expect([...GATED_READ_SITES].sort()).toEqual(
+      [
+        "readRelevantFactsWithMatch",
+        "readRecentFactsByEntity",
+        "readFactsByEntity",
+        "readFactsByIds",
+        "searchFacts",
+      ].sort(),
+    );
+  });
+
+  it("a volatile write is stored (not dropped) with metadata.transient = true", async () => {
+    const entityId = randomUUID();
+    const fact = await writeFact({
+      entityType: "project",
+      entityId,
+      key: "typecheck_status",
+      value: "clean",
+      source: "test",
+    });
+    expect(fact.value).toBe("clean");
+    const meta = fact.metadata as Record<string, unknown>;
+    expect(meta?.transient).toBe(true);
+  });
+
+  it("a volatile write is excluded from readRecentFactsByEntity", async () => {
+    const entityId = randomUUID();
+    await writeFact({
+      entityType: "project",
+      entityId,
+      key: "build_status",
+      value: "passing",
+      source: "test",
+    });
+    const recent = await readRecentFactsByEntity("project", entityId, 10);
+    expect(recent.find((f) => f.key === "build-status")).toBeUndefined();
+  });
+
+  it("a volatile write is excluded from readFactsByEntity", async () => {
+    const entityId = randomUUID();
+    await writeFact({
+      entityType: "project",
+      entityId,
+      key: "port",
+      value: "3000",
+      source: "test",
+    });
+    const all = await readFactsByEntity("project", entityId);
+    expect(all.find((f) => f.key === "port")).toBeUndefined();
+  });
+
+  it("a volatile write is excluded from readRelevantFactsByEntity (readRelevantFactsWithMatch)", async () => {
+    const entityId = randomUUID();
+    await writeFact({
+      entityType: "project",
+      entityId,
+      key: "ci_status",
+      value: "red",
+      source: "test",
+    });
+    // Also write a durable fact so the relevance pool isn't empty.
+    await writeFact({
+      entityType: "project",
+      entityId,
+      key: "decision:tech-stack",
+      value: "PostgreSQL 16",
+      source: "test",
+    });
+    const relevant = await readRelevantFactsByEntity(
+      "project",
+      entityId,
+      10,
+      "what is the ci status",
+    );
+    expect(relevant.find((f) => f.key === "ci-status")).toBeUndefined();
+  });
+
+  it("a volatile write is excluded from readFactsByIds", async () => {
+    const entityId = randomUUID();
+    const fact = await writeFact({
+      entityType: "project",
+      entityId,
+      key: "server_running",
+      value: "true",
+      source: "test",
+    });
+    const byIds = await readFactsByIds([fact.id]);
+    expect(byIds).toHaveLength(0);
+  });
+
+  it("a volatile write is excluded from searchFacts", async () => {
+    const entityId = randomUUID();
+    await writeFact({
+      entityType: "project",
+      entityId,
+      key: "deploy_status",
+      value: "the deploy is currently running",
+      source: "test",
+    });
+    const results = await searchFacts("deploy", { entityType: "project", entityId });
+    expect(results.find((f) => f.key === "deploy-status")).toBeUndefined();
+  });
+
+  it("durable: true bypasses the gate entirely — a volatile-shaped write is stored as normal", async () => {
+    const entityId = randomUUID();
+    const fact = await writeFact({
+      entityType: "project",
+      entityId,
+      key: "typecheck_status",
+      value: "clean",
+      source: "test",
+      durable: true,
+    });
+    const meta = fact.metadata as Record<string, unknown> | null;
+    expect(meta?.transient).toBeUndefined();
+
+    const recent = await readRecentFactsByEntity("project", entityId, 10);
+    expect(recent.find((f) => f.key === "typecheck-status")).toBeDefined();
+  });
+
+  it("a transient fact remains visible via getFactHistoryByKey (audit path) after being superseded", async () => {
+    const entityId = randomUUID();
+    // First write: volatile, transient.
+    await writeFact({
+      entityType: "project",
+      entityId,
+      key: "build_status",
+      value: "passing",
+      source: "test",
+    });
+    // Second write with a different value archives the first — the archive
+    // row is what getFactHistoryByKey reads, independent of the transient
+    // marker (audit paths are not gated).
+    await writeFact({
+      entityType: "project",
+      entityId,
+      key: "build_status",
+      value: "failing",
+      source: "test",
+    });
+
+    const history = await getFactHistoryByKey("project", entityId, "build_status");
+    expect(history.length).toBeGreaterThanOrEqual(1);
+    expect(history.some((h) => h.value === "passing")).toBe(true);
+  });
+
+  it("must-not-fire: write-issue's JSON value shape is never marked transient", async () => {
+    const entityId = randomUUID();
+    const value = JSON.stringify({
+      title: "flaky test",
+      description: null,
+      status: "open",
+      priority: "medium",
+    });
+    const fact = await writeFact({
+      entityType: "project",
+      entityId,
+      key: "issue:flaky-test",
+      value,
+      source: "test",
+    });
+    const meta = fact.metadata as Record<string, unknown> | null;
+    expect(meta?.transient).toBeUndefined();
+
+    // And it IS retrievable through a gated read site (proves it wasn't
+    // silently excluded).
+    const all = await readFactsByEntity("project", entityId);
+    expect(all.find((f) => f.key === "issue:flaky-test")).toBeDefined();
+  });
+
+  it("must-not-fire: a durable config fact ('port 3000 is the default...') is never marked transient", async () => {
+    const entityId = randomUUID();
+    // Key deliberately does NOT itself end in a runtime-noun segment
+    // (that's a separate, correctly-firing key-shape rule tested above) —
+    // this case isolates the VALUE-shape pattern's must-not-fire behavior,
+    // the PRD's own example.
+    const fact = await writeFact({
+      entityType: "project",
+      entityId,
+      key: "constraint:dev-server-config",
+      value: "port 3000 is the default for the dev server",
+      source: "test",
+    });
+    const meta = fact.metadata as Record<string, unknown> | null;
+    expect(meta?.transient).toBeUndefined();
+
+    const all = await readFactsByEntity("project", entityId);
+    expect(all.find((f) => f.key === "constraint:dev-server-config")).toBeDefined();
   });
 });

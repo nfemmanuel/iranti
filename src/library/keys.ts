@@ -82,3 +82,18 @@ export function withRawKey(
       : {};
   return { ...base, rawKey };
 }
+
+// AX-7: mark a fact's metadata as transient (volatility-gated: downgraded at
+// writeFact, not dropped — see src/library/volatility.ts's header comment for
+// why "stored but marked" beats both "silently dropped" and "hard rejected").
+// Mirrors withRawKey's shape exactly: preserve any existing metadata object,
+// merge in the one new field. Called only when the volatility gate actually
+// fires, same discipline as withRawKey only firing when normalizedKey !==
+// rawKey — a clean write's metadata stays untouched either way.
+export function withTransient(metadata: unknown): Record<string, unknown> {
+  const base =
+    metadata != null && typeof metadata === "object"
+      ? (metadata as Record<string, unknown>)
+      : {};
+  return { ...base, transient: true };
+}

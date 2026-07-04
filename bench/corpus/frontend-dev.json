@@ -127,6 +127,15 @@
           "entityId": "dashboard-redesign"
         }
       ]
+    },
+    {
+      "text": "Decision: the storybook build is currently green.",
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "dashboard-redesign"
+        }
+      ]
     }
   ],
   "goldFacts": [
@@ -351,6 +360,18 @@
       "expectedKeys": [],
       "negative": true,
       "note": "NEGATIVE PROBE — Lighthouse/performance budgets are never mentioned in this transcript."
+    },
+    {
+      "query": "Is the storybook build currently green?",
+      "entityHints": [
+        {
+          "entityType": "project",
+          "entityId": "dashboard-redesign"
+        }
+      ],
+      "expectedKeys": [],
+      "negative": true,
+      "note": "AX-7 VOLATILE-WRITE NEGATIVE PROBE (added red-first): message 15's 'Decision: the storybook build is currently green' is a moment-true CI/build snapshot, not a durable decision. RED TODAY (pre-AX-7): the bare 'Decision:' label pattern extracts it as decision:the-storybook-build-is-currently-green and it comes back matched=true for this query. AX-7's classifyVolatility gate (runtime-state-predicate: 'is currently green') marks it transient at write time, excluding it from readRelevantFactsWithMatch and every other gated read site; this probe must then return zero facts."
     }
   ],
   "rules": [

@@ -35,6 +35,12 @@ export const writeInputSchema = {
     .string()
     .optional()
     .describe("Free-text provenance label. Defaults to the agent name."),
+  durable: z
+    .boolean()
+    .optional()
+    .describe(
+      "Set true to bypass the volatile-fact gate (e.g. build status, ports) and force durable storage.",
+    ),
   agentName: z.string().optional(),
 };
 
@@ -63,6 +69,7 @@ export async function write(input: WriteInput): Promise<WriteResult> {
     sessionId: ctx.session.id,
     agentId: ctx.agent.id,
     project: ctx.project.id,
+    durable: input.durable,
   });
 
   return {
