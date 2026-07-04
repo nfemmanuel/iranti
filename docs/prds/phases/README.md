@@ -97,8 +97,14 @@ How we know it works: test counts, smoke checks, manual validation.
 
 | [Layer 0g — Selective Memory Migration](layer-0g-selective-migration.md) | Layer 0g (cutover track) | proposed |
 
-| [AX-9 — Extraction Honesty Hardening](ax-9-extraction-honesty.md) | AX-9 (hardening) | proposed |
-| [Layer 0h — Rule & Alias Correctability](layer-0h-rule-correctability.md) | Layer 0h (YC foundation) | proposed |
-| [Layer 0i — Correction Supersession](layer-0i-correction-supersession.md) | Layer 0i (YC foundation) | proposed |
+| [AX-9 — Extraction Honesty Hardening](ax-9-extraction-honesty.md) | AX-9 (hardening) | implemented on branch (pending merge) |
+| [Layer 0h — Rule & Alias Correctability](layer-0h-rule-correctability.md) | Layer 0h (YC foundation) | implemented on branch (pending merge) |
+| [Layer 0i — Correction Supersession](layer-0i-correction-supersession.md) | Layer 0i (YC foundation) | implemented on branch (pending merge) |
+| [AX-10 — Instrument Hardening](ax-10-instrument-hardening.md) | AX-10 (hardening) | proposed (wave 1) |
+| [AX-7 — Transient-vs-Durable Gate](ax-7-transient-durable-gate.md) | AX-7 (hardening) | proposed (wave 1) |
+| [CORE-16 — Semantic Retrieval Tier](core-16-semantic-retrieval.md) | Phase 3 completion | proposed (wave 1) |
+| [SW-1 — Single-Writer Safety](sw-1-single-writer.md) | SW-1 (trust/infra) | proposed (wave 1: lockfile build + daemon design) |
+| [Extraction Measurement Protocol](extraction-measurement.md) | measurement | proposed (wave 1, stage 3e) |
+| [OD-6 — Assumptions Profile](od-6-assumptions-profile.md) | unscheduled | proposed — PLAN ONLY, not scheduled |
 
 > Retroactive PRDs (0, 1, 1.1) document phases that shipped before this process existed. They are written from the implementation record and exist so the history is complete and auditable — the standard going forward is PRD-first.
