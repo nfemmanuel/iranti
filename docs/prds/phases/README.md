@@ -97,4 +97,8 @@ How we know it works: test counts, smoke checks, manual validation.
 
 | [Layer 0g — Selective Memory Migration](layer-0g-selective-migration.md) | Layer 0g (cutover track) | proposed |
 
+| [AX-9 — Extraction Honesty Hardening](ax-9-extraction-honesty.md) | AX-9 (hardening) | proposed |
+| [Layer 0h — Rule & Alias Correctability](layer-0h-rule-correctability.md) | Layer 0h (YC foundation) | proposed |
+| [Layer 0i — Correction Supersession](layer-0i-correction-supersession.md) | Layer 0i (YC foundation) | proposed |
+
 > Retroactive PRDs (0, 1, 1.1) document phases that shipped before this process existed. They are written from the implementation record and exist so the history is complete and auditable — the standard going forward is PRD-first.

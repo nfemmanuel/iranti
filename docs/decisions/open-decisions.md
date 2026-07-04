@@ -67,6 +67,27 @@ This register supersedes the ad-hoc "Pending decisions" table in
 - **Options:** local filesystem, S3-compatible (self-host minio / AWS), or defer.
 - **Lean:** ~~defer~~ → **build now** (user override; real use case). **Status:** ✅ **SHIPPED 2026-06-28** — local-FS backend, S3-ready abstraction, vision semantic tagging, `iranti_ingest_media` MCP tool, `AttendResult.media[]` tier → [od4-media-ingest](../prds/phases/od4-media-ingest.md) (see Decided below).
 
+### OD-6 — Evolving assumptions profile (user + system epistemic model)
+- **Context:** NF idea, 2026-07-04 (during dogfood-remediation planning): iranti could maintain
+  a small set of *general assumptions* about the user and the system that **evolve with use** —
+  e.g. starting at "user may not fully understand this project and needs research," later
+  refined to "user has consulted others on this subject and prioritizes approach X," or
+  "user is not merely math-literate but has a PhD in applied quantum mechanics." Injected as
+  ambient context (possibly system-prompt-level via host setup), and — the operative part —
+  used to **modulate** iranti's own behavior: confidence scores assigned to facts, and the
+  *fervor* with which rules are suggested and facts injected. First concrete consumer already
+  identified: Layer 0i §9 notes that whether a low-confidence host-summary correction should
+  supersede a higher-confidence fact is exactly an assumptions-profile judgment.
+- **Options:** (a) a reserved `assumption:*` fact category on `user/*` + `system/*` entities,
+  surfaced in a dedicated attend field and updated by ordinary write/supersession mechanics
+  (cheapest; deterministic storage, evolution driven by the LLM tier when it lands);
+  (b) a dedicated profile table with explicit revision history and per-assumption confidence;
+  (c) host-side only (CLAUDE.md-style), iranti stays out of it.
+- **Tension to resolve:** assumptions are *inferences*, not observations — the store's G1
+  "never invents" posture needs a marked boundary (provenance label, separate category, or
+  separate surface) so inferred context is never mistaken for recorded fact.
+- **Lean:** none yet — needs its own PRD before any build. **Status:** OPEN.
+
 ---
 
 ## Augmentation experiments (extraction/retrieval hardening)
