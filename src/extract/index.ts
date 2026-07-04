@@ -375,23 +375,43 @@ export class LocalLlmExtractor implements ExtractorBackend {
       if (!res.ok) throw new Error(`LLM endpoint returned ${res.status}`);
       const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
       const content = json.choices?.[0]?.message?.content ?? "[]";
-      const parsed = parseLlmJson<Array<{ key?: string; value?: string }>>(content);
+      const parsed = parseLlmJson<Array<Record<string, unknown>>>(content);
 
       if (Array.isArray(parsed)) {
         for (const item of parsed) {
-          if (typeof item.key === "string" && typeof item.value === "string") {
-            // Pre-slice to bound regex work; normalizeKey caps the result at 80.
-            const key = normalizeKey(item.key.slice(0, 200));
-            // Skip a key that normalizes to empty (punctuation-only) — writeFact
-            // would reject it anyway, and it must never reach the merge/dedup set.
-            if (!key) continue;
-            llmFacts.push({
-              key,
-              value: item.value.slice(0, 300),
-              source: "extractor_llm",
-              confidence: 0.80,
-            });
+          if (!item || typeof item !== "object") continue;
+          // Local models emit TWO shapes for a fact, and both must be accepted:
+          //   (1) the requested {"key": "...", "value": "..."} pair, and
+          //   (2) a map-style single-entry object {"<factKey>": "<value>"}
+          //       — qwen2.5 emits this frequently even at temperature 0.
+          // The old parser accepted only (1) and SILENTLY DROPPED (2), which
+          // made local/frontier extraction return 0 facts on inputs it clearly
+          // understood (root-caused via the competitive benchmark: qwen
+          // returned [{"decision:orm":"Drizzle"},...] and every fact was lost).
+          let rawKey: unknown;
+          let rawValue: unknown;
+          if (typeof item["key"] === "string" && typeof item["value"] === "string") {
+            rawKey = item["key"];
+            rawValue = item["value"];
+          } else {
+            const entries = Object.entries(item);
+            if (entries.length === 1 && typeof entries[0]![1] === "string") {
+              rawKey = entries[0]![0];
+              rawValue = entries[0]![1];
+            }
           }
+          if (typeof rawKey !== "string" || typeof rawValue !== "string") continue;
+          // Pre-slice to bound regex work; normalizeKey caps the result at 80.
+          const key = normalizeKey(rawKey.slice(0, 200));
+          // Skip a key that normalizes to empty (punctuation-only) — writeFact
+          // would reject it anyway, and it must never reach the merge/dedup set.
+          if (!key) continue;
+          llmFacts.push({
+            key,
+            value: rawValue.slice(0, 300),
+            source: "extractor_llm",
+            confidence: 0.80,
+          });
         }
         llmSucceeded = true;
       }

@@ -1,0 +1,9 @@
+# BENCH-1 runtime artifacts — never committed.
+# Per-config PGlite stores (fresh, reproducible-from-empty; the default
+# ~/.iranti/db is corrupt here so each config gets its own).
+.data/
+# Downloaded datasets (LongMemEval-S is ~277MB).
+datasets/data/
+# Run outputs — ledgers + summaries. Reproducible by re-running.
+results/
+results-smoke/

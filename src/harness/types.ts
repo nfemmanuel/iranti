@@ -121,4 +121,11 @@ export interface Corpus {
   ruleProbes?: RuleProbe[];
   // AX-9 — optional for the same backward-compatibility reason.
   fabricationProbes?: FabricationProbe[];
+  // BENCH-1 (docs/research/2026-07-04-memory-benchmark-methods.md §d) —
+  // marks where a coding-continuity persona's "session 1" (decisions/
+  // constraints established) ends and the gap before "session 2" (the probe
+  // that should honor them) begins. Optional and additive: only
+  // bench/competitive/datasets/coding-continuity.ts sets this; the 4
+  // existing personas and pnpm bench leave it unset and are unaffected.
+  sessionBoundary?: number;
 }

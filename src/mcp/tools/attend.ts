@@ -860,7 +860,10 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
   // costs nothing (nobody awaits this chain) and is correct on both engines.
   // trackBackground (not bare `void`) so closeDb can settle this chain
   // before tearing down the connection — RULE-2 root fix; see background.ts.
-  trackBackground((async () => {
+  // Held in a local (instead of inlined into trackBackground) so the
+  // IRANTI_EXTRACT_SYNC path below can await it — the default path is
+  // byte-identical to before (trackBackground(chain), still detached).
+  const postAttendChain = (async () => {
     if (budgetedFacts.length >= 2 || budgetedRuleList.length > 0) {
       // Layer 0 (D7): edges are tagged to the ATTENDING project (currentProject),
       // never a combined partner — this edge records "these were co-accessed
@@ -923,7 +926,17 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
     lastSyncedMetrics = snapshot;
   })().catch((err: unknown) =>
     console.error("[iranti] async post-attend chain error:", err),
-  ));
+  );
+  trackBackground(postAttendChain);
+  // Benchmark/test determinism: IRANTI_EXTRACT_SYNC=1 makes attend BLOCK until
+  // the extraction chain completes, so a caller that ingests-then-queries in
+  // the same process doesn't race the detached chain. Unset (default) keeps the
+  // fire-and-forget behavior — production response latency is unchanged. This
+  // changes only WHEN extraction lands, never WHAT is extracted, so it does not
+  // bias any measurement of retrieval quality.
+  if (process.env["IRANTI_EXTRACT_SYNC"] === "1") {
+    await postAttendChain;
+  }
 
   return {
     rules: budgetedRuleList.map((r) => ({

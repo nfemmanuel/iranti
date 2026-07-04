@@ -203,6 +203,7 @@ async function ingestCase(
 async function runCell(adapter: Adapter, system: string, dataset: Dataset, track: Track): Promise<CellLedger> {
   const ledger = loadLedger(system, dataset.id, track);
   const cfg = TRACKS[track];
+  if (!cfg) throw new Error(`unknown track: ${track}`);
   const jcfg = judgeConfig(track);
 
   for (let runIndex = 0; runIndex < RUNS_PER_CELL; runIndex++) {
@@ -306,7 +307,9 @@ async function main(): Promise<void> {
   const datasets: Dataset[] = [];
   for (const id of datasetIds) {
     console.log(`Loading dataset ${id}...`);
-    datasets.push(await DATASETS[id]({ limit: LIMIT }));
+    const loader = DATASETS[id];
+    if (!loader) throw new Error(`unknown dataset: ${id}`);
+    datasets.push(await loader({ limit: LIMIT }));
   }
 
   const ledgers: CellLedger[] = [];
@@ -314,7 +317,9 @@ async function main(): Promise<void> {
     console.log(`\n=== system: ${system} ===`);
     let adapter: Adapter | null = null;
     try {
-      adapter = await SYSTEMS[system]();
+      const factory = SYSTEMS[system];
+      if (!factory) throw new Error(`unknown system: ${system}`);
+      adapter = await factory();
       for (const dataset of datasets) {
         for (const track of tracks) {
           console.log(`-- ${dataset.id} / track ${track}`);
