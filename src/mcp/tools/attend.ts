@@ -174,6 +174,13 @@ async function recordAttendEdges(
 // are distinguishable from agent-authored explicit writes.
 const AUTOWRITE_SOURCE = "attendant_autowrite";
 const AUTOWRITE_CONFIDENCE = 0.70;
+// AX-9 (D5, NF ruling): on post-response, input.message is the HOST'S OWN
+// summary of the turn, not user-authored text — extraction still runs (host
+// summaries carry real facts) but the result is provenance-labeled and
+// confidence-demoted so a fabrication harvested from host phrasing never
+// carries user-grade trust. The live incident (dogfood check 3) was exactly
+// this: a negated host summary minted a full-confidence "decision".
+const HOST_SUMMARY_SOURCE = "host_summary_extract";
 
 async function extractAndStore(
   message: string,
@@ -839,8 +846,16 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
     // payload including the assistant response), tagged attendant_autowrite at
     // reduced confidence so auto-writes are distinguishable in reliability scoring.
     if (!isMidTurn && input.message) {
+      // AX-9 (D5): ONE call site serves both phases — the branch below is
+      // the entire user-vs-host distinction. pre-response message = the
+      // user's own words, full trust; post-response message = the host's
+      // summary, demoted (see HOST_SUMMARY_SOURCE above). Getting this
+      // branch wrong in either direction is pinned by a two-sided test.
+      const hostAuthored = phase === "post-response";
       factsExtracted += await extractAndStore(
         input.message, primary, ctx.session.id, ctx.agent.id, currentProject,
+        hostAuthored ? HOST_SUMMARY_SOURCE : undefined,
+        hostAuthored ? AUTOWRITE_CONFIDENCE : undefined,
       );
     }
     if (phase === "post-response" && input.currentContext) {

@@ -241,3 +241,146 @@ describe("attend — CORE-32 attendant_autowrite via currentContext", () => {
     expect(autowrites[0]!.confidence).toBeLessThanOrEqual(0.8);
   });
 });
+
+// ---------------------------------------------------------------------------
+// AX-9 — extraction honesty hardening (dogfood remediation)
+// ---------------------------------------------------------------------------
+
+describe("HeuristicExtractor — AX-9 fabrication guard", () => {
+  const ex = new HeuristicExtractor();
+
+  it("extracts NOTHING from the live incident sentence (negated 'decision' noun)", async () => {
+    const facts = await ex.extract(
+      "Told the user no rate limiting decision is on record for the HTTP transport.",
+    );
+    expect(facts).toHaveLength(0);
+  });
+
+  it("extracts NOTHING from the colon-less bare-noun form ('decision is')", async () => {
+    // The old pattern's [:\s]+ fired on 'decision is' too, not just
+    // 'decision:' — both sub-vectors must be dead, not only the colon form.
+    const facts = await ex.extract(
+      "the decision is final and nobody wants to relitigate it",
+    );
+    expect(facts).toHaveLength(0);
+  });
+
+  it("extracts NOTHING from a negated 'requirement' noun with a space after it", async () => {
+    const facts = await ex.extract(
+      "There was never a requirement to keep raw logs beyond thirty days.",
+    );
+    expect(facts).toHaveLength(0);
+  });
+
+  it("extracts NOTHING from an explicitly-undecided 'decision' sentence", async () => {
+    const facts = await ex.extract(
+      "We haven't made a decision about the icon set yet, still comparing options.",
+    );
+    expect(facts).toHaveLength(0);
+  });
+
+  it("extracts NOTHING from a mid-sentence 'constraint' noun misuse", async () => {
+    const facts = await ex.extract(
+      "we dropped the constraint list idea entirely, too much ceremony",
+    );
+    expect(facts).toHaveLength(0);
+  });
+
+  it("still extracts the sentence-initial 'Decision:' label form", async () => {
+    const facts = await ex.extract(
+      "Decision: all new components live under src/components/ui, no more scattering.",
+    );
+    expect(facts.some((f) => f.key.startsWith("decision:"))).toBe(true);
+  });
+
+  it("still extracts a label opening a LATER sentence in the message", async () => {
+    const facts = await ex.extract("Sounds good. Decision: ship it on Friday.");
+    expect(facts.some((f) => f.key.startsWith("decision:"))).toBe(true);
+  });
+
+  it("does NOT extract a label buried mid-sentence after an em-dash", async () => {
+    const facts = await ex.extract(
+      "oh also — decision: we're calling it 'the widget' from now on",
+    );
+    expect(facts.filter((f) => f.key.startsWith("decision:"))).toHaveLength(0);
+  });
+});
+
+describe("HeuristicExtractor — AX-9 dash clause terminators", () => {
+  const ex = new HeuristicExtractor();
+
+  it("em-dash terminates the capture (the dogfood eval's live miss sentence shape)", async () => {
+    const facts = await ex.extract(
+      "we decided to keep PGlite as the default database engine — Postgres is opt-in through the IRANTI_DB_ENGINE env var.",
+    );
+    const decision = facts.find((f) => f.key.startsWith("decision:"));
+    expect(decision).toBeDefined();
+    expect(decision!.value.toLowerCase()).toContain("pglite");
+    // Compound-sentence disclosure (PRD ax-9 §7): only the pattern-matching
+    // clause extracts; the trailing clause is an accepted non-extraction.
+    expect(decision!.value.toLowerCase()).not.toContain("postgres");
+  });
+
+  it("em-dash terminates a sentence-initial constraint label capture", async () => {
+    const facts = await ex.extract(
+      "constraint: the friday export csv is sacred — nobody edits the columns without telling finance.",
+    );
+    const constraint = facts.find((f) => f.key.startsWith("constraint:"));
+    expect(constraint).toBeDefined();
+    expect(constraint!.value.toLowerCase()).toBe("the friday export csv is sacred");
+  });
+
+  it("spaced hyphen terminates the capture", async () => {
+    const facts = await ex.extract("I prefer tabs over spaces - way easier to diff.");
+    const pref = facts.find((f) => f.key.startsWith("preference:"));
+    expect(pref).toBeDefined();
+    expect(pref!.value.toLowerCase()).toBe("tabs over spaces");
+  });
+
+  it("UNSPACED hyphens survive inside captured identifiers", async () => {
+    const facts = await ex.extract(
+      "we're using dogfood/report-1 as the eval branch name.",
+    );
+    const decision = facts.find((f) => f.key.startsWith("decision:"));
+    expect(decision).toBeDefined();
+    expect(decision!.value).toContain("dogfood/report-1");
+  });
+});
+
+describe("attend — AX-9 host-summary demotion (two-sided phase branch)", () => {
+  it("post-response message extraction is provenance-labeled and confidence-demoted", async () => {
+    const entityId = randomUUID();
+    await attend({
+      entityHints: [{ entityType: "project", entityId }],
+      message: "we chose Fastify as the http server",
+      phase: "post-response",
+    });
+    await new Promise((r) => setTimeout(r, 300));
+
+    // attend() writes under the cwd-resolved project, not "default" —
+    // same reason the integration test above queries with a fallback.
+    const { resolveCurrentProject } = await import("../library/projects.js");
+    const project = (await resolveCurrentProject()).id;
+    const stored = await findFact("project", entityId, "decision:fastify", "default", project);
+    expect(stored).toBeDefined();
+    expect(stored!.source).toBe("host_summary_extract");
+    expect(stored!.confidence).toBeCloseTo(0.7, 5);
+  });
+
+  it("pre-response (user-authored) message extraction keeps full trust", async () => {
+    const entityId = randomUUID();
+    await attend({
+      entityHints: [{ entityType: "project", entityId }],
+      message: "we chose Fastify as the http server",
+      phase: "pre-response",
+    });
+    await new Promise((r) => setTimeout(r, 300));
+
+    const { resolveCurrentProject } = await import("../library/projects.js");
+    const project = (await resolveCurrentProject()).id;
+    const stored = await findFact("project", entityId, "decision:fastify", "default", project);
+    expect(stored).toBeDefined();
+    expect(stored!.source).toBe("extractor_heuristic");
+    expect(stored!.confidence).toBeCloseTo(0.85, 5);
+  });
+});

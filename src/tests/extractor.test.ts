@@ -226,3 +226,49 @@ describe("extractAliases — precision guardrails", () => {
     expect(extractAliases(message, artifacts)).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// AX-9 — bare relative paths (dogfood remediation, check 4's caveat)
+// ---------------------------------------------------------------------------
+
+describe("extractArtifacts — AX-9 bare relative paths", () => {
+  it("extracts a bare repo-relative path with an extension", () => {
+    const artifacts = extractArtifacts(
+      "The component inventory lives in docs/design/component-inventory.md, keep it updated.",
+    );
+    expect(artifacts).toHaveLength(1);
+    expect(artifacts[0]!.kind).toBe("file_path");
+    expect(artifacts[0]!.value).toBe("docs/design/component-inventory.md");
+    expect(artifacts[0]!.key).toMatch(/^referenced_file:/);
+  });
+
+  it("does not extract slashed prose or extensionless identifiers", () => {
+    const artifacts = extractArtifacts(
+      "It's an either/or situation for the input/output contract on the TCP/IP stack; check the dogfood/report-1 branch and the 1.2/3.4 version split.",
+    );
+    expect(artifacts).toHaveLength(0);
+  });
+
+  it("does not double-extract the tail of a ./-prefixed path", () => {
+    const artifacts = extractArtifacts("see ./docs/x.md here");
+    expect(artifacts).toHaveLength(1);
+    expect(artifacts[0]!.value).toBe("./docs/x.md");
+  });
+
+  it("does not extract a URL's path component as a bare path", () => {
+    const artifacts = extractArtifacts("read https://example.com/docs/api.md first");
+    expect(artifacts).toHaveLength(1);
+    expect(artifacts[0]!.kind).toBe("url");
+  });
+
+  it("an alias declared against a bare path binds to it (the textbook fix now reaches paths)", () => {
+    const message =
+      "The failover runbook lives at ops/runbooks/failover.md — everyone just calls it 'the failover doc'.";
+    const artifacts = extractArtifacts(message);
+    expect(artifacts).toHaveLength(1);
+    const aliases = extractAliases(message, artifacts);
+    expect(aliases).toHaveLength(1);
+    expect(aliases[0]!.rawAlias).toBe("the failover doc");
+    expect(aliases[0]!.factKey).toBe(artifacts[0]!.key);
+  });
+});

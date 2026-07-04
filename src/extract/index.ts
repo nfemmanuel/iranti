@@ -99,35 +99,56 @@ function extractSingleCapture(
 // HeuristicExtractor
 // ---------------------------------------------------------------------------
 
-// Decision patterns: we decided to use X, we're going with X, decision: X
+// AX-9: the clause-terminator class. Em-dash, en-dash, and the SPACED hyphen
+// join [.,;] — real prose delimits clauses with dashes exactly like commas,
+// and without them a dash-punctuated sentence pushes the lazy capture past
+// its length cap and extracts NOTHING (the dogfood eval's two live misses,
+// check 2). Unspaced hyphens are deliberately NOT terminators: they appear
+// inside identifiers (dogfood/report-1, feature-store) that must survive
+// inside a captured value.
+const T = String.raw`(?:[.,;—–]|\s-\s|$)`;
+
+// Decision patterns: we decided to use X, we're going with X, "Decision: X"
+// (sentence-initial label only — see the AX-9 note below).
 const DECISION_PATTERNS: Array<{ re: RegExp; capture: number }> = [
-  { re: /\bwe\s+decided\s+to\s+use\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1 },
-  { re: /\bwe\s+chose\s+(.{3,60}?)(?:\s+for|\s+as|[.,;]|$)/i, capture: 1 },
-  { re: /\bdecision[:\s]+(.{3,80}?)(?:[.,;]|$)/i, capture: 1 },
+  { re: new RegExp(String.raw`\bwe\s+decided\s+to\s+use\s+(.{3,60}?)` + T, "i"), capture: 1 },
+  { re: new RegExp(String.raw`\bwe\s+chose\s+(.{3,60}?)(?:\s+for|\s+as|[.,;—–]|\s-\s|$)`, "i"), capture: 1 },
+  // AX-9: this was /\bdecision[:\s]+…/ — a bare noun match that fired on the
+  // word "decision" ANYWHERE, colon or no colon, including under negation
+  // ("Told the user no rate limiting decision is on record…" → stored a
+  // fact asserting the OPPOSITE; the live dogfood fabrication, check 3).
+  // Now a sentence-initial LABEL: colon required, label must open a
+  // sentence — the shape every real corpus positive already uses
+  // ("Decision: all new components live under…"). A negation lookbehind was
+  // rejected: negators sit arbitrarily far before the noun, and
+  // enumerate-the-negators is a losing game. Precision over recall.
+  { re: new RegExp(String.raw`(?:^|[.!?]\s+)decision:\s+(.{3,80}?)` + T, "im"), capture: 1 },
   { re: /\bgoing\s+with\s+(.{3,60}?)\s+(?:for|as|because|instead|over)[.,;]?\b/i, capture: 1 },
-  { re: /\bwe(?:'re| are)\s+(?:using|adopting|switching\s+to)\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1 },
-  { re: /\blet'?s\s+(?:use|go\s+with)\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1 },
-  { re: /\bwe\s+(?:decided|agreed|concluded)\s+(?:that\s+)?(.{3,80}?)(?:[.,;]|$)/i, capture: 1 },
+  { re: new RegExp(String.raw`\bwe(?:'re| are)\s+(?:using|adopting|switching\s+to)\s+(.{3,60}?)` + T, "i"), capture: 1 },
+  { re: new RegExp(String.raw`\blet'?s\s+(?:use|go\s+with)\s+(.{3,60}?)` + T, "i"), capture: 1 },
+  { re: new RegExp(String.raw`\bwe\s+(?:decided|agreed|concluded)\s+(?:that\s+)?(.{3,80}?)` + T, "i"), capture: 1 },
 ];
 
 // Preference patterns: I always want X, prefer Y, never use Z
 const PREFERENCE_PATTERNS: SingleCapturePattern[] = [
-  { re: /\bi\s+(?:always\s+)?prefer\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1 },
-  { re: /\balways\s+(?:use|want|do)\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1 },
-  { re: /\bnever\s+(?:use|do)\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1 },
-  { re: /\bi\s+(?:want|need)\s+(?:you\s+to\s+)?always\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1 },
-  { re: /\bplease\s+(?:always\s+)?(.{3,60}?)(?:\s+when|\s+if|[.,;]|$)/i, capture: 1 },
-  { re: /\bmake\s+sure\s+(?:to\s+)?(?:always\s+)?(.{3,60}?)(?:[.,;]|$)/i, capture: 1 },
-  { re: /\bi\s+(?:don'?t|do\s+not)\s+(?:want|like)\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1 },
+  { re: new RegExp(String.raw`\bi\s+(?:always\s+)?prefer\s+(.{3,60}?)` + T, "i"), capture: 1 },
+  { re: new RegExp(String.raw`\balways\s+(?:use|want|do)\s+(.{3,60}?)` + T, "i"), capture: 1 },
+  { re: new RegExp(String.raw`\bnever\s+(?:use|do)\s+(.{3,60}?)` + T, "i"), capture: 1 },
+  { re: new RegExp(String.raw`\bi\s+(?:want|need)\s+(?:you\s+to\s+)?always\s+(.{3,60}?)` + T, "i"), capture: 1 },
+  { re: new RegExp(String.raw`\bplease\s+(?:always\s+)?(.{3,60}?)(?:\s+when|\s+if|[.,;—–]|\s-\s|$)`, "i"), capture: 1 },
+  { re: new RegExp(String.raw`\bmake\s+sure\s+(?:to\s+)?(?:always\s+)?(.{3,60}?)` + T, "i"), capture: 1 },
+  { re: new RegExp(String.raw`\bi\s+(?:don'?t|do\s+not)\s+(?:want|like)\s+(.{3,60}?)` + T, "i"), capture: 1 },
 ];
 
-// Constraint patterns: we can't use X, requirement: X, must not do Y
+// Constraint patterns: we can't use X, "Constraint:/Requirement: X" (labels,
+// sentence-initial only — same AX-9 rationale as DECISION_PATTERNS above:
+// the bare-noun forms fabricated from negated sentences), must not do Y.
 const CONSTRAINT_PATTERNS: Array<{ re: RegExp; capture: number }> = [
-  { re: /\bwe\s+(?:can'?t|cannot|must\s+not|should\s+not|won'?t)\s+use\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1 },
-  { re: /\brequirement[:\s]+(.{3,80}?)(?:[.,;]|$)/i, capture: 1 },
-  { re: /\bconstraint[:\s]+(.{3,80}?)(?:[.,;]|$)/i, capture: 1 },
-  { re: /\bwe\s+(?:have\s+to|must)\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1 },
-  { re: /\bnot\s+allowed\s+to\s+(.{3,60}?)(?:[.,;]|$)/i, capture: 1 },
+  { re: new RegExp(String.raw`\bwe\s+(?:can'?t|cannot|must\s+not|should\s+not|won'?t)\s+use\s+(.{3,60}?)` + T, "i"), capture: 1 },
+  { re: new RegExp(String.raw`(?:^|[.!?]\s+)requirement:\s+(.{3,80}?)` + T, "im"), capture: 1 },
+  { re: new RegExp(String.raw`(?:^|[.!?]\s+)constraint:\s+(.{3,80}?)` + T, "im"), capture: 1 },
+  { re: new RegExp(String.raw`\bwe\s+(?:have\s+to|must)\s+(.{3,60}?)` + T, "i"), capture: 1 },
+  { re: new RegExp(String.raw`\bnot\s+allowed\s+to\s+(.{3,60}?)` + T, "i"), capture: 1 },
 ];
 
 // Failed approach patterns: tried X but failed, X didn't work
@@ -135,13 +156,13 @@ const FAILED_PATTERNS: Array<{ re: RegExp; capture: number }> = [
   { re: /\b(?:we\s+)?tried\s+(.{3,60}?)\s+(?:but|and)\s+(?:it\s+)?(?:didn'?t\s+work|failed|was\s+wrong)/i, capture: 1 },
   { re: /\b(.{3,60}?)\s+didn'?t\s+work(?:\s+because|\s+for)?/i, capture: 1 },
   { re: /\b(?:don'?t|do\s+not)\s+(?:use|try)\s+(.{3,60}?)\s+(?:—|for|because|it|if)/i, capture: 1 },
-  { re: /\bfailed\s+approach[:\s]+(.{3,80}?)(?:[.,;]|$)/i, capture: 1 },
+  { re: new RegExp(String.raw`\bfailed\s+approach[:\s]+(.{3,80}?)` + T, "i"), capture: 1 },
 ];
 
 // Correction patterns: actually X is Y, the correct value is Y
 const CORRECTION_PATTERNS: Array<{ re: RegExp; capture: string }> = [
-  { re: /\bactually,?\s+(.{3,60}?)\s+(?:is|should\s+be)\s+(.{3,60}?)(?:[.,;]|$)/i, capture: "1:2" },
-  { re: /\bthe\s+correct\s+(?:value\s+(?:for\s+)?(?:of\s+)?)?(.{3,60}?)\s+is\s+(.{3,60}?)(?:[.,;]|$)/i, capture: "1:2" },
+  { re: new RegExp(String.raw`\bactually,?\s+(.{3,60}?)\s+(?:is|should\s+be)\s+(.{3,60}?)` + T, "i"), capture: "1:2" },
+  { re: new RegExp(String.raw`\bthe\s+correct\s+(?:value\s+(?:for\s+)?(?:of\s+)?)?(.{3,60}?)\s+is\s+(.{3,60}?)` + T, "i"), capture: "1:2" },
 ];
 
 export class HeuristicExtractor implements ExtractorBackend {

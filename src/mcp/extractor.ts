@@ -59,6 +59,18 @@ const UNIX_PATH_PATTERN = /(?<![\w.])\/[\w.-]+(?:\/[\w.-]+)+/g;
 // Relative paths: must start with ./ or ../
 const RELATIVE_PATH_PATTERN = /\.\.?[\\/][\w.-]+(?:[\\/][\w.-]+)*/g;
 
+// AX-9: BARE relative paths — the way developers actually type them
+// ("docs/reviews/x.md", no ./ prefix). Requires >=2 segments AND a
+// dot-extension (1-8 alphanumerics) on the final segment: the extension is
+// the deterministic tell that this is a file and not prose ("either/or",
+// "input/output", "TCP/IP" have no extension; "dogfood/report-1" has no
+// dot-suffix). The lookbehind rejects matches embedded in other tokens —
+// the tail of a ./-prefixed path (already RELATIVE_PATH_PATTERN's), a
+// Windows path segment (preceded by \), a URL remnant, or a decimal like
+// "1.2/3.4" (preceded by .). A missed extensionless file (Makefile) is the
+// accepted precision trade — see PRD ax-9 §9.
+const BARE_RELATIVE_PATH_PATTERN = /(?<![\w.\\/-])[\w-]+(?:[\\/][\w.-]+)+\.[A-Za-z0-9]{1,8}\b/g;
+
 // Trailing punctuation that is almost always sentence punctuation, not part
 // of the artifact: "see https://example.com." should not keep the dot.
 const TRAILING_PUNCTUATION = /[.,;:!?]+$/;
@@ -107,6 +119,9 @@ export function extractArtifacts(message: string): ExtractedArtifact[] {
     push("file_path", "referenced_file", path);
   }
   for (const path of matchAll(withoutUrls, UNIX_PATH_PATTERN)) {
+    push("file_path", "referenced_file", path);
+  }
+  for (const path of matchAll(withoutUrls, BARE_RELATIVE_PATH_PATTERN)) {
     push("file_path", "referenced_file", path);
   }
 
