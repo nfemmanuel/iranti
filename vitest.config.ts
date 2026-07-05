@@ -9,6 +9,12 @@ export default defineConfig({
     globals: true,
     environment: "node",
 
+    // Only our own tests under src/ — never wander into sibling git worktrees
+    // (.claude/worktrees/*), whose stale duplicate *.test.ts files otherwise get
+    // picked up by vitest's default glob and pollute the suite with phantom
+    // failures + inflated counts (flagged by the 2026-07-05 CORE-17 S1 review).
+    include: ["src/**/*.test.ts"],
+
     // Each test file runs in its own child process (fork), giving full isolation.
     // This means each file gets its own DB connection pool instance, which is
     // closed cleanly at the end of the file via afterAll.
