@@ -45,6 +45,7 @@ import type {
 import { irantiNextFactory } from "./adapters/iranti-next.js";
 import { irantiOldFactory } from "./adapters/iranti-old.js";
 import { aiMemFactory } from "./adapters/ai-mem.js";
+import { chunkRagFactory } from "./adapters/chunk-rag.js";
 import { loadLongMemEvalS } from "./datasets/longmemeval-s.js";
 import { loadCodingContinuity } from "./datasets/coding-continuity.js";
 import { composeAnswer } from "./reader.js";
@@ -109,6 +110,7 @@ const SYSTEMS: Record<string, AdapterFactory> = {
   "iranti-next:frontier": irantiNextFactory("frontier"),
   "iranti-old": irantiOldFactory,
   "ai-mem": aiMemFactory,
+  "iranti-next:chunk-rag": chunkRagFactory,
 };
 
 const DATASETS: Record<DatasetId, DatasetLoader> = {
