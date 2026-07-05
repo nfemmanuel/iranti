@@ -386,8 +386,38 @@ export interface AttendResult {
   // chunk is recall context, never a truth claim (facts remain the truth
   // layer, D-FACTS-TRUTH). An OPEN query that clears the floor for nothing
   // omits the field — that emptiness is the abstention primitive S3 lifts to
-  // an explicit signal.
+  // an explicit signal (see `abstain` below).
   chunks?: Array<{ content: string; score: number }>;
+  // CORE-17 S3 (the abstention gate — D-ABSTAIN / G1 never-invent made
+  // first-class at RETRIEVAL time): true ONLY when this read classified OPEN,
+  // an embedder was active, the semantic tier cleared the floor for NOTHING
+  // (`chunks` omitted), AND the deterministic tiers produced no matched fact
+  // (matchedFactIds empty). It is iranti saying, explicitly, "I have nothing
+  // that answers this" — so a host declines rather than padding an answer from
+  // an irrelevant chunk or an ambient recency fact.
+  //
+  // Relationship to Layer 0f (no-answer honesty): Layer 0f already lets a host
+  // INFER no-answer from the read — an all-`matched:false` fact set is iranti
+  // saying "nothing here answers that" (the doctrine documented on
+  // `facts[].matched` above). S3 does not duplicate or replace that per-fact
+  // lexical signal; it COMPOSES it with the semantic tier's emptiness and lifts
+  // the conjunction to ONE explicit boolean, so the host no longer has to
+  // reconstruct "no matched fact AND no chunk" itself. Ambient facts still flow
+  // (Option B, never Option A) — `abstain` is orthogonal to whether ambient
+  // context is present, exactly as Layer 0f kept `falsePositiveRateRaw` at 100%
+  // by design while `matched` drove the honest metric.
+  //
+  // ADDITIVE + omitted-when-false (same "ball in pool" convention as
+  // `facts[].semantic` / `chunks` above): a STRUCTURED read (a fact/alias/
+  // correction answered it), an OPEN read that DID retrieve a chunk, and the
+  // embedder-off default all omit it entirely — so a host that ignores this
+  // field, or runs zero-infra, sees exactly today's payload shape. It is
+  // meaningful only when the embedder is on: with it off the semantic tier is
+  // always empty, so emitting `abstain` there would be a false "I checked and
+  // found nothing" when nothing was ever checked — hence the isEmbedderActive()
+  // guard on its computation (below), which also preserves the byte-identical
+  // off-path guarantee.
+  abstain?: true;
   // Phase 3 (CORE-31): protocol breadcrumb — what the host should call next.
   nextDue: string;
   // Layer 0e: "where did we leave off?" rollup. Populated ONLY on the first
@@ -907,6 +937,37 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
     }
   }
 
+  // CORE-17 S3 — the abstention gate (D-ABSTAIN / G1 never-invent made
+  // first-class at retrieval time). This LIFTS the S2 empty-chunk primitive
+  // (searchChunksSemantic returning [] below floor leaves chunkHits undefined)
+  // to an explicit AttendResult.abstain, conjoined with the deterministic
+  // tiers having produced no matched fact — so the host declines rather than
+  // padding an answer from an irrelevant chunk or an ambient recency fact.
+  //
+  // The gate requires BOTH emptinesses (PRD D-ABSTAIN: "below floor AND no
+  // fact hit", not either/or): no chunk cleared the floor (chunkHits omitted)
+  // AND matchedFactIds is empty. A matched fact SUPPRESSES abstention — the
+  // deterministic tier answered it. Note queryClass === "open" ALREADY implies
+  // matchedFactIds.size === 0 && corrections.length === 0 (that is exactly what
+  // classifyQuery routes on), so the explicit matchedFactIds check below is
+  // redundant with the router today; it is kept verbatim from the plan's
+  // written expression so the invariant is self-evident and stays correct if a
+  // future input-only OPEN signal is ever OR'd into classifyQuery.
+  //
+  // Guarded on isEmbedderActive() so it is emitted ONLY when the semantic tier
+  // actually ran: with the embedder off, chunk recall never fires, so an
+  // unguarded `abstain` would be a false "I checked and found nothing" when
+  // nothing was checked — AND it would perturb the byte-identical off-path
+  // payload (every OPEN read would gain the field). Both reasons make the guard
+  // mandatory. This COMPOSES with, and does not replace, Layer 0f: ambient
+  // facts still flow; abstain is the explicit conjunction of "no chunk" with
+  // Layer 0f's "no matched fact" that a host previously had to infer.
+  const abstain =
+    queryClass === "open" &&
+    isEmbedderActive() &&
+    chunkHits === undefined &&
+    matchedFactIds.size === 0;
+
   // OD-4: media tier — keyword search over description_text / tags for the
   // entities in scope. Only fires when there is a message to match against,
   // and only for pre/post-response phases (skip on mid-turn cheap top-ups).
@@ -1114,6 +1175,12 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
     // the embedder-off default omit it, so the payload shape is byte-identical
     // to today on the exact-first path and the zero-infra path.
     ...(chunkHits ? { chunks: chunkHits } : {}),
+    // CORE-17 S3: omitted-when-false (same "ball in pool" convention as
+    // chunks/facts[].semantic above) so the byte-identical off-path and the
+    // STRUCTURED/OPEN-with-a-hit payloads are unchanged; present as `true` only
+    // when the abstention gate fired (OPEN + embedder on + no chunk + no
+    // matched fact) — an explicit "nothing here answers this."
+    ...(abstain ? { abstain: true as const } : {}),
     nextDue: computeNextDue(phase),
     projectState,
   };
