@@ -43,6 +43,7 @@ import {
   writeFact,
 } from "../../library/facts.js";
 import { getRulesForAttend } from "../../library/rules.js";
+import { writeChunk, embedChunkOnWrite } from "../../library/chunks.js";
 import { learnAlias, resolveAlias } from "../../library/aliases.js";
 import { normalizeKey } from "../../library/keys.js";
 import { graph } from "../../graph/index.js";
@@ -864,6 +865,38 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
   // IRANTI_EXTRACT_SYNC path below can await it — the default path is
   // byte-identical to before (trackBackground(chain), still detached).
   const postAttendChain = (async () => {
+    // CORE-17 S1 (write path): persist the raw turn as a chunk and embed it
+    // fire-and-forget, so the retrieval-first recall pool actually fills.
+    // Mirrors writeFact's post-commit embed hook (facts.ts:508 →
+    // embedFactOnWrite): writeChunk is one insert (always runs); the embed is
+    // isEmbedderActive()-guarded INSIDE embedChunkOnWrite (chunks.ts:120), so
+    // the default embedder-off path writes the row and no-ops the vector —
+    // zero cost beyond the one insert, byte-identical retrieval to today.
+    // Gated on !isMidTurn && input.message (same gate as artifact extraction,
+    // :484) so a mid-turn read-only top-up never seeds a chunk. Scoped to
+    // currentProject — the single attributing project, never the effective/
+    // combined read set (§11.6), exactly as writeFact/learnAlias above.
+    // It rides in THIS chain (not a bare trackBackground at the write site) so
+    // the IRANTI_EXTRACT_SYNC gate below awaits it for deterministic
+    // tests/bench, just like extraction. A failure here must never surface.
+    if (!isMidTurn && input.message) {
+      const message = input.message;
+      const { id } = await writeChunk(
+        {
+          content: message,
+          sessionId: ctx.session.id,
+          agentId: ctx.agent.id,
+          surface: input.surface,
+          entityHint: `${primary.entityType}/${primary.entityId}`,
+        },
+        "default",
+        currentProject,
+      );
+      await embedChunkOnWrite(id, message).catch((err: unknown) =>
+        console.error("[iranti] chunk embed error:", err),
+      );
+    }
+
     if (budgetedFacts.length >= 2 || budgetedRuleList.length > 0) {
       // Layer 0 (D7): edges are tagged to the ATTENDING project (currentProject),
       // never a combined partner — this edge records "these were co-accessed
