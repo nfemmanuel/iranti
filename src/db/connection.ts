@@ -205,6 +205,33 @@ if (usePostgres) {
     "0010_gray_dark_phoenix": [
       `ALTER TABLE "facts" ADD COLUMN "embedding" text`,
     ],
+    // CORE-17 (0015): the `chunks` table's `embedding` is vector(768) + an
+    // HNSW index on Postgres — neither exists on PGlite (no pgvector, same
+    // gap as 0010). Substitute the same statements EXCEPT: `embedding` typed
+    // `text` (the one vector-column accessor serializes to/from it), and the
+    // HNSW `CREATE INDEX` dropped (no vector op class on a text column). The
+    // table, its FKs, and the btree index are kept verbatim so the PGlite
+    // schema still matches the shared Drizzle `chunks` pgTable column-for-column.
+    "0015_condemned_miracleman": [
+      `CREATE TABLE "chunks" (
+        "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+        "tenant_id" text DEFAULT 'default' NOT NULL,
+        "project" text DEFAULT 'default' NOT NULL,
+        "content" text NOT NULL,
+        "session_id" uuid,
+        "agent_id" uuid,
+        "surface" text,
+        "entity_hint" text,
+        "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+        "last_accessed_at" timestamp with time zone DEFAULT now() NOT NULL,
+        "access_count" integer DEFAULT 0 NOT NULL,
+        "metadata" jsonb,
+        "embedding" text
+      )`,
+      `ALTER TABLE "chunks" ADD CONSTRAINT "chunks_session_id_sessions_id_fk" FOREIGN KEY ("session_id") REFERENCES "public"."sessions"("id") ON DELETE no action ON UPDATE no action`,
+      `ALTER TABLE "chunks" ADD CONSTRAINT "chunks_agent_id_agents_id_fk" FOREIGN KEY ("agent_id") REFERENCES "public"."agents"("id") ON DELETE no action ON UPDATE no action`,
+      `CREATE INDEX "chunks_tenant_project_idx" ON "chunks" USING btree ("tenant_id","project")`,
+    ],
   };
 
   // SW-1 code-review MAJOR fix: everything from here through the migration

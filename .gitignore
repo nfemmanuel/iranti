@@ -15,6 +15,10 @@ build/
 .iranti-write-debt
 escalation/
 iranti-escalations/
+# stray PGlite data dir from a mangled IRANTI_DATA_DIR (a Windows backslash path
+# collapsing to a repo-root relative dir, e.g. UsersNF.irantidb-next/) — the
+# `git add -A` foot-gun flagged by the 2026-07-05 architecture audit.
+/UsersNF.iranti*/
 
 # MCP registry tokens
 .mcpregistry_*

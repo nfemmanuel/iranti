@@ -254,6 +254,68 @@ export const facts = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// chunks — CORE-17 (retrieval-first recall)
+//
+// Raw conversation episodes, stored verbatim + embedded: the RECALL layer.
+// It answers open, natural-language questions by MEANING (cosine over the
+// whole project's chunks) where the exact-key and keyword tiers structurally
+// can't reach — the retrieval bottleneck the competitive benchmark exposed
+// (lexical recall 12–18% vs semantic-over-chunks ~79% on the same haystacks).
+//
+// Distinct from `facts` (the compressed TRUTH layer): a chunk keeps the full
+// reasoning so "why did I switch?" is answerable; a fact keeps one correctable
+// value so "what did I switch to?" stays exact and supersedable. Semantic
+// finds the region; facts resolve the current truth. Project-scoped, NOT
+// entity-scoped — an open question ranges across all sessions, so retrieval
+// can't be pre-narrowed to one entity the way facts are.
+//
+// See docs/prds/phases/core-17-retrieval-first-recall.md.
+// ---------------------------------------------------------------------------
+export const chunks = pgTable(
+  "chunks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+
+    // Tenancy + project seams — identical semantics to facts (isolation is
+    // enforced by including both in every retrieval filter).
+    tenantId: text("tenant_id").notNull().default("default"),
+    project: text("project").notNull().default("default"),
+
+    // The raw episode text (a rendered session or turn-window) — the recall
+    // unit. Stored verbatim; nothing extracted away.
+    content: text("content").notNull(),
+
+    // Provenance — where this episode came from.
+    sessionId: uuid("session_id").references(() => sessions.id),
+    agentId: uuid("agent_id").references(() => agents.id),
+    surface: text("surface"),
+
+    // Optional primary entity this episode is about (attend's entityHints[0]),
+    // for future entity-scoped narrowing; retrieval does not require it.
+    entityHint: text("entity_hint"),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastAccessedAt: timestamp("last_accessed_at", { withTimezone: true }).notNull().defaultNow(),
+    accessCount: integer("access_count").notNull().default(0),
+
+    // Holds embedRegime (the CORE-16 D4 version-lock) on both engines.
+    metadata: jsonb("metadata"),
+
+    // CORE-17: dense embedding — vector(768) on Postgres, JSON-text on PGlite,
+    // through the same single vector-column accessor discipline as facts
+    // (regime rides in metadata.embedRegime; this column stays a pure vector).
+    embedding: vector("embedding", { dimensions: 768 }),
+  },
+  (t) => [
+    index("chunks_tenant_project_idx").on(t.tenantId, t.project),
+    // CORE-17: HNSW for ANN search on Postgres; adapted to a plain text column
+    // (no index) on PGlite via connection.ts's PGLITE_MIGRATION_OVERRIDES.
+    index("chunks_embedding_hnsw_idx")
+      .using("hnsw", t.embedding.op("vector_cosine_ops")),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // fact_archive
 //
 // An append-only history table. Every time a fact's value is replaced
