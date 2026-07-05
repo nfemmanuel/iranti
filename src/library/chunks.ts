@@ -24,6 +24,27 @@ import { cosineSimilarity } from "../embed/cosine.js";
 import { buildEmbedRegime, regimeMatches } from "../embed/regime.js";
 import { embeddingAssignmentSql, parseStoredVector } from "../embed/vector-column.js";
 
+// Project scope filter for chunk reads — accepts one project or the effective
+// (combined) set, so attend can span currentProject + its combined partners for
+// chunk recall exactly as it does for fact recall (attend.ts effectiveProjectIds
+// / getEffectiveProjectIds). A single id uses eq; the combined set uses inArray.
+//
+// Deliberately does NOT normalize the ids here (unlike facts.ts's projectFilter
+// which pairs with a normalizing writeFact): the chunk WRITE side (writeChunk)
+// stores the project verbatim, so the read must match verbatim — normalizing
+// only one side would make writes unfindable. Production symmetry is already
+// guaranteed because attend passes the already-normalized ctx.project.id /
+// effectiveProjectIds (resolveCurrentProject/getEffectiveProjectIds normalize)
+// on BOTH the write and the read. Keeping the filter a pure "match what you're
+// given" also preserves the isolated recall contract in chunks.test.ts (raw
+// fake-path scopes round-trip write->read unchanged).
+function chunkProjectFilter(project: string | string[]) {
+  const ids = Array.isArray(project) ? project : [project];
+  return ids.length === 1
+    ? eq(chunks.project, ids[0]!)
+    : inArray(chunks.project, ids);
+}
+
 // Fixed cosine floor for chunk recall — its OWN constant, deliberately NOT
 // shared with the fact tier's 0.60 (CORE-16 D2). Chunk texts are long and
 // their cosine distribution differs from terse `key: value` facts, so coupling
@@ -146,18 +167,19 @@ export async function embedChunkOnWrite(chunkId: string, content: string): Promi
 // entity-scoped: an open question ranges across every session.
 async function fetchChunkCandidates(
   tenantId: string,
-  project: string,
+  project: string | string[],
 ): Promise<Array<{ id: string; content: string; metadata: unknown }>> {
   const rows = await db
     .select({ id: chunks.id, content: chunks.content, metadata: chunks.metadata })
     .from(chunks)
-    .where(and(eq(chunks.tenantId, tenantId), eq(chunks.project, project)))
+    .where(and(eq(chunks.tenantId, tenantId), chunkProjectFilter(project)))
     .orderBy(chunks.id)
     .limit(SEMANTIC_CHUNK_CAP + 1);
   if (rows.length > SEMANTIC_CHUNK_CAP) {
+    const scope = Array.isArray(project) ? project.join(",") : project;
     console.error(
       `[iranti] chunk candidate fetch truncated at ${SEMANTIC_CHUNK_CAP} for ` +
-        `${tenantId}/${project} (${rows.length} eligible) — ANN-index escalation ` +
+        `${tenantId}/${scope} (${rows.length} eligible) — ANN-index escalation ` +
         `trigger (PRD core-17-retrieval-first-recall.md §9).`,
     );
     return rows.slice(0, SEMANTIC_CHUNK_CAP);
@@ -175,7 +197,7 @@ export async function searchChunksSemantic(
   query: string,
   k: number,
   tenantId: string = "default",
-  project: string = "default",
+  project: string | string[] = "default",
 ): Promise<ChunkHit[]> {
   if (!isEmbedderActive() || k <= 0) return [];
   const embedder = getEmbedder();

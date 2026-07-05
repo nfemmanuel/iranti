@@ -43,7 +43,8 @@ import {
   writeFact,
 } from "../../library/facts.js";
 import { getRulesForAttend } from "../../library/rules.js";
-import { writeChunk, embedChunkOnWrite } from "../../library/chunks.js";
+import { writeChunk, embedChunkOnWrite, searchChunksSemantic } from "../../library/chunks.js";
+import { isEmbedderActive } from "../../embed/index.js";
 import { learnAlias, resolveAlias } from "../../library/aliases.js";
 import { normalizeKey } from "../../library/keys.js";
 import { graph } from "../../graph/index.js";
@@ -63,6 +64,12 @@ export const MAX_TOTAL_FACTS = 20;
 export const MAX_MID_TURN_FACTS = 3;
 // Secondary (graph-hop) peripheral facts cap. Separate from primary budget.
 export const MAX_PERIPHERAL_FACTS = 10;
+// CORE-17 S2: how many semantic chunk hits an OPEN query surfaces. Chunks get
+// their OWN K — they are a SEPARATE output array (AttendResult.chunks[]), NOT
+// competing for the fact budget (MAX_FACTS_PER_ENTITY / MAX_TOTAL_FACTS). This
+// keeps the recall tier from silently entangling with the fact ranking (plan
+// §S2 K-budget decision) and preserves the byte-identical fact path.
+export const MAX_CHUNK_HITS = 5;
 // Layer 0d: rules are imperative and meant to be actively read/obeyed every
 // turn, not browsed like facts — a long rules block defeats its own purpose
 // (the "dumped every turn" failure mode). Applied AFTER situational relevance
@@ -365,6 +372,22 @@ export interface AttendResult {
     objectUrl: string;
     tags: string[];
   }>;
+  // CORE-17 S2 (the retrieval-first recall tier): meaning-closest raw
+  // conversation chunks for an OPEN, natural-language query — the region the
+  // deterministic tiers structurally cannot reach (a question that shares no
+  // keyword with any stored fact). ADDITIVE + omitted-when-empty (same
+  // token-frugal "ball in pool" convention as `facts[].semantic` above): the
+  // field is present ONLY when the router classified this read OPEN, an
+  // embedder was active, AND at least one chunk cleared the similarity floor.
+  // A STRUCTURED read (a known key / alias / correction fired — deterministic
+  // drives, D-ROUTE) and the embedder-off default both omit it entirely, so a
+  // host that ignores this field — or runs zero-infra — sees exactly today's
+  // payload shape. `score` is the cosine similarity (> the chunk floor); the
+  // chunk is recall context, never a truth claim (facts remain the truth
+  // layer, D-FACTS-TRUTH). An OPEN query that clears the floor for nothing
+  // omits the field — that emptiness is the abstention primitive S3 lifts to
+  // an explicit signal.
+  chunks?: Array<{ content: string; score: number }>;
   // Phase 3 (CORE-31): protocol breadcrumb — what the host should call next.
   nextDue: string;
   // Layer 0e: "where did we leave off?" rollup. Populated ONLY on the first
@@ -457,6 +480,48 @@ function computeNextDue(phase: string): string {
     default:
       return "iranti_attend(phase='post-response') due after response";
   }
+}
+
+// CORE-17 S2 — the deterministic query router (no LLM — PRD G1). This is the
+// reconciliation of exact-first with semantic-primary (D-ROUTE): deterministic
+// DRIVES (exact-first wins whenever it has an answer); semantic takes the wheel
+// only when deterministic can't see the road — an OPEN, natural-language recall
+// with no key to look up (PRD re-ratified §8).
+//
+//   STRUCTURED  <- the deterministic tiers already answered this read: a
+//                  keyword/exact fact matched, an alias resolved (both land in
+//                  matchedFactIds — facts.ts hasKeyTokenMatch + attend.ts:612),
+//                  OR a stale-context correction fired (corrections). The
+//                  exact-first path stays SUPREME and UNCHANGED — no chunk read.
+//   OPEN        <- otherwise: nothing deterministic matched, so this is exactly
+//                  the region lexical recall structurally cannot reach. Run
+//                  semantic chunk recall as the primary find-it path (additive
+//                  in chunks[], never displacing facts[]).
+//
+// JUDGMENT CALL (flagged for the architect): the plan names the helper
+// classifyQuery(input), implying classification from the raw input. But the
+// three STRUCTURED signals the plan itself lists — "resolve an exact key /
+// alias fires / correction fires" — are OUTCOMES of the deterministic read in
+// this codebase (keys are derived, not caller-named; alias/correction are
+// resolved against the store). So the router classifies from the read RESULT,
+// not the raw input string. This is both the rule the plan's own words describe
+// and the strictly safer one: the deterministic tiers speak first, and the
+// chunk read is additive w.r.t. the fact/determinism output (it can only ADD
+// context on a misroute, never remove or reorder a fact hit — the §S2
+// highest-design risk mitigation). Its sole write is chunk access-telemetry
+// (lastAccessedAt/accessCount on the chunks table only — never facts/
+// fact_archive), so the determinism guarantee stays intact (architect
+// ratification 2026-07-05: "additive w.r.t. facts", not "purely read-only"). A future
+// input-only signal (e.g. an explicit named-key param) can be OR'd in here
+// without changing any call site.
+type QueryClass = "structured" | "open";
+function classifyQuery(signals: {
+  matchedFactCount: number;
+  correctionCount: number;
+}): QueryClass {
+  return signals.matchedFactCount > 0 || signals.correctionCount > 0
+    ? "structured"
+    : "open";
 }
 
 export async function attend(input: AttendInput): Promise<AttendResult> {
@@ -797,6 +862,51 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
     ? await getCorrections(ranked, normalizedContext)
     : [];
 
+  // CORE-17 S2 — read path + query router (the retrieval-first recall tier).
+  // Classify this read deterministically now that BOTH STRUCTURED signals are
+  // known (matchedFactIds — keyword/exact/alias hits; corrections — stale
+  // context). STRUCTURED keeps the exact-first path above byte-identical (no
+  // chunk read at all). OPEN additionally runs semantic chunk recall over the
+  // project's chunk pool and surfaces the meaning-closest episodes — the region
+  // lexical recall structurally cannot reach (D-ROUTE / D-PRIMARY).
+  //
+  // Mirrors the CORE-16 read-then-surface shape (readRelevantFactsWithMatch is
+  // called in the read side and its ids are threaded into the output — :561):
+  // call searchChunksSemantic here, thread its hits into the chunks[] block in
+  // the return object below. The whole cost is guarded on isEmbedderActive()
+  // FIRST (exactly as fillRemainingWithSemantic, facts.ts:840) so the default
+  // embedder-off path pays nothing and its output shape is unchanged. Scoped to
+  // effectiveProjectIds — the same effective (combined) read set every other
+  // read spans (:473) — so chunk recall isn't silently narrower than fact
+  // recall; cross-project isolation is enforced by that scope + tested. Skipped
+  // on mid-turn only if there's no message; a mid-turn OPEN recall query is a
+  // legitimate discovery top-up and SHOULD retrieve. Chunks get their own K
+  // (MAX_CHUNK_HITS) — a separate array, never competing for the fact budget.
+  // An empty result (below-floor or embedder off) leaves chunkHits [] and the
+  // field is omitted — the abstention primitive S3 lifts to an explicit signal.
+  const queryClass = classifyQuery({
+    matchedFactCount: matchedFactIds.size,
+    correctionCount: corrections.length,
+  });
+  let chunkHits: AttendResult["chunks"] = undefined;
+  if (queryClass === "open" && input.message && isEmbedderActive()) {
+    const hits = await searchChunksSemantic(
+      input.message,
+      MAX_CHUNK_HITS,
+      "default",
+      effectiveProjectIds,
+    ).catch((err: unknown) => {
+      // A recall failure must never break the deterministic response — the
+      // fact path already produced its answer. Degrade to no chunks (today's
+      // shape), same fail-soft posture as the media tier's .catch below.
+      console.error("[iranti] chunk recall error:", err);
+      return [];
+    });
+    if (hits.length > 0) {
+      chunkHits = hits.map((h) => ({ content: h.content, score: h.score }));
+    }
+  }
+
   // OD-4: media tier — keyword search over description_text / tags for the
   // entities in scope. Only fires when there is a message to match against,
   // and only for pre/post-response phases (skip on mid-turn cheap top-ups).
@@ -998,6 +1108,12 @@ export async function attend(input: AttendInput): Promise<AttendResult> {
     alreadyPresent,
     corrections,
     media: budgetedMedia,
+    // CORE-17 S2: omitted-when-empty (the same "ball in pool" convention as
+    // facts[].semantic above) — present ONLY for an OPEN query with an active
+    // embedder that cleared the chunk floor for something. STRUCTURED reads and
+    // the embedder-off default omit it, so the payload shape is byte-identical
+    // to today on the exact-first path and the zero-infra path.
+    ...(chunkHits ? { chunks: chunkHits } : {}),
     nextDue: computeNextDue(phase),
     projectState,
   };

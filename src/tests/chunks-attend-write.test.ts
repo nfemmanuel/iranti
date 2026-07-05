@@ -110,9 +110,20 @@ describe("CORE-17 S1 - attend write path stores + embeds a chunk", () => {
       message,
       phase: "post-response",
     });
-    // S1 is write-side ONLY - attend's response shape is unchanged (no chunks[]
-    // field; that is S2). Guard against premature S2 leakage.
-    expect(result).not.toHaveProperty("chunks");
+    // S1 is write-side; the read-side chunks[] field is S2's concern (pinned by
+    // src/tests/chunks-attend-read.test.ts). S2 has since landed, so chunks[] is
+    // now a legitimate ADDITIVE, omitted-when-empty field: this write-turn's own
+    // just-written chunk is embedded in the post-attend chain AFTER the read
+    // side computes results, so it isn't in the pool at this read's time. We
+    // therefore only assert the S2 contract holds if the field appears at all
+    // (it is a well-formed array of {content, score}) rather than forbidding it.
+    if ("chunks" in result && result.chunks) {
+      expect(Array.isArray(result.chunks)).toBe(true);
+      for (const c of result.chunks) {
+        expect(typeof c.content).toBe("string");
+        expect(typeof c.score).toBe("number");
+      }
+    }
 
     const chunk = await readChunkByContent(message);
     expect(chunk).not.toBeNull();
