@@ -108,6 +108,12 @@ const SYSTEMS: Record<string, AdapterFactory> = {
   "iranti-next:heuristic": irantiNextFactory("heuristic"),
   "iranti-next:local": irantiNextFactory("local"),
   "iranti-next:frontier": irantiNextFactory("frontier"),
+  // CORE-17 S5: iranti with its retrieval-first recall tier ON (local
+  // nomic-embed-text). Measures iranti's OWN semantic chunk recall — the row
+  // that may finally be quoted as iranti's, to be compared against the
+  // chunk-rag concept test on the identical subsample. Run e.g.
+  // BENCH_SYSTEMS=iranti-next:recall,iranti-next:chunk-rag.
+  "iranti-next:recall": irantiNextFactory("recall"),
   "iranti-old": irantiOldFactory,
   "ai-mem": aiMemFactory,
   "iranti-next:chunk-rag": chunkRagFactory,

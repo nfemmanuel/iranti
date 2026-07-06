@@ -27,7 +27,15 @@ import dotenv from "dotenv";
 import type { Adapter, AdapterFactory, QueryResult, RunConfig, WriteInput, WriteResult } from "../types.js";
 import { McpClient } from "../mcp-client.js";
 
-export type IrantiNextExtractor = "heuristic" | "local" | "frontier";
+// "heuristic" | "local" | "frontier" select the EXTRACTOR (how facts get mined)
+// and all run with IRANTI_EMBEDDER="off" — they measure iranti's LEXICAL recall
+// path (the 12.5%/18–20% baseline). "recall" is CORE-17 S5's variant: it flips
+// the embedder ON (local nomic-embed-text) so iranti's OWN semantic chunk recall
+// (chunks.ts, surfaced in AttendResult.chunks[]) is finally observable through
+// the harness — the path the concept-test chunk-rag.ts adapter proved at ~79%
+// but which iranti-next itself was structurally blind to (embedder off + reads
+// only parsed.facts). See docs/plans/2026-07-05-core17-completion-plan.md §S5.
+export type IrantiNextExtractor = "heuristic" | "local" | "frontier" | "recall";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -77,11 +85,18 @@ class IrantiNextAdapter implements Adapter {
     // ONLY in endpoint/model/key.
     const env: NodeJS.ProcessEnv = {
       IRANTI_DATA_DIR: dataDir,
-      IRANTI_EMBEDDER: "off", // full-text retrieval only — deterministic, no embed model
+      // Embedder: OFF for the extractor configs (lexical/full-text retrieval
+      // only — deterministic, no embed model → iranti's 12.5%/18–20% baseline).
+      // The "recall" config OVERRIDES this to "ollama" below (CORE-17 S5) so
+      // iranti's own semantic chunk recall is exercised. Default off here keeps
+      // every non-recall row byte-identical to the prior committed benchmark.
+      IRANTI_EMBEDDER: "off",
       // Make write()=iranti_attend BLOCK until extraction lands, so ingest-then-
       // query in the runner doesn't race the server's detached extraction chain
       // (src/mcp/tools/attend.ts). Without this, retrieval is empty and every
-      // score is a false 0.
+      // score is a false 0. For "recall" this ALSO settles the chunk write path
+      // (writeChunk + embedChunkOnWrite ride the same postAttendChain) so a
+      // chunk is stored+embedded before the query reads it.
       IRANTI_EXTRACT_SYNC: "1",
       // Generous ceiling: a cold qwen2.5:7b extraction can take ~45s; the 8s
       // default would time out and extract nothing. Warm calls are unaffected
@@ -89,6 +104,34 @@ class IrantiNextAdapter implements Adapter {
       IRANTI_LLM_TIMEOUT_MS: "120000",
     };
     if (this.extractor === "heuristic") {
+      env["IRANTI_EXTRACTOR"] = "heuristic";
+    } else if (this.extractor === "recall") {
+      // CORE-17 S5 — the recall-enabled config. Flip the embedder ON to the
+      // local Ollama nomic-embed-text stack so iranti's write path embeds each
+      // ingested turn as a chunk (chunks.ts writeChunk/embedChunkOnWrite) and
+      // its read path (attend.ts classifyQuery → searchChunksSemantic) surfaces
+      // the meaning-closest chunks in AttendResult.chunks[]. This reproduces the
+      // concept-test chunk-rag.ts stack INSIDE iranti's own store, so the row it
+      // produces is iranti's OWN retrieval-first recall — not the bench-only
+      // chunk-rag number.
+      //
+      // IRANTI_EMBEDDER is set EXPLICITLY (not left unset to rely on the S4
+      // auto-ON probe): explicit "ollama" short-circuits the probe
+      // (src/embed/probe.ts:69) so the tier is deterministically on regardless
+      // of probe timing. IRANTI_EMBED_ENDPOINT is the BASE url — OllamaEmbedder
+      // appends "/api/embed" itself (src/embed/ollama.ts:40); this is a DIFFERENT
+      // var from chunk-rag.ts's IRANTI_EMBED_URL (which is the full /api/embed
+      // path). Passing the full path here would double it and silently zero the
+      // vectors. Model matches the concept test's nomic-embed-text so the
+      // comparison is apples-to-apples.
+      env["IRANTI_EMBEDDER"] = "ollama";
+      env["IRANTI_EMBED_ENDPOINT"] = "http://127.0.0.1:11434";
+      env["IRANTI_EMBED_MODEL"] = "nomic-embed-text";
+      // Extraction is orthogonal to chunk recall here: the chunk write path fires
+      // for every non-mid-turn message regardless of extractor, so heuristic
+      // keeps this config $0/local (no LLM key, no frontier spend) while still
+      // filling and embedding the chunk pool. The number this row measures is
+      // RETRIEVAL (chunks), not fact extraction.
       env["IRANTI_EXTRACTOR"] = "heuristic";
     } else if (this.extractor === "local") {
       env["IRANTI_EXTRACTOR"] = "local";
@@ -166,20 +209,40 @@ class IrantiNextAdapter implements Adapter {
       if (result.isError || !result.text) {
         return { retrieved: [], nativeAnswer: null, latencyMs, raw: result.raw };
       }
-      let parsed: { facts?: Array<{ key?: string; value?: string }> };
+      let parsed: {
+        facts?: Array<{ key?: string; value?: string }>;
+        // CORE-17 S2: iranti_attend surfaces the meaning-closest raw chunks for
+        // an OPEN query in AttendResult.chunks[] (attend.ts:1177 → register.ts's
+        // asResult JSON.stringifies the whole result). Present ONLY when the
+        // embedder is on (the "recall" config) and the query routed OPEN and a
+        // chunk cleared the floor — so the extractor configs (embedder off)
+        // simply never see this field and behave exactly as before.
+        chunks?: Array<{ content?: string; score?: number }>;
+      };
       try {
-        parsed = JSON.parse(result.text) as { facts?: Array<{ key?: string; value?: string }> };
+        parsed = JSON.parse(result.text) as typeof parsed;
       } catch {
         // Not JSON — fall back to raw text as a single retrieved item so a
         // schema drift in the server doesn't silently zero out the score.
         return { retrieved: [result.text], nativeAnswer: null, latencyMs, raw: result.raw };
       }
-      const retrieved = (parsed.facts ?? [])
+      // CORE-17 S5: fold iranti's OWN semantic chunk hits into the scored
+      // retrieved[] surface FIRST (the recall layer is the find-it tier — it
+      // reaches the region a keyword-free question shares no fact with), then
+      // append facts as the reason-over-it fallback so a STRUCTURED-routed
+      // answer (iranti returns facts, no chunks) still scores. On the extractor
+      // configs chunks[] is always absent, so `chunkTexts` is [] and this is
+      // byte-identical to the prior facts-only behavior. Whole list topK-bounded
+      // per RunConfig — chunks, being first, win the budget on an OPEN recall.
+      const chunkTexts = (parsed.chunks ?? [])
+        .map((c) => (typeof c.content === "string" ? c.content : undefined))
+        .filter((v): v is string => typeof v === "string");
+      const factTexts = (parsed.facts ?? [])
         // Give the reader "key: value" so a bare value like "3" or "Drizzle"
         // carries its own context (which decision/preference it answers).
         .map((f) => (typeof f.value === "string" ? (f.key ? `${f.key}: ${f.value}` : f.value) : undefined))
-        .filter((v): v is string => typeof v === "string")
-        .slice(0, config.topK);
+        .filter((v): v is string => typeof v === "string");
+      const retrieved = [...chunkTexts, ...factTexts].slice(0, config.topK);
       return { retrieved, nativeAnswer: null, latencyMs, raw: result.raw };
     } catch (err) {
       return {
