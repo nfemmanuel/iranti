@@ -14,6 +14,7 @@
 
 import { OllamaEmbedder } from "./ollama.js";
 import { MockEmbedder } from "./mock.js";
+import { embedderProbeVerdict } from "./probe.js";
 
 export interface EmbedderIdentity {
   provider: string;
@@ -60,11 +61,25 @@ export class NoopEmbedder implements EmbedderBackend {
 // mock too, not just by "off"/"ollama".
 export type EmbedderMode = "off" | "ollama" | "mock";
 
+// CORE-17 S4 (PRD §9): the recall embedder defaults ON when reachable, else
+// silent OFF. Precedence, highest first:
+//   1. Explicit IRANTI_EMBEDDER=off  → off. The user's opt-out ALWAYS wins;
+//      the probe is never consulted (respected verbatim, no network).
+//   2. Explicit ollama | mock        → that backend, unchanged from before S4.
+//   3. UNSET (the default install)   → the memoized reachability verdict:
+//      "ollama" iff the auto-ON probe (src/embed/probe.ts, kicked at server
+//      boot / awaited in tests) came back reachable, else "off".
+// This function stays SYNCHRONOUS — every hot-path caller (isEmbedderActive()
+// in attend/chunks/facts/write-hook) reads a cached boolean, never a fetch. It
+// is fail-closed by construction: until the probe proves reachability the
+// verdict is false → "off" → today's byte-identical zero-infra behavior.
 export function getEmbedderMode(): EmbedderMode {
   const mode = process.env["IRANTI_EMBEDDER"];
+  if (mode === "off") return "off";
   if (mode === "ollama") return "ollama";
   if (mode === "mock") return "mock";
-  return "off";
+  // Unset: auto-ON iff an embedder was probed reachable this process.
+  return embedderProbeVerdict() ? "ollama" : "off";
 }
 
 export function isEmbedderActive(): boolean {
@@ -109,3 +124,4 @@ export * from "./regime.js";
 export * from "./vector-column.js";
 export * from "./ollama.js";
 export * from "./mock.js";
+export { ensureEmbedderProbe, embedderProbeVerdict, resetEmbedderProbe } from "./probe.js";

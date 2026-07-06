@@ -17,6 +17,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { pool } from "../db/connection.js";
+import { ensureEmbedderProbe } from "../embed/index.js";
 import { shutdownContext } from "./context.js";
 import { startHttpServer } from "./http.js";
 import { registerIrantiTools } from "./register.js";
@@ -69,6 +70,19 @@ async function shutdown(signal: string): Promise<void> {
 
 process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
+
+// CORE-17 S4: fire the embedder auto-ON reachability probe ONCE at startup so
+// that on a default install (IRANTI_EMBEDDER unset) with a reachable Ollama +
+// embed model, the recall tier is active out of the box (PRD §9). Bounded +
+// fail-closed inside ensureEmbedderProbe(): a machine without Ollama degrades
+// silently to today's deterministic-only behavior — this await adds at most the
+// ~1.5s probe cap in that (already-slow) case and nothing when Ollama is up or
+// when the user set IRANTI_EMBEDDER explicitly. Never throws; the verdict is
+// memoized for every subsequent isEmbedderActive() read.
+const embedderReachable = await ensureEmbedderProbe();
+if (embedderReachable) {
+  console.error("iranti: embedder auto-ON (Ollama reachable) — recall tier active");
+}
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
